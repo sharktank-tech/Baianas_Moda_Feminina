@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Registro</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles/animation.css') }}">
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.jpg') }}">
+</head>
+<body class="bg-gray-100">
+
+  <nav class="bg-black text-white px-4 py-2 flex justify-between items-center">
+    <h1 class="text-xl font-bold">Painel Administrativo</h1>
+    <ul class="flex gap-4">
+      <li><a href="{{ url_for('main.home') }}" class="hover:underline">Home</a></li>
+    </ul>
+  </nav>
+
+  <main class="mt-10 px-4 max-w-md mx-auto">
+    <h1 class="text-3xl font-bold text-center mb-6">Criar Conta</h1>
+
+    <!-- Mensagens Flash -->
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div id="flash-message" class="mb-4">
+          {% for message in messages %}
+            <div class="p-4 mb-4 text-white {{ 'bg-green-500' if 'erro' in message else 'bg-red-500' }} rounded">
+              {{ message }}
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <form method="POST" class="bg-white p-6 rounded shadow">
+      <div class="mb-4">
+        <label for="username" class="block text-lg font-medium text-gray-700">Usuário</label>
+        <input type="text" id="username" name="username" placeholder="Digite seu nome de usuário" required
+               class="w-full mt-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-black">
+      </div>
+
+      <div class="mb-4">
+        <label for="email" class="block text-lg font-medium text-gray-700">E-mail</label>
+        <input type="email" id="email" name="email" placeholder="Digite seu e-mail" required
+               class="w-full mt-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-black">
+      </div>
+
+      <div class="mb-4">
+        <label for="password" class="block text-lg font-medium text-gray-700">Senha</label>
+        <input type="password" id="password" name="password" placeholder="Digite sua senha" required
+               class="w-full mt-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-black">
+      </div>
+
+      <div class="mb-4">
+        <label for="confirm_password" class="block text-lg font-medium text-gray-700">Confirmar Senha</label>
+        <input type="password" id="confirm_password" name="confirm_password" placeholder="Confirme sua senha" required
+               class="w-full mt-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-black">
+      </div>
+
+      <button type="submit" class="w-full bg-black text-white py-2 rounded hover:bg-gray-800">Registrar</button>
+    </form>
+
+    <p class="text-center mt-4 text-gray-600">
+      Já tem uma conta? <a href="{{ url_for('main.login') }}" class="text-black font-semibold hover:underline">Faça Login</a>
+    </p>
+  </main>
+
+  <!-- Script para desaparecer a mensagem flash após 3 segundos -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      var flashMessage = document.getElementById('flash-message');
+      if (flashMessage) {
+        setTimeout(function() {
+          flashMessage.style.opacity = '0';
+          flashMessage.style.transition = 'opacity 0.5s ease-out';
+        }, 3000); // Mensagem desaparecerá após 3 segundos
+      }
+    });
+  </script>
+
+</body>
+</html>

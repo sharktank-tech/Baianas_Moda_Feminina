@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel Administrativo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles/animation.css') }}"> <!-- Corrigido o caminho -->
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.jpg') }}">
+</head>
+<body class="bg-gray-100">
+
+  <!-- Navbar -->
+  <nav class="bg-black text-white px-4 py-2 flex justify-between items-center">
+    <h1 class="text-xl font-bold">Painel Administrativo</h1>
+    <ul class="flex gap-4">
+      <li><a href="/" class="hover:underline">Home</a></li>
+      <li><a href="#" class="hover:underline">Produtos</a></li>
+      <li><a href="#" class="hover:underline">Usuários</a></li>
+      <li><a href="{{ url_for('admin.logout') }}" class="hover:underline">Sair</a></li>
+    </ul>
+  </nav>
+
+  <!-- Conteúdo Principal -->
+  <main class="mt-6 px-4 max-w-4xl mx-auto">
+    <h1 class="text-3xl font-bold mb-6">Administração</h1>
+
+    <!-- Gerenciar Produtos -->
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-4">Produtos</h2>
+      <a href="{{ url_for('admin.add_product') }}" class="bg-black text-white py-2 px-4 rounded hover:bg-gray-800 inline-block mb-4">Adicionar Produto</a>
+      <ul class="space-y-4">
+        {% for product in products %}
+          {% if product %}
+            <li class="bg-white p-4 rounded shadow flex justify-between items-center">
+              <div>
+                <h3 class="text-lg font-bold">{{ product.name }}</h3>
+                <p class="text-gray-600">R$ {{ "%.2f"|format(product.price|float) }}</p>
+              </div>
+              <div class="flex gap-2">
+                <a href="{{ url_for('admin.edit_product', id=product.id) }}" class="bg-blue-500 text-white py-1 px-3 rounded hover:bg-blue-600">Editar</a>
+                <form action="{{ url_for('admin.delete_product', id=product.id) }}" method="post">
+                  <button type="submit" class="bg-red-500 text-white py-1 px-3 rounded hover:bg-red-600">Excluir</button>
+                </form>
+              </div>
+            </li>
+          {% else %}
+            <li class="bg-white p-4 rounded shadow flex justify-between items-center">
+              <div>
+                <h3 class="text-lg font-bold text-red-500">Produto Inválido</h3>
+              </div>
+            </li>
+          {% endif %}
+        {% endfor %}
+      </ul>
+    </section>
+
+    <!-- Gerenciar Usuários -->
+    <section>
+      <h2 class="text-2xl font-semibold mb-4">Usuários</h2>
+      <a href="{{ url_for('admin.add_user') }}" class="bg-black text-white py-2 px-4 rounded hover:bg-gray-800 inline-block mb-4">Adicionar Usuário</a>
+      <ul class="space-y-4">
+        {% for user in users %}
+          {% if user %}
+            <li class="bg-white p-4 rounded shadow flex justify-between items-center">
+              <div>
+                <h3 class="text-lg font-bold">{{ user.username }}</h3>
+                <p class="text-gray-600">{{ user.email }}</p>
+              </div>
+              <div>
+                <form action="{{ url_for('admin.delete_user', id=user.id) }}" method="post">
+                  <button type="submit" class="bg-red-500 text-white py-1 px-3 rounded hover:bg-red-600">Excluir</button>
+                </form>
+              </div>
+            </li>
+          {% else %}
+            <li class="bg-white p-4 rounded shadow flex justify-between items-center">
+              <div>
+                <h3 class="text-lg font-bold text-red-500">Usuário Inválido</h3>
+              </div>
+            </li>
+          {% endif %}
+        {% endfor %}
+      </ul>
+    </section>
+  </main>
+
+</body>
+</html>
