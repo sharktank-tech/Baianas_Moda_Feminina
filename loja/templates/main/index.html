@@ -57,14 +57,17 @@
     <div class="relative w-full max-w-6xl mx-auto overflow-hidden rounded-lg shadow-lg">
       <div class="slides flex transition-transform duration-500 ease-in-out">
         <!-- Imagem do Carrossel -->
-        <div class="slide min-w-full bg-cover bg-center h-64 sm:h-80 md:h-96 fade-in" style="background-image: url('{{ url_for('static', filename='img/agua-de-coco.jpg') }}');">
-
+        <div class="slide min-w-full h-64 sm:h-80 md:h-96 flex-shrink-0">
+          <img src="{{ url_for('static', filename='img/agua-de-coco.jpg') }}" alt="Imagem 1"
+              class="w-full h-full object-cover">
         </div>
-        <div class="slide min-w-full bg-cover bg-center h-64 sm:h-80 md:h-96 fade-in" style="background-image: url('{{ url_for('static', filename='img/corrano.jpg') }}');">
-
+        <div class="slide min-w-full h-64 sm:h-80 md:h-96 flex-shrink-0">
+          <img src="{{ url_for('static', filename='img/corrano.jpg') }}" alt="Imagem 2"
+              class="w-full h-full">
         </div>
-        <div class="slide min-w-full bg-cover bg-center h-64 sm:h-80 md:h-96 fade-in" style="background-image: url('{{ url_for('static', filename='img/beauty-week.jpg') }}');">
-
+        <div class="slide min-w-full h-64 sm:h-80 md:h-96 flex-shrink-0">
+          <img src="{{ url_for('static', filename='img/beauty-week.jpg') }}" alt="Imagem 3"
+              class="w-full h-full object-cover">
         </div>
       </div>
 
@@ -77,6 +80,7 @@
       </button>
     </div>
   </section>
+
 
   <!-- Área de Produtos -->
   <section class="mt-10 px-4">
@@ -100,14 +104,94 @@
 
 </p>
 
+<!-- Seção de Promoções -->
+<section class="mt-12 bg-red-100 py-10">
+  <h2 class="text-3xl font-bold text-center mb-6 text-red-700">Promoções Especiais</h2>
+  <div class="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-4">
+    <!-- Produto em promoção 1 -->
+    <div class="bg-white rounded-lg shadow-lg overflow-hidden">
+      <img src="https://img-br.prvstatic.com/front/get/photo/246720_-_images_-_960ximg-mosaic-open-slot1.jpg"
+           alt="Tênis esportivo em promoção"
+           class="w-full h-64 object-cover">
+      <div class="p-4">
+        <h3 class="text-lg font-bold">Tênis Esportivo</h3>
+        <p class="line-through text-gray-500">R$ 149,90</p>
+        <p class="text-red-700 font-bold mt-1">R$ 99,90</p>
+        <button class="mt-4 bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600">Comprar</button>
+      </div>
+    </div>
+
+    <!-- Produto em promoção 2 -->
+    <div class="bg-white rounded-lg shadow-lg overflow-hidden">
+      <img src="https://m.media-amazon.com/images/I/5120Clm3TTL._AC_SX679_.jpg"
+           alt="Bolsa feminina em couro"
+           class="w-full h-64 object-cover">
+      <div class="p-4">
+        <h3 class="text-lg font-bold">Bolsa Feminina</h3>
+        <p class="line-through text-gray-500">R$ 105,90</p>
+        <p class="text-red-700 font-bold mt-1">R$ 79,90</p>
+        <button class="mt-4 bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600">Comprar</button>
+      </div>
+    </div>
+
+    <!-- Produto em promoção 3 (Novo Produto Adicionado) -->
+    <div class="bg-white rounded-lg shadow-lg overflow-hidden">
+      <img src="https://m.media-amazon.com/images/I/71rwiaPvMAL._AC_SY679_.jpg"
+           alt="Relógio masculino esportivo"
+           class="w-full h-64 object-cover">
+      <div class="p-4">
+        <h3 class="text-lg font-bold">Camisetas Masculinas</h3>
+        <p class="line-through text-gray-500">R$ 199,90</p>
+        <p class="text-red-700 font-bold mt-1">R$ 149,90</p>
+        <button class="mt-4 bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600">Comprar</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- Seção de Depoimentos -->
+<section class="mt-12 bg-gray-200 py-10">
+  <h2 class="text-3xl font-bold text-center mb-6">O que nossos clientes dizem</h2>
+  <div class="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-4">
+    <!-- Depoimento 1 -->
+    <div class="bg-white rounded-lg shadow-lg p-6">
+      <p class="italic text-gray-700">
+        "A qualidade das roupas é impecável! Sempre encontro exatamente o que preciso. Recomendo a todos!"
+      </p>
+      <div class="mt-4 text-right">
+        <span class="font-semibold">- Ana Silva</span>
+      </div>
+    </div>
+    <!-- Depoimento 2 -->
+    <div class="bg-white rounded-lg shadow-lg p-6">
+      <p class="italic text-gray-700">
+        "Ótimo atendimento e entrega super rápida. Com certeza farei mais compras no futuro!"
+      </p>
+      <div class="mt-4 text-right">
+        <span class="font-semibold">- João Pereira</span>
+      </div>
+    </div>
+    <!-- Depoimento 3 -->
+    <div class="bg-white rounded-lg shadow-lg p-6">
+      <p class="italic text-gray-700">
+        "Adoro a variedade e os preços. Loja confiável e com produtos incríveis!"
+      </p>
+      <div class="mt-4 text-right">
+        <span class="font-semibold">- Maria Oliveira</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+
 <!-- Rodapé -->
 <footer class="bg-black text-white py-8 px-4">
-  <div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
-
+  <div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
     <!-- Coluna 1: Redes Sociais -->
     <div>
-      <h2 class="text-lg font-semibold mb-4">Siga a gente</h2>
-      <div class="flex gap-4">
+      <h2 class="text-lg font-semibold mb-2">Siga a gente</h2>
+      <div class="flex gap-2">
         <a href="#" class="hover:opacity-80">
           <img src="static/img/rodape/facebook.png" alt="Facebook" class="w-8">
         </a>
@@ -122,8 +206,8 @@
 
     <!-- Coluna 2: Links de Informações -->
     <div>
-      <h2 class="text-lg font-semibold mb-4">Sobre a Pollo Modas</h2>
-      <ul class="space-y-2">
+      <h2 class="text-lg font-semibold mb-2">Sobre a Pollo Modas</h2>
+      <ul class="space-y-1">
         <li><a href="#" class="hover:underline">O que é a Pollo Modas?</a></li>
         <li><a href="#" class="hover:underline">Privacidade e Cookies</a></li>
         <li><a href="#" class="hover:underline">Condições de uso</a></li>
@@ -131,36 +215,37 @@
         <li><a href="#" class="hover:underline">Nossas marcas</a></li>
         <li><a href="#" class="hover:underline">Black Friday</a></li>
       </ul>
-      <h2 class="text-lg font-semibold mt-6 mb-4">Fale com a gente</h2>
-      <ul class="space-y-2">
+      <h2 class="text-lg font-semibold mt-4 mb-2">Fale com a gente</h2>
+      <ul class="space-y-1">
         <li><a href="#" class="hover:underline">Ajuda</a></li>
         <li><a href="#" class="hover:underline">Contato para marcas</a></li>
-        <li><a href="#" class="hover:underline">Termos Privalia Ads</a></li>
+        <li><a href="#" class="hover:underline">Termos Pollo Modas Ads</a></li>
       </ul>
     </div>
 
     <!-- Coluna 3: Premium e Marcas -->
     <div>
-      <h2 class="text-lg font-semibold mt-6 mb-4">Formas de pagamento</h2>
-      <div class="flex gap-4 mb-4">
+      <h2 class="text-lg font-semibold mt-4 mb-2">Formas de pagamento</h2>
+      <div class="flex gap-2 mb-2">
         <img src="static/img/rodape/logotipo-visa.png" alt="Visa" class="w-12">
         <img src="static/img/rodape/cartao.png" alt="Master Card" class="w-12">
         <img src="static/img/rodape/amex.png" alt="Amex" class="w-12">
         <img src="static/img/rodape/paypal.png" alt="Paypal" class="w-12">
       </div>
-      <h2 class="text-lg font-semibold mb-4">Marcas</h2>
+      <h2 class="text-lg font-semibold mb-2">Marcas</h2>
       <p>Femininas | Masculinas | Infantis | Casa</p>
     </div>
   </div>
 
-  <hr class="border-gray-700 my-8">
+  <hr class="border-gray-700 my-4">
 
   <!-- Rodapé Inferior -->
   <div class="text-center text-sm">
-    <p class="mb-2">Copyright © Pollo Modas Brasil S.A. 2008-2021</p>
+    <p class="mb-1">Copyright © Pollo Modas Brasil S.A. 2008-2021</p>
     <p>Av Prof Alceu Maynard de Araújo, 698 | CEP 04726-160 - São Paulo/SP | CNPJ 10.464.223/0001-63</p>
   </div>
 </footer>
+
 
 </body>
 </html>
