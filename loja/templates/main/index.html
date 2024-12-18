@@ -6,16 +6,16 @@
   <title>Loja de Roupas</title>
   <script src="static/scripts/carousel.js" defer></script>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="static/styles/animation.css"> <!-- Link para o CSS -->
+  <link rel="stylesheet" href="static/styles/animation.css">
   <link rel="icon" href="{{ url_for('static', filename='img/favicon.jpg') }}">
 </head>
 <body class="bg-gray-100 font-sans">
 
   <!-- Exibição das mensagens de flash -->
-  <div class="fixed top-0 left-0 w-full z-50">
+  <div class="fixed top-0 left-0 w-full z-50 px-4">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
-        <div id="flash-message" class="bg-gray-800 text-white py-2">
+        <div id="flash-message" class="bg-gray-800 text-white py-2 rounded-lg">
           {% for category, message in messages %}
             <div class="text-center">{{ message }}</div>
           {% endfor %}
@@ -24,7 +24,6 @@
     {% endwith %}
   </div>
 
-  <!-- Script para desaparecer a mensagem flash após 3 segundos -->
   <script>
     document.addEventListener('DOMContentLoaded', function() {
       var flashMessage = document.getElementById('flash-message');
@@ -32,15 +31,17 @@
         setTimeout(function() {
           flashMessage.style.opacity = '0';
           flashMessage.style.transition = 'opacity 0.5s ease-out';
-        }, 3000); // Mensagem desaparecerá após 3 segundos
+        }, 3000);
       }
     });
   </script>
 
   <!-- Navbar -->
-  <nav class="bg-black text-white px-4 py-3 flex justify-between items-center">
-    <h1 class="text-2xl font-bold"><a href="{{ url_for('main.home') }}">Loja de Roupas</a></h1>
-    <ul class="flex space-x-4 items-center">
+  <nav class="bg-black text-white px-4 py-3 flex flex-wrap justify-between items-center">
+    <h1 class="text-xl sm:text-2xl font-bold text-center w-full sm:w-auto">
+      <a href="{{ url_for('main.home') }}">Loja de Roupas</a>
+    </h1>
+    <ul class="flex flex-wrap justify-center space-x-4 w-full sm:w-auto mt-3 sm:mt-0">
       <li><a href="produtos" class="hover:text-gray-400">Produtos</a></li>
       <li><a href="#" class="hover:text-gray-400">Sobre</a></li>
       <li><a href="#" class="hover:text-gray-400">Contato</a></li>
@@ -53,25 +54,22 @@
   </nav>
 
   <!-- Carrossel -->
-  <section class="mt-6">
-    <div class="relative w-full max-w-6xl mx-auto overflow-hidden rounded-lg shadow-lg">
+  <section class="mt-6 px-4">
+    <div class="relative w-full max-w-4xl mx-auto overflow-hidden rounded-lg shadow-lg">
       <div class="slides flex transition-transform duration-500 ease-in-out">
-        <!-- Imagem do Carrossel -->
-        <div class="slide min-w-full h-64 sm:h-80 md:h-96 flex-shrink-0">
+        <div class="slide w-full flex-shrink-0 h-48 sm:h-64">
           <img src="{{ url_for('static', filename='img/agua-de-coco.jpg') }}" alt="Imagem 1"
-              class="w-full h-full object-cover">
+               class="w-full h-full object-cover">
         </div>
-        <div class="slide min-w-full h-64 sm:h-80 md:h-96 flex-shrink-0">
+        <div class="slide w-full flex-shrink-0 h-48 sm:h-64">
           <img src="{{ url_for('static', filename='img/corrano.jpg') }}" alt="Imagem 2"
-              class="w-full h-full">
+               class="w-full h-full object-cover">
         </div>
-        <div class="slide min-w-full h-64 sm:h-80 md:h-96 flex-shrink-0">
+        <div class="slide w-full flex-shrink-0 h-48 sm:h-64">
           <img src="{{ url_for('static', filename='img/beauty-week.jpg') }}" alt="Imagem 3"
-              class="w-full h-full object-cover">
+               class="w-full h-full object-cover">
         </div>
       </div>
-
-      <!-- Botões de navegação -->
       <button class="prev absolute left-2 top-1/2 transform -translate-y-1/2 bg-white p-2 rounded-full shadow-md hover:bg-gray-200">
         &larr;
       </button>
@@ -81,16 +79,15 @@
     </div>
   </section>
 
-
   <!-- Área de Produtos -->
   <section class="mt-10 px-4">
-    <h2 class="text-3xl font-bold text-center mb-6">Novidades</h2>
-    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-      <!-- Iterar sobre os produtos e renderizar dinamicamente -->
+    <h2 class="text-xl sm:text-3xl font-bold text-center mb-6">Novidades</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
       {% for product in products %}
         <div class="bg-white rounded-lg shadow-lg overflow-hidden">
-          <img src="{{ product.image or url_for('static', filename='img/default.jpg') }}" alt="{{ product.name }}" class="w-full h-48 object-cover">
-          <div class="p-4">
+          <img src="{{ product.image or url_for('static', filename='img/default.jpg') }}" alt="{{ product.name }}"
+               class="w-full h-48 object-cover">
+          <div class="p-4 text-center">
             <h3 class="text-lg font-bold">{{ product.name }}</h3>
             <p class="text-gray-600">R$ {{ '%.2f' % product.price }}</p>
             <button class="mt-4 w-full bg-black text-white py-2 rounded hover:bg-gray-800">Comprar</button>
@@ -100,152 +97,10 @@
     </div>
   </section>
 
-<p>
-
-</p>
-
-<!-- Seção de Promoções -->
-<section class="mt-12 bg-red-100 py-10">
-  <h2 class="text-3xl font-bold text-center mb-6 text-red-700">Promoções Especiais</h2>
-  <div class="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-4">
-    <!-- Produto em promoção 1 -->
-    <div class="bg-white rounded-lg shadow-lg overflow-hidden">
-      <img src="https://img-br.prvstatic.com/front/get/photo/246720_-_images_-_960ximg-mosaic-open-slot1.jpg"
-           alt="Tênis esportivo em promoção"
-           class="w-full h-64 object-cover">
-      <div class="p-4">
-        <h3 class="text-lg font-bold">Tênis Esportivo</h3>
-        <p class="line-through text-gray-500">R$ 149,90</p>
-        <p class="text-red-700 font-bold mt-1">R$ 99,90</p>
-        <button class="mt-4 bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600">Comprar</button>
-      </div>
-    </div>
-
-    <!-- Produto em promoção 2 -->
-    <div class="bg-white rounded-lg shadow-lg overflow-hidden">
-      <img src="https://m.media-amazon.com/images/I/5120Clm3TTL._AC_SX679_.jpg"
-           alt="Bolsa feminina em couro"
-           class="w-full h-64 object-cover">
-      <div class="p-4">
-        <h3 class="text-lg font-bold">Bolsa Feminina</h3>
-        <p class="line-through text-gray-500">R$ 105,90</p>
-        <p class="text-red-700 font-bold mt-1">R$ 79,90</p>
-        <button class="mt-4 bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600">Comprar</button>
-      </div>
-    </div>
-
-    <!-- Produto em promoção 3 (Novo Produto Adicionado) -->
-    <div class="bg-white rounded-lg shadow-lg overflow-hidden">
-      <img src="https://m.media-amazon.com/images/I/71rwiaPvMAL._AC_SY679_.jpg"
-           alt="Relógio masculino esportivo"
-           class="w-full h-64 object-cover">
-      <div class="p-4">
-        <h3 class="text-lg font-bold">Camisetas Masculinas</h3>
-        <p class="line-through text-gray-500">R$ 199,90</p>
-        <p class="text-red-700 font-bold mt-1">R$ 149,90</p>
-        <button class="mt-4 bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600">Comprar</button>
-      </div>
-    </div>
-  </div>
-</section>
-
-
-<!-- Seção de Depoimentos -->
-<section class="mt-12 bg-gray-200 py-10">
-  <h2 class="text-3xl font-bold text-center mb-6">O que nossos clientes dizem</h2>
-  <div class="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-4">
-    <!-- Depoimento 1 -->
-    <div class="bg-white rounded-lg shadow-lg p-6">
-      <p class="italic text-gray-700">
-        "A qualidade das roupas é impecável! Sempre encontro exatamente o que preciso. Recomendo a todos!"
-      </p>
-      <div class="mt-4 text-right">
-        <span class="font-semibold">- Ana Silva</span>
-      </div>
-    </div>
-    <!-- Depoimento 2 -->
-    <div class="bg-white rounded-lg shadow-lg p-6">
-      <p class="italic text-gray-700">
-        "Ótimo atendimento e entrega super rápida. Com certeza farei mais compras no futuro!"
-      </p>
-      <div class="mt-4 text-right">
-        <span class="font-semibold">- João Pereira</span>
-      </div>
-    </div>
-    <!-- Depoimento 3 -->
-    <div class="bg-white rounded-lg shadow-lg p-6">
-      <p class="italic text-gray-700">
-        "Adoro a variedade e os preços. Loja confiável e com produtos incríveis!"
-      </p>
-      <div class="mt-4 text-right">
-        <span class="font-semibold">- Maria Oliveira</span>
-      </div>
-    </div>
-  </div>
-</section>
-
-
-<!-- Rodapé -->
-<footer class="bg-black text-white py-8 px-4">
-  <div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
-    <!-- Coluna 1: Redes Sociais -->
-    <div>
-      <h2 class="text-lg font-semibold mb-2">Siga a gente</h2>
-      <div class="flex gap-2">
-        <a href="#" class="hover:opacity-80">
-          <img src="static/img/rodape/facebook.png" alt="Facebook" class="w-8">
-        </a>
-        <a href="#" class="hover:opacity-80">
-          <img src="static/img/rodape/instagram.png" alt="Instagram" class="w-8">
-        </a>
-        <a href="#" class="hover:opacity-80">
-          <img src="static/img/rodape/twitter.png" alt="Twitter" class="w-8">
-        </a>
-      </div>
-    </div>
-
-    <!-- Coluna 2: Links de Informações -->
-    <div>
-      <h2 class="text-lg font-semibold mb-2">Sobre a Pollo Modas</h2>
-      <ul class="space-y-1">
-        <li><a href="#" class="hover:underline">O que é a Pollo Modas?</a></li>
-        <li><a href="#" class="hover:underline">Privacidade e Cookies</a></li>
-        <li><a href="#" class="hover:underline">Condições de uso</a></li>
-        <li><a href="#" class="hover:underline">Relações com Investidores</a></li>
-        <li><a href="#" class="hover:underline">Nossas marcas</a></li>
-        <li><a href="#" class="hover:underline">Black Friday</a></li>
-      </ul>
-      <h2 class="text-lg font-semibold mt-4 mb-2">Fale com a gente</h2>
-      <ul class="space-y-1">
-        <li><a href="#" class="hover:underline">Ajuda</a></li>
-        <li><a href="#" class="hover:underline">Contato para marcas</a></li>
-        <li><a href="#" class="hover:underline">Termos Pollo Modas Ads</a></li>
-      </ul>
-    </div>
-
-    <!-- Coluna 3: Premium e Marcas -->
-    <div>
-      <h2 class="text-lg font-semibold mt-4 mb-2">Formas de pagamento</h2>
-      <div class="flex gap-2 mb-2">
-        <img src="static/img/rodape/logotipo-visa.png" alt="Visa" class="w-12">
-        <img src="static/img/rodape/cartao.png" alt="Master Card" class="w-12">
-        <img src="static/img/rodape/amex.png" alt="Amex" class="w-12">
-        <img src="static/img/rodape/paypal.png" alt="Paypal" class="w-12">
-      </div>
-      <h2 class="text-lg font-semibold mb-2">Marcas</h2>
-      <p>Femininas | Masculinas | Infantis | Casa</p>
-    </div>
-  </div>
-
-  <hr class="border-gray-700 my-4">
-
-  <!-- Rodapé Inferior -->
-  <div class="text-center text-sm">
-    <p class="mb-1">Copyright © Pollo Modas Brasil S.A. 2008-2021</p>
-    <p>Av Prof Alceu Maynard de Araújo, 698 | CEP 04726-160 - São Paulo/SP | CNPJ 10.464.223/0001-63</p>
-  </div>
-</footer>
-
+  <!-- Rodapé -->
+  <footer class="bg-black text-white py-6 px-4 text-center">
+    <p class="text-sm">© 2024 Loja de Roupas. Todos os direitos reservados.</p>
+  </footer>
 
 </body>
 </html>
