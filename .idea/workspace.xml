@@ -4,9 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="310da70a-5095-47e0-b4d5-9b337aa34487" name="Changes" comment="atualização do design para celulares">
-      <change beforePath="$PROJECT_DIR$/loja/templates/main/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/main/index.html" afterDir="false" />
-    </list>
+    <list default="true" id="310da70a-5095-47e0-b4d5-9b337aa34487" name="Changes" comment="atualização do design para celulares" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -135,7 +133,15 @@
       <option name="project" value="LOCAL" />
       <updated>1734553803740</updated>
     </task>
-    <option name="localTasksCounter" value="6" />
+    <task id="LOCAL-00006" summary="atualização do design para celulares">
+      <option name="closed" value="true" />
+      <created>1734554092926</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1734554092926</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
