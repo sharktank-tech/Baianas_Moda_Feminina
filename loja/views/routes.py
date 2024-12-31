@@ -9,7 +9,7 @@ main_blueprint = Blueprint('main', __name__)
 @main_blueprint.route('/')
 def home():
     # Obtém todos os produtos
-    products = Products.query.all()
+    products = Products.query.limit(4).all()
 
     # Converte os preços para float de forma segura
     for product in products:
@@ -181,3 +181,13 @@ def delete_account():
     except Exception as e:
         flash('Ocorreu um erro ao tentar excluir a conta. Tente novamente.', 'danger')
         return redirect(url_for('main.account'))
+
+# Rota da Politica d eprvacidade
+@main_blueprint.route('/politica_privacidade')
+def politica_privacidade():
+    return render_template('institucional/politica_privacidade.html')
+
+# Rota da página de sobre
+@main_blueprint.route('/sobre')
+def sobre():
+    return render_template('institucional/sobre.html')
