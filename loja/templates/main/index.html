@@ -14,7 +14,7 @@
 </head>
 <body class="bg-gray-100 font-sans">
 
-  <!-- Exibição das mensagens de flash -->
+  <!-- mensagens flash -->
   <div class="fixed top-0 left-0 w-full z-50">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -27,7 +27,7 @@
     {% endwith %}
   </div>
 
-  <!-- Script para desaparecer a mensagem flash após 3 segundos -->
+  <!-- Script para setar a duração das menssagens -->
   <script>
     document.addEventListener('DOMContentLoaded', function() {
       var flashMessage = document.getElementById('flash-message');
