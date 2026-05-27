@@ -1,287 +1,623 @@
- <!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Loja de Roupas com novidades, promoções especiais e qualidade garantida. Confira nossos produtos!">
-  <meta name="keywords" content="roupas, moda, promoções, loja online">
-  <title>Loja de Roupas</title>
-  <script src="static/scripts/carousel-1.js" defer></script>
-  <script src="static/scripts/carousel-2.js" defer></script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="static/styles/animation.css">
-  <link rel="icon" href="{{ url_for('static', filename='img/favicon.jpg') }}">
-</head>
-<body class="bg-gray-100 font-sans">
+{% extends "base.html" %}
 
-  <!-- mensagens flash -->
-  <div class="fixed top-0 left-0 w-full z-50">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        <div id="flash-message" class="bg-gray-800 text-white py-2">
-          {% for category, message in messages %}
-            <div class="text-center">{{ message }}</div>
-          {% endfor %}
-        </div>
-      {% endif %}
-    {% endwith %}
-  </div>
+{% block title %}Pollo Modas — Novidades e Promoções{% endblock %}
+{% block meta_description %}Loja de Roupas com novidades, promoções especiais e qualidade garantida. Confira nossos produtos!{% endblock %}
 
-  <!-- Script para setar a duração das menssagens -->
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      var flashMessage = document.getElementById('flash-message');
-      if (flashMessage) {
-        setTimeout(function() {
-          flashMessage.style.opacity = '0';
-          flashMessage.style.transition = 'opacity 0.5s ease-out';
-        }, 3000); // Mensagem desaparecerá após 3 segundos
-      }
-    });
-  </script>
+{% block extra_head %}
+  <script src="{{ url_for('static', filename='scripts/carousel-1.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='scripts/carousel-2.js') }}" defer></script>
 
-  <!-- Navbar -->
-  <nav class="bg-black text-white px-4 py-3 flex flex-wrap justify-between items-center">
-    <h1 class="text-xl sm:text-2xl font-bold text-center w-full sm:w-auto">
-      <a href="{{ url_for('main.home') }}">Loja de Roupas</a>
-    </h1>
-    <ul class="flex flex-wrap justify-center space-x-4 w-full sm:w-auto mt-3 sm:mt-0">
-      <li><a href="produtos" class="hover:text-gray-400">Produtos</a></li>
-      <li><a href="#" class="hover:text-gray-400">Sobre</a></li>
-      <li><a href="#" class="hover:text-gray-400">Contato</a></li>
-      {% if current_user.is_authenticated %}
-        <li><a href="{{ url_for('main.conta') }}" class="bg-white text-black px-4 py-2 rounded hover:bg-gray-200">Minha Conta</a></li>
-      {% else %}
-        <li><a href="{{ url_for('main.login') }}" class="bg-white text-black px-4 py-2 rounded hover:bg-gray-200">Entrar</a></li>
-      {% endif %}
-    </ul>
-  </nav>
+  <style>
+    /* ══════════════════════════════
+       HERO CAROUSEL
+    ══════════════════════════════ */
+    .hero-section { margin-top: 0; }
 
-<!-- Carrossel-1 -->
-<section class="mt-6">
-  <div class="relative w-full max-w-6xl mx-auto overflow-hidden rounded-lg shadow-lg">
-    <div class="slides flex transition-transform duration-500 ease-in-out">
-      <!-- Imagem do Carrossel -->
-      <div class="slide min-w-full h-64 sm:h-80 md:h-96 flex-shrink-0">
-        <img src="{{ url_for('static', filename='img/agua-de-coco.jpg') }}" alt="Imagem 1"
-          class="w-full h-full  rounded-lg">
-      </div>
-      <div class="slide min-w-full h-64 sm:h-80 md:h-96 flex-shrink-0">
-        <img src="{{ url_for('static', filename='img/corrano.jpg') }}" alt="Imagem 2"
-          class="w-full h-full  rounded-lg">
-      </div>
-      <div class="slide min-w-full h-64 sm:h-80 md:h-96 flex-shrink-0">
-        <img src="{{ url_for('static', filename='img/beauty-week.jpg') }}" alt="Imagem 3"
-          class="w-full h-full  rounded-lg">
-      </div>
-    </div>
+    .carousel-wrap {
+      position: relative;
+      width: 100%;
+      max-width: 100%;
+      overflow: hidden;
+      background: #0a0a0a;
+    }
 
-    <!-- Botões de navegação -->
-    <button class="prev absolute left-2 top-1/2 transform -translate-y-1/2 bg-white p-2 rounded-full shadow-md hover:bg-gray-300 z-10">
-      &larr;
-    </button>
-    <button class="next absolute right-2 top-1/2 transform -translate-y-1/2 bg-white p-2 rounded-full shadow-md hover:bg-gray-300 z-10">
-      &rarr;
-    </button>
-  </div>
-</section>
+    .slides {
+      display: flex;
+      transition: transform 0.6s cubic-bezier(0.77, 0, 0.18, 1);
+    }
 
+    .slide {
+      min-width: 100%;
+      position: relative;
+      flex-shrink: 0;
+    }
 
-  <!-- Área de Produtos -->
-  <section class="mt-10 px-4">
-    <h2 class="text-3xl font-bold text-center mb-6">Novidades</h2>
-    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-      <!-- Iterar sobre os produtos e renderizar dinamicamente -->
-      {% for product in products %}
-        <div class="bg-white rounded-lg shadow-lg overflow-hidden">
-          <img src="{{ product.image or url_for('static', filename='img/default.jpg') }}" alt="{{ product.name }}" class="w-full h-48 ">
-          <div class="p-4">
-            <h3 class="text-lg font-bold">{{ product.name }}</h3>
-            <p class="text-gray-600">R$ {{ '%.2f' % product.price }}</p>
-            <button class="mt-4 w-full bg-black text-white py-2 rounded hover:bg-gray-800">Comprar</button>
+    .slide img {
+      width: 100%;
+      height: clamp(260px, 52vw, 520px);
+      object-fit: cover;
+      display: block;
+      opacity: 0.88;
+    }
+
+    .slide-overlay {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(to right, rgba(0,0,0,0.55) 0%, transparent 60%);
+      display: flex;
+      align-items: center;
+      padding: 0 5%;
+    }
+
+    .slide-label {
+      font-family: 'Playfair Display', serif;
+      color: #fff;
+      font-size: clamp(1.6rem, 4vw, 3rem);
+      font-weight: 700;
+      line-height: 1.2;
+      text-shadow: 0 2px 20px rgba(0,0,0,0.5);
+    }
+
+    .slide-label small {
+      display: block;
+      font-family: 'DM Sans', sans-serif;
+      font-size: clamp(0.75rem, 1.5vw, 1rem);
+      font-weight: 400;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #ccc;
+      margin-bottom: 0.5rem;
+    }
+
+    .carousel-btn {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.25);
+      color: #fff;
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      backdrop-filter: blur(6px);
+      transition: background 0.2s;
+      z-index: 10;
+      font-size: 1rem;
+    }
+
+    .carousel-btn:hover { background: rgba(255,255,255,0.28); }
+    .carousel-btn.prev { left: 1.25rem; }
+    .carousel-btn.next { right: 1.25rem; }
+
+    /* ══════════════════════════════
+       SECTION TITLES
+    ══════════════════════════════ */
+    .section-title {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(1.6rem, 3vw, 2.2rem);
+      font-weight: 700;
+      text-align: center;
+      position: relative;
+      margin-bottom: 2.5rem;
+    }
+
+    .section-title::after {
+      content: '';
+      display: block;
+      width: 48px;
+      height: 3px;
+      background: var(--accent);
+      margin: 0.6rem auto 0;
+      border-radius: 2px;
+    }
+
+    /* ══════════════════════════════
+       PRODUTOS / NOVIDADES
+    ══════════════════════════════ */
+    .products-section {
+      max-width: 1280px;
+      margin: 5rem auto 0;
+      padding: 0 1.5rem;
+    }
+
+    .products-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 1.75rem;
+    }
+
+    .product-card {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      transition: transform 0.25s, box-shadow 0.25s;
+    }
+
+    .product-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 32px rgba(0,0,0,0.1);
+    }
+
+    .product-card img {
+      width: 100%;
+      height: 240px;
+      object-fit: cover;
+      display: block;
+    }
+
+    .product-info {
+      padding: 1rem 1.1rem 1.25rem;
+    }
+
+    .product-name {
+      font-weight: 600;
+      font-size: 0.95rem;
+      margin-bottom: 0.3rem;
+      color: var(--black);
+    }
+
+    .product-price {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--black);
+    }
+
+    .btn-comprar {
+      display: block;
+      width: 100%;
+      margin-top: 1rem;
+      background: var(--black);
+      color: #fff;
+      border: none;
+      padding: 10px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: background 0.2s;
+    }
+
+    .btn-comprar:hover { background: #2a2a2a; }
+
+    /* ══════════════════════════════
+       PROMOÇÕES CAROUSEL
+    ══════════════════════════════ */
+    .promo-section {
+      background: #fff5f6;
+      padding: 5rem 0;
+      margin-top: 5rem;
+      border-top: 1px solid #fddde2;
+      border-bottom: 1px solid #fddde2;
+    }
+
+    .promo-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    .promo-title-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      margin-bottom: 2.5rem;
+    }
+
+    .promo-badge {
+      background: var(--accent);
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 2px;
+    }
+
+    .promo-section .section-title {
+      color: var(--accent);
+    }
+
+    .promo-section .section-title::after {
+      background: var(--accent);
+    }
+
+    .promo-carousel-wrap {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .promo-slides {
+      display: flex;
+      transition: transform 0.5s cubic-bezier(0.77, 0, 0.18, 1);
+    }
+
+    .promo-slide {
+      flex-shrink: 0;
+      width: 33.333%;
+      padding: 0 0.75rem;
+    }
+
+    .promo-card {
+      background: #fff;
+      border: 1px solid #fddde2;
+      border-radius: 4px;
+      overflow: hidden;
+      transition: transform 0.25s, box-shadow 0.25s;
+    }
+
+    .promo-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 32px rgba(200,16,46,0.1);
+    }
+
+    .promo-card img {
+      width: 100%;
+      height: 240px;
+      object-fit: cover;
+      display: block;
+    }
+
+    .promo-info { padding: 1rem 1.1rem 1.25rem; }
+
+    .promo-info h3 {
+      font-weight: 600;
+      font-size: 0.95rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .promo-old {
+      text-decoration: line-through;
+      color: #aaa;
+      font-size: 0.85rem;
+    }
+
+    .promo-new {
+      color: var(--accent);
+      font-size: 1.2rem;
+      font-weight: 700;
+      margin-top: 2px;
+    }
+
+    .btn-promo {
+      display: inline-block;
+      margin-top: 1rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 9px 20px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: background 0.2s;
+    }
+
+    .btn-promo:hover { background: #a00d25; }
+
+    .promo-btn {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      background: #fff;
+      border: 1px solid #fddde2;
+      color: var(--accent);
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      transition: background 0.2s;
+      z-index: 10;
+      font-size: 1rem;
+    }
+
+    .promo-btn:hover { background: #fff0f2; }
+    .promo-prev { left: -8px; }
+    .promo-next { right: -8px; }
+
+    @media (max-width: 768px) {
+      .promo-slide { width: 80%; }
+      .promo-prev { left: 0.5rem; }
+      .promo-next { right: 0.5rem; }
+    }
+
+    @media (max-width: 480px) {
+      .promo-slide { width: 100%; }
+    }
+
+    /* ══════════════════════════════
+       DEPOIMENTOS
+    ══════════════════════════════ */
+    .testimonials-section {
+      background: var(--cream);
+      padding: 5rem 1.5rem;
+      margin-top: 5rem;
+    }
+
+    .testimonials-grid {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 2rem;
+    }
+
+    .testimonial-card {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2rem;
+      position: relative;
+    }
+
+    .testimonial-card::before {
+      content: '\201C';
+      font-family: 'Playfair Display', serif;
+      font-size: 4rem;
+      color: var(--accent);
+      line-height: 1;
+      position: absolute;
+      top: 0.75rem;
+      left: 1.25rem;
+      opacity: 0.3;
+    }
+
+    .testimonial-text {
+      font-style: italic;
+      color: #555;
+      font-size: 0.95rem;
+      line-height: 1.75;
+      padding-top: 1rem;
+    }
+
+    .testimonial-author {
+      margin-top: 1.25rem;
+      font-weight: 600;
+      font-size: 0.875rem;
+      color: var(--black);
+      text-align: right;
+    }
+
+    .star-row {
+      display: flex;
+      gap: 3px;
+      margin-bottom: 0.5rem;
+    }
+
+    .star { color: #f59e0b; font-size: 0.85rem; }
+
+    /* ══════════════════════════════
+       BANNER INTERMEDIÁRIO
+    ══════════════════════════════ */
+    .mid-banner {
+      background: var(--black);
+      color: #fff;
+      text-align: center;
+      padding: 4rem 1.5rem;
+      margin-top: 5rem;
+    }
+
+    .mid-banner p {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(1.4rem, 3vw, 2rem);
+      font-weight: 400;
+      font-style: italic;
+      color: #ccc;
+      max-width: 600px;
+      margin: 0 auto 1.5rem;
+      line-height: 1.6;
+    }
+
+    .mid-banner a {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      padding: 12px 32px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      text-decoration: none;
+      border-radius: 2px;
+      transition: background 0.2s;
+    }
+
+    .mid-banner a:hover { background: #a00d25; }
+  </style>
+{% endblock %}
+
+{% block content %}
+
+  <!-- ── Hero Carousel ── -->
+  <section class="hero-section">
+    <div class="carousel-wrap" id="carousel1">
+      <div class="slides">
+        <div class="slide">
+          <img src="{{ url_for('static', filename='img/agua-de-coco.jpg') }}" alt="Coleção Verão">
+          <div class="slide-overlay">
+            <div class="slide-label">
+              <small>Nova Coleção</small>
+              Verão 2025
+            </div>
           </div>
         </div>
+        <div class="slide">
+          <img src="{{ url_for('static', filename='img/corrano.jpg') }}" alt="Coleção Especial">
+          <div class="slide-overlay">
+            <div class="slide-label">
+              <small>Exclusivo</small>
+              Look do Dia
+            </div>
+          </div>
+        </div>
+        <div class="slide">
+          <img src="{{ url_for('static', filename='img/beauty-week.jpg') }}" alt="Beauty Week">
+          <div class="slide-overlay">
+            <div class="slide-label">
+              <small>Promoção Especial</small>
+              Beauty Week
+            </div>
+          </div>
+        </div>
+      </div>
+      <button class="carousel-btn prev">&#8592;</button>
+      <button class="carousel-btn next">&#8594;</button>
+    </div>
+  </section>
+
+  <!-- ── Novidades ── -->
+  <section class="products-section">
+    <h2 class="section-title">Novidades</h2>
+    <div class="products-grid">
+      {% for product in products %}
+        <div class="product-card">
+          <img src="{{ product.image or url_for('static', filename='img/default.jpg') }}"
+               alt="{{ product.name }}">
+          <div class="product-info">
+            <div class="product-name">{{ product.name }}</div>
+            <div class="product-price">R$ {{ '%.2f'|format(product.price) }}</div>
+            <button class="btn-comprar">Comprar</button>
+          </div>
+        </div>
+      {% else %}
+        <p style="grid-column:1/-1; text-align:center; color:#888; padding:3rem 0;">
+          Nenhum produto disponível no momento.
+        </p>
       {% endfor %}
     </div>
   </section>
 
-<p>
-
-</p>
-<!-- Carousel-2 -->
-<section class="mt-12 bg-red-100 py-10">
-  <h2 class="text-3xl font-bold text-center mb-6 text-red-700">Promoções Especiais</h2>
-  <div class="relative w-full max-w-6xl mx-auto overflow-hidden rounded-lg">
-    <!-- Slides -->
-    <div class="promo-slides flex transition-transform duration-500 ease-in-out">
-      <!-- Slide 1 -->
-      <div class="flex-shrink-0 flex w-full md:w-1/3 px-2">
-        <div class="bg-white rounded-lg shadow-lg overflow-hidden w-full">
-          <img src="https://img-br.prvstatic.com/front/get/photo/246720_-_images_-_960ximg-mosaic-open-slot1.jpg"
-               alt="Tênis esportivo em promoção"
-               class="w-full h-64 object-cover">
-          <div class="p-4">
-            <h3 class="text-lg font-bold">Tênis Esportivo</h3>
-            <p class="line-through text-gray-500">R$ 149,90</p>
-            <p class="text-red-700 font-bold mt-1">R$ 99,90</p>
-            <button class="mt-4 bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600">Comprar</button>
-          </div>
-        </div>
-      </div>
-      <!-- Slide 2 -->
-      <div class="flex-shrink-0 flex w-full md:w-1/3 px-2">
-        <div class="bg-white rounded-lg shadow-lg overflow-hidden w-full">
-          <img src="https://m.media-amazon.com/images/I/5120Clm3TTL._AC_SX679_.jpg"
-               alt="Bolsa feminina em couro"
-               class="w-full h-64 object-cover">
-          <div class="p-4">
-            <h3 class="text-lg font-bold">Bolsa Feminina</h3>
-            <p class="line-through text-gray-500">R$ 105,90</p>
-            <p class="text-red-700 font-bold mt-1">R$ 79,90</p>
-            <button class="mt-4 bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600">Comprar</button>
-          </div>
-        </div>
-      </div>
-      <!-- Slide 3 -->
-      <div class="flex-shrink-0 flex w-full md:w-1/3 px-2">
-        <div class="bg-white rounded-lg shadow-lg overflow-hidden w-full">
-          <img src="https://m.media-amazon.com/images/I/71rwiaPvMAL._AC_SY679_.jpg"
-               alt="Camisetas Masculinas"
-               class="w-full h-64 object-cover">
-          <div class="p-4">
-            <h3 class="text-lg font-bold">Camisetas Masculinas</h3>
-            <p class="line-through text-gray-500">R$ 199,90</p>
-            <p class="text-red-700 font-bold mt-1">R$ 149,90</p>
-            <button class="mt-4 bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600">Comprar</button>
-          </div>
-        </div>
-      </div>
-      <!-- Slide 4 -->
-      <div class="flex-shrink-0 flex w-full md:w-1/3 px-2">
-        <div class="bg-white rounded-lg shadow-lg overflow-hidden w-full">
-          <img src="https://m.media-amazon.com/images/I/41WrbjC6dcL._AC_SX466_.jpg"
-               alt="Calças Masculinas"
-               class="w-full h-64 object-cover">
-          <div class="p-4">
-            <h3 class="text-lg font-bold"> Calças masculinas</h3>
-            <p class="line-through text-gray-500">R$ 154,90</p>
-            <p class="text-red-700 font-bold mt-1">R$ 149,90</p>
-            <button class="mt-4 bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600">Comprar</button>
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- Navegação -->
-    <button class="promo-prev absolute left-2 top-1/2 transform -translate-y-1/2 bg-white p-2 rounded-full shadow-md hover:bg-gray-200">
-      &larr;
-    </button>
-    <button class="promo-next absolute right-2 top-1/2 transform -translate-y-1/2 bg-white p-2 rounded-full shadow-md hover:bg-gray-200">
-      &rarr;
-    </button>
-  </div>
-</section>
-
-
-
-<!-- Seção de Depoimentos -->
-<section class="mt-12 bg-gray-200 py-10">
-  <h2 class="text-3xl font-bold text-center mb-6">O que nossos clientes dizem</h2>
-  <div class="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-4">
-    <!-- Depoimento 1 -->
-    <div class="bg-white rounded-lg shadow-lg p-6">
-      <p class="italic text-gray-700">
-        "A qualidade das roupas é impecável! Sempre encontro exatamente o que preciso. Recomendo a todos!"
-      </p>
-      <div class="mt-4 text-right">
-        <span class="font-semibold">- Ana Silva</span>
-      </div>
-    </div>
-    <!-- Depoimento 2 -->
-    <div class="bg-white rounded-lg shadow-lg p-6">
-      <p class="italic text-gray-700">
-        "Ótimo atendimento e entrega super rápida. Com certeza farei mais compras no futuro!"
-      </p>
-      <div class="mt-4 text-right">
-        <span class="font-semibold">- João Pereira</span>
-      </div>
-    </div>
-    <!-- Depoimento 3 -->
-    <div class="bg-white rounded-lg shadow-lg p-6">
-      <p class="italic text-gray-700">
-        "Adoro a variedade e os preços. Loja confiável e com produtos incríveis!"
-      </p>
-      <div class="mt-4 text-right">
-        <span class="font-semibold">- Maria Oliveira</span>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Rodapé -->
-<footer class="bg-black text-white py-8 px-4">
-  <div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
-    <!-- Coluna 1: Redes Sociais -->
-    <div>
-      <h2 class="text-lg font-semibold mb-2">Siga a gente</h2>
-      <div class="flex gap-2">
-        <a href="#" class="hover:opacity-80">
-          <img src="static/img/rodape/facebook.png" alt="Facebook" class="w-8">
-        </a>
-        <a href="#" class="hover:opacity-80">
-          <img src="static/img/rodape/instagram.png" alt="Instagram" class="w-8">
-        </a>
-        <a href="#" class="hover:opacity-80">
-          <img src="static/img/rodape/twitter.png" alt="Twitter" class="w-8">
-        </a>
-      </div>
-    </div>
-
-    <!-- Coluna 2: Links de Informações e Contato -->
-    <div class="grid grid-cols-2 gap-4">
-      <div>
-        <h2 class="text-lg font-semibold mb-2">Sobre a Pollo Modas</h2>
-        <ul class="space-y-1">
-          <li><a href="/sobre" class="hover:underline">O que é a Pollo Modas?</a></li>
-          <li><a href="/politica_privacidade" class="hover:underline">Privacidade e Cookies</a></li>
-          <li><a href="#" class="hover:underline">Condições de uso</a></li>
-          <li><a href="#" class="hover:underline">Relações com Investidores</a></li>
-          <li><a href="#" class="hover:underline">Nossas marcas</a></li>
-          <li><a href="#" class="hover:underline">Black Friday</a></li>
-        </ul>
-      </div>
-      <div>
-        <h2 class="text-lg font-semibold mb-2">Fale com a gente</h2>
-        <ul class="space-y-1">
-          <li><a href="#" class="hover:underline">Ajuda</a></li>
-          <li><a href="#" class="hover:underline">Contato para marcas</a></li>
-          <li><a href="/politica_privacidade" class="hover:underline">Termos Pollo Modas Ads</a></li>
-        </ul>
-      </div>
-    </div>
-
-    <!-- Coluna 3: Premium e Marcas -->
-    <div>
-      <h2 class="text-lg font-semibold mt-4 mb-2">Formas de pagamento</h2>
-      <div class="flex gap-2 mb-2">
-        <img src="static/img/rodape/logotipo-visa.png" alt="Visa" class="w-12">
-        <img src="static/img/rodape/cartao.png" alt="Master Card" class="w-12">
-        <img src="static/img/rodape/amex.png" alt="Amex" class="w-12">
-        <img src="static/img/rodape/paypal.png" alt="Paypal" class="w-12">
-      </div>
-      <h2 class="text-lg font-semibold mb-2">Marcas</h2>
-      <p>Femininas | Masculinas | Infantis | Casa</p>
-    </div>
+  <!-- ── Banner CTA ── -->
+  <div class="mid-banner">
+    <p>"Vista o que você é. Descubra o que ainda pode ser."</p>
+    <a href="{{ url_for('main.produtos') }}">Ver todos os produtos</a>
   </div>
 
-  <hr class="border-gray-700 my-4">
+  <!-- ── Promoções Carousel ── -->
+  <section class="promo-section">
+    <div class="promo-inner">
+      <div class="promo-title-wrap">
+        <h2 class="section-title" style="margin-bottom:0;">Promoções Especiais</h2>
+        <span class="promo-badge">Oferta Limitada</span>
+      </div>
 
-  <!-- Rodapé Inferior -->
-  <div class="text-center text-sm">
-    <p class="mb-1">Copyright © Pollo Modas Brasil S.A. 2008-2021</p>
-    <p>Av Prof Alceu Maynard de Araújo, 698 | CEP 04726-160 - São Paulo/SP | CNPJ 10.464.223/0001-63</p>
-  </div>
-</footer>
+      <div class="promo-carousel-wrap" id="carousel2">
+        <div class="promo-slides">
 
+          <div class="promo-slide">
+            <div class="promo-card">
+              <img src="https://img-br.prvstatic.com/front/get/photo/246720_-_images_-_960ximg-mosaic-open-slot1.jpg"
+                   alt="Tênis Esportivo">
+              <div class="promo-info">
+                <h3>Tênis Esportivo</h3>
+                <p class="promo-old">R$ 149,90</p>
+                <p class="promo-new">R$ 99,90</p>
+                <button class="btn-promo">Comprar</button>
+              </div>
+            </div>
+          </div>
 
-</body>
-</html>
+          <div class="promo-slide">
+            <div class="promo-card">
+              <img src="https://m.media-amazon.com/images/I/5120Clm3TTL._AC_SX679_.jpg"
+                   alt="Bolsa Feminina">
+              <div class="promo-info">
+                <h3>Bolsa Feminina</h3>
+                <p class="promo-old">R$ 105,90</p>
+                <p class="promo-new">R$ 79,90</p>
+                <button class="btn-promo">Comprar</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="promo-slide">
+            <div class="promo-card">
+              <img src="https://m.media-amazon.com/images/I/71rwiaPvMAL._AC_SY679_.jpg"
+                   alt="Camisetas Masculinas">
+              <div class="promo-info">
+                <h3>Camisetas Masculinas</h3>
+                <p class="promo-old">R$ 199,90</p>
+                <p class="promo-new">R$ 149,90</p>
+                <button class="btn-promo">Comprar</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="promo-slide">
+            <div class="promo-card">
+              <img src="https://m.media-amazon.com/images/I/41WrbjC6dcL._AC_SX466_.jpg"
+                   alt="Calças Masculinas">
+              <div class="promo-info">
+                <h3>Calças Masculinas</h3>
+                <p class="promo-old">R$ 154,90</p>
+                <p class="promo-new">R$ 149,90</p>
+                <button class="btn-promo">Comprar</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <button class="promo-btn promo-prev">&#8592;</button>
+        <button class="promo-btn promo-next">&#8594;</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Depoimentos ── -->
+  <section class="testimonials-section">
+    <h2 class="section-title">O que nossos clientes dizem</h2>
+    <div class="testimonials-grid">
+
+      <div class="testimonial-card">
+        <div class="star-row">
+          <span class="star">★</span><span class="star">★</span><span class="star">★</span>
+          <span class="star">★</span><span class="star">★</span>
+        </div>
+        <p class="testimonial-text">
+          A qualidade das roupas é impecável! Sempre encontro exatamente o que preciso. Recomendo a todos!
+        </p>
+        <p class="testimonial-author">— Ana Silva</p>
+      </div>
+
+      <div class="testimonial-card">
+        <div class="star-row">
+          <span class="star">★</span><span class="star">★</span><span class="star">★</span>
+          <span class="star">★</span><span class="star">★</span>
+        </div>
+        <p class="testimonial-text">
+          Ótimo atendimento e entrega super rápida. Com certeza farei mais compras no futuro!
+        </p>
+        <p class="testimonial-author">— João Pereira</p>
+      </div>
+
+      <div class="testimonial-card">
+        <div class="star-row">
+          <span class="star">★</span><span class="star">★</span><span class="star">★</span>
+          <span class="star">★</span><span class="star">★</span>
+        </div>
+        <p class="testimonial-text">
+          Adoro a variedade e os preços. Loja confiável e com produtos incríveis!
+        </p>
+        <p class="testimonial-author">— Maria Oliveira</p>
+      </div>
+
+    </div>
+  </section>
+
+{% endblock %}
