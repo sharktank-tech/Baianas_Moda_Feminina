@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
-{% block title %}Pollo Modas — Novidades e Promoções{% endblock %}
-{% block meta_description %}Loja de Roupas com novidades, promoções especiais e qualidade garantida. Confira nossos produtos!{% endblock %}
+{% block title %}{{ site.name }} — Novidades e Promoções{% endblock %}
+{% block meta_description %}{{ site.meta_description }}{% endblock %}
 
 {% block extra_head %}
   <script src="{{ url_for('static', filename='scripts/carousel-1.js') }}" defer></script>
@@ -439,6 +439,151 @@
     }
 
     .mid-banner a:hover { background: #a00d25; }
+
+    /* ══════════════════════════════
+       RODAPÉ
+    ══════════════════════════════ */
+    .site-footer {
+      background: #111;
+      color: #ccc;
+      padding: 4rem 1.5rem 2rem;
+      margin-top: 5rem;
+      font-family: 'DM Sans', sans-serif;
+    }
+
+    .footer-grid {
+      max-width: 1280px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr 1fr;
+      gap: 2.5rem;
+    }
+
+    .footer-brand .footer-logo {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 0.75rem;
+    }
+
+    .footer-brand p {
+      font-size: 0.875rem;
+      line-height: 1.75;
+      color: #999;
+      max-width: 280px;
+    }
+
+    .footer-social {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 1.25rem;
+    }
+
+    .footer-social a {
+      width: 36px;
+      height: 36px;
+      border: 1px solid #333;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #aaa;
+      text-decoration: none;
+      font-size: 0.9rem;
+      transition: border-color 0.2s, color 0.2s;
+    }
+
+    .footer-social a:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .footer-col h4 {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #fff;
+      margin-bottom: 1.25rem;
+    }
+
+    .footer-col ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .footer-col ul li {
+      margin-bottom: 0.6rem;
+    }
+
+    .footer-col ul li a {
+      color: #999;
+      text-decoration: none;
+      font-size: 0.875rem;
+      transition: color 0.2s;
+    }
+
+    .footer-col ul li a:hover { color: #fff; }
+
+    .footer-contact-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.6rem;
+      margin-bottom: 0.75rem;
+      font-size: 0.875rem;
+      color: #999;
+    }
+
+    .footer-contact-item span.icon {
+      color: var(--accent);
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .footer-bottom {
+      max-width: 1280px;
+      margin: 3rem auto 0;
+      padding-top: 1.5rem;
+      border-top: 1px solid #222;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      font-size: 0.8rem;
+      color: #555;
+    }
+
+    .footer-bottom a {
+      color: #555;
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .footer-bottom a:hover { color: #999; }
+
+    .footer-bottom-links {
+      display: flex;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 960px) {
+      .footer-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .footer-grid {
+        grid-template-columns: 1fr;
+      }
+      .footer-bottom {
+        flex-direction: column;
+        text-align: center;
+      }
+    }
   </style>
 {% endblock %}
 
@@ -448,33 +593,28 @@
   <section class="hero-section">
     <div class="carousel-wrap" id="carousel1">
       <div class="slides">
-        <div class="slide">
-          <img src="{{ url_for('static', filename='img/agua-de-coco.jpg') }}" alt="Coleção Verão">
-          <div class="slide-overlay">
-            <div class="slide-label">
-              <small>Nova Coleção</small>
-              Verão 2025
+        {% for slide in hero_slides %}
+          <div class="slide">
+            <img src="{{ slide.image }}" alt="{{ slide.alt }}">
+            <div class="slide-overlay">
+              <div class="slide-label">
+                {% if slide.eyebrow %}<small>{{ slide.eyebrow }}</small>{% endif %}
+                {{ slide.title }}
+              </div>
             </div>
           </div>
-        </div>
-        <div class="slide">
-          <img src="{{ url_for('static', filename='img/corrano.jpg') }}" alt="Coleção Especial">
-          <div class="slide-overlay">
-            <div class="slide-label">
-              <small>Exclusivo</small>
-              Look do Dia
+        {% else %}
+          {# fallback caso hero_slides não seja fornecido #}
+          <div class="slide">
+            <img src="{{ url_for('static', filename='img/agua-de-coco.jpg') }}" alt="Coleção Verão">
+            <div class="slide-overlay">
+              <div class="slide-label">
+                <small>Nova Coleção</small>
+                Verão 2025
+              </div>
             </div>
           </div>
-        </div>
-        <div class="slide">
-          <img src="{{ url_for('static', filename='img/beauty-week.jpg') }}" alt="Beauty Week">
-          <div class="slide-overlay">
-            <div class="slide-label">
-              <small>Promoção Especial</small>
-              Beauty Week
-            </div>
-          </div>
-        </div>
+        {% endfor %}
       </div>
       <button class="carousel-btn prev">&#8592;</button>
       <button class="carousel-btn next">&#8594;</button>
@@ -492,7 +632,10 @@
           <div class="product-info">
             <div class="product-name">{{ product.name }}</div>
             <div class="product-price">R$ {{ '%.2f'|format(product.price) }}</div>
-            <button class="btn-comprar">Comprar</button>
+            <button class="btn-comprar"
+                    {% if product.id %}data-product-id="{{ product.id }}"{% endif %}>
+              Comprar
+            </button>
           </div>
         </div>
       {% else %}
@@ -505,8 +648,8 @@
 
   <!-- ── Banner CTA ── -->
   <div class="mid-banner">
-    <p>"Vista o que você é. Descubra o que ainda pode ser."</p>
-    <a href="{{ url_for('main.produtos') }}">Ver todos os produtos</a>
+    <p>"{{ banner.quote }}"</p>
+    <a href="{{ url_for('main.produtos') }}">{{ banner.cta_text }}</a>
   </div>
 
   <!-- ── Promoções Carousel ── -->
@@ -514,64 +657,31 @@
     <div class="promo-inner">
       <div class="promo-title-wrap">
         <h2 class="section-title" style="margin-bottom:0;">Promoções Especiais</h2>
-        <span class="promo-badge">Oferta Limitada</span>
+        <span class="promo-badge">{{ promo_badge }}</span>
       </div>
 
       <div class="promo-carousel-wrap" id="carousel2">
         <div class="promo-slides">
-
-          <div class="promo-slide">
-            <div class="promo-card">
-              <img src="https://img-br.prvstatic.com/front/get/photo/246720_-_images_-_960ximg-mosaic-open-slot1.jpg"
-                   alt="Tênis Esportivo">
-              <div class="promo-info">
-                <h3>Tênis Esportivo</h3>
-                <p class="promo-old">R$ 149,90</p>
-                <p class="promo-new">R$ 99,90</p>
-                <button class="btn-promo">Comprar</button>
+          {% for promo in promotions %}
+            <div class="promo-slide">
+              <div class="promo-card">
+                <img src="{{ promo.image }}" alt="{{ promo.name }}">
+                <div class="promo-info">
+                  <h3>{{ promo.name }}</h3>
+                  <p class="promo-old">R$ {{ '%.2f'|format(promo.original_price) }}</p>
+                  <p class="promo-new">R$ {{ '%.2f'|format(promo.sale_price) }}</p>
+                  <button class="btn-promo"
+                          {% if promo.id %}data-product-id="{{ promo.id }}"{% endif %}>
+                    Comprar
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-
-          <div class="promo-slide">
-            <div class="promo-card">
-              <img src="https://m.media-amazon.com/images/I/5120Clm3TTL._AC_SX679_.jpg"
-                   alt="Bolsa Feminina">
-              <div class="promo-info">
-                <h3>Bolsa Feminina</h3>
-                <p class="promo-old">R$ 105,90</p>
-                <p class="promo-new">R$ 79,90</p>
-                <button class="btn-promo">Comprar</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="promo-slide">
-            <div class="promo-card">
-              <img src="https://m.media-amazon.com/images/I/71rwiaPvMAL._AC_SY679_.jpg"
-                   alt="Camisetas Masculinas">
-              <div class="promo-info">
-                <h3>Camisetas Masculinas</h3>
-                <p class="promo-old">R$ 199,90</p>
-                <p class="promo-new">R$ 149,90</p>
-                <button class="btn-promo">Comprar</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="promo-slide">
-            <div class="promo-card">
-              <img src="https://m.media-amazon.com/images/I/41WrbjC6dcL._AC_SX466_.jpg"
-                   alt="Calças Masculinas">
-              <div class="promo-info">
-                <h3>Calças Masculinas</h3>
-                <p class="promo-old">R$ 154,90</p>
-                <p class="promo-new">R$ 149,90</p>
-                <button class="btn-promo">Comprar</button>
-              </div>
-            </div>
-          </div>
-
+          {% else %}
+            <p style="text-align:center; color:#888; padding:3rem 0; width:100%;">
+              Nenhuma promoção disponível no momento.
+            </p>
+          {% endfor %}
         </div>
         <button class="promo-btn promo-prev">&#8592;</button>
         <button class="promo-btn promo-next">&#8594;</button>
@@ -583,41 +693,42 @@
   <section class="testimonials-section">
     <h2 class="section-title">O que nossos clientes dizem</h2>
     <div class="testimonials-grid">
-
-      <div class="testimonial-card">
-        <div class="star-row">
-          <span class="star">★</span><span class="star">★</span><span class="star">★</span>
-          <span class="star">★</span><span class="star">★</span>
+      {% for t in testimonials %}
+        <div class="testimonial-card">
+          <div class="star-row">
+            {% for i in range(t.rating) %}
+              <span class="star">★</span>
+            {% endfor %}
+          </div>
+          <p class="testimonial-text">{{ t.text }}</p>
+          <p class="testimonial-author">— {{ t.author }}</p>
         </div>
-        <p class="testimonial-text">
-          A qualidade das roupas é impecável! Sempre encontro exatamente o que preciso. Recomendo a todos!
-        </p>
-        <p class="testimonial-author">— Ana Silva</p>
-      </div>
-
-      <div class="testimonial-card">
-        <div class="star-row">
-          <span class="star">★</span><span class="star">★</span><span class="star">★</span>
-          <span class="star">★</span><span class="star">★</span>
+      {% else %}
+        {# fallback estático caso testimonials não seja fornecido #}
+        <div class="testimonial-card">
+          <div class="star-row">
+            {% for i in range(5) %}<span class="star">★</span>{% endfor %}
+          </div>
+          <p class="testimonial-text">A qualidade das roupas é impecável! Sempre encontro exatamente o que preciso. Recomendo a todos!</p>
+          <p class="testimonial-author">— Ana Silva</p>
         </div>
-        <p class="testimonial-text">
-          Ótimo atendimento e entrega super rápida. Com certeza farei mais compras no futuro!
-        </p>
-        <p class="testimonial-author">— João Pereira</p>
-      </div>
-
-      <div class="testimonial-card">
-        <div class="star-row">
-          <span class="star">★</span><span class="star">★</span><span class="star">★</span>
-          <span class="star">★</span><span class="star">★</span>
+        <div class="testimonial-card">
+          <div class="star-row">
+            {% for i in range(5) %}<span class="star">★</span>{% endfor %}
+          </div>
+          <p class="testimonial-text">Ótimo atendimento e entrega super rápida. Com certeza farei mais compras no futuro!</p>
+          <p class="testimonial-author">— João Pereira</p>
         </div>
-        <p class="testimonial-text">
-          Adoro a variedade e os preços. Loja confiável e com produtos incríveis!
-        </p>
-        <p class="testimonial-author">— Maria Oliveira</p>
-      </div>
-
+        <div class="testimonial-card">
+          <div class="star-row">
+            {% for i in range(5) %}<span class="star">★</span>{% endfor %}
+          </div>
+          <p class="testimonial-text">Adoro a variedade e os preços. Loja confiável e com produtos incríveis!</p>
+          <p class="testimonial-author">— Maria Oliveira</p>
+        </div>
+      {% endfor %}
     </div>
   </section>
+
 
 {% endblock %}

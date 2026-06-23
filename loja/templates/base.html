@@ -71,9 +71,7 @@
       white-space: nowrap;
     }
 
-    .navbar-brand span {
-      color: var(--accent);
-    }
+    .navbar-brand span { color: var(--accent); }
 
     .navbar-links {
       display: flex;
@@ -194,7 +192,7 @@
 </head>
 <body>
 
-  <!-- Flash Messages -->
+  <!-- ── Flash Messages ── -->
   <div class="fixed top-0 left-0 w-full z-50">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -214,16 +212,38 @@
     });
   </script>
 
-  <!-- Navbar -->
+  <!-- ── Navbar ── -->
   <nav class="navbar">
     <a href="{{ url_for('main.home') }}" class="navbar-brand">
-      Pollo<span>.</span>Modas
+      {% if site and site.name %}
+        {{ site.name }}
+      {% else %}
+        Pollo<span>.</span>Modas
+      {% endif %}
     </a>
     <ul class="navbar-links">
       <li><a href="{{ url_for('main.produtos') }}">Produtos</a></li>
-      <li><a href="/sobre">Sobre</a></li>
+      <li><a href="{{ url_for('main.sobre') }}">Sobre</a></li>
       <li><a href="#">Contato</a></li>
+      <li>
+    <a href="{{ url_for('main.conta') }}"
+       class="text-gray-700 hover:text-red-600">
+        Minha Conta
+    </a>
+</li>
+
+{% if current_user.is_authenticated and current_user.is_admin %}
+<li>
+    <a href="{{ url_for('admin.admin_dashboard') }}"
+       class="text-gray-700 hover:text-red-600">
+        Admin
+    </a>
+</li>
+{% endif %}
       {% if current_user.is_authenticated %}
+        {% if current_user.is_admin %}
+          <li><a href="{{ url_for('admin.admin_dashboard') }}">Admin</a></li>
+        {% endif %}
         <li><a href="{{ url_for('main.conta') }}" class="btn-conta">Minha Conta</a></li>
       {% else %}
         <li><a href="{{ url_for('main.login') }}" class="btn-conta">Entrar</a></li>
@@ -231,12 +251,12 @@
     </ul>
   </nav>
 
-  <!-- Conteúdo principal -->
+  <!-- ── Conteúdo principal ── -->
   <main>
     {% block content %}{% endblock %}
   </main>
 
-  <!-- Rodapé -->
+  <!-- ── Rodapé ── -->
   <footer class="site-footer">
     <div class="footer-grid">
 
@@ -244,52 +264,88 @@
       <div>
         <p class="footer-heading">Siga a gente</p>
         <div class="footer-social">
-          <a href="#"><img src="{{ url_for('static', filename='img/rodape/facebook.png') }}" alt="Facebook"></a>
-          <a href="#"><img src="{{ url_for('static', filename='img/rodape/instagram.png') }}" alt="Instagram"></a>
-          <a href="#"><img src="{{ url_for('static', filename='img/rodape/twitter.png') }}" alt="Twitter"></a>
+          {% if footer and footer.social_links %}
+            {% for social in footer.social_links %}
+              <a href="{{ social.url }}" target="_blank" rel="noopener" aria-label="{{ social.label }}">
+                <img src="{{ url_for('static', filename='img/rodape/' + social.icon_file) }}"
+                     alt="{{ social.label }}">
+              </a>
+            {% endfor %}
+          {% else %}
+            {# fallback estático #}
+            <a href="#"><img src="{{ url_for('static', filename='img/rodape/facebook.png') }}"   alt="Facebook"></a>
+            <a href="#"><img src="{{ url_for('static', filename='img/rodape/instagram.png') }}"  alt="Instagram"></a>
+            <a href="#"><img src="{{ url_for('static', filename='img/rodape/twitter.png') }}"    alt="Twitter"></a>
+          {% endif %}
         </div>
         <p style="margin-top:1.5rem; font-size:0.8rem; color:#555; line-height:1.7">
-          Moda com identidade.<br>Qualidade que você sente.
+          {% if footer and footer.brand_description %}
+            {{ footer.brand_description }}
+          {% else %}
+            Moda com identidade.<br>Qualidade que você sente.
+          {% endif %}
         </p>
       </div>
 
-      <!-- Coluna 2: Links -->
+      <!-- Coluna 2: Links institucionais e atendimento -->
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem;">
         <div>
           <p class="footer-heading">Institucional</p>
           <ul class="footer-links">
-            <li><a href="/sobre">Sobre nós</a></li>
-            <li><a href="/politica_privacidade">Privacidade</a></li>
-            <li><a href="#">Condições de uso</a></li>
-            <li><a href="#">Investidores</a></li>
-            <li><a href="#">Nossas marcas</a></li>
+            {% if footer and footer.nav_links %}
+              {% for link in footer.nav_links %}
+                <li><a href="{{ link.url }}">{{ link.label }}</a></li>
+              {% endfor %}
+            {% else %}
+              <li><a href="{{ url_for('main.sobre') }}">Sobre nós</a></li>
+              <li><a href="{{ url_for('main.politica_privacidade') }}">Privacidade</a></li>
+              <li><a href="#">Condições de uso</a></li>
+            {% endif %}
           </ul>
         </div>
         <div>
           <p class="footer-heading">Atendimento</p>
           <ul class="footer-links">
-            <li><a href="#">Central de Ajuda</a></li>
-            <li><a href="#">Contato para marcas</a></li>
-            <li><a href="/politica_privacidade">Pollo Ads</a></li>
-            <li><a href="#">Trocas e Devoluções</a></li>
+            {% if footer and footer.categories %}
+              {% for cat in footer.categories %}
+                <li><a href="{{ cat.url }}">{{ cat.label }}</a></li>
+              {% endfor %}
+            {% else %}
+              <li><a href="#">Central de Ajuda</a></li>
+              <li><a href="#">Contato para marcas</a></li>
+              <li><a href="#">Trocas e Devoluções</a></li>
+            {% endif %}
           </ul>
         </div>
       </div>
 
-      <!-- Coluna 3: Pagamento e Marcas -->
+      <!-- Coluna 3: Pagamento e contato -->
       <div>
         <p class="footer-heading">Formas de pagamento</p>
         <div class="footer-payments">
-          <img src="{{ url_for('static', filename='img/rodape/logotipo-visa.png') }}" alt="Visa">
-          <img src="{{ url_for('static', filename='img/rodape/cartao.png') }}" alt="Mastercard">
-          <img src="{{ url_for('static', filename='img/rodape/amex.png') }}" alt="Amex">
-          <img src="{{ url_for('static', filename='img/rodape/paypal.png') }}" alt="Paypal">
+          <img src="{{ url_for('static', filename='img/rodape/logotipo-visa.png') }}"  alt="Visa">
+          <img src="{{ url_for('static', filename='img/rodape/cartao.png') }}"         alt="Mastercard">
+          <img src="{{ url_for('static', filename='img/rodape/amex.png') }}"           alt="Amex">
+          <img src="{{ url_for('static', filename='img/rodape/paypal.png') }}"         alt="Paypal">
         </div>
-        <p class="footer-heading" style="margin-top:1.75rem;">Categorias</p>
-        <p style="font-size:0.85rem; color:#666; line-height:2;">
-          Femininas &nbsp;·&nbsp; Masculinas<br>
-          Infantis &nbsp;·&nbsp; Casa &amp; Decoração
-        </p>
+
+        {% if footer and footer.contact %}
+          <p class="footer-heading" style="margin-top:1.75rem;">Contato</p>
+          <ul class="footer-links">
+            {% if footer.contact.address %}
+              <li>{{ footer.contact.address }}</li>
+            {% endif %}
+            {% if footer.contact.phone %}
+              <li><a href="tel:{{ footer.contact.phone }}">{{ footer.contact.phone }}</a></li>
+            {% endif %}
+            {% if footer.contact.email %}
+              <li><a href="mailto:{{ footer.contact.email }}">{{ footer.contact.email }}</a></li>
+            {% endif %}
+            {% if footer.contact.hours %}
+              <li>{{ footer.contact.hours }}</li>
+            {% endif %}
+          </ul>
+        {% endif %}
       </div>
 
     </div>
@@ -297,8 +353,23 @@
     <hr class="footer-divider">
 
     <div class="footer-bottom">
-      <p>Copyright &copy; Pollo Modas Brasil S.A. 2008–2025</p>
-      <p>Av. Prof. Alceu Maynard de Araújo, 698 &nbsp;|&nbsp; CEP 04726-160 — São Paulo/SP &nbsp;|&nbsp; CNPJ 10.464.223/0001-63</p>
+      {% if footer %}
+        <p>Copyright &copy; {{ footer.brand_name }} &mdash; {{ footer.copyright_year }}. {{ footer.copyright_text }}</p>
+      {% else %}
+        <p>Copyright &copy; Pollo Modas Brasil S.A. 2008–2025</p>
+      {% endif %}
+
+      {% if footer and footer.legal_links %}
+        <p>
+          {% for link in footer.legal_links %}
+            <a href="{{ link.url }}" style="color:#555; text-decoration:none; transition:color 0.2s;"
+               onmouseover="this.style.color='#999'" onmouseout="this.style.color='#555'">
+              {{ link.label }}
+            </a>
+            {% if not loop.last %} &nbsp;·&nbsp; {% endif %}
+          {% endfor %}
+        </p>
+      {% endif %}
     </div>
   </footer>
 

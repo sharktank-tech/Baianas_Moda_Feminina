@@ -1,4 +1,27 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 class Config:
-    SQLALCHEMY_DATABASE_URI = 'sqlite:///database.db'
+    # ============== Flask =================
+    SECRET_KEY = os.getenv("SECRET_KEY", "rjh393sn1958ffn")
+    FLASK_APP = os.getenv("SECRET_KEY", "run")
+
+    # ============== Database =================
+    DATABASE_URL = os.getenv("DATABASE_URL")
+    DATABASE_KEY = os.getenv("DATABASE_KEY")
+    DATABASE_SERVICE_ROLE_KEY = os.getenv("DATABASE_SERVICE_ROLE_KEY")
+
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL não configurada.")
+
+    # ============= SQLAlchemy ==================
+    SQLALCHEMY_DATABASE_URI = (
+        DATABASE_URL
+    )
+
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SECRET_KEY = 'jfd3b9fjsdpjvpikjfjwnrs*bnv4('
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_pre_ping": True,
+        "pool_recycle": 300,
+    }
