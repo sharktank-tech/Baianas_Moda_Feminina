@@ -1,123 +1,51 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Sobre a Pollo Modas. Conheça nossa história, missão e valores.">
-  <meta name="keywords" content="sobre, história, missão, valores">
-  <title>Sobre - Loja Pollo Modas</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="static/styles/animation.css">
-  <link rel="icon" href="{{ url_for('static', filename='img/favicon.jpg') }}">
-</head>
-<body class="bg-blue-300 font-sans">
+{% extends "base.html" %}
 
-  <!-- Navbar -->
-  <nav class="bg-black text-white px-4 py-3 flex flex-wrap justify-between items-center">
-    <h1 class="text-xl sm:text-2xl font-bold text-center w-full sm:w-auto">
-      <a href="{{ url_for('main.home') }}">Pollo Modas </a>
-    </h1>
-    <ul class="flex flex-wrap justify-center space-x-4 w-full sm:w-auto mt-3 sm:mt-0">
-      <li><a href="produtos" class="hover:text-gray-400">Produtos</a></li>
-      <li><a href="#" class="hover:text-gray-400">Sobre</a></li>
-      <li><a href="#" class="hover:text-gray-400">Contato</a></li>
-      {% if current_user.is_authenticated %}
-        <li><a href="{{ url_for('main.conta') }}" class="bg-white text-black px-4 py-2 rounded hover:bg-gray-200">Minha Conta</a></li>
-      {% else %}
-        <li><a href="{{ url_for('main.login') }}" class="bg-white text-black px-4 py-2 rounded hover:bg-gray-200">Entrar</a></li>
-      {% endif %}
-    </ul>
-  </nav>
+{% block title %}Sobre - Pollo Modas{% endblock %}
 
-  <!-- Sobre -->
-  <section class="mt-10 px-6">
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='styles/animation.css') }}">
+<meta name="description" content="Sobre a Pollo Modas. Conheça nossa história, missão e valores.">
+<meta name="keywords" content="sobre, história, missão, valores">
+{% endblock %}
+
+{% block content %}
+
+<section class="mt-10 px-6 py-8">
     <h1 class="text-4xl font-bold text-center mb-6">Sobre Nós</h1>
+
     <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-lg p-6">
-      <p class="mb-4 text-gray-700">
-        Bem-vindo à Pollo modas! Somos uma empresa dedicada a oferecer roupas de qualidade, estilo e conforto para todos os nossos clientes. Nossa jornada começou com o objetivo de tornar a moda acessível a todos, sem comprometer a qualidade e o atendimento.
-      </p>
-      <h2 class="text-2xl font-semibold mt-6 mb-4">Nossa Missão</h2>
-      <p class="text-gray-700 mb-4">
-        Proporcionar aos nossos clientes a melhor experiência em compras de roupas, com produtos que combinam qualidade, estilo e preços acessíveis.
-      </p>
-      <h2 class="text-2xl font-semibold mt-6 mb-4">Nossos Valores</h2>
-      <ul class="list-disc list-inside text-gray-700">
-        <li>Compromisso com a qualidade</li>
-        <li>Atendimento ao cliente excepcional</li>
-        <li>Inovação e sustentabilidade</li>
-        <li>Respeito e inclusão</li>
-      </ul>
-      <h2 class="text-2xl font-semibold mt-6 mb-4">Nossa História</h2>
-      <p class="text-gray-700 mb-4">
-        Fundada em 2010, Pollo Modas começou como um pequeno negócio familiar. Ao longo dos anos, crescemos e nos tornamos uma referência no setor de moda, mantendo sempre nosso compromisso com a satisfação do cliente.
-      </p>
-    </div>
-  </section>
 
-<!-- Rodapé -->
-<footer class="bg-black text-white py-8 px-4">
-  <div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
-    <!-- Coluna 1: Redes Sociais -->
-    <div>
-      <h2 class="text-lg font-semibold mb-2">Siga a gente</h2>
-      <div class="flex gap-2">
-        <a href="#" class="hover:opacity-80">
-          <img src="static/img/rodape/facebook.png" alt="Facebook" class="w-8">
-        </a>
-        <a href="#" class="hover:opacity-80">
-          <img src="static/img/rodape/instagram.png" alt="Instagram" class="w-8">
-        </a>
-        <a href="#" class="hover:opacity-80">
-          <img src="static/img/rodape/twitter.png" alt="Twitter" class="w-8">
-        </a>
-      </div>
-    </div>
+        <p class="mb-4 text-gray-700">
+            Bem-vindo à Pollo Modas! Somos uma empresa dedicada a oferecer roupas de qualidade,
+            estilo e conforto para todos os nossos clientes. Nossa jornada começou com o objetivo
+            de tornar a moda acessível a todos, sem comprometer a qualidade e o atendimento.
+        </p>
 
-    <!-- Coluna 2: Links de Informações e Contato -->
-    <div class="grid grid-cols-2 gap-4">
-      <div>
-        <h2 class="text-lg font-semibold mb-2">Sobre a Pollo Modas</h2>
-        <ul class="space-y-1">
-          <li><a href="/sobres" class="hover:underline">O que é a Pollo Modas?</a></li>
-          <li><a href="/politica_privacidade" class="hover:underline">Privacidade e Cookies</a></li>
-          <li><a href="#" class="hover:underline">Condições de uso</a></li>
-          <li><a href="#" class="hover:underline">Relações com Investidores</a></li>
-          <li><a href="#" class="hover:underline">Nossas marcas</a></li>
-          <li><a href="#" class="hover:underline">Black Friday</a></li>
+        <h2 class="text-2xl font-semibold mt-6 mb-4">Nossa Missão</h2>
+
+        <p class="text-gray-700 mb-4">
+            Proporcionar aos nossos clientes a melhor experiência em compras de roupas,
+            com produtos que combinam qualidade, estilo e preços acessíveis.
+        </p>
+
+        <h2 class="text-2xl font-semibold mt-6 mb-4">Nossos Valores</h2>
+
+        <ul class="list-disc list-inside text-gray-700 space-y-2">
+            <li>Compromisso com a qualidade</li>
+            <li>Atendimento ao cliente excepcional</li>
+            <li>Inovação e sustentabilidade</li>
+            <li>Respeito e inclusão</li>
         </ul>
-      </div>
-      <div>
-        <h2 class="text-lg font-semibold mb-2">Fale com a gente</h2>
-        <ul class="space-y-1">
-          <li><a href="#" class="hover:underline">Ajuda</a></li>
-          <li><a href="#" class="hover:underline">Contato para marcas</a></li>
-          <li><a href="/politica_privacidade" class="hover:underline">Termos Pollo Modas Ads</a></li>
-        </ul>
-      </div>
+
+        <h2 class="text-2xl font-semibold mt-6 mb-4">Nossa História</h2>
+
+        <p class="text-gray-700">
+            Fundada em 2010, a Pollo Modas começou como um pequeno negócio familiar.
+            Ao longo dos anos, crescemos e nos tornamos uma referência no setor de moda,
+            mantendo sempre nosso compromisso com a satisfação do cliente.
+        </p>
+
     </div>
+</section>
 
-    <!-- Coluna 3: Premium e Marcas -->
-    <div>
-      <h2 class="text-lg font-semibold mt-4 mb-2">Formas de pagamento</h2>
-      <div class="flex gap-2 mb-2">
-        <img src="static/img/rodape/logotipo-visa.png" alt="Visa" class="w-12">
-        <img src="static/img/rodape/cartao.png" alt="Master Card" class="w-12">
-        <img src="static/img/rodape/amex.png" alt="Amex" class="w-12">
-        <img src="static/img/rodape/paypal.png" alt="Paypal" class="w-12">
-      </div>
-      <h2 class="text-lg font-semibold mb-2">Marcas</h2>
-      <p>Femininas | Masculinas | Infantis | Casa</p>
-    </div>
-  </div>
-
-  <hr class="border-gray-700 my-4">
-
-  <!-- Rodapé Inferior -->
-  <div class="text-center text-sm">
-    <p class="mb-1">Copyright © Pollo Modas Brasil S.A. 2008-2021</p>
-    <p>Av Prof Alceu Maynard de Araújo, 698 | CEP 04726-160 - São Paulo/SP | CNPJ 10.464.223/0001-63</p>
-  </div>
-</footer>
-
-</body>
-</html>
+{% endblock %}

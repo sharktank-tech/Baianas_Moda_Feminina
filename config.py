@@ -25,3 +25,10 @@ class Config:
         "pool_pre_ping": True,
         "pool_recycle": 300,
     }
+
+    # ============= Email ==================
+    EMAIL_DESTINE = os.getenv("EMAIL_DESTINE")
+    EMAIL_SERVER = os.getenv("EMAIL_SERVER")
+    EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+    EMAIL_PORT = int(os.getenv("EMAIL_PORT", 587))
+    EMAIL_SENDER = os.getenv("EMAIL_SENDER")

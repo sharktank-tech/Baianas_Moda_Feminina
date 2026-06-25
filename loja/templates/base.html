@@ -11,6 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/animation.css') }}">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
   {% block extra_head %}{% endblock %}
 
   <style>
@@ -193,22 +194,72 @@
 <body>
 
   <!-- ── Flash Messages ── -->
-  <div class="fixed top-0 left-0 w-full z-50">
+  <div class="fixed top-4 right-4 z-50 space-y-3 w-full max-w-sm px-4">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
-        <div id="flash-message">
-          {% for category, message in messages %}
-            <div>{{ message }}</div>
-          {% endfor %}
-        </div>
+        {% for category, message in messages %}
+
+          {% set styles = {
+            'success': 'bg-green-500 border-green-600',
+            'error': 'bg-red-500 border-red-600',
+            'warning': 'bg-yellow-500 border-yellow-600',
+            'info': 'bg-blue-500 border-blue-600'
+          } %}
+
+          <div
+            class="flash-message {{ styles.get(category, 'bg-gray-800 border-gray-900') }} text-white border-l-4 shadow-xl rounded-xl p-4 flex items-start justify-between animate-slide-in transition-opacity duration-500"
+          >
+            <span>{{ message }}</span>
+
+            <button
+              onclick="closeFlash(this)"
+              class="ml-4 text-white/80 hover:text-white text-xl leading-none"
+            >
+              &times;
+            </button>
+          </div>
+
+        {% endfor %}
       {% endif %}
     {% endwith %}
   </div>
 
+  <style>
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateX(100%);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    .animate-slide-in {
+      animation: slideIn 0.4s ease-out;
+    }
+  </style>
+
   <script>
-    document.addEventListener('DOMContentLoaded', function () {
-      var el = document.getElementById('flash-message');
-      if (el) setTimeout(() => el.style.opacity = '0', 3000);
+    function closeFlash(button) {
+      const flash = button.parentElement;
+
+      flash.style.opacity = "0";
+      flash.style.transform = "translateX(100%)";
+
+      setTimeout(() => flash.remove(), 500);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('.flash-message').forEach(flash => {
+        setTimeout(() => {
+          flash.style.opacity = "0";
+          flash.style.transform = "translateX(100%)";
+
+          setTimeout(() => flash.remove(), 500);
+        }, 4000);
+      });
     });
   </script>
 
@@ -224,22 +275,7 @@
     <ul class="navbar-links">
       <li><a href="{{ url_for('main.produtos') }}">Produtos</a></li>
       <li><a href="{{ url_for('main.sobre') }}">Sobre</a></li>
-      <li><a href="#">Contato</a></li>
-      <li>
-    <a href="{{ url_for('main.conta') }}"
-       class="text-gray-700 hover:text-red-600">
-        Minha Conta
-    </a>
-</li>
-
-{% if current_user.is_authenticated and current_user.is_admin %}
-<li>
-    <a href="{{ url_for('admin.admin_dashboard') }}"
-       class="text-gray-700 hover:text-red-600">
-        Admin
-    </a>
-</li>
-{% endif %}
+      <li><a href="/contato">Contato</a></li>
       {% if current_user.is_authenticated %}
         {% if current_user.is_admin %}
           <li><a href="{{ url_for('admin.admin_dashboard') }}">Admin</a></li>
@@ -312,7 +348,7 @@
               {% endfor %}
             {% else %}
               <li><a href="#">Central de Ajuda</a></li>
-              <li><a href="#">Contato para marcas</a></li>
+              <li><a href="/contato">Contato para marcas</a></li>
               <li><a href="#">Trocas e Devoluções</a></li>
             {% endif %}
           </ul>
@@ -356,7 +392,7 @@
       {% if footer %}
         <p>Copyright &copy; {{ footer.brand_name }} &mdash; {{ footer.copyright_year }}. {{ footer.copyright_text }}</p>
       {% else %}
-        <p>Copyright &copy; Pollo Modas Brasil S.A. 2008–2025</p>
+        <p>Copyright &copy; Pollo Modas Brasil S.A. 2026</p>
       {% endif %}
 
       {% if footer and footer.legal_links %}

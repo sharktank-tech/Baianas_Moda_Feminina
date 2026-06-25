@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{% extends "base.html" %}
+
+{% block title %}Editar Depoimento{% endblock %}
+
+{% block content %}
+
+<div class="max-w-4xl mx-auto px-4 py-8">
+
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-gray-800">
+            Editar Depoimento
+        </h1>
+
+        <p class="text-gray-500 mt-2">
+            Atualize as informações do depoimento.
+        </p>
+    </div>
+
+    <form
+        method="POST"
+        class="bg-white rounded-2xl shadow p-8 space-y-6"
+    >
+
+        <!-- Autor -->
+        <div>
+            <label class="block font-medium text-gray-700 mb-2">
+                Nome do cliente
+            </label>
+
+            <input
+                type="text"
+                name="author"
+                required
+                value="{{ testimonial.author or '' }}"
+                class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                placeholder="Ex: Maria Silva"
+            >
+        </div>
+
+        <!-- Depoimento -->
+        <div>
+            <label class="block font-medium text-gray-700 mb-2">
+                Depoimento
+            </label>
+
+            <textarea
+                name="text"
+                rows="5"
+                required
+                class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                placeholder="Escreva o depoimento do cliente..."
+            >{{ testimonial.text or '' }}</textarea>
+        </div>
+
+        <!-- Avaliação -->
+        <div>
+            <label class="block font-medium text-gray-700 mb-2">
+                Avaliação
+            </label>
+
+            <select
+                name="rating"
+                class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+            >
+                <option value="5" {% if testimonial.rating == 5 %}selected{% endif %}>
+                    ⭐⭐⭐⭐⭐ (5 estrelas)
+                </option>
+
+                <option value="4" {% if testimonial.rating == 4 %}selected{% endif %}>
+                    ⭐⭐⭐⭐ (4 estrelas)
+                </option>
+
+                <option value="3" {% if testimonial.rating == 3 %}selected{% endif %}>
+                    ⭐⭐⭐ (3 estrelas)
+                </option>
+
+                <option value="2" {% if testimonial.rating == 2 %}selected{% endif %}>
+                    ⭐⭐ (2 estrelas)
+                </option>
+
+                <option value="1" {% if testimonial.rating == 1 %}selected{% endif %}>
+                    ⭐ (1 estrela)
+                </option>
+            </select>
+        </div>
+
+        <!-- Visível -->
+        <div class="flex items-center gap-3">
+
+            <input
+                type="checkbox"
+                id="is_visible"
+                name="is_visible"
+                {% if testimonial.is_visible %}checked{% endif %}
+                class="w-5 h-5 text-pink-600 rounded"
+            >
+
+            <label
+                for="is_visible"
+                class="text-gray-700"
+            >
+                Exibir este depoimento na loja
+            </label>
+
+        </div>
+
+        <!-- Botões -->
+        <div class="flex gap-4 pt-4">
+
+            <button
+                type="submit"
+                class="bg-pink-600 hover:bg-pink-700 transition text-white px-8 py-3 rounded-lg font-medium"
+            >
+                Salvar Alterações
+            </button>
+
+            <a
+                href="{{ url_for('admin.admin_dashboard') }}"
+                class="bg-gray-200 hover:bg-gray-300 transition px-8 py-3 rounded-lg font-medium"
+            >
+                Cancelar
+            </a>
+
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}</title>
+</head>
+<body>
+
+</body>
+</html>

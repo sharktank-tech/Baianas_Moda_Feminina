@@ -1,62 +1,37 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Minha Conta</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <link rel="icon" href="{{ url_for('static', filename='images/bolsa-de-compras.png') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
-</head>
-<body class="bg-gray-100 flex flex-col min-h-screen">
-    <!-- Navbar -->
-    <nav class="bg-white shadow-md">
-        <div class="container mx-auto px-4 py-2 flex justify-between items-center">
-            <h1 class="text-2xl font-bold text-red-600">E-commerce</h1>
-            <ul class="flex space-x-4">
-                <li><a href="/" class="text-gray-700 hover:text-red-600">Página Inicial</a></li>
+{% extends "base.html" %}
 
-                <!-- Exibir o link 'Admin' apenas para usuários com is_admin = 1 -->
-                {% if admin == 1 %}
-                    <li><a href="{{ url_for('admin.admin_dashboard') }}" class="text-gray-700 hover:text-red-600">Admin</a></li>
-                {% endif %}
+{% block title %}Minha Conta{% endblock %}
 
-                <li>
-                    <form action="{{ url_for('main.logout') }}" method="POST">
-                        <button type="submit" class="text-gray-700 hover:text-red-600">Sair</button>
-                    </form>
-                </li>
-            </ul>
-        </div>
-    </nav>
+{% block content %}
+<div class="container mx-auto px-4 py-8 flex-grow">
+    <h2 class="text-2xl font-bold mb-4">Minha Conta</h2>
 
+    <div class="bg-white shadow-md rounded-lg p-6">
+        <h3 class="text-xl font-semibold mb-4">Detalhes do Usuário</h3>
 
-    <!-- Main Content -->
-    <main class="flex-grow container mx-auto px-4 py-8">
-        <h2 class="text-2xl font-bold mb-4">Minha Conta</h2>
-        <div class="bg-white shadow-md rounded-lg p-6">
-            <h3 class="text-xl font-semibold mb-2">Detalhes do Usuário</h3>
+        <div class="space-y-2 text-gray-700">
             <p><strong>Nome:</strong> {{ username }}</p>
             <p><strong>Email:</strong> {{ email }}</p>
-            <p><strong>ID do Usuário:</strong> {{ id }}</p>
-
-            <h3 class="text-xl font-semibold mt-6 mb-2">Ações</h3>
-            <a href="{{ url_for('main.edit_account') }}" class="text-blue-600 hover:underline">Editar Conta</a>
-            <br>
-            <form action="{{ url_for('main.delete_account') }}" method="POST" class="mt-2">
-                <button type="submit" class="text-red-600 hover:underline">Excluir Conta</button>
-            </form>
+            <p><strong>Telefone:</strong> {{ telefone }}</p>
         </div>
-    </main>
 
-    <!-- Footer -->
-    <footer class="bg-gray-200 py-4 shadow-inner">
-        <div class="container mx-auto px-4 text-center">
-            <p class="text-gray-500 text-sm">&copy; 2024 E-commerce. Todos os direitos reservados.</p>
+        <div class="mt-8">
+            <h3 class="text-xl font-semibold mb-4">Ações</h3>
+
+            <div class="flex flex-col gap-3">
+                <a href="{{ url_for('main.edit_account') }}"
+                   class="text-blue-600 hover:text-blue-800 hover:underline">
+                    Editar Conta
+                </a>
+
+                <form action="{{ url_for('main.delete_account') }}" method="POST">
+                    <button type="submit"
+                            class="text-red-600 hover:text-red-800 hover:underline">
+                        Excluir Conta
+                    </button>
+                </form>
+            </div>
         </div>
-    </footer>
-
-    <!-- JavaScript -->
-    <script src="{{ url_for('static', filename='scripts/index.js') }}"></script>
-</body>
-</html>
+    </div>
+</div>
+{% endblock %}

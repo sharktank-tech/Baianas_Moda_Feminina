@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Adicionar Informações de Contato{% endblock %}
+
+{% block content %}
+
+<div class="max-w-4xl mx-auto px-4 py-8">
+
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-gray-800">
+            Informações de Contato
+        </h1>
+
+        <p class="text-gray-500 mt-2">
+            Configure os dados de contato exibidos no rodapé e nas páginas da loja.
+        </p>
+    </div>
+
+    <form
+        method="POST"
+        class="bg-white rounded-2xl shadow p-8 space-y-6"
+    >
+
+        <!-- Endereço -->
+        <div>
+            <label class="block font-medium text-gray-700 mb-2">
+                Endereço
+            </label>
+
+            <textarea
+                name="address"
+                rows="3"
+                class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                placeholder="Ex: Rua das Flores, 123 - Centro, São Paulo - SP"
+            ></textarea>
+
+            <p class="text-sm text-gray-500 mt-1">
+                Endereço físico da empresa ou loja.
+            </p>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-6">
+
+            <!-- Telefone -->
+            <div>
+                <label class="block font-medium text-gray-700 mb-2">
+                    Telefone
+                </label>
+
+                <input
+                    type="text"
+                    name="phone"
+                    class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                    placeholder="(63) 99999-9999"
+                >
+
+                <p class="text-sm text-gray-500 mt-1">
+                    Número para contato e WhatsApp.
+                </p>
+            </div>
+
+            <!-- E-mail -->
+            <div>
+                <label class="block font-medium text-gray-700 mb-2">
+                    E-mail
+                </label>
+
+                <input
+                    type="email"
+                    name="email"
+                    class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                    placeholder="contato@sualoja.com"
+                >
+
+                <p class="text-sm text-gray-500 mt-1">
+                    E-mail principal da empresa.
+                </p>
+            </div>
+
+        </div>
+
+        <!-- Horário -->
+        <div>
+            <label class="block font-medium text-gray-700 mb-2">
+                Horário de funcionamento
+            </label>
+
+            <textarea
+                name="hours"
+                rows="3"
+                class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                placeholder="Segunda a Sexta: 08h às 18h&#10;Sábado: 08h às 12h"
+            ></textarea>
+
+            <p class="text-sm text-gray-500 mt-1">
+                Horários que serão exibidos para os clientes.
+            </p>
+        </div>
+
+        <!-- Botões -->
+        <div class="flex gap-4 pt-4">
+
+            <button
+                type="submit"
+                class="bg-pink-600 hover:bg-pink-700 transition text-white px-8 py-3 rounded-lg font-medium"
+            >
+                Salvar Informações
+            </button>
+
+            <a
+                href="{{ url_for('admin.admin_dashboard') }}"
+                class="bg-gray-200 hover:bg-gray-300 transition px-8 py-3 rounded-lg font-medium"
+            >
+                Cancelar
+            </a>
+
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

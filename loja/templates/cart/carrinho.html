@@ -1,0 +1,318 @@
+{% extends "base.html" %}
+
+{% block title %}Carrinho — {{ site.name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+
+.cart-container{
+    max-width:1280px;
+    margin:4rem auto;
+    padding:0 1.5rem;
+}
+
+.page-title{
+    font-family:'Playfair Display', serif;
+    font-size:2.5rem;
+    text-align:center;
+    margin-bottom:3rem;
+}
+
+.cart-layout{
+    display:grid;
+    grid-template-columns:2fr 380px;
+    gap:2rem;
+}
+
+.cart-products{
+    display:flex;
+    flex-direction:column;
+    gap:1.5rem;
+}
+
+.cart-card{
+    background:white;
+    border:1px solid var(--border);
+    display:flex;
+    padding:1rem;
+    gap:1.25rem;
+    border-radius:4px;
+}
+
+.cart-image{
+    width:130px;
+    height:160px;
+    object-fit:cover;
+}
+
+.cart-info{
+    flex:1;
+}
+
+.cart-name{
+    font-weight:700;
+    font-size:1rem;
+    margin-bottom:.5rem;
+}
+
+.cart-category{
+    color:#777;
+    font-size:.9rem;
+    margin-bottom:1rem;
+}
+
+.cart-price{
+    font-size:1.1rem;
+    font-weight:700;
+}
+
+.quantity-box{
+    display:flex;
+    align-items:center;
+    gap:.75rem;
+    margin-top:1rem;
+}
+
+.quantity-btn{
+    width:34px;
+    height:34px;
+    border:1px solid var(--border);
+    background:white;
+    cursor:pointer;
+}
+
+.remove-btn{
+    margin-top:1rem;
+    background:none;
+    border:none;
+    color:var(--accent);
+    cursor:pointer;
+    padding:0;
+    font-weight:600;
+}
+
+.resume-card{
+    background:white;
+    border:1px solid var(--border);
+    padding:2rem;
+    height:max-content;
+    position:sticky;
+    top:100px;
+}
+
+.resume-title{
+    font-family:'Playfair Display', serif;
+    font-size:1.5rem;
+    margin-bottom:2rem;
+}
+
+.resume-row{
+    display:flex;
+    justify-content:space-between;
+    margin-bottom:1rem;
+    color:#666;
+}
+
+.resume-total{
+    border-top:1px solid var(--border);
+    padding-top:1rem;
+    margin-top:1rem;
+    display:flex;
+    justify-content:space-between;
+    font-size:1.2rem;
+    font-weight:700;
+}
+
+.checkout-btn{
+    width:100%;
+    background:var(--black);
+    color:white;
+    border:none;
+    padding:15px;
+    margin-top:2rem;
+    font-weight:700;
+    letter-spacing:.15em;
+    text-transform:uppercase;
+    cursor:pointer;
+    transition:.2s;
+}
+
+.checkout-btn:hover{
+    background:#222;
+}
+
+.empty-cart{
+    background:white;
+    border:1px solid var(--border);
+    padding:4rem;
+    text-align:center;
+}
+
+.empty-cart h2{
+    font-family:'Playfair Display', serif;
+    margin-bottom:1rem;
+}
+
+.continue-btn{
+    display:inline-block;
+    margin-top:1.5rem;
+    background:var(--black);
+    color:white;
+    text-decoration:none;
+    padding:14px 30px;
+    text-transform:uppercase;
+    letter-spacing:.12em;
+    font-size:.85rem;
+}
+
+@media(max-width:900px){
+
+.cart-layout{
+    grid-template-columns:1fr;
+}
+
+.resume-card{
+    position:static;
+}
+
+.cart-card{
+    flex-direction:column;
+}
+
+.cart-image{
+    width:100%;
+    height:300px;
+}
+
+}
+
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="cart-container">
+
+    <h1 class="page-title">
+        Meu Carrinho
+    </h1>
+
+    {% if cart_items %}
+
+    <div class="cart-layout">
+
+        <div class="cart-products">
+
+            {% for item in cart_items %}
+
+            <div class="cart-card">
+
+                <img
+                    class="cart-image"
+                    src="{{ item.product.image }}"
+                    alt="{{ item.product.name }}"
+                >
+
+                <div class="cart-info">
+
+                    <div class="cart-name">
+                        {{ item.product.name }}
+                    </div>
+
+                    <div class="cart-category">
+                        {{ item.product.category }}
+                    </div>
+
+                    <div class="cart-price">
+                        R$ {{ '%.2f'|format(item.product.price) }}
+                    </div>
+
+                    <div class="quantity-box">
+
+                        <button class="quantity-btn">−</button>
+
+                        <strong>
+                            {{ item.quantity }}
+                        </strong>
+
+                        <button class="quantity-btn">+</button>
+
+                    </div>
+
+                    <button class="remove-btn">
+                        Remover produto
+                    </button>
+
+                </div>
+
+            </div>
+
+            {% endfor %}
+
+        </div>
+
+        <div class="resume-card">
+
+            <div class="resume-title">
+                Resumo do pedido
+            </div>
+
+            <div class="resume-row">
+                <span>Subtotal</span>
+                <span>
+                    R$ {{ '%.2f'|format(subtotal) }}
+                </span>
+            </div>
+
+            <div class="resume-row">
+                <span>Frete</span>
+                <span>
+                    {% if shipping == 0 %}
+                        Grátis
+                    {% else %}
+                        R$ {{ '%.2f'|format(shipping) }}
+                    {% endif %}
+                </span>
+            </div>
+
+            <div class="resume-total">
+                <span>Total</span>
+                <span>
+                    R$ {{ '%.2f'|format(total) }}
+                </span>
+            </div>
+
+            <button class="checkout-btn">
+                Finalizar Compra
+            </button>
+
+        </div>
+
+    </div>
+
+    {% else %}
+
+    <div class="empty-cart">
+
+        <h2>
+            Seu carrinho está vazio
+        </h2>
+
+        <p>
+            Adicione produtos para continuar sua compra.
+        </p>
+
+        <a
+            class="continue-btn"
+            href="{{ url_for('main.produtos') }}"
+        >
+            Continuar comprando
+        </a>
+
+    </div>
+
+    {% endif %}
+
+</div>
+
+{% endblock %}

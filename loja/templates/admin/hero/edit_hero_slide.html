@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}Editar Slide Principal{% endblock %}
+
+{% block content %}
+
+<div class="max-w-4xl mx-auto px-4 py-8">
+
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-gray-800">
+            Editar Slide Principal
+        </h1>
+
+        <p class="text-gray-500 mt-2">
+            Atualize as informações do slide exibido na página inicial.
+        </p>
+    </div>
+
+    <form
+        method="POST"
+        class="bg-white rounded-2xl shadow p-8 space-y-6"
+    >
+
+        <!-- URL da imagem -->
+        <div>
+            <label class="block font-medium text-gray-700 mb-2">
+                URL da imagem
+            </label>
+
+            <input
+                type="url"
+                name="image"
+                required
+                value="{{ slide.image }}"
+                class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                placeholder="https://..."
+            >
+
+            <p class="text-sm text-gray-500 mt-1">
+                Imagem principal exibida no banner.
+            </p>
+
+            {% if slide.image %}
+            <div class="mt-4">
+                <img
+                    src="{{ slide.image }}"
+                    alt="{{ slide.alt or 'Preview do slide' }}"
+                    class="w-full max-w-md rounded-xl border shadow object-cover"
+                >
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Texto alternativo -->
+        <div>
+            <label class="block font-medium text-gray-700 mb-2">
+                Texto alternativo (ALT)
+            </label>
+
+            <input
+                type="text"
+                name="alt"
+                value="{{ slide.alt or '' }}"
+                class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                placeholder="Ex: Modelo usando coleção inverno"
+            >
+
+            <p class="text-sm text-gray-500 mt-1">
+                Utilizado para acessibilidade e SEO.
+            </p>
+        </div>
+
+        <!-- Eyebrow -->
+        <div>
+            <label class="block font-medium text-gray-700 mb-2">
+                Texto superior (Eyebrow)
+            </label>
+
+            <input
+                type="text"
+                name="eyebrow"
+                value="{{ slide.eyebrow or '' }}"
+                class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                placeholder="Ex: Nova Coleção 2026"
+            >
+
+            <p class="text-sm text-gray-500 mt-1">
+                Pequeno texto exibido acima do título principal.
+            </p>
+        </div>
+
+        <!-- Título -->
+        <div>
+            <label class="block font-medium text-gray-700 mb-2">
+                Título do slide
+            </label>
+
+            <input
+                type="text"
+                name="title"
+                value="{{ slide.title or '' }}"
+                class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                placeholder="Ex: Vista o estilo que combina com você"
+            >
+        </div>
+
+        <!-- Botões -->
+        <div class="flex gap-4 pt-4">
+
+            <button
+                type="submit"
+                class="bg-pink-600 hover:bg-pink-700 transition text-white px-8 py-3 rounded-lg font-medium"
+            >
+                Salvar Alterações
+            </button>
+
+            <a
+                href="{{ url_for('admin.admin_dashboard') }}"
+                class="bg-gray-200 hover:bg-gray-300 transition px-8 py-3 rounded-lg font-medium"
+            >
+                Cancelar
+            </a>
+
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

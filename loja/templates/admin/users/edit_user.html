@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block title %}Editar Usuário{% endblock %}
+
+{% block content %}
+
+<div class="max-w-3xl mx-auto">
+
+    <div class="flex items-center justify-between mb-8">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-800">
+                Editar Usuário
+            </h1>
+            <p class="text-gray-500 mt-1">
+                Atualize as informações do usuário.
+            </p>
+        </div>
+
+        <a href="{{ url_for('admin.admin_dashboard') }}"
+           class="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">
+            Voltar
+        </a>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm p-8">
+
+        <form method="POST"
+              action="{{ url_for('admin.edit_user', id=user.id) }}"
+              class="space-y-6">
+
+            <!-- Nome -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    Nome
+                </label>
+
+                <input
+                    type="text"
+                    name="name"
+                    value="{{ user.name }}"
+                    required
+                    class="w-full border rounded-xl px-4 py-3 focus:ring-2 focus:ring-black outline-none"
+                >
+            </div>
+
+            <!-- Email -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    E-mail
+                </label>
+
+                <input
+                    type="email"
+                    name="email"
+                    value="{{ user.email }}"
+                    required
+                    class="w-full border rounded-xl px-4 py-3 focus:ring-2 focus:ring-black outline-none"
+                >
+            </div>
+
+            <!-- Telefone -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    Telefone
+                </label>
+
+                <input
+                    type="text"
+                    name="phone"
+                    value="{{ user.phone or '' }}"
+                    placeholder="(11) 99999-9999"
+                    class="w-full border rounded-xl px-4 py-3 focus:ring-2 focus:ring-black outline-none"
+                >
+            </div>
+
+            <!-- Senha -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    Nova senha
+                </label>
+
+                <input
+                    type="password"
+                    name="password"
+                    placeholder="Deixe em branco para manter a senha atual"
+                    class="w-full border rounded-xl px-4 py-3 focus:ring-2 focus:ring-black outline-none"
+                >
+
+                <p class="text-sm text-gray-500 mt-2">
+                    Se não desejar alterar a senha, deixe este campo vazio.
+                </p>
+            </div>
+
+            <!-- Administrador -->
+            <div>
+                <label class="flex items-center gap-3">
+
+                    <input
+                        type="checkbox"
+                        name="is_admin"
+                        value="1"
+                        {% if user.is_admin %}checked{% endif %}
+                        class="w-5 h-5"
+                    >
+
+                    <span class="font-medium text-gray-700">
+                        Usuário administrador
+                    </span>
+
+                </label>
+            </div>
+
+            <!-- Botões -->
+            <div class="flex gap-4 pt-6">
+
+                <button
+                    type="submit"
+                    class="bg-black text-white px-6 py-3 rounded-xl hover:bg-gray-800 transition"
+                >
+                    Salvar Alterações
+                </button>
+
+                <a
+                    href="{{ url_for('admin.admin_dashboard') }}"
+                    class="px-6 py-3 border rounded-xl hover:bg-gray-100 transition"
+                >
+                    Cancelar
+                </a>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+{% endblock %}

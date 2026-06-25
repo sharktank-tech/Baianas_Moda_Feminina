@@ -6,585 +6,10 @@
 {% block extra_head %}
   <script src="{{ url_for('static', filename='scripts/carousel-1.js') }}" defer></script>
   <script src="{{ url_for('static', filename='scripts/carousel-2.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='scripts/index.js') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles/styles.css') }}">
 
-  <style>
-    /* ══════════════════════════════
-       HERO CAROUSEL
-    ══════════════════════════════ */
-    .hero-section { margin-top: 0; }
 
-    .carousel-wrap {
-      position: relative;
-      width: 100%;
-      max-width: 100%;
-      overflow: hidden;
-      background: #0a0a0a;
-    }
-
-    .slides {
-      display: flex;
-      transition: transform 0.6s cubic-bezier(0.77, 0, 0.18, 1);
-    }
-
-    .slide {
-      min-width: 100%;
-      position: relative;
-      flex-shrink: 0;
-    }
-
-    .slide img {
-      width: 100%;
-      height: clamp(260px, 52vw, 520px);
-      object-fit: cover;
-      display: block;
-      opacity: 0.88;
-    }
-
-    .slide-overlay {
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(to right, rgba(0,0,0,0.55) 0%, transparent 60%);
-      display: flex;
-      align-items: center;
-      padding: 0 5%;
-    }
-
-    .slide-label {
-      font-family: 'Playfair Display', serif;
-      color: #fff;
-      font-size: clamp(1.6rem, 4vw, 3rem);
-      font-weight: 700;
-      line-height: 1.2;
-      text-shadow: 0 2px 20px rgba(0,0,0,0.5);
-    }
-
-    .slide-label small {
-      display: block;
-      font-family: 'DM Sans', sans-serif;
-      font-size: clamp(0.75rem, 1.5vw, 1rem);
-      font-weight: 400;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: #ccc;
-      margin-bottom: 0.5rem;
-    }
-
-    .carousel-btn {
-      position: absolute;
-      top: 50%;
-      transform: translateY(-50%);
-      background: rgba(255,255,255,0.12);
-      border: 1px solid rgba(255,255,255,0.25);
-      color: #fff;
-      width: 42px;
-      height: 42px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      backdrop-filter: blur(6px);
-      transition: background 0.2s;
-      z-index: 10;
-      font-size: 1rem;
-    }
-
-    .carousel-btn:hover { background: rgba(255,255,255,0.28); }
-    .carousel-btn.prev { left: 1.25rem; }
-    .carousel-btn.next { right: 1.25rem; }
-
-    /* ══════════════════════════════
-       SECTION TITLES
-    ══════════════════════════════ */
-    .section-title {
-      font-family: 'Playfair Display', serif;
-      font-size: clamp(1.6rem, 3vw, 2.2rem);
-      font-weight: 700;
-      text-align: center;
-      position: relative;
-      margin-bottom: 2.5rem;
-    }
-
-    .section-title::after {
-      content: '';
-      display: block;
-      width: 48px;
-      height: 3px;
-      background: var(--accent);
-      margin: 0.6rem auto 0;
-      border-radius: 2px;
-    }
-
-    /* ══════════════════════════════
-       PRODUTOS / NOVIDADES
-    ══════════════════════════════ */
-    .products-section {
-      max-width: 1280px;
-      margin: 5rem auto 0;
-      padding: 0 1.5rem;
-    }
-
-    .products-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 1.75rem;
-    }
-
-    .product-card {
-      background: #fff;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      overflow: hidden;
-      transition: transform 0.25s, box-shadow 0.25s;
-    }
-
-    .product-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 12px 32px rgba(0,0,0,0.1);
-    }
-
-    .product-card img {
-      width: 100%;
-      height: 240px;
-      object-fit: cover;
-      display: block;
-    }
-
-    .product-info {
-      padding: 1rem 1.1rem 1.25rem;
-    }
-
-    .product-name {
-      font-weight: 600;
-      font-size: 0.95rem;
-      margin-bottom: 0.3rem;
-      color: var(--black);
-    }
-
-    .product-price {
-      font-size: 1.05rem;
-      font-weight: 700;
-      color: var(--black);
-    }
-
-    .btn-comprar {
-      display: block;
-      width: 100%;
-      margin-top: 1rem;
-      background: var(--black);
-      color: #fff;
-      border: none;
-      padding: 10px;
-      font-family: 'DM Sans', sans-serif;
-      font-size: 0.8rem;
-      font-weight: 600;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      cursor: pointer;
-      border-radius: 2px;
-      transition: background 0.2s;
-    }
-
-    .btn-comprar:hover { background: #2a2a2a; }
-
-    /* ══════════════════════════════
-       PROMOÇÕES CAROUSEL
-    ══════════════════════════════ */
-    .promo-section {
-      background: #fff5f6;
-      padding: 5rem 0;
-      margin-top: 5rem;
-      border-top: 1px solid #fddde2;
-      border-bottom: 1px solid #fddde2;
-    }
-
-    .promo-inner {
-      max-width: 1280px;
-      margin: 0 auto;
-      padding: 0 1.5rem;
-    }
-
-    .promo-title-wrap {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 1rem;
-      margin-bottom: 2.5rem;
-    }
-
-    .promo-badge {
-      background: var(--accent);
-      color: #fff;
-      font-size: 0.7rem;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      padding: 4px 10px;
-      border-radius: 2px;
-    }
-
-    .promo-section .section-title {
-      color: var(--accent);
-    }
-
-    .promo-section .section-title::after {
-      background: var(--accent);
-    }
-
-    .promo-carousel-wrap {
-      position: relative;
-      overflow: hidden;
-    }
-
-    .promo-slides {
-      display: flex;
-      transition: transform 0.5s cubic-bezier(0.77, 0, 0.18, 1);
-    }
-
-    .promo-slide {
-      flex-shrink: 0;
-      width: 33.333%;
-      padding: 0 0.75rem;
-    }
-
-    .promo-card {
-      background: #fff;
-      border: 1px solid #fddde2;
-      border-radius: 4px;
-      overflow: hidden;
-      transition: transform 0.25s, box-shadow 0.25s;
-    }
-
-    .promo-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 12px 32px rgba(200,16,46,0.1);
-    }
-
-    .promo-card img {
-      width: 100%;
-      height: 240px;
-      object-fit: cover;
-      display: block;
-    }
-
-    .promo-info { padding: 1rem 1.1rem 1.25rem; }
-
-    .promo-info h3 {
-      font-weight: 600;
-      font-size: 0.95rem;
-      margin-bottom: 0.5rem;
-    }
-
-    .promo-old {
-      text-decoration: line-through;
-      color: #aaa;
-      font-size: 0.85rem;
-    }
-
-    .promo-new {
-      color: var(--accent);
-      font-size: 1.2rem;
-      font-weight: 700;
-      margin-top: 2px;
-    }
-
-    .btn-promo {
-      display: inline-block;
-      margin-top: 1rem;
-      background: var(--accent);
-      color: #fff;
-      border: none;
-      padding: 9px 20px;
-      font-family: 'DM Sans', sans-serif;
-      font-size: 0.78rem;
-      font-weight: 600;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      cursor: pointer;
-      border-radius: 2px;
-      transition: background 0.2s;
-    }
-
-    .btn-promo:hover { background: #a00d25; }
-
-    .promo-btn {
-      position: absolute;
-      top: 50%;
-      transform: translateY(-50%);
-      background: #fff;
-      border: 1px solid #fddde2;
-      color: var(--accent);
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-      transition: background 0.2s;
-      z-index: 10;
-      font-size: 1rem;
-    }
-
-    .promo-btn:hover { background: #fff0f2; }
-    .promo-prev { left: -8px; }
-    .promo-next { right: -8px; }
-
-    @media (max-width: 768px) {
-      .promo-slide { width: 80%; }
-      .promo-prev { left: 0.5rem; }
-      .promo-next { right: 0.5rem; }
-    }
-
-    @media (max-width: 480px) {
-      .promo-slide { width: 100%; }
-    }
-
-    /* ══════════════════════════════
-       DEPOIMENTOS
-    ══════════════════════════════ */
-    .testimonials-section {
-      background: var(--cream);
-      padding: 5rem 1.5rem;
-      margin-top: 5rem;
-    }
-
-    .testimonials-grid {
-      max-width: 1100px;
-      margin: 0 auto;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 2rem;
-    }
-
-    .testimonial-card {
-      background: #fff;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 2rem;
-      position: relative;
-    }
-
-    .testimonial-card::before {
-      content: '\201C';
-      font-family: 'Playfair Display', serif;
-      font-size: 4rem;
-      color: var(--accent);
-      line-height: 1;
-      position: absolute;
-      top: 0.75rem;
-      left: 1.25rem;
-      opacity: 0.3;
-    }
-
-    .testimonial-text {
-      font-style: italic;
-      color: #555;
-      font-size: 0.95rem;
-      line-height: 1.75;
-      padding-top: 1rem;
-    }
-
-    .testimonial-author {
-      margin-top: 1.25rem;
-      font-weight: 600;
-      font-size: 0.875rem;
-      color: var(--black);
-      text-align: right;
-    }
-
-    .star-row {
-      display: flex;
-      gap: 3px;
-      margin-bottom: 0.5rem;
-    }
-
-    .star { color: #f59e0b; font-size: 0.85rem; }
-
-    /* ══════════════════════════════
-       BANNER INTERMEDIÁRIO
-    ══════════════════════════════ */
-    .mid-banner {
-      background: var(--black);
-      color: #fff;
-      text-align: center;
-      padding: 4rem 1.5rem;
-      margin-top: 5rem;
-    }
-
-    .mid-banner p {
-      font-family: 'Playfair Display', serif;
-      font-size: clamp(1.4rem, 3vw, 2rem);
-      font-weight: 400;
-      font-style: italic;
-      color: #ccc;
-      max-width: 600px;
-      margin: 0 auto 1.5rem;
-      line-height: 1.6;
-    }
-
-    .mid-banner a {
-      display: inline-block;
-      background: var(--accent);
-      color: #fff;
-      padding: 12px 32px;
-      font-size: 0.8rem;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      text-decoration: none;
-      border-radius: 2px;
-      transition: background 0.2s;
-    }
-
-    .mid-banner a:hover { background: #a00d25; }
-
-    /* ══════════════════════════════
-       RODAPÉ
-    ══════════════════════════════ */
-    .site-footer {
-      background: #111;
-      color: #ccc;
-      padding: 4rem 1.5rem 2rem;
-      margin-top: 5rem;
-      font-family: 'DM Sans', sans-serif;
-    }
-
-    .footer-grid {
-      max-width: 1280px;
-      margin: 0 auto;
-      display: grid;
-      grid-template-columns: 2fr 1fr 1fr 1fr;
-      gap: 2.5rem;
-    }
-
-    .footer-brand .footer-logo {
-      font-family: 'Playfair Display', serif;
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: #fff;
-      margin-bottom: 0.75rem;
-    }
-
-    .footer-brand p {
-      font-size: 0.875rem;
-      line-height: 1.75;
-      color: #999;
-      max-width: 280px;
-    }
-
-    .footer-social {
-      display: flex;
-      gap: 0.75rem;
-      margin-top: 1.25rem;
-    }
-
-    .footer-social a {
-      width: 36px;
-      height: 36px;
-      border: 1px solid #333;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #aaa;
-      text-decoration: none;
-      font-size: 0.9rem;
-      transition: border-color 0.2s, color 0.2s;
-    }
-
-    .footer-social a:hover {
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-
-    .footer-col h4 {
-      font-size: 0.75rem;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: #fff;
-      margin-bottom: 1.25rem;
-    }
-
-    .footer-col ul {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-    }
-
-    .footer-col ul li {
-      margin-bottom: 0.6rem;
-    }
-
-    .footer-col ul li a {
-      color: #999;
-      text-decoration: none;
-      font-size: 0.875rem;
-      transition: color 0.2s;
-    }
-
-    .footer-col ul li a:hover { color: #fff; }
-
-    .footer-contact-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.6rem;
-      margin-bottom: 0.75rem;
-      font-size: 0.875rem;
-      color: #999;
-    }
-
-    .footer-contact-item span.icon {
-      color: var(--accent);
-      flex-shrink: 0;
-      margin-top: 2px;
-    }
-
-    .footer-bottom {
-      max-width: 1280px;
-      margin: 3rem auto 0;
-      padding-top: 1.5rem;
-      border-top: 1px solid #222;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-      font-size: 0.8rem;
-      color: #555;
-    }
-
-    .footer-bottom a {
-      color: #555;
-      text-decoration: none;
-      transition: color 0.2s;
-    }
-
-    .footer-bottom a:hover { color: #999; }
-
-    .footer-bottom-links {
-      display: flex;
-      gap: 1.5rem;
-    }
-
-    @media (max-width: 960px) {
-      .footer-grid {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
-
-    @media (max-width: 560px) {
-      .footer-grid {
-        grid-template-columns: 1fr;
-      }
-      .footer-bottom {
-        flex-direction: column;
-        text-align: center;
-      }
-    }
-  </style>
 {% endblock %}
 
 {% block content %}
@@ -621,30 +46,106 @@
     </div>
   </section>
 
-  <!-- ── Novidades ── -->
-  <section class="products-section">
-    <h2 class="section-title">Novidades</h2>
-    <div class="products-grid">
+  <!-- ── Banner Novidades ── -->
+  <section class="pb-banner" aria-label="Produtos em destaque">
+
+  <!-- trilho de slides: cada produto = 1 slide -->
+  <div class="pb-track-wrap">
+    <div class="pb-track" id="pbTrack">
+
       {% for product in products %}
-        <div class="product-card">
-          <img src="{{ product.image or url_for('static', filename='img/default.jpg') }}"
-               alt="{{ product.name }}">
-          <div class="product-info">
-            <div class="product-name">{{ product.name }}</div>
-            <div class="product-price">R$ {{ '%.2f'|format(product.price) }}</div>
-            <button class="btn-comprar"
-                    {% if product.id %}data-product-id="{{ product.id }}"{% endif %}>
-              Comprar
-            </button>
+      <article class="pb-slide" aria-label="{{ product.name }}">
+
+        <!-- ── Imagem (mini-slider interno) ───────────────────── -->
+        <div class="pb-img-side">
+
+          <div class="pb-img-slider">
+            <img src="{{ product.image1 }}"
+                 alt="{{ product.name }}"
+                 class="pb-img active"
+                 loading="{{ 'eager' if loop.first else 'lazy' }}">
+
+            {% if product.image2 %}
+            <img src="{{ product.image2 }}"
+                 alt="{{ product.name }} — imagem 2"
+                 class="pb-img"
+                 loading="lazy">
+            {% endif %}
+
+            {% if product.image3 %}
+            <img src="{{ product.image3 }}"
+                 alt="{{ product.name }} — imagem 3"
+                 class="pb-img"
+                 loading="lazy">
+            {% endif %}
+
+            {% if product.image4 %}
+            <img src="{{ product.image4 }}"
+                 alt="{{ product.name }} — imagem 4"
+                 class="pb-img"
+                 loading="lazy">
+            {% endif %}
           </div>
+
+          <!-- dots do mini-slider de imagens -->
+          {% set img_count = [1,
+            (1 if product.image2 else 0),
+            (1 if product.image3 else 0),
+            (1 if product.image4 else 0)] | sum %}
+          {% if img_count > 1 %}
+          <div class="pb-img-dots" aria-hidden="true">
+            {% for i in range(img_count) %}
+            <span class="pb-img-dot {{ 'active' if loop.first }}"></span>
+            {% endfor %}
+          </div>
+          {% endif %}
+
         </div>
-      {% else %}
-        <p style="grid-column:1/-1; text-align:center; color:#888; padding:3rem 0;">
-          Nenhum produto disponível no momento.
-        </p>
+
+        <!-- ── Conteúdo ────────────────────────────────────────── -->
+        <div class="pb-content-side">
+
+          {% if product.category %}
+          <span class="pb-category">{{ product.category }}</span>
+          {% endif %}
+
+          <h2 class="pb-name">{{ product.name }}</h2>
+
+          {% if product.description %}
+          <p class="pb-desc">{{ product.description }}</p>
+          {% endif %}
+
+          <div class="pb-price">
+            R$ {{ "%.2f"|format(product.price) }}
+          </div>
+
+          <a href="{{ url_for('main.produto_individual', id=product.id) }}"
+             class="pb-cta">
+            Ver produto
+          </a>
+
+        </div>
+
+      </article>
       {% endfor %}
-    </div>
-  </section>
+
+    </div><!-- /pb-track -->
+  </div><!-- /pb-track-wrap -->
+
+  <!-- ── Controles globais ─────────────────────────────────── -->
+  <button class="pb-nav pb-prev" id="pbPrev" aria-label="Produto anterior">&#8592;</button>
+  <button class="pb-nav pb-next" id="pbNext" aria-label="Próximo produto">&#8594;</button>
+
+  <!-- dots de produtos -->
+  <div class="pb-dots" id="pbDots" aria-label="Navegação de produtos">
+    {% for product in products %}
+    <button class="pb-dot {{ 'active' if loop.first }}"
+            aria-label="Produto {{ loop.index }}: {{ product.name }}">
+    </button>
+    {% endfor %}
+  </div>
+
+</section>
 
   <!-- ── Banner CTA ── -->
   <div class="mid-banner">

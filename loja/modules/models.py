@@ -41,17 +41,11 @@ class SiteConfig(db.Model):
     )
 
     name = db.Column(db.String(150), nullable=False)
-
     meta_description = db.Column(db.Text)
-
     banner_quote = db.Column(db.Text)
-
     banner_cta_text = db.Column(db.String(100))
-
     promo_badge = db.Column(db.String(100))
-
     copyright_year = db.Column(db.Integer)
-
     copyright_text = db.Column(db.String(255))
 
 
@@ -66,15 +60,10 @@ class HeroSlide(db.Model):
         primary_key=True,
         default=uuid.uuid4
     )
-
     image = db.Column(db.Text, nullable=False)
-
     alt = db.Column(db.String(255))
-
     eyebrow = db.Column(db.String(100))
-
     title = db.Column(db.String(100))
-
 
 # ==========================================================
 # Fornecedores
@@ -87,19 +76,12 @@ class Supplier(db.Model):
         primary_key=True,
         default=uuid.uuid4
     )
-
     name = db.Column(db.String(150), nullable=False)
-
     company_name = db.Column(db.String(200))
-
     phone = db.Column(db.String(30))
-
     email = db.Column(db.String(120))
-
     website = db.Column(db.String(255))
-
     address = db.Column(db.Text)
-
     created_at = db.Column(
         db.DateTime,
         default=datetime.utcnow
@@ -112,7 +94,6 @@ class Supplier(db.Model):
         lazy=True
     )
 
-
 # ==========================================================
 # Produtos
 # ==========================================================
@@ -124,20 +105,17 @@ class Product(db.Model):
         primary_key=True,
         default=uuid.uuid4
     )
-
     name = db.Column(db.String(255), nullable=False)
-
     description = db.Column(db.Text)
-
     price = db.Column(
         db.Numeric(10, 2),
         nullable=False
     )
-
-    image = db.Column(db.Text)
-
+    image1 = db.Column(db.Text)
+    image2 = db.Column(db.Text)
+    image3 = db.Column(db.Text)
+    image4 = db.Column(db.Text)
     category = db.Column(db.String(100))
-
     stock = db.Column(
         db.Integer,
         default=0
@@ -147,12 +125,10 @@ class Product(db.Model):
         db.Boolean,
         default=True
     )
-
     created_at = db.Column(
         db.DateTime,
         default=datetime.utcnow
     )
-
     suppliers = db.relationship(
         "Supplier",
         secondary=product_supplier,
@@ -162,7 +138,6 @@ class Product(db.Model):
 
     def __repr__(self):
         return f"<Product {self.name}>"
-
 
 # ==========================================================
 # Promoções
@@ -175,24 +150,18 @@ class Promotion(db.Model):
         primary_key=True,
         default=uuid.uuid4
     )
-
     name = db.Column(db.String(255))
-
     image = db.Column(db.Text)
-
     original_price = db.Column(
         db.Numeric(10, 2)
     )
-
     sale_price = db.Column(
         db.Numeric(10, 2)
     )
-
     is_active = db.Column(
         db.Boolean,
         default=True
     )
-
 
 # ==========================================================
 # Depoimentos
@@ -205,18 +174,13 @@ class Testimonial(db.Model):
         primary_key=True,
         default=uuid.uuid4
     )
-
     author = db.Column(db.String(150))
-
     text = db.Column(db.Text)
-
     rating = db.Column(db.Integer)
-
     is_visible = db.Column(
         db.Boolean,
         default=True
     )
-
 
 # ==========================================================
 # Rodapé
@@ -229,14 +193,11 @@ class FooterConfig(db.Model):
         primary_key=True,
         default=uuid.uuid4
     )
-
     brand_name = db.Column(
         db.String(150),
         nullable=False
     )
-
     brand_description = db.Column(db.Text)
-
 
 # ==========================================================
 # Redes sociais
@@ -249,16 +210,12 @@ class SocialLink(db.Model):
         primary_key=True,
         default=uuid.uuid4
     )
-
     label = db.Column(
         db.String(50),
         nullable=False
     )
-
     url = db.Column(db.Text)
-
     icon = db.Column(db.String(50))
-
 
 # ==========================================================
 # Links de navegação
@@ -271,17 +228,14 @@ class NavLink(db.Model):
         primary_key=True,
         default=uuid.uuid4
     )
-
     label = db.Column(
         db.String(100),
         nullable=False
     )
-
     url = db.Column(
         db.String(255),
         nullable=False
     )
-
 
 # ==========================================================
 # Categorias
@@ -305,7 +259,6 @@ class CategoryLink(db.Model):
         nullable=False
     )
 
-
 # ==========================================================
 # Contato
 # ==========================================================
@@ -317,15 +270,10 @@ class ContactInfo(db.Model):
         primary_key=True,
         default=uuid.uuid4
     )
-
     address = db.Column(db.Text)
-
     phone = db.Column(db.String(30))
-
     email = db.Column(db.String(150))
-
     hours = db.Column(db.String(100))
-
 
 # ==========================================================
 # Links legais
@@ -349,7 +297,6 @@ class LegalLink(db.Model):
         nullable=False
     )
 
-
 # ==========================================================
 # Usuários
 # ==========================================================
@@ -361,7 +308,6 @@ class User(UserMixin, db.Model):
         primary_key=True,
         default=uuid.uuid4
     )
-
     name = db.Column(
         db.String(150),
         nullable=False
@@ -403,7 +349,6 @@ class User(UserMixin, db.Model):
 
     def check_password(self, password):
         return check_password_hash(self.password, password)
-
 
     def get_id(self):
         return str(self.id)

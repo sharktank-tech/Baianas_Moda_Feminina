@@ -7,6 +7,7 @@ Responsabilidade: buscar, montar e retornar dados prontos para as rotas,
 mantendo as views limpas de lógica de negócio e consultas diretas ao banco.
 
 """
+import email
 
 from loja.modules.models import (
     Product,
@@ -18,8 +19,8 @@ from loja.modules.models import (
     SocialLink,
     NavLink,
     CategoryLink,
-    ContactInfo,
     LegalLink,
+    ContactInfo
 )
 
 
@@ -27,7 +28,7 @@ from loja.modules.models import (
 
 def get_home_data() -> dict:
     """
-    Retorna todo o contexto necessário para renderizar main/index.html.
+    Retorna todo o contexto necessário para renderizar base.html.
 
     Estrutura retornada:
         site          – SiteConfig | None
@@ -109,7 +110,7 @@ def _build_footer(site: "SiteConfig | None") -> dict:
 def get_products_page_data() -> dict:
     """
     Contexto para main/produtos.html.
-    Expanda conforme a página evoluir (filtros, paginação, categorias…).
+    Expandir conforme a página evoluir (filtros, paginação, categorias…).
     """
     return {
         "products": _get_active_products(limit=None),

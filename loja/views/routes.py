@@ -1,99 +1,146 @@
-from flask import Blueprint, render_template, flash, redirect, url_for, request
+from flask import Blueprint, render_template, flash, redirect, url_for, request, Response, jsonify
 from flask_login import login_user, login_required, current_user, logout_user
-from werkzeug.security import check_password_hash, generate_password_hash
 from sqlalchemy.exc import IntegrityError
-
-from loja.modules.models import (
-    db,
-    Product,
-    User,
-    HeroSlide,
-    Promotion,
-    Testimonial,
-    SiteConfig,
-    FooterConfig,
-    SocialLink,
-    NavLink,
-    CategoryLink,
-    ContactInfo,
-    LegalLink
-)
+from loja.modules.enviar_email import enviar_email
+from config import Config
+from loja.modules.models import db, User,Product, ContactInfo, SocialLink, Cart
 from loja.modules.services import get_home_data
+from decimal import Decimal
 
 main_blueprint = Blueprint('main', __name__)
 
+# ── Variáveis de contexto globais ────────────────────────────────────────────────────────
+
+@main_blueprint.context_processor
+def inject_global_data():
+    return get_home_data()
 
 # ── Home ──────────────────────────────────────────────────────────────────────
 
 @main_blueprint.route('/')
 def home():
-    context = get_home_data()
-    return render_template("main/index.html", **context)
-
+    return render_template("main/index.html")
 
 # ── Produtos ──────────────────────────────────────────────────────────────────
 
 @main_blueprint.route('/produtos')
 def produtos():
-    ads = [
-        {"image": "https://via.placeholder.com/1500x600", "alt": "Anúncio 1"},
-        {"image": "https://via.placeholder.com/1500x600", "alt": "Anúncio 2"},
-        {"image": "https://via.placeholder.com/1500x600", "alt": "Anúncio 3"},
-    ]
-    novidades = [
-        {
-            "large_image": "https://via.placeholder.com/600x400",
-            "small_images": [
-                "https://via.placeholder.com/300x200",
-                "https://via.placeholder.com/300x200",
-            ],
-        },
-        {
-            "large_image": "https://via.placeholder.com/600x400",
-            "small_images": [
-                "https://via.placeholder.com/300x200",
-                "https://via.placeholder.com/300x200",
-            ],
-        },
-    ]
-    destaques = [
-        {
-            "large_image": "https://via.placeholder.com/600x400",
-            "small_images": [
-                "https://via.placeholder.com/300x200",
-                "https://via.placeholder.com/300x200",
-            ],
-        },
-        {
-            "large_image": "https://via.placeholder.com/600x400",
-            "small_images": [
-                "https://via.placeholder.com/300x200",
-                "https://via.placeholder.com/300x200",
-            ],
-        },
-    ]
+    products = Product.query.filter_by(is_active=True).all()
+
     return render_template(
-        'main/produtos.html',
-        ads=ads,
-        novidades=novidades,
-        destaques=destaques,
+        "main/produtos.html",
+        products=products
     )
 
+# ── Produto individual ───────────────────────────────────────────────
 
-# ── Conta ─────────────────────────────────────────────────────────────────────
+@main_blueprint.route('/produtos/<id>')
+def produto_individual(id):
+    produto = Product.query.get_or_404(id)
+    site = get_home_data()
+    related_products = Product.query.filter_by(is_active=True)
+
+
+    return render_template(
+        "main/produto_individual.html",
+        related_products=related_products,
+        product=produto,
+        **site
+    )
+
+# ── Carrinho ────────────────────────────────────────────────────────────────
+
+@main_blueprint.route('/cart')
+@login_required  # Garante que o usuário está logado
+def carrinho():
+    site = get_home_data()
+    # Busca o carrinho associado ao usuário logado
+    cart = Cart.query.filter_by(user_id=current_user.id).first()
+
+    # Se o carrinho não existir, você pode criá-lo ou retornar uma página vazia
+    if not cart:
+        cart_items = []
+        subtotal = 0.0
+        total = 0.0
+    else:
+        cart_items = cart.items
+        subtotal = 100.0  # Substitua pela sua lógica de cálculo real
+        total = subtotal  # Substitua pela sua lógica de cálculo real
+
+    shipping = '20'
+
+    return render_template(
+        "cart/carrinho.html",
+        cart_items=cart_items,
+        subtotal=subtotal,
+        shipping=shipping,
+        total=total,
+        site=site
+    )
+
+# ── Checkout ────────────────────────────────────────────────────
+
+@main_blueprint.route('/checkout/<uuid:product_id>')
+@login_required
+def checkout(product_id):
+
+    product = Product.query.get_or_404(product_id)
+
+    quantity = 1
+    subtotal = product.price
+
+    shipping = Decimal.from_float(0)
+
+    total = subtotal + shipping
+
+    return render_template(
+        'cart/checkout.html',
+        product=product,
+        quantity=quantity,
+        subtotal=subtotal,
+        shipping=shipping,
+        total=total,
+        site=get_home_data()
+    )
+
+# ── Calculo do frete ──────────────────────────────────────────
+
+@main_blueprint.route("/calcular_frete", methods=["POST"])
+@login_required
+def calcular_frete():
+
+    dados = request.get_json()
+
+    cep = dados["cep"]
+    product_id = dados["product_id"]
+
+    produto = Product.query.get_or_404(product_id)
+
+    # posteriormente substituir por Melhor Envio
+    valor_frete = Decimal.from_float(18.90)
+
+    total = produto.price + valor_frete
+
+    return jsonify({
+        "valor": f"{valor_frete:.2f}",
+        "total": f"{total:.2f}"
+    })
+
+# ── Conta ───────────────────────────────────────────────────────────────────
 
 @main_blueprint.route('/conta')
 @login_required
 def conta():
+    context = get_home_data()
     try:
         user = current_user
         return render_template(
             'conta/conta.html',
-            user=user,
             admin=user.is_admin,
-            id=user.id,
+            telefone=user.phone,
             username=user.name,       # corrigido: user.name
             email=user.email,
+            **context
         )
     except Exception as e:
         flash("Erro ao acessar os dados da conta. Tente novamente.", "danger")
@@ -107,12 +154,12 @@ def register():
     if request.method == "POST":
         username = (request.form.get("username", "").strip())
         email = (request.form.get("email", "").strip().lower())
-        telefone = (request.form.get("telefone", "").strip()
+        telefone = request.form.get("password", "")
         password = request.form.get("password","")
         print(username, email, telefone, password)
 
         # Validação
-        if not username or not email or not password:
+        if not username or not email or not telefone or not password:
             flash("Todos os campos são obrigatórios.","danger")
             return redirect(url_for("main.register"))
         try:
@@ -124,7 +171,7 @@ def register():
                 return redirect(url_for("main.register"))
 
             # Cria usuário
-            new_user = User(name=username,email=email,is_admin=False)
+            new_user = User(name=username,telefone=telefone,email=email,is_admin=False)
             new_user.set_password(password)
 
             db.session.add(new_user)
@@ -246,7 +293,69 @@ def delete_account():
 def politica_privacidade():
     return render_template('institucional/politica_privacidade.html')
 
-
 @main_blueprint.route('/sobre')
 def sobre():
     return render_template('institucional/sobre.html')
+
+@main_blueprint.route('/condições_de_uso')
+def condi_uso():
+    return render_template('institucional/condi_uso.html')
+
+# ================== Contato ==================
+
+@main_blueprint.route("/contato", methods=["GET", "POST"])
+def contato():
+    info_contatos = ContactInfo.query.first()
+    social_links = SocialLink.query.all()
+
+    if request.method == "POST":
+        nome = request.form.get("nome")
+        email = request.form.get("email")
+        assunto = request.form.get("assunto")
+        mensagem = request.form.get("mensagem")
+
+        if not all([nome, email, assunto, mensagem]):
+            flash("Preencha todos os campos.", "warning")
+            return redirect(url_for("main.contato"))
+
+        conteudo_assunto = f"""
+        Nome: {nome}
+        E-mail: {email}
+        Assunto: {assunto}
+        """.strip()
+
+        try:
+            enviar_email(
+                Config.EMAIL_DESTINE,
+                conteudo_assunto,
+                mensagem.strip()
+            )
+
+            flash("Mensagem enviada com sucesso!", "success")
+
+        except Exception:
+            flash("Erro ao enviar a mensagem.", "danger")
+
+        return redirect(url_for("main.contato"))
+
+    return render_template(
+        "institucional/contato.html",
+        contact_info=info_contatos,
+        social_links=social_links
+    )
+
+# ================== Robots ==================
+
+@main_blueprint.route("/robots.txt")
+def robots():
+    return Response(
+        """User-agent: *\nDisallow: 
+        /conta/\n
+        /admin_dashboard/\n
+        /admin_products/\n
+        /admin/products/add/\n
+        /admin/products/edit/<int:id>\n
+        /admin/products/delete/<int:id>\n
+        /admin/categorias/add/\n
+        /admin/users/delete/<int:id>/""",
+        mimetype="text/plain")

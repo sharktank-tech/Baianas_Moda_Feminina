@@ -35,4 +35,5 @@ def create_app():
         except ValueError:
             return None         # corrigido: User
 
+
     return app

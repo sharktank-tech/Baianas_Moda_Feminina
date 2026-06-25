@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}Contato{% endblock %}
+
+{% block content %}
+
+<div class="max-w-7xl mx-auto px-4 py-12">
+
+    <!-- Cabeçalho -->
+    <div class="text-center mb-12">
+        <h1 class="text-4xl font-bold mb-4">
+            Entre em contato
+        </h1>
+
+        <p class="text-gray-500 max-w-2xl mx-auto">
+            Ficaremos felizes em responder dúvidas, sugestões ou solicitações.
+        </p>
+    </div>
+
+    <div class="grid lg:grid-cols-3 gap-8">
+
+        <!-- Informações -->
+        <div class="space-y-6">
+
+            <!-- Contato -->
+            <div class="bg-white rounded-2xl shadow p-6">
+                <h2 class="font-bold text-lg mb-4">
+                    Informações de contato
+                </h2>
+
+                <div class="space-y-4">
+
+                    {% if contact_info.email %}
+                    <a href="mailto:{{ contact_info.email }}"
+                       class="block hover:text-pink-600">
+                        <div class="text-sm text-gray-500">
+                            E-mail
+                        </div>
+
+                        <div class="font-medium">
+                            {{ contact_info.email }}
+                        </div>
+                    </a>
+                    {% endif %}
+
+                    {% if contact_info.phone %}
+                    <a href="https://wa.me/{{ contact_info.phone|replace('+','')|replace(' ','')|replace('(','')|replace(')','')|replace('-','') }}"
+                       target="_blank"
+                       class="block hover:text-pink-600">
+
+                        <div class="text-sm text-gray-500">
+                            WhatsApp
+                        </div>
+
+                        <div class="font-medium">
+                            {{ contact_info.phone }}
+                        </div>
+                    </a>
+                    {% endif %}
+
+                    {% if contact_info.address %}
+                    <div>
+                        <div class="text-sm text-gray-500">
+                            Endereço
+                        </div>
+
+                        <div class="font-medium">
+                            {{ contact_info.address }}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Redes sociais -->
+            <div class="bg-white rounded-2xl shadow p-6">
+                <h2 class="font-bold text-lg mb-4">
+                    Redes Sociais
+                </h2>
+
+                <div class="space-y-3">
+                    {% for social in social_links %}
+                    <a href="{{ social.url }}"
+                       target="_blank"
+                       class="flex items-center justify-between hover:text-pink-600">
+                        <span>{{ social.label }}</span>
+                        <span class="text-gray-400">↗</span>
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Horário -->
+            <div class="bg-pink-50 border border-pink-200 rounded-2xl p-6">
+                <h2 class="font-bold text-pink-700 mb-4">
+                    Horário de atendimento
+                </h2>
+
+                <div class="text-gray-700">
+                    {{ contact_info.hours or "Segunda a Sexta • 08:00 às 18:00" }}
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Formulário -->
+        <div class="lg:col-span-2 bg-white rounded-2xl shadow p-8">
+
+            <h2 class="text-2xl font-bold mb-6">
+                Enviar mensagem
+            </h2>
+
+            <form method="POST" class="space-y-6">
+
+                <div class="grid md:grid-cols-2 gap-6">
+
+                    <div>
+                        <label class="block mb-2 font-medium">
+                            Nome
+                        </label>
+
+                        <input
+                            type="text"
+                            name="nome"
+                            required
+                            value="{{ current_user.name if current_user.is_authenticated else '' }}"
+                            class="w-full border rounded-xl px-4 py-3">
+                    </div>
+
+                    <div>
+                        <label class="block mb-2 font-medium">
+                            E-mail
+                        </label>
+
+                        <input
+                            type="email"
+                            name="email"
+                            required
+                            value="{{ current_user.email if current_user.is_authenticated else '' }}"
+                            class="w-full border rounded-xl px-4 py-3">
+                    </div>
+
+                </div>
+
+                <div>
+                    <label class="block mb-2 font-medium">
+                        Assunto
+                    </label>
+
+                    <input
+                        type="text"
+                        name="assunto"
+                        required
+                        class="w-full border rounded-xl px-4 py-3">
+                </div>
+
+                <div>
+                    <label class="block mb-2 font-medium">
+                        Mensagem
+                    </label>
+
+                    <textarea
+                        name="mensagem"
+                        rows="8"
+                        required
+                        class="w-full border rounded-xl px-4 py-3"></textarea>
+                </div>
+
+                <button
+                    type="submit"
+                    class="bg-pink-600 hover:bg-pink-700 text-white px-8 py-3 rounded-xl font-semibold">
+
+                    Enviar mensagem
+                </button>
+
+            </form>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}
