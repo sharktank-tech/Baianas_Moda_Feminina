@@ -2,6 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash
 from loja.utils.decorators import admin_required
+from loja.modules.services import get_home_data
 
 from loja.modules.models import (
     db,
@@ -18,6 +19,11 @@ admin_blueprint = Blueprint(
     template_folder="templates/admin"
 )
 
+# ── Variáveis de contexto globais ────────────────────────────────────────────────────────
+
+@admin_blueprint.context_processor
+def inject_global_data():
+    return get_home_data()
 
 # -------------------------------------------------------------------
 # Dashboard

@@ -1,51 +1,518 @@
 {% extends "base.html" %}
 
-{% block title %}Sobre - Pollo Modas{% endblock %}
+{% block title %}Sobre — Pollo Modas{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='styles/animation.css') }}">
-<meta name="description" content="Sobre a Pollo Modas. Conheça nossa história, missão e valores.">
-<meta name="keywords" content="sobre, história, missão, valores">
+<meta name="description" content="Conheça a Pollo Modas — nossa história, missão e os valores que guiam cada peça que vendemos.">
+<meta name="keywords" content="sobre, história, missão, valores, Pollo Modas">
 {% endblock %}
 
 {% block content %}
 
-<section class="mt-10 px-6 py-8">
-    <h1 class="text-4xl font-bold text-center mb-6">Sobre Nós</h1>
+<style>
+/* ── Sobre — estilos de escopo ──────────────────────────── */
+.sobre-wrap * { box-sizing: border-box; }
 
-    <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-lg p-6">
+/* ════════════════════════════════════════════════════════
+   HERO
+════════════════════════════════════════════════════════ */
+.sobre-hero {
+  background: var(--black);
+  padding: 7rem 1.5rem 6rem;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.sobre-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 55% 70% at 20% 110%, rgba(200,16,46,0.14) 0%, transparent 65%),
+    radial-gradient(ellipse 40% 50% at 80%  -10%, rgba(200,16,46,0.08) 0%, transparent 60%);
+  pointer-events: none;
+}
 
-        <p class="mb-4 text-gray-700">
-            Bem-vindo à Pollo Modas! Somos uma empresa dedicada a oferecer roupas de qualidade,
-            estilo e conforto para todos os nossos clientes. Nossa jornada começou com o objetivo
-            de tornar a moda acessível a todos, sem comprometer a qualidade e o atendimento.
+/* Eyebrow */
+.sobre-eyebrow {
+  display: inline-block;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 1.5rem;
+  position: relative;
+}
+.sobre-eyebrow::before,
+.sobre-eyebrow::after {
+  content: '—';
+  margin: 0 0.7rem;
+  opacity: 0.5;
+}
+
+.sobre-hero-title {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(2.4rem, 6vw, 5rem);
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  max-width: 760px;
+  margin: 0 auto 1.75rem;
+  position: relative;
+}
+.sobre-hero-title em {
+  font-style: italic;
+  color: var(--accent);
+}
+
+.sobre-hero-sub {
+  font-family: 'DM Sans', sans-serif;
+  font-size: clamp(0.95rem, 1.4vw, 1.1rem);
+  color: rgba(255,255,255,0.5);
+  max-width: 520px;
+  margin: 0 auto;
+  line-height: 1.8;
+  position: relative;
+}
+
+/* Linha divisória decorativa */
+.sobre-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin: 5rem auto 0;
+  max-width: 120px;
+  position: relative;
+}
+.sobre-divider::before,
+.sobre-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255,255,255,0.12);
+}
+.sobre-divider-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* ════════════════════════════════════════════════════════
+   MISSÃO — bloco de destaque
+════════════════════════════════════════════════════════ */
+.sobre-missao {
+  max-width: 900px;
+  margin: 6rem auto 0;
+  padding: 0 1.5rem;
+  display: grid;
+  grid-template-columns: 3px 1fr;
+  gap: 0 2.5rem;
+  align-items: start;
+}
+.sobre-missao-bar {
+  background: var(--accent);
+  height: 100%;
+  border-radius: 2px;
+  min-height: 80px;
+}
+.sobre-missao-content {}
+.sobre-missao-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 1rem;
+}
+.sobre-missao-text {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(1.4rem, 2.5vw, 2rem);
+  font-weight: 400;
+  font-style: italic;
+  color: var(--black);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* ════════════════════════════════════════════════════════
+   VALORES
+════════════════════════════════════════════════════════ */
+.sobre-valores {
+  max-width: 1100px;
+  margin: 6rem auto 0;
+  padding: 0 1.5rem;
+}
+.sobre-section-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent);
+  text-align: center;
+  margin-bottom: 0.75rem;
+}
+.sobre-section-title {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  font-weight: 700;
+  text-align: center;
+  color: var(--black);
+  margin: 0 0 3rem;
+  position: relative;
+}
+.sobre-section-title::after {
+  content: '';
+  display: block;
+  width: 36px;
+  height: 3px;
+  background: var(--accent);
+  margin: 0.7rem auto 0;
+  border-radius: 2px;
+}
+
+.sobre-valores-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.5rem;
+}
+
+.sobre-valor-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2rem 1.75rem;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.3s, box-shadow 0.3s;
+}
+.sobre-valor-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.35s ease;
+}
+.sobre-valor-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.08);
+}
+.sobre-valor-card:hover::before { transform: scaleX(1); }
+
+.sobre-valor-icon {
+  font-size: 1.6rem;
+  margin-bottom: 1.1rem;
+  display: block;
+  line-height: 1;
+}
+.sobre-valor-name {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--black);
+  margin: 0 0 0.5rem;
+}
+.sobre-valor-desc {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.875rem;
+  color: #666;
+  line-height: 1.7;
+  margin: 0;
+}
+
+/* ════════════════════════════════════════════════════════
+   HISTÓRIA — linha do tempo
+════════════════════════════════════════════════════════ */
+.sobre-historia {
+  background: var(--cream);
+  margin-top: 6rem;
+  padding: 6rem 1.5rem;
+}
+.sobre-historia-inner {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.sobre-timeline {
+  position: relative;
+  margin-top: 3rem;
+  padding-left: 2rem;
+}
+.sobre-timeline::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0; bottom: 0;
+  width: 1px;
+  background: linear-gradient(to bottom, var(--accent), transparent);
+}
+
+.sobre-timeline-item {
+  position: relative;
+  padding: 0 0 3rem 2.5rem;
+}
+.sobre-timeline-item:last-child { padding-bottom: 0; }
+
+.sobre-timeline-item::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--cream);
+}
+
+.sobre-timeline-year {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.4rem;
+}
+.sobre-timeline-heading {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--black);
+  margin: 0 0 0.5rem;
+}
+.sobre-timeline-text {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.9rem;
+  color: #666;
+  line-height: 1.75;
+  margin: 0;
+  max-width: 580px;
+}
+
+/* ════════════════════════════════════════════════════════
+   CTA FINAL
+════════════════════════════════════════════════════════ */
+.sobre-cta {
+  background: var(--black);
+  padding: 6rem 1.5rem;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.sobre-cta::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 60% 80% at 50% 110%, rgba(200,16,46,0.16) 0%, transparent 65%);
+  pointer-events: none;
+}
+.sobre-cta-title {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(1.6rem, 3.5vw, 2.6rem);
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 1rem;
+  position: relative;
+}
+.sobre-cta-sub {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.95rem;
+  color: rgba(255,255,255,0.45);
+  margin: 0 auto 2.5rem;
+  max-width: 420px;
+  line-height: 1.75;
+  position: relative;
+}
+.sobre-cta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--accent);
+  color: #fff;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-decoration: none;
+  padding: 14px 36px;
+  border-radius: 2px;
+  position: relative;
+  transition: background 0.2s, transform 0.2s, letter-spacing 0.2s;
+}
+.sobre-cta-btn:hover {
+  background: #a00d25;
+  transform: translateY(-2px);
+  letter-spacing: 0.18em;
+}
+
+/* ════════════════════════════════════════════════════════
+   RESPONSIVE
+════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  .sobre-missao { grid-template-columns: 1fr; }
+  .sobre-missao-bar { display: none; }
+  .sobre-timeline { padding-left: 1.5rem; }
+  .sobre-timeline-item { padding-left: 2rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sobre-valor-card,
+  .sobre-valor-card::before,
+  .sobre-cta-btn { transition: none; }
+}
+</style>
+
+
+<div class="sobre-wrap reveal">
+
+  <!-- ══ HERO ═════════════════════════════════════════════ -->
+  <section class="sobre-hero">
+    <span class="sobre-eyebrow">Pollo Modas</span>
+    <h1 class="sobre-hero-title">
+      Moda com <em>propósito</em>,<br>estilo com <em>história</em>
+    </h1>
+    <p class="sobre-hero-sub">
+      Desde 2010 levamos qualidade, identidade e cuidado em cada peça —
+      para quem veste não apenas roupa, mas confiança.
+    </p>
+    <div class="sobre-divider">
+      <span class="sobre-divider-dot"></span>
+    </div>
+  </section>
+
+
+  <!-- ══ MISSÃO ════════════════════════════════════════════ -->
+  <section class="sobre-missao reveal">
+    <div class="sobre-missao-bar"></div>
+    <div class="sobre-missao-content">
+      <p class="sobre-missao-label">Nossa missão</p>
+      <p class="sobre-missao-text">
+        "Proporcionar a melhor experiência em moda — com produtos que combinam
+        qualidade real, estilo acessível e um atendimento que faz você voltar."
+      </p>
+    </div>
+  </section>
+
+
+  <!-- ══ VALORES ═══════════════════════════════════════════ -->
+  <section class="sobre-valores reveal">
+    <p class="sobre-section-label">O que nos guia</p>
+    <h2 class="sobre-section-title">Nossos valores</h2>
+
+    <div class="sobre-valores-grid">
+
+      <div class="sobre-valor-card">
+        <span class="sobre-valor-icon">✦</span>
+        <h3 class="sobre-valor-name">Qualidade acima de tudo</h3>
+        <p class="sobre-valor-desc">
+          Cada peça passa por uma curadoria rigorosa. Se não usaríamos,
+          não vendemos.
         </p>
+      </div>
 
-        <h2 class="text-2xl font-semibold mt-6 mb-4">Nossa Missão</h2>
-
-        <p class="text-gray-700 mb-4">
-            Proporcionar aos nossos clientes a melhor experiência em compras de roupas,
-            com produtos que combinam qualidade, estilo e preços acessíveis.
+      <div class="sobre-valor-card">
+        <span class="sobre-valor-icon">◎</span>
+        <h3 class="sobre-valor-name">Cliente no centro</h3>
+        <p class="sobre-valor-desc">
+          Atendimento que vai além da venda — acompanhamos você do tamanho
+          certo à troca sem burocracia.
         </p>
+      </div>
 
-        <h2 class="text-2xl font-semibold mt-6 mb-4">Nossos Valores</h2>
-
-        <ul class="list-disc list-inside text-gray-700 space-y-2">
-            <li>Compromisso com a qualidade</li>
-            <li>Atendimento ao cliente excepcional</li>
-            <li>Inovação e sustentabilidade</li>
-            <li>Respeito e inclusão</li>
-        </ul>
-
-        <h2 class="text-2xl font-semibold mt-6 mb-4">Nossa História</h2>
-
-        <p class="text-gray-700">
-            Fundada em 2010, a Pollo Modas começou como um pequeno negócio familiar.
-            Ao longo dos anos, crescemos e nos tornamos uma referência no setor de moda,
-            mantendo sempre nosso compromisso com a satisfação do cliente.
+      <div class="sobre-valor-card">
+        <span class="sobre-valor-icon">⬡</span>
+        <h3 class="sobre-valor-name">Moda inclusiva</h3>
+        <p class="sobre-valor-desc">
+          Estilo não tem corpo padrão. Trabalhamos com um mix que serve
+          pessoas reais, em tamanhos reais.
         </p>
+      </div>
+
+      <div class="sobre-valor-card">
+        <span class="sobre-valor-icon">↻</span>
+        <h3 class="sobre-valor-name">Responsabilidade</h3>
+        <p class="sobre-valor-desc">
+          Parcerias com fornecedores que respeitam pessoas e processos.
+          Menos descartável, mais intencional.
+        </p>
+      </div>
 
     </div>
-</section>
+  </section>
+
+
+  <!-- ══ HISTÓRIA ══════════════════════════════════════════ -->
+  <section class="sobre-historia reveal">
+    <div class="sobre-historia-inner">
+      <p class="sobre-section-label">Como chegamos até aqui</p>
+      <h2 class="sobre-section-title">Nossa história</h2>
+
+      <div class="sobre-timeline">
+
+        <div class="sobre-timeline-item">
+          <p class="sobre-timeline-year">2010</p>
+          <h3 class="sobre-timeline-heading">O começo familiar</h3>
+          <p class="sobre-timeline-text">
+            A Pollo Modas nasce como um negócio familiar pequeno, com um único
+            objetivo: oferecer roupas de qualidade a preços justos para a comunidade local.
+          </p>
+        </div>
+
+        <div class="sobre-timeline-item">
+          <p class="sobre-timeline-year">2015</p>
+          <h3 class="sobre-timeline-heading">Crescimento e expansão</h3>
+          <p class="sobre-timeline-text">
+            A reputação construída boca a boca levou à abertura de um espaço maior
+            e à ampliação do catálogo — chegamos ao feminino, masculino e infantil.
+          </p>
+        </div>
+
+        <div class="sobre-timeline-item">
+          <p class="sobre-timeline-year">2020</p>
+          <h3 class="sobre-timeline-heading">A loja online</h3>
+          <p class="sobre-timeline-text">
+            Levamos a experiência da loja física para o digital. Mais pessoas,
+            mesma atenção — agora com entrega em todo o Brasil.
+          </p>
+        </div>
+
+        <div class="sobre-timeline-item">
+          <p class="sobre-timeline-year">Hoje</p>
+          <h3 class="sobre-timeline-heading">Uma referência em moda acessível</h3>
+          <p class="sobre-timeline-text">
+            Mais de uma década depois, somos reconhecidos pela curadoria honesta,
+            pelo atendimento próximo e por uma clientela que cresce a cada coleção.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ══ CTA FINAL ══════════════════════════════════════════ -->
+  <section class="sobre-cta reveal">
+    <h2 class="sobre-cta-title">Venha fazer parte da nossa história</h2>
+    <p class="sobre-cta-sub">
+      Explore a nova coleção e descubra peças que combinam com quem você é.
+    </p>
+    <a href="{{ url_for('main.index') }}" class="sobre-cta-btn">
+      Ver coleção →
+    </a>
+  </section>
+
+</div>
 
 {% endblock %}
