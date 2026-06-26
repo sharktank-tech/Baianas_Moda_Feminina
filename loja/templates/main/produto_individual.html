@@ -210,7 +210,7 @@
 
         <div class="product-gallery">
 
-            <img src="{{ product.image }}" alt="{{ product.name }}">
+            <img src="{{ product.image1 }}" alt="{{ product.name }}">
 
             {% if product.image2 %}
             <img src="{{ product.image2 }}">
@@ -305,7 +305,7 @@
 
             <a href="{{ url_for('main.produtos', product_id=p.id) }}">
 
-                <img src="{{ p.image }}" alt="{{ p.name }}">
+                <img src="{{ p.image1 }}" alt="{{ p.name }}">
 
                 <div class="card-info">
 

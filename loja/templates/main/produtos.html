@@ -3,70 +3,10 @@
 {% block title %}Produtos{% endblock %}
 
 {% block extra_head %}
-<style>
-
-.product-card{
-    transition:.3s;
-}
-
-.product-card:hover{
-    transform:translateY(-6px);
-}
-
-.product-slider{
-    position:relative;
-    overflow:hidden;
-}
-
-.product-slides{
-    display:flex;
-    transition:.5s;
-}
-
-.product-slide{
-    min-width:100%;
-}
-
-.product-slide img{
-    width:100%;
-    height:380px;
-    object-fit:cover;
-}
-
-.slider-dots{
-    position:absolute;
-    bottom:15px;
-    left:50%;
-    transform:translateX(-50%);
-    display:flex;
-    gap:8px;
-}
-
-.slider-dot{
-    width:8px;
-    height:8px;
-    border-radius:50%;
-    background:rgba(255,255,255,.6);
-}
-
-.slider-dot.active{
-    background:white;
-}
-
-.category-badge{
-    color:#c8102e;
-    font-size:.8rem;
-    font-weight:700;
-    letter-spacing:.1em;
-    text-transform:uppercase;
-}
-
-.price{
-    font-size:1.5rem;
-    font-weight:700;
-}
-
-</style>
+<link
+    rel="stylesheet"
+    href="{{ url_for('static', filename='styles/produtos.css') }}"
+>
 {% endblock %}
 
 {% block content %}
@@ -85,117 +25,304 @@
 
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8">
 
-        {% for product in products %}
+    <!-- MOBILE -->
+    <button
+        id="openFilters"
+        class="lg:hidden w-full mb-6 border rounded-2xl py-3 font-bold">
 
-        <a
-            href="{{ url_for('main.produto_individual',id=product.id) }}"
-            class="product-card bg-white rounded-2xl overflow-hidden shadow">
+        ☰ Filtros
 
-            <div class="product-slider">
+    </button>
 
-                <div class="product-slides auto-slider">
 
-                    <div class="product-slide">
-                        <img src="{{ product.image1 }}">
-                    </div>
+    <div
+        id="mobileFilters"
+        class="mobile-filters hidden">
 
-                    {% if product.image2 %}
-                    <div class="product-slide">
-                        <img src="{{ product.image2 }}">
-                    </div>
-                    {% endif %}
+        <div class="mobile-overlay"></div>
 
-                    {% if product.image3 %}
-                    <div class="product-slide">
-                        <img src="{{ product.image3 }}">
-                    </div>
-                    {% endif %}
+        <div class="mobile-content">
 
-                    {% if product.image4 %}
-                    <div class="product-slide">
-                        <img src="{{ product.image4 }}">
-                    </div>
-                    {% endif %}
+            <div class="flex justify-between mb-6">
 
-                </div>
-
-                <div class="slider-dots">
-                    <div class="slider-dot active"></div>
-                    {% if product.image2 %}
-                    <div class="slider-dot"></div>
-                    {% endif %}
-                    {% if product.image3 %}
-                    <div class="slider-dot"></div>
-                    {% endif %}
-                    {% if product.image4 %}
-                    <div class="slider-dot"></div>
-                    {% endif %}
-                </div>
-
-            </div>
-
-            <div class="p-6">
-
-                {% if product.category %}
-                <div class="category-badge mb-2">
-                    {{ product.category }}
-                </div>
-                {% endif %}
-
-                <h2 class="font-bold text-xl mb-3">
-                    {{ product.name }}
+                <h2 class="text-2xl font-bold">
+                    Filtros
                 </h2>
 
-                <p class="text-gray-500 line-clamp-2">
-                    {{ product.description }}
-                </p>
+                <button id="closeFilters">
+                    ✕
+                </button>
 
-                <div class="mt-6 flex items-center justify-between">
+            </div>
 
-                    <div class="price">
-                        R$ {{ "%.2f"|format(product.price) }}
-                    </div>
+            <input
+                id="searchProductsMobile"
+                type="text"
+                placeholder="Pesquisar..."
+                class="filter-input"
+            >
 
-                    <div class="text-pink-600 font-semibold">
-                        Ver produto →
-                    </div>
+            <div class="mt-8">
+
+                <h3 class="font-bold mb-4">
+                    Categorias
+                </h3>
+
+                {% for categoria in categorias %}
+
+                <a
+                    href="?categoria={{ categoria }}"
+                    class="category-link
+                    {% if request.args.get('categoria') == categoria %}
+                        active-category
+                    {% endif %}
+                    ">
+
+                    {{ categoria }}
+
+                </a>
+
+                {% endfor %}
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <div class="flex flex-col lg:flex-row gap-8">
+
+        <!-- SIDEBAR -->
+        <aside class="sidebar hidden lg:block">
+
+            <div class="sidebar-card">
+
+                <div class="flex justify-between mb-8">
+
+                    <h2 class="text-2xl font-bold">
+                        Filtros
+                    </h2>
+
+                    <a
+                        href="{{ url_for('main.produtos') }}"
+                        class="text-pink-600">
+
+                        Limpar
+
+                    </a>
+
+                </div>
+
+
+                <input
+                    id="searchProducts"
+                    type="text"
+                    placeholder="Pesquisar..."
+                    class="filter-input"
+                >
+
+
+                <div class="mt-8">
+
+                    <h3 class="font-bold mb-4">
+                        Categorias
+                    </h3>
+
+                    {% for categoria in categorias %}
+
+                    <a
+                        href="?categoria={{ categoria }}"
+                        class="category-link
+                        {% if request.args.get('categoria') == categoria %}
+                            active-category
+                        {% endif %}
+                        ">
+
+                        {{ categoria }}
+
+                    </a>
+
+                    {% endfor %}
 
                 </div>
 
             </div>
 
-        </a>
+        </aside>
 
-        {% endfor %}
+
+        <!-- PRODUTOS -->
+        <div class="flex-1">
+
+            <div
+                class="flex flex-col md:flex-row justify-between gap-4 mb-8">
+
+                <p
+                    id="resultsCounter"
+                    class="text-gray-500">
+
+                    Exibindo {{ products|length }} produtos
+
+                </p>
+
+
+                <select
+                    onchange="location=this.value"
+                    class="sort-select">
+
+                    <option
+                        value="?ordenar=recentes"
+                        {% if request.args.get('ordenar') == 'recentes' %}
+                        selected
+                        {% endif %}
+                    >
+                        Mais recentes
+                    </option>
+
+                    <option
+                        value="?ordenar=menor-preco"
+                        {% if request.args.get('ordenar') == 'menor-preco' %}
+                        selected
+                        {% endif %}
+                    >
+                        Menor preço
+                    </option>
+
+                    <option
+                        value="?ordenar=maior-preco"
+                        {% if request.args.get('ordenar') == 'maior-preco' %}
+                        selected
+                        {% endif %}
+                    >
+                        Maior preço
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <div
+                id="productsGrid"
+                class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
+
+                {% for product in products %}
+
+                <a
+                    href="{{ url_for('main.produto_individual', id=product.id) }}"
+                    class="product-card bg-white rounded-2xl overflow-hidden shadow">
+
+                    <button
+                        class="favorite-btn"
+                        data-id="{{ product.id }}">
+
+                        ♡
+
+                    </button>
+
+
+                    <div class="discount-badge">
+                        -20% OFF
+                    </div>
+
+
+                    <div class="product-slider">
+
+                        <div class="product-slides auto-slider">
+
+                            <div class="product-slide">
+                                <img src="{{ product.image1 }}">
+                            </div>
+
+                            {% if product.image2 %}
+                            <div class="product-slide">
+                                <img src="{{ product.image2 }}">
+                            </div>
+                            {% endif %}
+
+                            {% if product.image3 %}
+                            <div class="product-slide">
+                                <img src="{{ product.image3 }}">
+                            </div>
+                            {% endif %}
+
+                            {% if product.image4 %}
+                            <div class="product-slide">
+                                <img src="{{ product.image4 }}">
+                            </div>
+                            {% endif %}
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="p-6">
+
+                        {% if product.category %}
+
+                        <div class="category-badge">
+
+                            {{ product.category }}
+
+                        </div>
+
+                        {% endif %}
+
+
+                        <h2 class="font-bold text-xl mb-3 product-name">
+
+                            {{ product.name }}
+
+                        </h2>
+
+
+                        <p class="text-gray-500 line-clamp-2">
+
+                            {{ product.description }}
+
+                        </p>
+
+
+                        <div
+                            class="mt-6 flex justify-between items-center">
+
+                            <div class="price">
+
+                                R$
+                                {{ "%.2f"|format(product.price) }}
+
+                            </div>
+
+                            <div class="text-pink-600">
+
+                                Ver →
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                </a>
+
+                {% endfor %}
+
+            </div>
+
+        </div>
 
     </div>
 
 </div>
 
-<script>
+{% endblock %}
 
-document.querySelectorAll(".auto-slider").forEach(slider=>{
 
-    let index=0;
-
-    const slides=slider.children.length;
-
-    setInterval(()=>{
-
-        index++;
-
-        if(index>=slides)
-            index=0;
-
-        slider.style.transform=
-            `translateX(-${index*100}%)`;
-
-    },3000);
-
-});
-
+{% block extra_scripts %}
+<script
+src="{{ url_for('static', filename='scripts/produtos.js') }}">
 </script>
-
 {% endblock %}

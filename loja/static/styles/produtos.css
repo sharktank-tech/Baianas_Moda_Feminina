@@ -1,0 +1,125 @@
+.product-card{
+    transition:.3s;
+    position:relative;
+}
+
+.product-card:hover{
+    transform:translateY(-6px);
+}
+
+.favorite-btn{
+    position:absolute;
+    top:15px;
+    right:15px;
+    z-index:20;
+    width:40px;
+    height:40px;
+    border:none;
+    border-radius:50%;
+    background:white;
+    cursor:pointer;
+    font-size:20px;
+}
+
+.discount-badge{
+    position:absolute;
+    left:15px;
+    top:15px;
+    z-index:20;
+    background:#dc2626;
+    color:white;
+    padding:6px 12px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:bold;
+}
+
+.product-slider{
+    overflow:hidden;
+}
+
+.product-slides{
+    display:flex;
+    transition:.5s;
+}
+
+.product-slide{
+    min-width:100%;
+}
+
+.product-slide img{
+    width:100%;
+    height:380px;
+    object-fit:cover;
+}
+
+.category-badge{
+    color:#c8102e;
+    font-size:12px;
+    font-weight:bold;
+    margin-bottom:10px;
+}
+
+.price{
+    font-size:24px;
+    font-weight:bold;
+}
+
+.sidebar{
+    width:280px;
+}
+
+.sidebar-card{
+    background:white;
+    padding:30px;
+    border-radius:24px;
+    border:1px solid #eee;
+    position:sticky;
+    top:100px;
+}
+
+.filter-input{
+    width:100%;
+    padding:12px;
+    border:1px solid #ddd;
+    border-radius:12px;
+}
+
+.category-link{
+    display:block;
+    padding:10px 0;
+}
+
+.active-category{
+    color:#db2777;
+    font-weight:bold;
+}
+
+.sort-select{
+    padding:12px 20px;
+    border:1px solid #ddd;
+    border-radius:12px;
+}
+
+.mobile-filters{
+    position:fixed;
+    inset:0;
+    z-index:999;
+}
+
+.mobile-overlay{
+    position:absolute;
+    inset:0;
+    background:rgba(0,0,0,.5);
+}
+
+.mobile-content{
+    position:absolute;
+    left:0;
+    top:0;
+    width:300px;
+    height:100%;
+    background:white;
+    padding:30px;
+    overflow:auto;
+}

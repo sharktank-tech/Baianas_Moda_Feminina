@@ -1,151 +1,190 @@
 /* ═══════════════════════════════════════════════════════════
-   carousel-1.js — Hero carousel
-   + Mini carrossel de imagens nos cards de produto (hover)
+   carousel-1.js — Hero carousel + mini carrossel de produto
 ═══════════════════════════════════════════════════════════ */
 
 document.addEventListener("DOMContentLoaded", () => {
 
-  // ── Hero carousel ────────────────────────────────────────
-  const carousel = document.querySelector("#carousel1");
-  if (!carousel) return;
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  const slidesContainer = carousel.querySelector(".slides");
-  const slides          = carousel.querySelectorAll(".slide");
-  const prevButton      = carousel.querySelector(".prev");
-  const nextButton      = carousel.querySelector(".next");
-  const dots            = carousel.querySelectorAll(".dot");
+  // ─────────────────────────────────────────────────────────
+  // HERO CAROUSEL
+  // ─────────────────────────────────────────────────────────
+  initHeroCarousel();
 
-  const totalSlides = slides.length;
-  if (totalSlides <= 1) return;
+  function initHeroCarousel() {
+    const carousel = document.querySelector("#carousel1");
+    if (!carousel) return;
 
-  let currentIndex = 0;
-  let autoSlide;
+    const track      = carousel.querySelector(".slides");
+    const slides     = carousel.querySelectorAll(".slide");
+    const prevBtn    = carousel.querySelector(".prev");
+    const nextBtn    = carousel.querySelector(".next");
+    const dots       = carousel.querySelectorAll(".dot");
+    const total      = slides.length;
 
-  // Transição padrão vs. rápida (wrap do último → primeiro)
-  const TRANSITION_NORMAL = "transform 1s ease-in-out";
-  const TRANSITION_FAST   = "transform 0.1s ease-in-out";
-
-  function updateCarousel(fast = false) {
-    slidesContainer.style.transition = fast ? TRANSITION_FAST : TRANSITION_NORMAL;
-    slidesContainer.style.transform  = `translateX(-${currentIndex * 100}%)`;
-
-    // Sincroniza dots
-    dots.forEach((dot, i) => dot.classList.toggle("active", i === currentIndex));
-
-    // Reativa animação do label
-    const label = slides[currentIndex].querySelector(".slide-label");
-    if (label) {
-      label.style.animation = "none";
-      void label.offsetWidth;
-      label.style.animation = "";
-    }
-  }
-
-  function nextSlide() {
-    const isLast = currentIndex === totalSlides - 1;
-    currentIndex = isLast ? 0 : currentIndex + 1;
-    updateCarousel(isLast); // rápido ao fazer wrap último → primeiro
-  }
-
-  function prevSlide() {
-    const isFirst = currentIndex === 0;
-    currentIndex  = isFirst ? totalSlides - 1 : currentIndex - 1;
-    updateCarousel(isFirst); // rápido ao fazer wrap primeiro → último
-  }
-
-  function startAutoSlide() {
-    autoSlide = setInterval(nextSlide, 5000);
-  }
-
-  function stopAutoSlide() {
-    clearInterval(autoSlide);
-  }
-
-  // ── Eventos dos botões ───────────────────────────────────
-  nextButton.addEventListener("click", () => {
-    stopAutoSlide();
-    nextSlide();
-    startAutoSlide();
-  });
-
-  prevButton.addEventListener("click", () => {
-    stopAutoSlide();
-    prevSlide();
-    startAutoSlide();
-  });
-
-  // ── Dots ─────────────────────────────────────────────────
-  dots.forEach((dot, i) => {
-    dot.addEventListener("click", () => {
-      stopAutoSlide();
-      const fast   = Math.abs(i - currentIndex) === totalSlides - 1;
-      currentIndex = i;
-      updateCarousel(fast);
-      startAutoSlide();
-    });
-  });
-
-  // ── Pausa ao hover ───────────────────────────────────────
-  carousel.addEventListener("mouseenter", stopAutoSlide);
-  carousel.addEventListener("mouseleave", startAutoSlide);
-
-  // ── Touch swipe ──────────────────────────────────────────
-  let touchStartX = 0;
-  let touchDeltaX = 0;
-
-  carousel.addEventListener("touchstart", (e) => {
-    touchStartX = e.touches[0].clientX;
-    stopAutoSlide();
-  }, { passive: true });
-
-  carousel.addEventListener("touchmove", (e) => {
-    touchDeltaX = e.touches[0].clientX - touchStartX;
-  }, { passive: true });
-
-  carousel.addEventListener("touchend", () => {
-    if      (touchDeltaX < -50) nextSlide();
-    else if (touchDeltaX >  50) prevSlide();
-    touchDeltaX = 0;
-    startAutoSlide();
-  });
-
-  // ── Teclado ──────────────────────────────────────────────
-  carousel.setAttribute("tabindex", "0");
-  carousel.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowLeft")  { stopAutoSlide(); prevSlide(); startAutoSlide(); }
-    if (e.key === "ArrowRight") { stopAutoSlide(); nextSlide(); startAutoSlide(); }
-  });
-
-  updateCarousel();
-  startAutoSlide();
-
-
-  // ── Mini carrossel de imagens nos cards (hover) ──────────
-  document.querySelectorAll(".product-img-wrap").forEach((wrap) => {
-    const imgs       = wrap.querySelectorAll(".product-img");
-    const indicators = wrap.querySelectorAll(".img-indicator");
-    const total      = imgs.length;
-
-    if (total <= 1) return;
-
-    let current = 0;
-
-    function goTo(index) {
-      imgs[current].classList.remove("active");
-      indicators[current]?.classList.remove("active");
-      current = index;
-      imgs[current].classList.add("active");
-      indicators[current]?.classList.add("active");
+    if (total <= 1) {
+      prevBtn?.remove();
+      nextBtn?.remove();
+      return;
     }
 
-    wrap.addEventListener("mousemove", (e) => {
-      const rect  = wrap.getBoundingClientRect();
-      const zone  = rect.width / total;
-      const index = Math.min(Math.floor((e.clientX - rect.left) / zone), total - 1);
-      if (index !== current) goTo(index);
+    let index     = 0;
+    let timer     = null;
+    let animating = false;  // guarda contra cliques durante transição
+
+    // ── Navegação ───────────────────────────────────────────
+    function goTo(next, { fast = false } = {}) {
+      if (animating && !fast) return;
+      animating = true;
+
+      const duration = (reduceMotion || fast) ? 0 : 700;
+      track.style.transition = duration ? `transform ${duration}ms cubic-bezier(0.77,0,0.18,1)` : "none";
+      track.style.transform  = `translateX(-${next * 100}%)`;
+
+      // atualiza dots
+      dots.forEach((d, i) => d.classList.toggle("active", i === next));
+
+      // reanima label
+      if (!reduceMotion) {
+        const label = slides[next].querySelector(".slide-label");
+        if (label) {
+          label.style.animation = "none";
+          void label.offsetWidth;
+          label.style.animation = "";
+        }
+      }
+
+      index = next;
+
+      // libera guarda após a transição
+      setTimeout(() => { animating = false; }, duration + 50);
+    }
+
+    function next() { goTo((index + 1) % total); }
+    function prev() { goTo((index - 1 + total) % total); }
+
+    // ── Autoplay ────────────────────────────────────────────
+    function startAuto() {
+      stopAuto();                         // garante que não há timer duplo
+      if (!reduceMotion) timer = setInterval(next, 6000);
+    }
+    function stopAuto() {
+      clearInterval(timer);
+      timer = null;
+    }
+
+    // ── Eventos — botões ────────────────────────────────────
+    nextBtn?.addEventListener("click", () => { next(); startAuto(); });
+    prevBtn?.addEventListener("click", () => { prev(); startAuto(); });
+
+    // ── Eventos — dots ──────────────────────────────────────
+    dots.forEach((dot, i) => {
+      dot.addEventListener("click", () => {
+        if (i === index) return;
+        // wrap de ponta a ponta → fast para evitar longa travessia visual
+        const isWrap = Math.abs(i - index) === total - 1;
+        goTo(i, { fast: isWrap });
+        startAuto();
+      });
     });
 
-    wrap.addEventListener("mouseleave", () => goTo(0));
-  });
+    // ── Eventos — hover ─────────────────────────────────────
+    carousel.addEventListener("mouseenter", stopAuto);
+    carousel.addEventListener("mouseleave", startAuto);
+
+    // ── Eventos — touch swipe ───────────────────────────────
+    let touchX = null;
+
+    carousel.addEventListener("touchstart", (e) => {
+      touchX = e.touches[0].clientX;
+      stopAuto();
+    }, { passive: true });
+
+    carousel.addEventListener("touchend", (e) => {
+      if (touchX === null) return;
+      const delta = e.changedTouches[0].clientX - touchX;
+      touchX = null;
+      if      (delta < -50) next();
+      else if (delta >  50) prev();
+      startAuto();
+    }, { passive: true });
+
+    // ── Eventos — teclado ───────────────────────────────────
+    carousel.setAttribute("tabindex", "0");
+    carousel.setAttribute("aria-roledescription", "carrossel");
+    carousel.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft")  { prev(); startAuto(); }
+      if (e.key === "ArrowRight") { next(); startAuto(); }
+    });
+
+    // ── Visibilidade — pausa quando a aba está oculta ───────
+    document.addEventListener("visibilitychange", () => {
+      document.hidden ? stopAuto() : startAuto();
+    });
+
+    goTo(0, { fast: true });
+    startAuto();
+  }
+
+
+  // ─────────────────────────────────────────────────────────
+  // MINI CARROSSEL DE IMAGENS NOS CARDS (hover por zona)
+  // ─────────────────────────────────────────────────────────
+  initProductMiniSliders();
+
+  function initProductMiniSliders() {
+    document.querySelectorAll(".product-img-wrap").forEach((wrap) => {
+      const imgs       = wrap.querySelectorAll(".product-img");
+      const indicators = wrap.querySelectorAll(".img-indicator");
+      const total      = imgs.length;
+
+      if (total <= 1) return;
+
+      // garante estado inicial correto
+      imgs[0].classList.add("active");
+      indicators[0]?.classList.add("active");
+
+      let current  = 0;
+      let lastZone = -1;   // evita reclacular quando o mouse não mudou de zona
+
+      function goTo(next) {
+        if (next === current) return;
+        imgs[current].classList.remove("active");
+        indicators[current]?.classList.remove("active");
+        current = next;
+        imgs[current].classList.add("active");
+        indicators[current]?.classList.add("active");
+      }
+
+      // ── Hover — divide a largura do wrap em zonas ─────────
+      wrap.addEventListener("mousemove", (e) => {
+        const { left, width } = wrap.getBoundingClientRect();
+        const zone = Math.min(Math.floor((e.clientX - left) / (width / total)), total - 1);
+        if (zone === lastZone) return;   // sem mudança de zona → ignora
+        lastZone = zone;
+        goTo(zone);
+      });
+
+      wrap.addEventListener("mouseleave", () => {
+        lastZone = -1;
+        goTo(0);
+      });
+
+      // ── Touch — swipe lateral ─────────────────────────────
+      let touchX = null;
+
+      wrap.addEventListener("touchstart", (e) => {
+        touchX = e.touches[0].clientX;
+      }, { passive: true });
+
+      wrap.addEventListener("touchend", (e) => {
+        if (touchX === null) return;
+        const delta = e.changedTouches[0].clientX - touchX;
+        touchX = null;
+        if      (delta < -30) goTo(Math.min(current + 1, total - 1));
+        else if (delta >  30) goTo(Math.max(current - 1, 0));
+      }, { passive: true });
+    });
+  }
 
 });

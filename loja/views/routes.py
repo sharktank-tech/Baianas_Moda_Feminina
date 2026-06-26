@@ -6,6 +6,7 @@ from config import Config
 from loja.modules.models import db, User,Product, ContactInfo, SocialLink, Cart
 from loja.modules.services import get_home_data
 from decimal import Decimal
+from sqlalchemy import asc, desc
 
 main_blueprint = Blueprint('main', __name__)
 
@@ -25,11 +26,48 @@ def home():
 
 @main_blueprint.route('/produtos')
 def produtos():
-    products = Product.query.filter_by(is_active=True).all()
+
+    categoria = request.args.get("categoria")
+    ordenar = request.args.get("ordenar", "recentes")
+
+    query = Product.query.filter_by(is_active=True)
+
+    if categoria:
+        query = query.filter(
+            Product.category == categoria
+        )
+
+    if ordenar == "menor-preco":
+        query = query.order_by(
+            asc(Product.price)
+        )
+
+    elif ordenar == "maior-preco":
+        query = query.order_by(
+            desc(Product.price)
+        )
+
+    else:
+        query = query.order_by(
+            desc(Product.created_at)
+        )
+
+    products = query.all()
+
+    categorias = db.session.query(
+        Product.category
+    ).distinct().all()
+
+    categorias = [
+        c[0]
+        for c in categorias
+        if c[0]
+    ]
 
     return render_template(
         "main/produtos.html",
-        products=products
+        products=products,
+        categorias=categorias
     )
 
 # ── Produto individual ───────────────────────────────────────────────
