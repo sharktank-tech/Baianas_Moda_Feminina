@@ -91,7 +91,7 @@ def add_product():
             db.session.add(product)
             db.session.commit()
             flash("Produto adicionado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="products"))
 
         except Exception as e:
             db.session.rollback()
@@ -126,7 +126,7 @@ def edit_product(id):
         try:
             db.session.commit()
             flash("Produto atualizado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="products"))
 
         except Exception as e:
             db.session.rollback()
@@ -147,7 +147,7 @@ def delete_product(id):
     db.session.delete(product)
     db.session.commit()
     flash("Produto excluído com sucesso!", "success")
-    return redirect(url_for("admin.admin_dashboard"))
+    return redirect(url_for("admin.admin_dashboard", _anchor="products"))
 
 
 # -------------------------------------------------------------------
@@ -176,7 +176,7 @@ def add_promotion():
             db.session.add(promo)
             db.session.commit()
             flash("Promoção adicionada com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="promotions"))
 
         except Exception as e:
             db.session.rollback()
@@ -208,7 +208,7 @@ def edit_promotion(id):
         try:
             db.session.commit()
             flash("Promoção atualizada com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="promotions"))
 
         except Exception as e:
             db.session.rollback()
@@ -229,7 +229,7 @@ def delete_promotion(id):
     db.session.delete(promo)
     db.session.commit()
     flash("Promoção excluída com sucesso!", "success")
-    return redirect(url_for("admin.admin_dashboard"))
+    return redirect(url_for("admin.admin_dashboard", _anchor="promotions"))
 
 
 # -------------------------------------------------------------------
@@ -261,7 +261,7 @@ def add_supplier():
             db.session.add(supplier)
             db.session.commit()
             flash("Fornecedor adicionado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="supplier"))
 
         except Exception as e:
             db.session.rollback()
@@ -292,7 +292,7 @@ def edit_supplier(id):
         try:
             db.session.commit()
             flash("Fornecedor atualizado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="promotions"))
 
         except Exception as e:
             db.session.rollback()
@@ -313,7 +313,7 @@ def delete_supplier(id):
     db.session.delete(supplier)
     db.session.commit()
     flash("Fornecedor excluído com sucesso!", "success")
-    return redirect(url_for("admin.admin_dashboard"))
+    return redirect(url_for("admin.admin_dashboard", _anchor="promotions"))
 
 
 # -------------------------------------------------------------------
@@ -340,7 +340,7 @@ def add_testimonial():
             db.session.add(testimonial)
             db.session.commit()
             flash("Depoimento adicionado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="testimonials"))
 
         except Exception as e:
             db.session.rollback()
@@ -369,7 +369,7 @@ def edit_testimonial(id):
         try:
             db.session.commit()
             flash("Depoimento atualizado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="testimonials"))
 
         except Exception as e:
             db.session.rollback()
@@ -393,7 +393,7 @@ def delete_testimonial(id):
     db.session.delete(testimonial)
     db.session.commit()
     flash("Depoimento excluído com sucesso!", "success")
-    return redirect(url_for("admin.admin_dashboard"))
+    return redirect(url_for("admin.admin_dashboard", _anchor="testimonials"))
 
 
 # -------------------------------------------------------------------
@@ -421,7 +421,7 @@ def add_hero_slide():
             db.session.add(slide)
             db.session.commit()
             flash("Slide adicionado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="hero"))
 
         except Exception as e:
             db.session.rollback()
@@ -450,7 +450,7 @@ def edit_hero_slide(id):
         try:
             db.session.commit()
             flash("Slide atualizado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="hero"))
 
         except Exception as e:
             db.session.rollback()
@@ -471,7 +471,7 @@ def delete_hero_slide(id):
     db.session.delete(slide)
     db.session.commit()
     flash("Slide excluído com sucesso!", "success")
-    return redirect(url_for("admin.admin_dashboard"))
+    return redirect(url_for("admin.admin_dashboard", _anchor="hero"))
 
 
 # -------------------------------------------------------------------
@@ -485,7 +485,7 @@ def add_site_config():
     # se já existe um registro, redireciona para edição
     existing = SiteConfig.query.first()
     if existing:
-        return redirect(url_for("admin.edit_site_config"))
+        return redirect(url_for("admin.edit_site_config", _anchor="siteconfig"))
 
     if request.method == "POST":
 
@@ -502,7 +502,7 @@ def add_site_config():
             db.session.add(config)
             db.session.commit()
             flash("Configurações do site salvas com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="siteconfig"))
 
         except Exception as e:
             db.session.rollback()
@@ -535,7 +535,7 @@ def edit_site_config():
         try:
             db.session.commit()
             flash("Configurações do site atualizadas com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="siteconfig"))
 
         except Exception as e:
             db.session.rollback()
@@ -567,7 +567,7 @@ def add_social_link():
             db.session.add(social)
             db.session.commit()
             flash("Rede social adicionada com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
         except Exception as e:
             db.session.rollback()
@@ -595,7 +595,7 @@ def edit_social_link(id):
         try:
             db.session.commit()
             flash("Rede social atualizada com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
         except Exception as e:
             db.session.rollback()
@@ -616,7 +616,7 @@ def delete_social_link(id):
     db.session.delete(social)
     db.session.commit()
     flash("Rede social excluída com sucesso!", "success")
-    return redirect(url_for("admin.admin_dashboard"))
+    return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
 
 # -------------------------------------------------------------------
@@ -641,7 +641,7 @@ def add_footer_config():
             db.session.add(footer)
             db.session.commit()
             flash("Configuração do rodapé salva com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
         except Exception as e:
             db.session.rollback()
@@ -657,7 +657,7 @@ def edit_footer_config():
     footer = FooterConfig.query.first()
 
     if not footer:
-        return redirect(url_for("admin.add_footer_config"))
+        return redirect(url_for("admin.add_footer_config", _anchor="footer"))
 
     if request.method == "POST":
 
@@ -667,7 +667,7 @@ def edit_footer_config():
         try:
             db.session.commit()
             flash("Rodapé atualizado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
         except Exception as e:
             db.session.rollback()
@@ -700,7 +700,7 @@ def add_contact_info():
             db.session.add(contact)
             db.session.commit()
             flash("Informações de contato salvas com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
         except Exception as e:
             db.session.rollback()
@@ -716,7 +716,7 @@ def edit_contact_info():
     contact = ContactInfo.query.first()
 
     if not contact:
-        return redirect(url_for("admin.add_contact_info"))
+        return redirect(url_for("admin.add_contact_info", _anchor="footer"))
 
     if request.method == "POST":
 
@@ -728,7 +728,7 @@ def edit_contact_info():
         try:
             db.session.commit()
             flash("Contato atualizado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
         except Exception as e:
             db.session.rollback()
@@ -755,7 +755,7 @@ def add_nav_link():
             db.session.add(nav)
             db.session.commit()
             flash("Link de navegação adicionado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
         except Exception as e:
             db.session.rollback()
@@ -782,7 +782,7 @@ def edit_nav_link(id):
         try:
             db.session.commit()
             flash("Link atualizado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
         except Exception as e:
             db.session.rollback()
@@ -803,7 +803,7 @@ def delete_nav_link(id):
     db.session.delete(nav)
     db.session.commit()
     flash("Link excluído com sucesso!", "success")
-    return redirect(url_for("admin.admin_dashboard"))
+    return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
 
 # -------------------------------------------------------------------
@@ -824,7 +824,7 @@ def add_category_link():
             db.session.add(cat)
             db.session.commit()
             flash("Link de categoria adicionado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
         except Exception as e:
             db.session.rollback()
@@ -851,7 +851,7 @@ def edit_category_link(id):
         try:
             db.session.commit()
             flash("Link de categoria atualizado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
         except Exception as e:
             db.session.rollback()
@@ -872,7 +872,7 @@ def delete_category_link(id):
     db.session.delete(cat)
     db.session.commit()
     flash("Link de categoria excluído com sucesso!", "success")
-    return redirect(url_for("admin.admin_dashboard"))
+    return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
 
 # -------------------------------------------------------------------
@@ -893,7 +893,7 @@ def add_legal_link():
             db.session.add(legal)
             db.session.commit()
             flash("Link legal adicionado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
         except Exception as e:
             db.session.rollback()
@@ -920,7 +920,7 @@ def edit_legal_link(id):
         try:
             db.session.commit()
             flash("Link legal atualizado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
         except Exception as e:
             db.session.rollback()
@@ -941,7 +941,7 @@ def delete_legal_link(id):
     db.session.delete(legal)
     db.session.commit()
     flash("Link legal excluído com sucesso!", "success")
-    return redirect(url_for("admin.admin_dashboard"))
+    return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
 
 # -------------------------------------------------------------------
@@ -972,7 +972,7 @@ def add_user():
             db.session.rollback()
             flash(str(e), "danger")
 
-    return render_template("admin/users/add_user.html")
+    return render_template("admin/users/add_user.html", _anchor="users")
 
 
 # -------------------------------------------------------------------
@@ -988,7 +988,7 @@ def edit_user(id):
 
     if user.id == current_user.id:
         flash("Edite sua própria conta pela página de perfil.", "warning")
-        return redirect(url_for("admin.admin_dashboard"))
+        return redirect(url_for("admin.admin_dashboard", _anchor="users"))
 
     if request.method == "POST":
 
@@ -1022,7 +1022,7 @@ def edit_user(id):
 
             db.session.commit()
             flash("Usuário atualizado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="users"))
 
         except Exception as e:
             db.session.rollback()
@@ -1043,4 +1043,4 @@ def delete_user(id):
     db.session.delete(user)
     db.session.commit()
     flash("Usuário excluído com sucesso!", "success")
-    return redirect(url_for("admin.admin_dashboard"))
+    return redirect(url_for("admin.admin_dashboard", _anchor="users"))
