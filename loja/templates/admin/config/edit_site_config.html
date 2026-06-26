@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Configurações do Site{% endblock %}
+{% block title %}Editar Configurações do Site{% endblock %}
 
 {% block content %}
 
@@ -8,11 +8,11 @@
 
     <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-800">
-            Configurações do Site
+            Editar Configurações do Site
         </h1>
 
         <p class="text-gray-500 mt-2">
-            Defina as informações globais utilizadas pela loja.
+            Atualize as informações globais utilizadas pela loja.
         </p>
     </div>
 
@@ -38,8 +38,9 @@
                     type="text"
                     name="name"
                     required
+                    value="{{ config.name or '' }}"
                     class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
-                    placeholder="Ex: Minha Loja Fashion"
+                    placeholder="Ex: Pollomodas"
                 >
             </div>
 
@@ -51,10 +52,14 @@
 
                 <textarea
                     name="meta_description"
-                    rows="3"
+                    rows="4"
                     class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
                     placeholder="Descrição que aparecerá nos mecanismos de busca..."
-                ></textarea>
+                >{{ config.meta_description or '' }}</textarea>
+
+                <p class="text-sm text-gray-500 mt-1">
+                    Exemplo: "Pollomodas - Encontre roupas femininas, masculinas e acessórios com estilo, qualidade e preços incríveis."
+                </p>
             </div>
 
         </div>
@@ -75,6 +80,7 @@
                 <input
                     type="text"
                     name="banner_quote"
+                    value="{{ config.banner_quote or '' }}"
                     class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
                     placeholder="Ex: Moda que inspira confiança."
                 >
@@ -89,6 +95,7 @@
                 <input
                     type="text"
                     name="banner_cta_text"
+                    value="{{ config.banner_cta_text or '' }}"
                     class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
                     placeholder="Ex: Comprar Agora"
                 >
@@ -103,8 +110,9 @@
                 <input
                     type="text"
                     name="promo_badge"
+                    value="{{ config.promo_badge or '' }}"
                     class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
-                    placeholder="Ex: Frete Grátis para todo o Brasil"
+                    placeholder="Ex: Frete grátis para todo o Brasil"
                 >
             </div>
 
@@ -130,6 +138,7 @@
                         name="copyright_year"
                         min="2000"
                         max="2100"
+                        value="{{ config.copyright_year or '' }}"
                         class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
                         placeholder="2026"
                     >
@@ -144,6 +153,7 @@
                     <input
                         type="text"
                         name="copyright_text"
+                        value="{{ config.copyright_text or '' }}"
                         class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
                         placeholder="Todos os direitos reservados."
                     >
@@ -160,7 +170,7 @@
                 type="submit"
                 class="bg-pink-600 hover:bg-pink-700 transition text-white px-8 py-3 rounded-lg font-medium"
             >
-                Salvar Configurações
+                Salvar Alterações
             </button>
 
             <a
