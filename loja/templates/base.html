@@ -423,7 +423,6 @@
       <li><a href="{{ url_for('main.produtos', categoria=categoria) }}">{{ categoria }}</a></li>
       {% endfor %}
 
-      <li><a href="{{ url_for('main.sobre') }}">Sobre</a></li>
       <li><a href="/contato">Contato</a></li>
 
       {% if current_user.is_authenticated %}
