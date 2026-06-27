@@ -294,7 +294,7 @@ def edit_supplier(id):
         try:
             db.session.commit()
             flash("Fornecedor atualizado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard", _anchor="promotions"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="supplier"))
 
         except Exception as e:
             db.session.rollback()

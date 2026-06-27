@@ -308,6 +308,80 @@ class LegalLink(db.Model):
         nullable=False
     )
 
+
+# ==========================================================
+# Endereços
+# ==========================================================
+
+class Address(db.Model):
+    __tablename__ = "addresses"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+
+    user_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    recipient_name = db.Column(
+        db.String(150),
+        nullable=False
+    )
+
+    phone = db.Column(
+        db.String(30)
+    )
+
+    zip_code = db.Column(
+        db.String(10),
+        nullable=False
+    )
+
+    street = db.Column(
+        db.String(255),
+        nullable=False
+    )
+
+    number = db.Column(
+        db.String(20),
+        nullable=False
+    )
+
+    complement = db.Column(
+        db.String(255)
+    )
+
+    neighborhood = db.Column(
+        db.String(150),
+        nullable=False
+    )
+
+    city = db.Column(
+        db.String(150),
+        nullable=False
+    )
+
+    state = db.Column(
+        db.String(2),
+        nullable=False
+    )
+
+    is_default = db.Column(
+        db.Boolean,
+        default=False,
+        nullable=False
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow
+    )
+
 # ==========================================================
 # Usuários
 # ==========================================================
@@ -348,6 +422,14 @@ class User(UserMixin, db.Model):
         lazy=True,
         cascade="all, delete-orphan"
     )
+
+    addresses = db.relationship(
+        "Address",
+        backref="user",
+        lazy=True,
+        cascade="all, delete-orphan"
+    )
+
     is_admin = db.Column(
         db.Boolean,
         nullable=False,

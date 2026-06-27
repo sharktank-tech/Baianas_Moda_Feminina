@@ -6,17 +6,45 @@
 <div class="container mx-auto px-4 py-8 flex-grow">
     <h2 class="text-2xl font-bold mb-4">Minha Conta</h2>
 
-    <div class="bg-white shadow-md rounded-lg p-6">
-        <h3 class="text-xl font-semibold mb-4">Detalhes do Usuário</h3>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
 
-        <div class="space-y-2 text-gray-700">
-            <p><strong>Nome:</strong> {{ username }}</p>
-            <p><strong>Email:</strong> {{ email }}</p>
-            <p><strong>Telefone:</strong> {{ telefone }}</p>
+        <!-- Detalhes do Usuário -->
+        <div>
+            <h3 class="text-xl font-semibold mb-4">
+                Detalhes do Usuário
+            </h3>
+
+            <div class="space-y-2 text-gray-700">
+                <p><strong>Nome:</strong> {{ username }}</p>
+                <p><strong>Email:</strong> {{ email }}</p>
+                <p><strong>Telefone:</strong> {{ telefone }}</p>
+            </div>
         </div>
 
-        <div class="mt-8">
-            <h3 class="text-xl font-semibold mb-4">Ações</h3>
+        <!-- Endereço -->
+        {% if adress %}
+        <div>
+            <h3 class="text-xl font-semibold mb-4">
+                Endereço
+            </h3>
+
+            <div class="space-y-2 text-gray-700">
+                <p><strong>CEP:</strong> {{ adress.zip_code }}</p>
+                <p><strong>Rua:</strong> {{ adress.street }}</p>
+                <p><strong>Número:</strong> {{ adress.number }}</p>
+                <p><strong>Bairro:</strong> {{ adress.neighborhood }}</p>
+                <p><strong>Cidade:</strong> {{ adress.city }}</p>
+                <p><strong>Estado:</strong> {{ adress.state }}</p>
+                <p><strong>Complemento:</strong> {{ adress.complement }}</p>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Ações -->
+        <div>
+            <h3 class="text-xl font-semibold mb-4">
+                Ações
+            </h3>
 
             <div class="flex flex-col gap-3">
                 <a href="{{ url_for('main.edit_account') }}"
@@ -32,6 +60,8 @@
                 </form>
             </div>
         </div>
+
     </div>
+</div>
 </div>
 {% endblock %}

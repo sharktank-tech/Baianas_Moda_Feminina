@@ -70,7 +70,7 @@
       height: 68px;
       position: sticky;
       top: 0;
-      z-index: 100;
+      z-index: 40;
       border-bottom: 1px solid var(--border-dark);
     }
 
@@ -391,7 +391,7 @@
   </div>
 
   <!-- ── Flash Messages ── -->
-  <div class="fixed top-4 right-4 z-50 space-y-3 w-full max-w-sm px-4">
+  <div class="fixed top-24 right-4 z-9999 space-y-3 w-full max-w-sm px-4">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}

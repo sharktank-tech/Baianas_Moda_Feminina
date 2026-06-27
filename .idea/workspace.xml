@@ -4,9 +4,17 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="310da70a-5095-47e0-b4d5-9b337aa34487" name="Changes" comment="- Redesign da pagina inicial&#10;- Melhoria do modelo de categoria no banco de dados">
+    <list default="true" id="310da70a-5095-47e0-b4d5-9b337aa34487" name="Changes" comment="- Melhoria na barra d enavegação&#10;- Substituição do icone de favicon">
+      <change afterPath="$PROJECT_DIR$/loja/modules/scraping.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/loja/static/styles/produtos_individual.css" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/modules/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/loja/modules/models.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/static/img/imagem.png" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/loja/templates/base.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/base.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/templates/conta/conta.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/conta/conta.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/templates/main/produto_individual.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/main/produto_individual.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/views/admin_routes.py" beforeDir="false" afterPath="$PROJECT_DIR$/loja/views/admin_routes.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/views/routes.py" beforeDir="false" afterPath="$PROJECT_DIR$/loja/views/routes.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -17,9 +25,9 @@
     <option name="RECENT_TEMPLATES">
       <list>
         <option value="HTML File" />
-        <option value="CSS File" />
         <option value="JavaScript File" />
         <option value="Python Script" />
+        <option value="CSS File" />
       </list>
     </option>
   </component>
@@ -279,7 +287,15 @@
       <option name="project" value="LOCAL" />
       <updated>1782582202529</updated>
     </task>
-    <option name="localTasksCounter" value="20" />
+    <task id="LOCAL-00020" summary="- Melhoria na barra d enavegação&#10;- Substituição do icone de favicon">
+      <option name="closed" value="true" />
+      <created>1782583801808</created>
+      <option name="number" value="00020" />
+      <option name="presentableId" value="LOCAL-00020" />
+      <option name="project" value="LOCAL" />
+      <updated>1782583801808</updated>
+    </task>
+    <option name="localTasksCounter" value="21" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -304,6 +320,7 @@
     <MESSAGE value="- Adicionado redirecionamentos corretos para cada area do painel admin" />
     <MESSAGE value="- Melhoria da pagina de produtos" />
     <MESSAGE value="- Redesign da pagina inicial&#10;- Melhoria do modelo de categoria no banco de dados" />
-    <option name="LAST_COMMIT_MESSAGE" value="- Redesign da pagina inicial&#10;- Melhoria do modelo de categoria no banco de dados" />
+    <MESSAGE value="- Melhoria na barra d enavegação&#10;- Substituição do icone de favicon" />
+    <option name="LAST_COMMIT_MESSAGE" value="- Melhoria na barra d enavegação&#10;- Substituição do icone de favicon" />
   </component>
 </project>

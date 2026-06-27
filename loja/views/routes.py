@@ -209,17 +209,19 @@ def calcular_frete():
 @main_blueprint.route('/conta')
 @login_required
 def conta():
-    context = get_home_data()
+
     try:
         user = current_user
+
         return render_template(
             'conta/conta.html',
             admin=user.is_admin,
             telefone=user.phone,
-            username=user.name,       # corrigido: user.name
+            username=user.name,
             email=user.email,
-            **context
+            adress=user.addresses[0] if user.addresses else None,
         )
+
     except Exception as e:
         flash("Erro ao acessar os dados da conta. Tente novamente.", "danger")
         print(f"Erro ao acessar os dados da conta: {e}")
