@@ -1,3 +1,5 @@
+from email.mime import image
+
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash
@@ -818,9 +820,11 @@ def add_category_link():
 
         label = request.form.get("label", "").strip()
         url   = request.form.get("url", "").strip()
+        slug = request.form.get("slug", "").strip()
+        image = request.form.get("image", "").strip()
 
         try:
-            cat = CategoryLink(label=label, url=url)
+            cat = CategoryLink(label=label, url=url, slug=slug, image=image)
             db.session.add(cat)
             db.session.commit()
             flash("Link de categoria adicionado com sucesso!", "success")
@@ -828,6 +832,7 @@ def add_category_link():
 
         except Exception as e:
             db.session.rollback()
+            print(e)
             flash(str(e), "danger")
 
     return render_template("admin/footer/add_category_link.html")
@@ -847,6 +852,8 @@ def edit_category_link(id):
 
         cat.label = request.form.get("label", "").strip()
         cat.url   = request.form.get("url", "").strip()
+        cat.slug = request.form.get("slug", "").strip()
+        cat.image = request.form.get("image", "").strip()
 
         try:
             db.session.commit()

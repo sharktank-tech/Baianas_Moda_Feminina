@@ -4,64 +4,19 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="310da70a-5095-47e0-b4d5-9b337aa34487" name="Changes" comment="- Mudança na arquitetura para implementar funções de e-commerce completo">
-      <change afterPath="$PROJECT_DIR$/loja/modules/enviar_email.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/static/scripts/dashboard_admin.js" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/static/scripts/index.js" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/static/styles/dashboard_admin.css" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/static/styles/styles.css" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/config/add_social_link.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/config/edit_site_config.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/config/edit_social_link.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/footer/add_category_link.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/footer/add_contact_info.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/footer/add_footer_config.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/footer/add_nav_link.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/footer/edit_contact_info.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/footer/edit_footer_config.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/footer/edit_nav_link.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/hero/add_hero_slide.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/hero/edit_hero_slide.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/products/add_product.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/products/edit_product.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/promotions/add_promotions.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/promotions/edit_promotion.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/suppliers/add_supplier.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/suppliers/edit_supplier.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/testimonials/add_testimonial.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/testimonials/edit_testimonial.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/users/add_user.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/admin/users/edit_user.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/cart/carrinho.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/cart/checkout.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/institucional/condi_uso.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/institucional/contato.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/templates/main/produto_individual.html" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/utils/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/utils/decorators.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/PolloModas.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/PolloModas.iml" afterDir="false" />
+    <list default="true" id="310da70a-5095-47e0-b4d5-9b337aa34487" name="Changes" comment="- Melhoria da pagina de produtos">
+      <change afterPath="$PROJECT_DIR$/teste.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/instance/database.db" beforeDir="false" afterPath="$PROJECT_DIR$/instance/database.db" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/loja/__init__.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/loja/modules/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/loja/modules/models.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/loja/modules/services.py" beforeDir="false" afterPath="$PROJECT_DIR$/loja/modules/services.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/static/img/favicon.jpg" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/static/scripts/carousel-1.js" beforeDir="false" afterPath="$PROJECT_DIR$/loja/static/scripts/carousel-1.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/static/styles/mobile.css" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/admin/add_product.html" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/admin/dashboard.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/admin/dashboard.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/admin/edit_product.html" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/static/scripts/index.js" beforeDir="false" afterPath="$PROJECT_DIR$/loja/static/scripts/index.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/static/styles/styles.css" beforeDir="false" afterPath="$PROJECT_DIR$/loja/static/styles/styles.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/templates/admin/footer/add_category_link.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/admin/footer/add_category_link.html" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/loja/templates/admin/footer/edit_category_link.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/admin/footer/edit_category_link.html" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/loja/templates/base.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/base.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/conta/conta.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/conta/conta.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/institucional/politica_privacidade.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/institucional/politica_privacidade.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/institucional/sobre.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/institucional/sobre.html" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/loja/templates/main/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/main/index.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/main/produtos.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/main/produtos.html" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/loja/views/admin_routes.py" beforeDir="false" afterPath="$PROJECT_DIR$/loja/views/admin_routes.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/loja/views/routes.py" beforeDir="false" afterPath="$PROJECT_DIR$/loja/views/routes.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/run.py" beforeDir="false" afterPath="$PROJECT_DIR$/run.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -71,10 +26,10 @@
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
       <list>
-        <option value="Python Script" />
-        <option value="JavaScript File" />
-        <option value="CSS File" />
         <option value="HTML File" />
+        <option value="CSS File" />
+        <option value="JavaScript File" />
+        <option value="Python Script" />
       </list>
     </option>
   </component>
@@ -128,11 +83,11 @@
       <recent name="$PROJECT_DIR$/loja/modules" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$" />
       <recent name="$PROJECT_DIR$/loja/templates/admin/footer" />
       <recent name="$PROJECT_DIR$/loja/templates/admin" />
       <recent name="$PROJECT_DIR$/loja/templates/admin/products" />
       <recent name="C:\Users\danil\PycharmProjects\PolloModas\loja\templates\institucional" />
-      <recent name="$PROJECT_DIR$/loja/modules" />
     </key>
   </component>
   <component name="RunManager">
@@ -254,7 +209,79 @@
       <option name="project" value="LOCAL" />
       <updated>1782233652378</updated>
     </task>
-    <option name="localTasksCounter" value="10" />
+    <task id="LOCAL-00010" summary="- Adição de funções para a area de admin">
+      <option name="closed" value="true" />
+      <created>1782429696379</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1782429696379</updated>
+    </task>
+    <task id="LOCAL-00011" summary="- Adição do favicon">
+      <option name="closed" value="true" />
+      <created>1782429716567</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1782429716567</updated>
+    </task>
+    <task id="LOCAL-00012" summary="_ Atualização do arquivo de dependencias do Python">
+      <option name="closed" value="true" />
+      <created>1782430192426</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1782430192426</updated>
+    </task>
+    <task id="LOCAL-00013" summary="- Correção de referencia inconsistente no template de sobre">
+      <option name="closed" value="true" />
+      <created>1782430677087</created>
+      <option name="number" value="00013" />
+      <option name="presentableId" value="LOCAL-00013" />
+      <option name="project" value="LOCAL" />
+      <updated>1782430677087</updated>
+    </task>
+    <task id="LOCAL-00014" summary="- Adição de arquivo da IDE ao gitignore">
+      <option name="closed" value="true" />
+      <created>1782430730078</created>
+      <option name="number" value="00014" />
+      <option name="presentableId" value="LOCAL-00014" />
+      <option name="project" value="LOCAL" />
+      <updated>1782430730078</updated>
+    </task>
+    <task id="LOCAL-00015" summary="- Correção do template de edição das configurações do site">
+      <option name="closed" value="true" />
+      <created>1782431510422</created>
+      <option name="number" value="00015" />
+      <option name="presentableId" value="LOCAL-00015" />
+      <option name="project" value="LOCAL" />
+      <updated>1782431510422</updated>
+    </task>
+    <task id="LOCAL-00016" summary="- Correção do carregamento dos dados para edição das configs do site">
+      <option name="closed" value="true" />
+      <created>1782432123784</created>
+      <option name="number" value="00016" />
+      <option name="presentableId" value="LOCAL-00016" />
+      <option name="project" value="LOCAL" />
+      <updated>1782432123784</updated>
+    </task>
+    <task id="LOCAL-00017" summary="- Adicionado redirecionamentos corretos para cada area do painel admin">
+      <option name="closed" value="true" />
+      <created>1782433026447</created>
+      <option name="number" value="00017" />
+      <option name="presentableId" value="LOCAL-00017" />
+      <option name="project" value="LOCAL" />
+      <updated>1782433026447</updated>
+    </task>
+    <task id="LOCAL-00018" summary="- Melhoria da pagina de produtos">
+      <option name="closed" value="true" />
+      <created>1782516899397</created>
+      <option name="number" value="00018" />
+      <option name="presentableId" value="LOCAL-00018" />
+      <option name="project" value="LOCAL" />
+      <updated>1782516899397</updated>
+    </task>
+    <option name="localTasksCounter" value="19" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -269,6 +296,15 @@
     <MESSAGE value="melhorias" />
     <MESSAGE value="- Correção da URL do banco de dados e melhoria da lógica de conexão" />
     <MESSAGE value="- Mudança na arquitetura para implementar funções de e-commerce completo" />
-    <option name="LAST_COMMIT_MESSAGE" value="- Mudança na arquitetura para implementar funções de e-commerce completo" />
+    <MESSAGE value="- Adição de funções para a area de admin" />
+    <MESSAGE value="- Adição do favicon" />
+    <MESSAGE value="_ Atualização do arquivo de dependencias do Python" />
+    <MESSAGE value="- Correção de referencia inconsistente no template de sobre" />
+    <MESSAGE value="- Adição de arquivo da IDE ao gitignore" />
+    <MESSAGE value="- Correção do template de edição das configurações do site" />
+    <MESSAGE value="- Correção do carregamento dos dados para edição das configs do site" />
+    <MESSAGE value="- Adicionado redirecionamentos corretos para cada area do painel admin" />
+    <MESSAGE value="- Melhoria da pagina de produtos" />
+    <option name="LAST_COMMIT_MESSAGE" value="- Melhoria da pagina de produtos" />
   </component>
 </project>

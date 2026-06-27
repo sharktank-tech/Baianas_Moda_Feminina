@@ -260,6 +260,16 @@ class CategoryLink(db.Model):
         nullable=False
     )
 
+    slug = db.Column(
+        db.Text,
+        nullable=False
+    )
+
+    image = db.Column(
+        db.Text,
+        nullable=False
+    )
+
 # ==========================================================
 # Contato
 # ==========================================================

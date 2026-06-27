@@ -8,130 +8,202 @@
   <script src="{{ url_for('static', filename='scripts/carousel-2.js') }}" defer></script>
   <script src="{{ url_for('static', filename='scripts/index.js') }}" defer></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/styles.css') }}">
-
-
 {% endblock %}
 
 {% block content %}
 
-  <!-- ── Hero Carousel ── -->
-  <section class="hero-section">
-    <div class="carousel-wrap" id="carousel1">
-      <div class="slides">
+  <!-- ══════════════════════════════════════════════
+       HERO — Hero Slides Carousel (tabela hero_slides)
+  ══════════════════════════════════════════════ -->
+  <section class="pb-banner" aria-label="Destaques da coleção">
+    <div class="pb-track-wrap">
+      <div class="pb-track" id="pbTrack">
+
         {% for slide in hero_slides %}
-          <div class="slide">
-            <img src="{{ slide.image }}" alt="{{ slide.alt }}">
-            <div class="slide-overlay">
-              <div class="slide-label">
-                {% if slide.eyebrow %}<small>{{ slide.eyebrow }}</small>{% endif %}
-                {{ slide.title }}
-              </div>
+        <div class="pb-slide pb-slide--fullwidth">
+          <div class="pb-img-side pb-img-side--full">
+            <img
+              class="pb-img active"
+              src="{{ slide.image }}"
+              alt="{{ slide.alt or '' }}"
+              loading="{% if loop.first %}eager{% else %}lazy{% endif %}"
+            >
+            <div class="pb-slide-overlay">
+              {% if slide.eyebrow %}
+              <small class="pb-slide-eyebrow">{{ slide.eyebrow }}</small>
+              {% endif %}
+              {% if slide.title %}
+              <h2 class="pb-slide-title">{{ slide.title }}</h2>
+              {% endif %}
+              <a href="{{ url_for('main.produtos') }}" class="pb-cta pb-cta--overlay">Ver coleção</a>
             </div>
           </div>
+        </div>
         {% else %}
-          {# fallback caso hero_slides não seja fornecido #}
-          <div class="slide">
-            <img src="{{ url_for('static', filename='img/agua-de-coco.jpg') }}" alt="Coleção Verão">
-            <div class="slide-overlay">
-              <div class="slide-label">
-                <small>Nova Coleção</small>
-                Verão 2025
-              </div>
+
+        {# Fallback estático caso hero_slides esteja vazio #}
+        <div class="pb-slide pb-slide--fullwidth">
+          <div class="pb-img-side pb-img-side--full">
+            <img class="pb-img active" src="{{ url_for('static', filename='img/agua-de-coco.jpg') }}" alt="Coleção Outono Inverno 2026" loading="eager">
+            <div class="pb-slide-overlay">
+              <small class="pb-slide-eyebrow">Nova Coleção</small>
+              <h2 class="pb-slide-title">Outono Inverno 2026</h2>
+              <a href="{{ url_for('main.produtos') }}" class="pb-cta pb-cta--overlay">Ver coleção</a>
             </div>
           </div>
+        </div>
+
         {% endfor %}
-      </div>
-      <button class="carousel-btn prev">&#8592;</button>
-      <button class="carousel-btn next">&#8594;</button>
+
+      </div><!-- /pb-track -->
+    </div>
+
+    <!-- nav botões -->
+    <button class="pb-nav pb-prev" id="pbPrev" aria-label="Slide anterior">&#8592;</button>
+    <button class="pb-nav pb-next" id="pbNext" aria-label="Próximo slide">&#8594;</button>
+
+    <!-- dots -->
+    <div class="pb-dots" id="pbDots" aria-hidden="true">
+      {% for slide in hero_slides %}
+      <button class="pb-dot{% if loop.first %} active{% endif %}"></button>
+      {% else %}
+      <button class="pb-dot active"></button>
+      {% endfor %}
     </div>
   </section>
 
-  <!-- ── Banner Novidades ── -->
+
+  <!-- ══════════════════════════════════════════════
+       CATEGORIAS EM DESTAQUE
+  ══════════════════════════════════════════════ -->
+  <section class="categories-section">
+    <div class="categories-inner">
+      <h2 class="section-title">Explore por categoria</h2>
+      <div class="categories-grid">
+        {% for cat in categories %}
+        <a href="{{ url_for('main.produtos', categoria=cat.slug) }}" class="cat-card">
+          <div class="cat-card-img">
+            <img src="{{ cat.image }}" alt="{{ cat.label }}" loading="lazy">
+          </div>
+          <span class="cat-card-label">{{ cat.label }}</span>
+        </a>
+        {% else %}
+        {% for item in [
+          {'name': 'Feminino',    'slug': 'feminino'},
+          {'name': 'Masculino',   'slug': 'masculino'},
+          {'name': 'Infantil',    'slug': 'infantil'},
+          {'name': 'Calçados',    'slug': 'calcados'},
+          {'name': 'Acessórios',  'slug': 'acessorios'}
+        ] %}
+        <a href="{{ url_for('main.produtos', categoria=item.slug) }}" class="cat-card cat-card--placeholder">
+          <div class="cat-card-img">
+            <span class="cat-placeholder-icon">{{ loop.index }}</span>
+          </div>
+          <span class="cat-card-label">{{ item.name }}</span>
+        </a>
+        {% endfor %}
+        {% endfor %}
+      </div>
+    </div>
+  </section>
 
 
-  <!-- ── Banner CTA ── -->
+  <!-- ══════════════════════════════════════════════
+       BANNER CTA (citação editorial)
+  ══════════════════════════════════════════════ -->
   <div class="mid-banner">
-    <p>"{{ banner.quote }}"</p>
-    <a href="{{ url_for('main.produtos') }}">{{ banner.cta_text }}</a>
+    <p>"{{ banner.quote | default('A moda é a armadura para enfrentar a vida cotidiana.') }}"</p>
+    <a href="{{ url_for('main.produtos') }}">{{ banner.cta_text | default('Ver a coleção completa') }}</a>
   </div>
 
-  <!-- ── Promoções Carousel ── -->
+
+  <!-- ══════════════════════════════════════════════
+       PROMOÇÕES ESPECIAIS — carousel
+  ══════════════════════════════════════════════ -->
   <section class="promo-section">
     <div class="promo-inner">
-      <div class="promo-title-wrap">
-        <h2 class="section-title" style="margin-bottom:0;">Promoções Especiais</h2>
-        <span class="promo-badge">{{ promo_badge }}</span>
+
+      <div class="promo-header">
+        <h2 class="section-title promo-title">Promoções especiais</h2>
+        <span class="promo-badge">{{ promo_badge | default('Oferta limitada') }}</span>
       </div>
 
       <div class="promo-carousel-wrap" id="carousel2">
         <div class="promo-slides">
           {% for promo in promotions %}
-            <div class="promo-slide">
-              <div class="promo-card">
-                <img src="{{ promo.image }}" alt="{{ promo.name }}">
-                <div class="promo-info">
-                  <h3>{{ promo.name }}</h3>
-                  <p class="promo-old">R$ {{ '%.2f'|format(promo.original_price) }}</p>
-                  <p class="promo-new">R$ {{ '%.2f'|format(promo.sale_price) }}</p>
-                  <button class="btn-promo"
-                          {% if promo.id %}data-product-id="{{ promo.id }}"{% endif %}>
-                    Comprar
-                  </button>
+          <div class="promo-slide">
+            <div class="promo-card">
+              <div class="promo-card-img-wrap">
+                <img src="{{ promo.image }}" alt="{{ promo.name }}" loading="lazy">
+                {% set pct = ((promo.original_price - promo.sale_price) / promo.original_price * 100) | round | int %}
+                {% if pct > 0 %}
+                <span class="promo-discount-badge">-{{ pct }}%</span>
+                {% endif %}
+              </div>
+              <div class="promo-info">
+                {% if promo.category %}
+                <span class="promo-category">{{ promo.category }}</span>
+                {% endif %}
+                <h3 class="promo-name">{{ promo.name }}</h3>
+                <div class="promo-price-row">
+                  <span class="promo-old">R$ {{ '%.2f'|format(promo.original_price) }}</span>
+                  <span class="promo-new">R$ {{ '%.2f'|format(promo.sale_price) }}</span>
                 </div>
+                <button
+                  class="btn-promo"
+                  {% if promo.id %}data-product-id="{{ promo.id }}"{% endif %}
+                >Comprar agora</button>
               </div>
             </div>
+          </div>
           {% else %}
-            <p style="text-align:center; color:#888; padding:3rem 0; width:100%;">
-              Nenhuma promoção disponível no momento.
-            </p>
+          <p class="promo-empty">Nenhuma promoção disponível no momento.</p>
           {% endfor %}
         </div>
-        <button class="promo-btn promo-prev">&#8592;</button>
-        <button class="promo-btn promo-next">&#8594;</button>
+        <button class="promo-btn promo-prev" aria-label="Anterior">&#8592;</button>
+        <button class="promo-btn promo-next" aria-label="Próximo">&#8594;</button>
       </div>
+
     </div>
   </section>
 
-  <!-- ── Depoimentos ── -->
+
+  <!-- ══════════════════════════════════════════════
+       DEPOIMENTOS
+  ══════════════════════════════════════════════ -->
   <section class="testimonials-section">
-    <h2 class="section-title">O que nossos clientes dizem</h2>
-    <div class="testimonials-grid">
-      {% for t in testimonials %}
+    <div class="testimonials-inner">
+      <h2 class="section-title">O que nossos clientes dizem</h2>
+      <div class="testimonials-grid">
+        {% for t in testimonials %}
         <div class="testimonial-card">
-          <div class="star-row">
-            {% for i in range(t.rating) %}
-              <span class="star">★</span>
+          <div class="star-row" aria-label="{{ t.rating }} de 5 estrelas">
+            {% for i in range(5) %}
+            <span class="star{% if i >= t.rating %} star--empty{% endif %}" aria-hidden="true">★</span>
             {% endfor %}
           </div>
           <p class="testimonial-text">{{ t.text }}</p>
           <p class="testimonial-author">— {{ t.author }}</p>
         </div>
-      {% else %}
-        {# fallback estático caso testimonials não seja fornecido #}
+        {% else %}
         <div class="testimonial-card">
-          <div class="star-row">
-            {% for i in range(5) %}<span class="star">★</span>{% endfor %}
-          </div>
-          <p class="testimonial-text">A qualidade das roupas é impecável! Sempre encontro exatamente o que preciso. Recomendo a todos!</p>
+          <div class="star-row">{% for i in range(5) %}<span class="star">★</span>{% endfor %}</div>
+          <p class="testimonial-text">A qualidade das peças é impecável! Sempre encontro o que preciso e o atendimento é excelente.</p>
           <p class="testimonial-author">— Ana Silva</p>
         </div>
         <div class="testimonial-card">
-          <div class="star-row">
-            {% for i in range(5) %}<span class="star">★</span>{% endfor %}
-          </div>
-          <p class="testimonial-text">Ótimo atendimento e entrega super rápida. Com certeza farei mais compras no futuro!</p>
+          <div class="star-row">{% for i in range(5) %}<span class="star">★</span>{% endfor %}</div>
+          <p class="testimonial-text">Entrega super rápida e as roupas chegaram perfeitamente embaladas. Com certeza compro de novo!</p>
           <p class="testimonial-author">— João Pereira</p>
         </div>
         <div class="testimonial-card">
-          <div class="star-row">
-            {% for i in range(5) %}<span class="star">★</span>{% endfor %}
-          </div>
-          <p class="testimonial-text">Adoro a variedade e os preços. Loja confiável e com produtos incríveis!</p>
+          <div class="star-row">{% for i in range(5) %}<span class="star">★</span>{% endfor %}</div>
+          <p class="testimonial-text">Adoro a variedade e os preços honestos. Uma loja de confiança que recomendo para todo mundo.</p>
           <p class="testimonial-author">— Maria Oliveira</p>
         </div>
-      {% endfor %}
+        {% endfor %}
+      </div>
     </div>
   </section>
-
 
 {% endblock %}

@@ -9,69 +9,81 @@
 
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/animation.css') }}">
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
   {% block extra_head %}{% endblock %}
 
   <style>
     :root {
-      --black: #0a0a0a;
-      --white: #fafaf8;
-      --cream: #f5f0e8;
-      --accent: #c8102e;
+      --black:        #0a0a0a;
+      --black-soft:   #111111;
+      --white:        #fafaf8;
+      --cream:        #f5f0e8;
+      --accent:       #c8102e;
+      --accent-hover: #a00d25;
       --accent-light: #f9dde2;
-      --gray-mid: #6b6b6b;
-      --border: #e2ddd5;
+      --gray-mid: #eae0e0;
+      --gray-muted:   #999999;
+      --border:       #e2ddd5;
+      --border-dark:  #222222;
     }
 
-    * { box-sizing: border-box; }
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
 
     body {
       background-color: var(--white);
       font-family: 'DM Sans', sans-serif;
       color: var(--black);
       margin: 0;
+      -webkit-font-smoothing: antialiased;
     }
 
     .font-display { font-family: 'Playfair Display', serif; }
 
-    /* ── Flash messages ── */
-    #flash-message {
-      background: var(--black);
-      color: var(--white);
-      padding: 10px 0;
+    /* ════════════════════════════════════════
+       PROMO STRIP (topo)
+    ════════════════════════════════════════ */
+    .promo-strip {
+      background: var(--accent);
+      color: #fff;
+      padding: 9px 1.5rem;
       text-align: center;
-      font-size: 0.85rem;
-      letter-spacing: 0.04em;
-      transition: opacity 0.5s ease-out;
+      font-size: 0.78rem;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
     }
 
-    /* ── Navbar ── */
+    /* ════════════════════════════════════════
+       NAVBAR
+    ════════════════════════════════════════ */
     .navbar {
       background: var(--black);
       color: var(--white);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 2rem;
-      height: 64px;
+      padding: 0 2.5rem;
+      height: 68px;
       position: sticky;
       top: 0;
-      z-index: 40;
-      border-bottom: 1px solid #1f1f1f;
+      z-index: 100;
+      border-bottom: 1px solid var(--border-dark);
     }
 
     .navbar-brand {
       font-family: 'Playfair Display', serif;
-      font-size: 1.4rem;
+      font-size: 1.45rem;
       font-weight: 700;
-      letter-spacing: 0.03em;
+      letter-spacing: 0.04em;
       color: var(--white);
       text-decoration: none;
       white-space: nowrap;
+      flex-shrink: 0;
     }
-
     .navbar-brand span { color: var(--accent); }
 
     .navbar-links {
@@ -84,201 +96,339 @@
     }
 
     .navbar-links a {
-      color: #b0b0b0;
+      color: #9a9a9a;
       text-decoration: none;
-      font-size: 0.875rem;
+      font-size: 0.8rem;
       font-weight: 500;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
       transition: color 0.2s;
+      white-space: nowrap;
     }
-
     .navbar-links a:hover { color: var(--white); }
 
+    /* botão Entrar / Minha Conta */
     .btn-conta {
       background: var(--white) !important;
       color: var(--black) !important;
-      padding: 7px 18px;
-      border-radius: 2px;
-      font-size: 0.8rem !important;
-      font-weight: 600 !important;
-      letter-spacing: 0.08em !important;
+      padding: 8px 20px !important;
+      border-radius: 2px !important;
+      font-size: 0.75rem !important;
+      font-weight: 700 !important;
+      letter-spacing: 0.09em !important;
       text-transform: uppercase !important;
-      transition: background 0.2s, color 0.2s !important;
+      transition: background 0.2s !important;
     }
-
     .btn-conta:hover {
       background: var(--cream) !important;
       color: var(--black) !important;
     }
 
-    /* ── Footer ── */
-    .site-footer {
-      background: var(--black);
-      color: #aaa;
-      padding: 4rem 2rem 2rem;
-      margin-top: 5rem;
+    /* dropdown */
+    .dropdown { position: relative; }
+    .dropdown-menu {
+      position: absolute;
+      top: calc(100% + 12px);
+      left: 50%;
+      transform: translateX(-50%) translateY(6px);
+      min-width: 200px;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 4px;
+      padding: 8px 0;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.2s, transform 0.2s, visibility 0.2s;
+      z-index: 200;
+    }
+    .dropdown:hover .dropdown-menu {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(-50%) translateY(0);
+    }
+    .dropdown-menu li { list-style: none; }
+    .dropdown-menu a {
+      display: block;
+      padding: 10px 18px;
+      font-size: 0.8rem !important;
+      letter-spacing: 0.06em !important;
+      color: #aaa !important;
+      text-transform: none !important;
+      white-space: nowrap;
+      transition: color 0.2s, background 0.2s;
+    }
+    .dropdown-menu a:hover {
+      color: var(--white) !important;
+      background: #222;
     }
 
-    .footer-grid {
-      max-width: 1200px;
-      margin: 0 auto;
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
+    /* ════════════════════════════════════════
+       BENEFÍCIOS STRIP
+    ════════════════════════════════════════ */
+    .benefits-strip {
+      display: flex;
+      align-items: center;
+      justify-content: center;
       gap: 3rem;
+      padding: 14px 2rem;
+      background: var(--cream);
+      border-bottom: 1px solid var(--border);
+    }
+    .benefit-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: var(--black);
+      letter-spacing: 0.03em;
+    }
+    .benefit-item svg {
+      width: 18px;
+      height: 18px;
+      stroke: var(--accent);
+      flex-shrink: 0;
     }
 
-    .footer-heading {
+    /* ════════════════════════════════════════
+       FLASH MESSAGES
+    ════════════════════════════════════════ */
+    @keyframes slideInRight {
+      from { opacity: 0; transform: translateX(110%); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    .flash-message { animation: slideInRight 0.35s ease-out; }
+
+    /* ════════════════════════════════════════
+       SEÇÃO — TITLE COMUM
+    ════════════════════════════════════════ */
+    .section-title {
       font-family: 'Playfair Display', serif;
-      font-size: 0.95rem;
-      color: var(--white);
+      font-size: clamp(1.6rem, 3vw, 2.2rem);
       font-weight: 700;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      margin-bottom: 1rem;
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+    .section-title::after {
+      content: '';
+      display: block;
+      width: 44px;
+      height: 3px;
+      background: var(--accent);
+      margin: 0.55rem auto 0;
+      border-radius: 2px;
     }
 
-    .footer-links { list-style: none; padding: 0; margin: 0; }
-    .footer-links li { margin-bottom: 0.45rem; }
-    .footer-links a {
-      color: #888;
+    /* ════════════════════════════════════════
+       FOOTER
+    ════════════════════════════════════════ */
+    .site-footer {
+      background: var(--black-soft);
+      color: #999;
+      padding: 5rem 2.5rem 2rem;
+      margin-top: 6rem;
+      font-family: 'DM Sans', sans-serif;
+    }
+
+    .footer-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    .footer-top {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr 1.4fr;
+      gap: 3rem;
+      padding-bottom: 3rem;
+      border-bottom: 1px solid var(--border-dark);
+    }
+
+    /* brand col */
+    .footer-brand-logo {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--white);
+      margin-bottom: 1rem;
+      display: block;
+    }
+    .footer-brand-logo span { color: var(--accent); }
+    .footer-brand-desc {
+      font-size: 0.875rem;
+      line-height: 1.8;
+      color: #666;
+      max-width: 260px;
+    }
+
+    /* social */
+    .footer-social {
+      display: flex;
+      gap: 10px;
+      margin-top: 1.5rem;
+    }
+    .footer-social a {
+      width: 36px;
+      height: 36px;
+      border: 1px solid #2a2a2a;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      transition: border-color 0.2s;
+    }
+    .footer-social a svg {
+      width: 15px;
+      height: 15px;
+      stroke: #666;
+      transition: stroke 0.2s;
+    }
+    .footer-social a:hover { border-color: var(--accent); }
+    .footer-social a:hover svg { stroke: var(--accent); }
+
+    /* cols */
+    .footer-col-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--white);
+      margin-bottom: 1.25rem;
+    }
+    .footer-col ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .footer-col ul li { margin-bottom: 0.6rem; }
+    .footer-col ul li a {
+      color: #666;
       text-decoration: none;
       font-size: 0.875rem;
       transition: color 0.2s;
     }
-    .footer-links a:hover { color: var(--white); }
+    .footer-col ul li a:hover { color: var(--white); }
 
-    .footer-social { display: flex; gap: 1rem; margin-top: 0.5rem; }
-    .footer-social a img {
-      width: 28px;
-      filter: invert(1) opacity(0.6);
-      transition: opacity 0.2s;
+    /* contact col */
+    .footer-contact-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 0.875rem;
+      color: #666;
+      margin-bottom: 0.75rem;
+      line-height: 1.6;
     }
-    .footer-social a:hover img { opacity: 1; }
+    .footer-contact-item svg {
+      width: 15px;
+      height: 15px;
+      stroke: var(--accent);
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
 
-    .footer-payments { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem; }
+    /* payments */
+    .footer-payments {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 1.25rem;
+    }
     .footer-payments img {
-      height: 24px;
-      filter: invert(1) opacity(0.5);
-      transition: opacity 0.2s;
+      height: 22px;
+      filter: invert(1) brightness(0.45);
+      transition: filter 0.2s;
     }
-    .footer-payments img:hover { opacity: 0.9; }
+    .footer-payments img:hover { filter: invert(1) brightness(0.75); }
 
-    .footer-divider {
-      border: none;
-      border-top: 1px solid #222;
-      max-width: 1200px;
-      margin: 2.5rem auto 1.5rem;
-    }
-
+    /* bottom bar */
     .footer-bottom {
-      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      padding-top: 1.75rem;
       font-size: 0.78rem;
-      color: #555;
-      line-height: 1.8;
+      color: #444;
     }
+    .footer-bottom a {
+      color: #444;
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .footer-bottom a:hover { color: #888; }
+    .footer-bottom-links { display: flex; gap: 1.5rem; }
 
-    /* ── Mobile nav ── */
-    @media (max-width: 640px) {
-      .navbar {
-        flex-direction: column;
-        height: auto;
-        padding: 1rem;
-        gap: 0.75rem;
+    /* ════════════════════════════════════════
+       RESPONSIVO
+    ════════════════════════════════════════ */
+    @media (max-width: 1024px) {
+      .footer-top { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 768px) {
+      .navbar { padding: 0 1.25rem; height: auto; flex-wrap: wrap; gap: 0; }
+      .navbar-brand { padding: 1rem 0; }
+      .navbar-links {
+        gap: 1rem;
+        flex-wrap: wrap;
+        justify-content: center;
+        padding: 0.75rem 0;
+        width: 100%;
+        border-top: 1px solid var(--border-dark);
       }
-      .navbar-links { gap: 1rem; flex-wrap: wrap; justify-content: center; }
-      .footer-grid { grid-template-columns: 1fr; gap: 2rem; }
+      .benefits-strip { gap: 1rem; flex-wrap: wrap; }
+      .footer-top { grid-template-columns: 1fr; gap: 2rem; }
+      .footer-bottom { flex-direction: column; text-align: center; }
     }
   </style>
 </head>
 <body>
+
+  <!-- ── Promo strip ── -->
+  <div class="promo-strip">
+    Frete grátis em compras acima de R$&nbsp;249 &nbsp;·&nbsp; Até 12× sem juros &nbsp;·&nbsp; Troca grátis em 30 dias
+  </div>
 
   <!-- ── Flash Messages ── -->
   <div class="fixed top-4 right-4 z-50 space-y-3 w-full max-w-sm px-4">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
-
           {% set styles = {
-            'success': 'bg-green-500 border-green-600',
-            'error': 'bg-red-500 border-red-600',
+            'success': 'bg-green-600 border-green-700',
+            'error':   'bg-red-600 border-red-700',
             'warning': 'bg-yellow-500 border-yellow-600',
-            'info': 'bg-blue-500 border-blue-600'
+            'info':    'bg-blue-600 border-blue-700'
           } %}
-
-          <div
-            class="flash-message {{ styles.get(category, 'bg-gray-800 border-gray-900') }} text-white border-l-4 shadow-xl rounded-xl p-4 flex items-start justify-between animate-slide-in transition-opacity duration-500"
-          >
-            <span>{{ message }}</span>
-
-            <button
-              onclick="closeFlash(this)"
-              class="ml-4 text-white/80 hover:text-white text-xl leading-none"
-            >
-              &times;
-            </button>
+          <div class="flash-message {{ styles.get(category, 'bg-zinc-800 border-zinc-900') }} text-white border-l-4 shadow-2xl rounded-lg p-4 flex items-start justify-between">
+            <span class="text-sm leading-snug">{{ message }}</span>
+            <button onclick="closeFlash(this)" class="ml-4 text-white/70 hover:text-white text-xl leading-none flex-shrink-0">&times;</button>
           </div>
-
         {% endfor %}
       {% endif %}
     {% endwith %}
   </div>
 
-  <style>
-    @keyframes slideIn {
-      from {
-        opacity: 0;
-        transform: translateX(100%);
-      }
-      to {
-        opacity: 1;
-        transform: translateX(0);
-      }
-    }
-
-    .animate-slide-in {
-      animation: slideIn 0.4s ease-out;
-    }
-  </style>
-
-  <script>
-    function closeFlash(button) {
-      const flash = button.parentElement;
-
-      flash.style.opacity = "0";
-      flash.style.transform = "translateX(100%)";
-
-      setTimeout(() => flash.remove(), 500);
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-      document.querySelectorAll('.flash-message').forEach(flash => {
-        setTimeout(() => {
-          flash.style.opacity = "0";
-          flash.style.transform = "translateX(100%)";
-
-          setTimeout(() => flash.remove(), 500);
-        }, 4000);
-      });
-    });
-  </script>
-
   <!-- ── Navbar ── -->
   <nav class="navbar">
     <a href="{{ url_for('main.home') }}" class="navbar-brand">
-      {% if site and site.name %}
-        {{ site.name }}
-      {% else %}
-        Pollo<span>.</span>Modas
-      {% endif %}
+      {% if site and site.name %}{{ site.name }}{% else %}Pollo<span>.</span>Modas{% endif %}
     </a>
+
     <ul class="navbar-links">
-      <li><a href="{{ url_for('main.produtos') }}">Produtos</a></li>
+      <li><a href="{{ url_for('main.produtos') }}">Todos os produtos</a></li>
+
+      {% for categoria in navbar_categories %}
+      <li><a href="{{ url_for('main.produtos', categoria=categoria) }}">{{ categoria }}</a></li>
+      {% endfor %}
+
       <li><a href="{{ url_for('main.sobre') }}">Sobre</a></li>
       <li><a href="/contato">Contato</a></li>
+
       {% if current_user.is_authenticated %}
         {% if current_user.is_admin %}
-          <li><a href="{{ url_for('admin.admin_dashboard') }}">Admin</a></li>
+        <li><a href="{{ url_for('admin.admin_dashboard') }}">Admin</a></li>
         {% endif %}
         <li><a href="{{ url_for('main.conta') }}" class="btn-conta">Minha Conta</a></li>
       {% else %}
@@ -286,136 +436,178 @@
       {% endif %}
     </ul>
   </nav>
-<!--  Feminino
-Masculino
-Infantil
-Marcas
-Beleza
-Esporte
-Ofertas
-Eletrônicos -->
+
+  <!-- ── Benefits strip ── -->
+  <div class="benefits-strip">
+    <span class="benefit-item">
+      <svg fill="none" stroke-width="1.8" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9 17H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v3" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 21l2-2 4 4 4-4-2-2" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 17v4" stroke-linecap="round"/><circle cx="17" cy="13" r="3" stroke-linecap="round"/></svg>
+      Entrega rápida
+    </span>
+    <span class="benefit-item">
+      <svg fill="none" stroke-width="1.8" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><polyline points="23 4 23 10 17 10" stroke-linecap="round" stroke-linejoin="round"/><path d="M20.49 15a9 9 0 1 1-.08-4.99" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Troca grátis em 30 dias
+    </span>
+    <span class="benefit-item">
+      <svg fill="none" stroke-width="1.8" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Compra 100% segura
+    </span>
+    <span class="benefit-item">
+      <svg fill="none" stroke-width="1.8" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="4" width="22" height="16" rx="2" ry="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="1" y1="10" x2="23" y2="10" stroke-linecap="round"/></svg>
+      Até 12× sem juros
+    </span>
+  </div>
 
   <!-- ── Conteúdo principal ── -->
-  <main>
-    {% block content %}{% endblock %}
-  </main>
+  <main>{% block content %}{% endblock %}</main>
 
   <!-- ── Rodapé ── -->
   <footer class="site-footer">
-    <div class="footer-grid">
+    <div class="footer-inner">
+      <div class="footer-top">
 
-      <!-- Coluna 1: Redes Sociais -->
-      <div>
-        <p class="footer-heading">Siga a gente</p>
-        <div class="footer-social">
-          {% if footer and footer.social_links %}
-            {% for social in footer.social_links %}
-              <a href="{{ social.url }}" target="_blank" rel="noopener" aria-label="{{ social.label }}">
-                <img src="{{ url_for('static', filename='img/rodape/' + social.icon_file) }}"
-                     alt="{{ social.label }}">
-              </a>
-            {% endfor %}
-          {% else %}
-            {# fallback estático #}
-            <a href="#"><img src="{{ url_for('static', filename='img/rodape/facebook.png') }}"   alt="Facebook"></a>
-            <a href="#"><img src="{{ url_for('static', filename='img/rodape/instagram.png') }}"  alt="Instagram"></a>
-            <a href="#"><img src="{{ url_for('static', filename='img/rodape/twitter.png') }}"    alt="Twitter"></a>
-          {% endif %}
-        </div>
-        <p style="margin-top:1.5rem; font-size:0.8rem; color:#555; line-height:1.7">
-          {% if footer and footer.brand_description %}
-            {{ footer.brand_description }}
-          {% else %}
-            Moda com identidade.<br>Qualidade que você sente.
-          {% endif %}
-        </p>
-      </div>
-
-      <!-- Coluna 2: Links institucionais e atendimento -->
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem;">
+        <!-- Col 1: brand -->
         <div>
-          <p class="footer-heading">Institucional</p>
-          <ul class="footer-links">
-            {% if footer and footer.nav_links %}
-              {% for link in footer.nav_links %}
-                <li><a href="{{ link.url }}">{{ link.label }}</a></li>
+          <span class="footer-brand-logo">
+            {% if footer and footer.brand_name %}{{ footer.brand_name }}{% else %}Pollo<span>.</span>Modas{% endif %}
+          </span>
+          <p class="footer-brand-desc">
+            {% if footer and footer.brand_description %}{{ footer.brand_description }}{% else %}Moda com identidade. Qualidade que você sente na primeira peça.{% endif %}
+          </p>
+          <div class="footer-social">
+            {% if footer and footer.social_links %}
+              {% for social in footer.social_links %}
+              <a href="{{ social.url }}" target="_blank" rel="noopener" aria-label="{{ social.label }}">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><use href="#icon-{{ social.label | lower }}"/></svg>
+              </a>
               {% endfor %}
+            {% else %}
+              <a href="#" aria-label="Instagram">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+              </a>
+              <a href="#" aria-label="Facebook">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
+              </a>
+              <a href="#" aria-label="TikTok">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5"/></svg>
+              </a>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Col 2: Institucional -->
+        <div class="footer-col">
+          <p class="footer-col-title">Institucional</p>
+          <ul>
+            {% if footer and footer.nav_links %}
+              {% for link in footer.nav_links %}<li><a href="{{ link.url }}">{{ link.label }}</a></li>{% endfor %}
             {% else %}
               <li><a href="{{ url_for('main.sobre') }}">Sobre nós</a></li>
               <li><a href="{{ url_for('main.politica_privacidade') }}">Privacidade</a></li>
               <li><a href="#">Condições de uso</a></li>
+              <li><a href="#">Trabalhe conosco</a></li>
             {% endif %}
           </ul>
         </div>
-        <div>
-          <p class="footer-heading">Atendimento</p>
-          <ul class="footer-links">
+
+        <!-- Col 3: Atendimento -->
+        <div class="footer-col">
+          <p class="footer-col-title">Atendimento</p>
+          <ul>
             {% if footer and footer.categories %}
-              {% for cat in footer.categories %}
-                <li><a href="{{ cat.url }}">{{ cat.label }}</a></li>
-              {% endfor %}
+              {% for cat in footer.categories %}<li><a href="{{ cat.url }}">{{ cat.label }}</a></li>{% endfor %}
             {% else %}
-              <li><a href="#">Central de Ajuda</a></li>
-              <li><a href="/contato">Contato para marcas</a></li>
-              <li><a href="#">Trocas e Devoluções</a></li>
+              <li><a href="#">Central de ajuda</a></li>
+              <li><a href="/contato">Fale conosco</a></li>
+              <li><a href="#">Trocas e devoluções</a></li>
+              <li><a href="#">Rastrear pedido</a></li>
             {% endif %}
           </ul>
         </div>
-      </div>
 
-      <!-- Coluna 3: Pagamento e contato -->
-      <div>
-        <p class="footer-heading">Formas de pagamento</p>
-        <div class="footer-payments">
-          <img src="{{ url_for('static', filename='img/rodape/logotipo-visa.png') }}"  alt="Visa">
-          <img src="{{ url_for('static', filename='img/rodape/cartao.png') }}"         alt="Mastercard">
-          <img src="{{ url_for('static', filename='img/rodape/amex.png') }}"           alt="Amex">
-          <img src="{{ url_for('static', filename='img/rodape/paypal.png') }}"         alt="Paypal">
-        </div>
-
-        {% if footer and footer.contact %}
-          <p class="footer-heading" style="margin-top:1.75rem;">Contato</p>
-          <ul class="footer-links">
+        <!-- Col 4: Contato + Pagamento -->
+        <div class="footer-col">
+          <p class="footer-col-title">Contato</p>
+          {% if footer and footer.contact %}
             {% if footer.contact.address %}
-              <li>{{ footer.contact.address }}</li>
+            <div class="footer-contact-item">
+              <svg fill="none" stroke-width="1.8" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="10" r="3" stroke-linecap="round"/></svg>
+              <span>{{ footer.contact.address }}</span>
+            </div>
             {% endif %}
             {% if footer.contact.phone %}
-              <li><a href="tel:{{ footer.contact.phone }}">{{ footer.contact.phone }}</a></li>
+            <div class="footer-contact-item">
+              <svg fill="none" stroke-width="1.8" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.63 3.4 2 2 0 0 1 3.6 1.22h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.91a16 16 0 0 0 6 6l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 16.92z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <a href="tel:{{ footer.contact.phone }}" style="color:inherit">{{ footer.contact.phone }}</a>
+            </div>
             {% endif %}
             {% if footer.contact.email %}
-              <li><a href="mailto:{{ footer.contact.email }}">{{ footer.contact.email }}</a></li>
+            <div class="footer-contact-item">
+              <svg fill="none" stroke-width="1.8" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" stroke-linecap="round" stroke-linejoin="round"/><polyline points="22,6 12,13 2,6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <a href="mailto:{{ footer.contact.email }}" style="color:inherit">{{ footer.contact.email }}</a>
+            </div>
             {% endif %}
-            {% if footer.contact.hours %}
-              <li>{{ footer.contact.hours }}</li>
-            {% endif %}
-          </ul>
-        {% endif %}
+          {% else %}
+            <div class="footer-contact-item">
+              <svg fill="none" stroke-width="1.8" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" stroke-linecap="round" stroke-linejoin="round"/><polyline points="22,6 12,13 2,6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <a href="mailto:contato@pollo.com.br" style="color:inherit">contato@pollo.com.br</a>
+            </div>
+          {% endif %}
+
+          <p class="footer-col-title" style="margin-top:1.75rem;">Pagamento</p>
+          <div class="footer-payments">
+            <img src="{{ url_for('static', filename='img/rodape/logotipo-visa.png') }}" alt="Visa">
+            <img src="{{ url_for('static', filename='img/rodape/cartao.png') }}" alt="Mastercard">
+            <img src="{{ url_for('static', filename='img/rodape/amex.png') }}" alt="Amex">
+            <img src="{{ url_for('static', filename='img/rodape/paypal.png') }}" alt="PayPal">
+          </div>
+        </div>
+
       </div>
 
-    </div>
-
-    <hr class="footer-divider">
-
-    <div class="footer-bottom">
-      {% if footer %}
-        <p>Copyright &copy; {{ footer.brand_name }} &mdash; {{ footer.copyright_year }}. {{ footer.copyright_text }}</p>
-      {% else %}
-        <p>Copyright &copy; Pollo Modas Brasil S.A. 2026</p>
-      {% endif %}
-
-      {% if footer and footer.legal_links %}
-        <p>
+      <div class="footer-bottom">
+        <span>
+          {% if footer %}
+            &copy; {{ footer.copyright_year }} {{ footer.brand_name }}. {{ footer.copyright_text }}
+          {% else %}
+            &copy; 2026 Pollo Modas. Todos os direitos reservados.
+          {% endif %}
+        </span>
+        {% if footer and footer.legal_links %}
+        <div class="footer-bottom-links">
           {% for link in footer.legal_links %}
-            <a href="{{ link.url }}" style="color:#555; text-decoration:none; transition:color 0.2s;"
-               onmouseover="this.style.color='#999'" onmouseout="this.style.color='#555'">
-              {{ link.label }}
-            </a>
-            {% if not loop.last %} &nbsp;·&nbsp; {% endif %}
+            <a href="{{ link.url }}">{{ link.label }}</a>
           {% endfor %}
-        </p>
-      {% endif %}
+        </div>
+        {% else %}
+        <div class="footer-bottom-links">
+          <a href="#">Privacidade</a>
+          <a href="#">Termos de uso</a>
+          <a href="#">Cookies</a>
+        </div>
+        {% endif %}
+      </div>
     </div>
   </footer>
+
+  <script>
+    function closeFlash(button) {
+      const flash = button.parentElement;
+      flash.style.opacity = '0';
+      flash.style.transform = 'translateX(110%)';
+      flash.style.transition = 'opacity 0.4s, transform 0.4s';
+      setTimeout(() => flash.remove(), 420);
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('.flash-message').forEach(flash => {
+        setTimeout(() => {
+          flash.style.opacity = '0';
+          flash.style.transform = 'translateX(110%)';
+          flash.style.transition = 'opacity 0.4s, transform 0.4s';
+          setTimeout(() => flash.remove(), 420);
+        }, 4500);
+      });
+    });
+  </script>
 
   {% block extra_scripts %}{% endblock %}
 </body>

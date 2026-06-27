@@ -44,6 +44,7 @@ def get_home_data() -> dict:
 
     return {
         "site":         site,
+        "categories": _get_categories(),
         "hero_slides":  _get_hero_slides(),
         "products":     _get_active_products(),
         "promotions":   _get_active_promotions(),
@@ -53,6 +54,10 @@ def get_home_data() -> dict:
         "footer":       _build_footer(site),
     }
 
+# ── Categorias ────────────────────────────────────────────────────────────────
+
+def _get_categories() -> list:
+    return CategoryLink.query.all()
 
 # ── Helpers privados ──────────────────────────────────────────────────────────
 

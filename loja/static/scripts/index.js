@@ -1,82 +1,132 @@
+/**
+ * index.js — Pollo Modas
+ * Controla o Product Banner carousel principal:
+ *   • navegação prev/next/dots
+ *   • autoplay com pausa no hover
+ *   • mini-slider de imagens (hover na img-side)
+ *   • swipe touch
+ */
 (function () {
-  const track   = document.getElementById('pbTrack');
-  const dots    = document.querySelectorAll('#pbDots .pb-dot');
-  const slides  = track.querySelectorAll('.pb-slide');
-  const total   = slides.length;
-  let   current = 0;
-  let   timer   = null;
+  'use strict';
 
+  const track  = document.getElementById('pbTrack');
+  const dotsEl = document.getElementById('pbDots');
+
+  if (!track) return; // página sem banner, sai sem erros
+
+  const dots   = dotsEl ? dotsEl.querySelectorAll('.pb-dot') : [];
+  const slides = track.querySelectorAll('.pb-slide');
+  const total  = slides.length;
+  let current  = 0;
+  let timer    = null;
+
+  // Oculta botões se só existe 1 slide
   if (total <= 1) {
-    document.getElementById('pbPrev').style.display = 'none';
-    document.getElementById('pbNext').style.display = 'none';
+    const prevBtn = document.getElementById('pbPrev');
+    const nextBtn = document.getElementById('pbNext');
+    if (prevBtn) prevBtn.hidden = true;
+    if (nextBtn) nextBtn.hidden = true;
+    if (dotsEl)  dotsEl.hidden  = true;
   }
 
-  /* ── Navega para slide i ──────────────────────────────── */
+  /* ── Navega para o slide i ─────────────────────────── */
   function goTo(i) {
-    current = (i + total) % total;
+    current = ((i % total) + total) % total;
     track.style.transform = `translateX(-${current * 100}%)`;
 
-    dots.forEach((d, idx) => d.classList.toggle('active', idx === current));
+    dots.forEach((d, idx) => {
+      d.classList.toggle('active', idx === current);
+    });
 
-    /* mini-slider de imagens: reseta para imagem 1 */
+    // Reseta mini-slider de imagens de todos os slides
     slides.forEach(slide => {
-      const imgs  = slide.querySelectorAll('.pb-img');
-      const idots = slide.querySelectorAll('.pb-img-dot');
-      imgs.forEach((img, j) => img.classList.toggle('active', j === 0));
-      idots.forEach((d, j) => d.classList.toggle('active', j === 0));
+      slide.querySelectorAll('.pb-img').forEach((img, j) =>
+        img.classList.toggle('active', j === 0)
+      );
+      slide.querySelectorAll('.pb-img-dot').forEach((d, j) =>
+        d.classList.toggle('active', j === 0)
+      );
     });
 
     resetTimer();
   }
 
-  /* ── Autoplay ─────────────────────────────────────────── */
-  function resetTimer() {
-    clearInterval(timer);
+  /* ── Autoplay ──────────────────────────────────────── */
+  function startTimer() {
     if (total > 1) timer = setInterval(() => goTo(current + 1), 6000);
   }
 
-  document.getElementById('pbPrev').addEventListener('click', () => goTo(current - 1));
-  document.getElementById('pbNext').addEventListener('click', () => goTo(current + 1));
+  function resetTimer() {
+    clearInterval(timer);
+    startTimer();
+  }
+
+  /* ── Botões prev / next ────────────────────────────── */
+  const prevBtn = document.getElementById('pbPrev');
+  const nextBtn = document.getElementById('pbNext');
+  if (prevBtn) prevBtn.addEventListener('click', () => goTo(current - 1));
+  if (nextBtn) nextBtn.addEventListener('click', () => goTo(current + 1));
+
+  /* ── Dots ──────────────────────────────────────────── */
   dots.forEach((d, i) => d.addEventListener('click', () => goTo(i)));
 
-  /* ── Mini-slider de imagens (hover / swipe tap) ───────── */
+  /* ── Mini-slider de imagens (hover na img-side) ────── */
   slides.forEach(slide => {
     const imgs  = slide.querySelectorAll('.pb-img');
     const idots = slide.querySelectorAll('.pb-img-dot');
     if (imgs.length <= 1) return;
 
-    let imgIdx = 0;
+    let imgIdx   = 0;
+    let imgTimer = null;
 
     function showImg(i) {
-      imgIdx = (i + imgs.length) % imgs.length;
-      imgs.forEach((img, j) => img.classList.toggle('active', j === imgIdx));
-      idots.forEach((d,  j) => d.classList.toggle('active',  j === imgIdx));
+      imgIdx = ((i % imgs.length) + imgs.length) % imgs.length;
+      imgs.forEach((img, j)  => img.classList.toggle('active', j === imgIdx));
+      idots.forEach((d, j) => d.classList.toggle('active', j === imgIdx));
     }
 
-    /* avança imagem ao passar o mouse sobre a metade direita */
-    let imgTimer = null;
-    slide.querySelector('.pb-img-side').addEventListener('mouseenter', () => {
-      imgTimer = setInterval(() => showImg(imgIdx + 1), 1200);
+    const imgSide = slide.querySelector('.pb-img-side');
+    if (!imgSide) return;
+
+    imgSide.addEventListener('mouseenter', () => {
+      imgTimer = setInterval(() => showImg(imgIdx + 1), 1100);
     });
-    slide.querySelector('.pb-img-side').addEventListener('mouseleave', () => {
+    imgSide.addEventListener('mouseleave', () => {
       clearInterval(imgTimer);
       showImg(0);
     });
   });
 
-  /* ── Swipe touch no banner principal ─────────────────── */
-  let touchX = null;
-  track.addEventListener('touchstart', e => { touchX = e.touches[0].clientX; }, { passive: true });
-  track.addEventListener('touchend',   e => {
-    if (touchX === null) return;
-    const diff = touchX - e.changedTouches[0].clientX;
-    if (Math.abs(diff) > 40) goTo(current + (diff > 0 ? 1 : -1));
-    touchX = null;
+  /* ── Swipe touch ───────────────────────────────────── */
+  let touchStartX = null;
+
+  track.addEventListener('touchstart', e => {
+    touchStartX = e.touches[0].clientX;
   }, { passive: true });
 
-  /* ── Pausa no hover ───────────────────────────────────── */
-  track.closest('.pb-banner').addEventListener('mouseenter', () => clearInterval(timer));
-  track.closest('.pb-banner').addEventListener('mouseleave', resetTimer);
+  track.addEventListener('touchend', e => {
+    if (touchStartX === null) return;
+    const diff = touchStartX - e.changedTouches[0].clientX;
+    if (Math.abs(diff) > 44) goTo(current + (diff > 0 ? 1 : -1));
+    touchStartX = null;
+  }, { passive: true });
 
-  resetTimer();
+  /* ── Pausa no hover (banner inteiro) ───────────────── */
+  const banner = track.closest('.pb-banner');
+  if (banner) {
+    banner.addEventListener('mouseenter', () => clearInterval(timer));
+    banner.addEventListener('mouseleave', () => {
+      clearInterval(timer);
+      startTimer();
+    });
+  }
+
+  /* ── Pausa se aba está oculta ──────────────────────── */
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) clearInterval(timer);
+    else startTimer();
+  });
+
+  /* ── Inicia ────────────────────────────────────────── */
+  startTimer();
 })();

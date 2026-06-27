@@ -16,6 +16,28 @@ main_blueprint = Blueprint('main', __name__)
 def inject_global_data():
     return get_home_data()
 
+# ── Injeção de categorias ────────────────────────────────────────────────────────────────
+@main_blueprint.context_processor
+def inject_categories():
+
+    categorias = (
+        db.session
+        .query(Product.category)
+        .filter(
+            Product.is_active == True,
+            Product.category.isnot(None),
+            Product.category != ''
+        )
+        .distinct()
+        .all()
+    )
+
+    categorias = [c[0] for c in categorias]
+    print(categorias)
+    return {
+        "navbar_categories": categorias
+    }
+
 # ── Home ──────────────────────────────────────────────────────────────────────
 
 @main_blueprint.route('/')
@@ -30,44 +52,62 @@ def produtos():
     categoria = request.args.get("categoria")
     ordenar = request.args.get("ordenar", "recentes")
 
-    query = Product.query.filter_by(is_active=True)
+    query = Product.query.filter(
+        Product.is_active == True
+    )
 
+    # Filtro por categoria
     if categoria:
         query = query.filter(
             Product.category == categoria
         )
 
+    # Ordenação
     if ordenar == "menor-preco":
+
         query = query.order_by(
             asc(Product.price)
         )
 
     elif ordenar == "maior-preco":
+
         query = query.order_by(
             desc(Product.price)
         )
 
     else:
+
         query = query.order_by(
             desc(Product.created_at)
         )
 
     products = query.all()
 
-    categorias = db.session.query(
-        Product.category
-    ).distinct().all()
+    # Categorias para a página de produtos
+    categorias = (
+        db.session
+        .query(Product.category)
+        .filter(
+            Product.is_active == True,
+            Product.category.isnot(None),
+            Product.category != ""
+        )
+        .distinct()
+        .order_by(Product.category.asc())
+        .all()
+    )
 
     categorias = [
-        c[0]
-        for c in categorias
-        if c[0]
+        categoria[0]
+        for categoria in categorias
     ]
 
     return render_template(
         "main/produtos.html",
         products=products,
-        categorias=categorias
+        categorias=categorias,
+        categoria_atual=categoria,
+        ordenar_atual=ordenar
     )
 
 # ── Produto individual ───────────────────────────────────────────────
