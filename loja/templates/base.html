@@ -49,12 +49,44 @@
     .promo-strip {
       background: var(--accent);
       color: #fff;
-      padding: 9px 1.5rem;
-      text-align: center;
+      overflow: hidden;
+      white-space: nowrap;
+      position: relative;
+      height: 38px;
+      display: flex;
+      align-items: center;
+    }
+
+    .promo-strip-track {
+      display: flex;
+      width: max-content;
+      animation: promo-scroll 25s linear infinite;
+    }
+
+    .promo-strip-track span {
+      display: inline-flex;
+      align-items: center;
+      padding-right: 4rem;
       font-size: 0.78rem;
       font-weight: 500;
       letter-spacing: 0.06em;
       text-transform: uppercase;
+      flex-shrink: 0;
+    }
+
+    .promo-strip:hover .promo-strip-track {
+      animation-play-state: paused;
+    }
+    
+
+    @keyframes promo-scroll {
+      from {
+        transform: translateX(0);
+      }
+
+      to {
+        transform: translateX(-50%);
+      }
     }
 
     /* ════════════════════════════════════════
@@ -497,7 +529,32 @@
 
   <!-- ── Promo strip ── -->
   <div class="promo-strip">
-    Frete grátis em compras acima de R$&nbsp;249 &nbsp;·&nbsp; Até 12× sem juros &nbsp;·&nbsp; Troca grátis em 30 dias
+    <div class="promo-strip-track">
+
+      <span>
+        🚚 Frete grátis em compras acima de R$ 249
+        &nbsp;&nbsp;•&nbsp;&nbsp;
+        💳 Até 12× sem juros
+        &nbsp;&nbsp;•&nbsp;&nbsp;
+        🔄 Troca grátis em 30 dias
+        &nbsp;&nbsp;•&nbsp;&nbsp;
+        🛍️ Novidades toda semana
+        &nbsp;&nbsp;•&nbsp;&nbsp;
+      </span>
+
+      <!-- duplicado para criar loop infinito -->
+      <span>
+        🚚 Frete grátis em compras acima de R$ 249
+        &nbsp;&nbsp;•&nbsp;&nbsp;
+        💳 Até 12× sem juros
+        &nbsp;&nbsp;•&nbsp;&nbsp;
+        🔄 Troca grátis em 30 dias
+        &nbsp;&nbsp;•&nbsp;&nbsp;
+        🛍️ Novidades toda semana
+        &nbsp;&nbsp;•&nbsp;&nbsp;
+      </span>
+
+    </div>
   </div>
 
   <!-- ── Flash Messages ── -->

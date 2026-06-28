@@ -458,194 +458,364 @@
 
 
 /* ════════════════════════════════════════════════════════
-   PROMOÇÕES
+   PROMOÇÕES PREMIUM
    ════════════════════════════════════════════════════════ */
+
 .promo-section {
-  background: var(--accent-light);
-  padding: 5rem 0;
-  border-top: 1px solid #f0c8cf;
-  border-bottom: 1px solid #f0c8cf;
+  position: relative;
+  padding: 7rem 0;
+  background:
+    linear-gradient(
+      180deg,
+      #fff 0%,
+      #fff7f8 100%
+    );
+  overflow: hidden;
+}
+
+.promo-section::before {
+  content: "";
+  position: absolute;
+  top: -120px;
+  right: -120px;
+  width: 350px;
+  height: 350px;
+  background: rgba(200,16,46,0.04);
+  border-radius: 50%;
+}
+
+.promo-section::after {
+  content: "";
+  position: absolute;
+  bottom: -180px;
+  left: -100px;
+  width: 300px;
+  height: 300px;
+  background: rgba(200,16,46,0.03);
+  border-radius: 50%;
 }
 
 .promo-inner {
-  max-width: 1280px;
+  position: relative;
+  z-index: 2;
+  max-width: 1400px;
   margin: 0 auto;
-  padding: 0 1.5rem;
+  padding: 0 2rem;
 }
+
+/* HEADER */
 
 .promo-header {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  margin-bottom: 0.5rem;
-  flex-wrap: wrap;
+  margin-bottom: 3rem;
+  text-align: center;
 }
-
-.promo-title {
-  color: var(--accent);
-  margin-bottom: 0 !important;
-}
-.promo-title::after { background: var(--accent); }
 
 .promo-badge {
   background: var(--accent);
   color: #fff;
-  font-size: 0.68rem;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: .7rem;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: .18em;
   text-transform: uppercase;
-  padding: 5px 12px;
-  border-radius: var(--radius-sm);
-  flex-shrink: 0;
+  margin-bottom: 1rem;
+  box-shadow: 0 8px 20px rgba(200,16,46,.18);
 }
 
-/* carousel */
+.promo-title {
+  color: var(--black);
+  margin-bottom: .8rem !important;
+}
+
+.promo-title::after {
+  background: var(--accent);
+}
+
+.promo-subtitle {
+  max-width: 500px;
+  color: var(--gray-mid);
+  font-size: .95rem;
+  line-height: 1.8;
+}
+
+/* CAROUSEL */
+
 .promo-carousel-wrap {
   position: relative;
   overflow: hidden;
-  margin-top: 2.5rem;
 }
 
 .promo-slides {
   display: flex;
-  transition: transform 0.52s cubic-bezier(0.77, 0, 0.18, 1);
+  transition: transform .7s cubic-bezier(.77,0,.18,1);
 }
 
 .promo-slide {
   flex-shrink: 0;
   width: 33.333%;
-  padding: 0 0.8rem;
+  padding: 0 .9rem;
 }
 
-/* card */
+/* CARD */
+
 .promo-card {
-  background: var(--white);
-  border: 1px solid #f0c8cf;
-  border-radius: var(--radius-md);
+  background: #fff;
+  border-radius: 18px;
   overflow: hidden;
-  transition: transform var(--transition), box-shadow var(--transition);
+  border: 1px solid rgba(0,0,0,.05);
+  transition:
+    transform .35s ease,
+    box-shadow .35s ease;
 }
+
 .promo-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 16px 40px rgba(200,16,46,0.12);
+  transform: translateY(-10px);
+  box-shadow:
+    0 20px 50px rgba(0,0,0,.08);
 }
+
+/* IMAGEM */
 
 .promo-card-img-wrap {
-  position: relative;
+  aspect-ratio: 4/5;
   overflow: hidden;
 }
+
 .promo-card-img-wrap img {
   width: 100%;
-  height: 260px;
+  height: 100%;
   object-fit: cover;
-  display: block;
-  transition: transform 0.4s ease;
+  transition: transform .6s ease;
 }
-.promo-card:hover .promo-card-img-wrap img { transform: scale(1.04); }
+
+
+.promo-card:hover img {
+  transform: scale(1.06);
+}
+
+/* BADGE DESCONTO */
 
 .promo-discount-badge {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 18px;
+  right: 18px;
   background: var(--accent);
   color: #fff;
-  font-size: 0.7rem;
-  font-weight: 700;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
+  min-width: 64px;
+  min-height: 64px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .8rem;
+  font-weight: 800;
+  box-shadow:
+    0 10px 25px rgba(200,16,46,.3);
 }
 
-.promo-info { padding: 1.1rem 1.25rem 1.4rem; }
+/* INFO */
+
+.promo-info {
+  padding: 1.5rem;
+}
 
 .promo-category {
-  display: block;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  display: inline-block;
+  margin-bottom: .7rem;
   color: var(--accent);
-  margin-bottom: 0.4rem;
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .18em;
+  text-transform: uppercase;
 }
 
 .promo-name {
+  font-size: 1rem;
   font-weight: 600;
-  font-size: 0.95rem;
+  line-height: 1.5;
   color: var(--black);
-  margin: 0 0 0.6rem;
-  line-height: 1.4;
+  margin-bottom: 1rem;
+  min-height: 48px;
 }
+
+/* PREÇO */
 
 .promo-price-row {
   display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
-  margin-bottom: 1rem;
+  align-items: center;
+  gap: .8rem;
+  margin-bottom: 1.3rem;
 }
 
 .promo-old {
-  text-decoration: line-through;
   color: #bbb;
-  font-size: 0.85rem;
+  text-decoration: line-through;
+  font-size: .9rem;
 }
 
 .promo-new {
   color: var(--accent);
-  font-size: 1.25rem;
-  font-weight: 700;
+  font-size: 1.45rem;
+  font-weight: 800;
 }
 
+/* BOTÃO */
+
 .btn-promo {
-  display: inline-block;
-  background: var(--accent);
-  color: #fff;
+  width: 100%;
   border: none;
-  padding: 10px 22px;
-  font-family: 'DM Sans', sans-serif;
-  font-size: 0.75rem;
+  background: var(--black);
+  color: #fff;
+  padding: 14px;
+  border-radius: 999px;
+  font-size: .72rem;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: .15em;
   text-transform: uppercase;
   cursor: pointer;
-  border-radius: var(--radius-sm);
-  transition: background var(--transition), transform var(--transition);
+  transition:
+    background .25s,
+    transform .25s;
 }
+
 .btn-promo:hover {
-  background: var(--accent-hover);
-  transform: translateY(-1px);
+  background: var(--accent);
+  transform: translateY(-2px);
 }
+
+/* SETAS */
 
 .promo-btn {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  background: var(--white);
-  border: 1px solid #f0c8cf;
-  color: var(--accent);
-  width: 42px;
-  height: 42px;
+  width: 52px;
+  height: 52px;
+  border: none;
   border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  background: rgba(255,255,255,.95);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 30px rgba(0,0,0,.1);
+  color: var(--black);
   cursor: pointer;
-  box-shadow: 0 2px 14px rgba(0,0,0,0.08);
-  transition: background var(--transition), transform var(--transition);
+  transition: all .25s ease;
   z-index: 10;
-  font-size: 1rem;
 }
+
 .promo-btn:hover {
-  background: #fff0f2;
-  transform: translateY(-50%) scale(1.08);
+  background: var(--accent);
+  color: #fff;
+  transform: translateY(-50%) scale(1.1);
 }
-.promo-prev { left: -6px; }
-.promo-next { right: -6px; }
+
+.promo-prev {
+  left: 8px;
+}
+
+.promo-next {
+  right: 8px;
+}
+
+/* VAZIO */
 
 .promo-empty {
   text-align: center;
+  padding: 5rem 0;
   color: var(--gray-mid);
-  padding: 3rem 0;
-  width: 100%;
+}
+
+/* RESPONSIVO */
+
+@media (max-width:1024px) {
+  .promo-slide {
+    width: 50%;
+  }
+}
+
+@media (max-width:768px) {
+
+  .promo-section {
+    padding: 5rem 0;
+  }
+
+  .promo-slide {
+    width: 85%;
+  }
+
+  .promo-card-img-wrap img {
+    height: 280px;
+  }
+
+  .promo-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .promo-prev {
+    left: 4px;
+  }
+
+  .promo-next {
+    right: 4px;
+  }
+}
+
+@media (max-width:480px) {
+
+  .promo-slide {
+    width: 100%;
+    padding: 0;
+  }
+
+  .promo-inner {
+    padding: 0 1rem;
+  }
+
+  .promo-card-img-wrap img {
+    height: 320px;
+  }
+}
+
+.promo-economy {
+  margin-bottom: .4rem;
+  color: #666;
+  font-size: .82rem;
+}
+
+.promo-economy strong {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.promo-installments {
+  margin-bottom: 1.2rem;
+  color: #999;
+  font-size: .78rem;
+}
+
+.promo-dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 2rem;
+}
+
+.promo-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.15);
+  transition: .3s;
+  cursor: pointer;
+}
+
+.promo-dot.active {
+  background: var(--accent);
+  transform: scale(1.25);
 }
 
 
