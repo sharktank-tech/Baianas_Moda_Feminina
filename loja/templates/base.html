@@ -23,7 +23,7 @@
       --accent:       #c8102e;
       --accent-hover: #a00d25;
       --accent-light: #f9dde2;
-      --gray-mid: #eae0e0;
+      --gray-mid:     #6b6b6b;
       --gray-muted:   #999999;
       --border:       #e2ddd5;
       --border-dark:  #222222;
@@ -70,7 +70,7 @@
       height: 68px;
       position: sticky;
       top: 0;
-      z-index: 40;
+      z-index: 100;
       border-bottom: 1px solid var(--border-dark);
     }
 
@@ -366,17 +366,127 @@
     @media (max-width: 1024px) {
       .footer-top { grid-template-columns: 1fr 1fr; }
     }
+    /* ════════════════════════════════════════
+       NAVBAR MOBILE — hamburguer
+    ════════════════════════════════════════ */
+    .navbar-hamburger {
+      display: none;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 6px;
+      color: var(--white);
+      flex-shrink: 0;
+    }
+    .navbar-hamburger svg { display: block; }
+
+    /* drawer mobile */
+    .navbar-drawer {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 300;
+    }
+    .navbar-drawer.open { display: block; }
+
+    .navbar-drawer-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(3px);
+    }
+
+    .navbar-drawer-panel {
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: min(280px, 82vw);
+      background: var(--black-soft);
+      border-right: 1px solid var(--border-dark);
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+      transform: translateX(-100%);
+      transition: transform 0.32s cubic-bezier(0.77, 0, 0.18, 1);
+      overflow-y: auto;
+    }
+    .navbar-drawer.open .navbar-drawer-panel {
+      transform: translateX(0);
+    }
+
+    .navbar-drawer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border-dark);
+      flex-shrink: 0;
+    }
+
+    .navbar-drawer-brand {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--white);
+      text-decoration: none;
+    }
+    .navbar-drawer-brand span { color: var(--accent); }
+
+    .navbar-drawer-close {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #999;
+      padding: 4px;
+      transition: color 0.2s;
+    }
+    .navbar-drawer-close:hover { color: var(--white); }
+    .navbar-drawer-close svg { display: block; }
+
+    .navbar-drawer-links {
+      list-style: none;
+      margin: 0;
+      padding: 0.75rem 0;
+      flex: 1;
+    }
+    .navbar-drawer-links li a {
+      display: block;
+      padding: 13px 1.5rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #999;
+      text-decoration: none;
+      transition: color 0.2s, background 0.2s;
+    }
+    .navbar-drawer-links li a:hover {
+      color: var(--white);
+      background: rgba(255,255,255,0.04);
+    }
+
+    .navbar-drawer-footer {
+      padding: 1.25rem 1.5rem;
+      border-top: 1px solid var(--border-dark);
+    }
+    .navbar-drawer-footer a {
+      display: block;
+      text-align: center;
+      background: var(--white);
+      color: var(--black);
+      padding: 11px;
+      border-radius: 2px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      text-decoration: none;
+      transition: background 0.2s;
+    }
+    .navbar-drawer-footer a:hover { background: var(--cream); }
+
     @media (max-width: 768px) {
-      .navbar { padding: 0 1.25rem; height: auto; flex-wrap: wrap; gap: 0; }
-      .navbar-brand { padding: 1rem 0; }
-      .navbar-links {
-        gap: 1rem;
-        flex-wrap: wrap;
-        justify-content: center;
-        padding: 0.75rem 0;
-        width: 100%;
-        border-top: 1px solid var(--border-dark);
-      }
+      .navbar-hamburger { display: block; }
+      .navbar-links { display: none; }  /* esconde links inline no mobile */
       .benefits-strip { gap: 1rem; flex-wrap: wrap; }
       .footer-top { grid-template-columns: 1fr; gap: 2rem; }
       .footer-bottom { flex-direction: column; text-align: center; }
@@ -391,7 +501,7 @@
   </div>
 
   <!-- ── Flash Messages ── -->
-  <div class="fixed top-24 right-4 z-9999 space-y-3 w-full max-w-sm px-4">
+  <div class="fixed top-4 right-4 z-50 space-y-3 w-full max-w-sm px-4">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
@@ -416,15 +526,14 @@
       {% if site and site.name %}{{ site.name }}{% else %}Pollo<span>.</span>Modas{% endif %}
     </a>
 
+    <!-- Links desktop -->
     <ul class="navbar-links">
       <li><a href="{{ url_for('main.produtos') }}">Todos os produtos</a></li>
-
       {% for categoria in navbar_categories %}
       <li><a href="{{ url_for('main.produtos', categoria=categoria) }}">{{ categoria }}</a></li>
       {% endfor %}
-
+      <li><a href="{{ url_for('main.sobre') }}">Sobre</a></li>
       <li><a href="/contato">Contato</a></li>
-
       {% if current_user.is_authenticated %}
         {% if current_user.is_admin %}
         <li><a href="{{ url_for('admin.admin_dashboard') }}">Admin</a></li>
@@ -434,7 +543,53 @@
         <li><a href="{{ url_for('main.login') }}" class="btn-conta">Entrar</a></li>
       {% endif %}
     </ul>
+
+    <!-- Botão hamburguer (mobile) -->
+    <button class="navbar-hamburger" id="navHamburger" aria-label="Menu" aria-expanded="false">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M17.5 15H2.5V13.333H17.5V15ZM17.5 10.833H2.5V9.16699H17.5V10.833ZM17.5 5V6.66699H2.5V5H17.5Z" fill="currentColor"/>
+      </svg>
+    </button>
   </nav>
+
+  <!-- ── Drawer mobile ── -->
+  <div class="navbar-drawer" id="navDrawer" aria-hidden="true">
+    <div class="navbar-drawer-overlay" id="navDrawerOverlay"></div>
+    <div class="navbar-drawer-panel">
+
+      <div class="navbar-drawer-header">
+        <a href="{{ url_for('main.home') }}" class="navbar-drawer-brand">
+          {% if site and site.name %}{{ site.name }}{% else %}Pollo<span>.</span>Modas{% endif %}
+        </a>
+        <button class="navbar-drawer-close" id="navDrawerClose" aria-label="Fechar menu">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <line x1="15" y1="5" x2="5" y2="15"/><line x1="5" y1="5" x2="15" y2="15"/>
+          </svg>
+        </button>
+      </div>
+
+      <ul class="navbar-drawer-links">
+        <li><a href="{{ url_for('main.produtos') }}">Todos os produtos</a></li>
+        {% for categoria in navbar_categories %}
+        <li><a href="{{ url_for('main.produtos', categoria=categoria) }}">{{ categoria }}</a></li>
+        {% endfor %}
+        <li><a href="{{ url_for('main.sobre') }}">Sobre</a></li>
+        <li><a href="/contato">Contato</a></li>
+        {% if current_user.is_authenticated and current_user.is_admin %}
+        <li><a href="{{ url_for('admin.admin_dashboard') }}">Admin</a></li>
+        {% endif %}
+      </ul>
+
+      <div class="navbar-drawer-footer">
+        {% if current_user.is_authenticated %}
+        <a href="{{ url_for('main.conta') }}">Minha Conta</a>
+        {% else %}
+        <a href="{{ url_for('main.login') }}">Entrar</a>
+        {% endif %}
+      </div>
+
+    </div>
+  </div>
 
   <!-- ── Benefits strip ── -->
   <div class="benefits-strip">
@@ -597,6 +752,7 @@
       setTimeout(() => flash.remove(), 420);
     }
     document.addEventListener('DOMContentLoaded', () => {
+      // Auto-remove flash
       document.querySelectorAll('.flash-message').forEach(flash => {
         setTimeout(() => {
           flash.style.opacity = '0';
@@ -605,6 +761,30 @@
           setTimeout(() => flash.remove(), 420);
         }, 4500);
       });
+
+      // Drawer mobile
+      const drawer  = document.getElementById('navDrawer');
+      const openBtn = document.getElementById('navHamburger');
+      const closeBtn = document.getElementById('navDrawerClose');
+      const overlay = document.getElementById('navDrawerOverlay');
+
+      function openDrawer() {
+        drawer.classList.add('open');
+        drawer.setAttribute('aria-hidden', 'false');
+        openBtn.setAttribute('aria-expanded', 'true');
+        document.body.style.overflow = 'hidden';
+      }
+      function closeDrawer() {
+        drawer.classList.remove('open');
+        drawer.setAttribute('aria-hidden', 'true');
+        openBtn.setAttribute('aria-expanded', 'false');
+        document.body.style.overflow = '';
+      }
+
+      if (openBtn)  openBtn.addEventListener('click', openDrawer);
+      if (closeBtn) closeBtn.addEventListener('click', closeDrawer);
+      if (overlay)  overlay.addEventListener('click', closeDrawer);
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
     });
   </script>
 
