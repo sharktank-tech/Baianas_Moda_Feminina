@@ -558,7 +558,7 @@
   </div>
 
   <!-- ── Flash Messages ── -->
-  <div class="fixed top-4 right-4 z-50 space-y-3 w-full max-w-sm px-4">
+  <div class="fixed top-1 right-4 z-400 space-y-3 w-full max-w-sm px-4">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
@@ -647,7 +647,7 @@
 
     </div>
   </div>
-  
+
 
   <!-- ── Conteúdo principal ── -->
   <main>{% block content %}{% endblock %}</main>

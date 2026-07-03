@@ -8,6 +8,7 @@ from loja.modules.services import get_home_data
 from decimal import Decimal
 from sqlalchemy import asc, desc
 
+
 main_blueprint = Blueprint('main', __name__)
 
 # ── Variáveis de contexto globais ────────────────────────────────────────────────────────
@@ -283,6 +284,7 @@ def register():
 # ── Login ─────────────────────────────────────────────────────────────────────
 @main_blueprint.route("/login", methods=["GET", "POST"])
 def login():
+
     if request.method == "POST":
         email = (request.form.get("email", "").strip().lower())
         password = (request.form.get("password", "").strip())

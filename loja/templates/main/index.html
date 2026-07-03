@@ -20,8 +20,8 @@
       <div class="pb-track" id="pbTrack">
 
         {% for slide in hero_slides %}
-        <div class="pb-slide pb-slide--fullwidth">
-          <div class="pb-img-side pb-img-side--full">
+        <div class="pb-slide--fullwidth">
+          <div class="pb-img-side--full">
             <img
               class="pb-img active"
               src="{{ slide.image }}"
@@ -30,25 +30,25 @@
             >
             <div class="pb-slide-overlay">
               {% if slide.eyebrow %}
-              <small class="pb-slide-eyebrow">{{ slide.eyebrow }}</small>
+              <span class="pb-slide-eyebrow">{{ slide.eyebrow }}</span>
               {% endif %}
               {% if slide.title %}
               <h2 class="pb-slide-title">{{ slide.title }}</h2>
               {% endif %}
-              <a href="{{ url_for('main.produtos') }}" class="pb-cta pb-cta--overlay">Ver coleção</a>
+              <a href="{{ url_for('main.produtos') }}" class="btn btn--outline btn--arrow">Ver coleção</a>
             </div>
           </div>
         </div>
         {% else %}
 
         {# Fallback estático caso hero_slides esteja vazio #}
-        <div class="pb-slide pb-slide--fullwidth">
-          <div class="pb-img-side pb-img-side--full">
+        <div class="pb-slide--fullwidth">
+          <div class="pb-img-side--full">
             <img class="pb-img active" src="{{ url_for('static', filename='img/agua-de-coco.jpg') }}" alt="Coleção Outono Inverno 2026" loading="eager">
             <div class="pb-slide-overlay">
-              <small class="pb-slide-eyebrow">Nova Coleção</small>
+              <span class="pb-slide-eyebrow">Nova Coleção</span>
               <h2 class="pb-slide-title">Outono Inverno 2026</h2>
-              <a href="{{ url_for('main.produtos') }}" class="pb-cta pb-cta--overlay">Ver coleção</a>
+              <a href="{{ url_for('main.produtos') }}" class="btn btn--outline btn--arrow">Ver coleção</a>
             </div>
           </div>
         </div>
@@ -63,11 +63,11 @@
     <button class="pb-nav pb-next" id="pbNext" aria-label="Próximo slide">&#8594;</button>
 
     <!-- dots -->
-    <div class="pb-dots" id="pbDots" aria-hidden="true">
+    <div class="pb-dots" id="pbDots" role="tablist" aria-label="Selecionar slide">
       {% for slide in hero_slides %}
-      <button class="pb-dot{% if loop.first %} active{% endif %}"></button>
+      <button class="pb-dot{% if loop.first %} active{% endif %}" role="tab" aria-label="Ir para slide {{ loop.index }}" aria-selected="{{ 'true' if loop.first else 'false' }}"></button>
       {% else %}
-      <button class="pb-dot active"></button>
+      <button class="pb-dot active" role="tab" aria-label="Ir para slide 1" aria-selected="true"></button>
       {% endfor %}
     </div>
   </section>
@@ -76,7 +76,7 @@
   <!-- ══════════════════════════════════════════════
        CATEGORIAS EM DESTAQUE
   ══════════════════════════════════════════════ -->
-  <section class="categories-section">
+  <section class="categories-section" data-reveal>
     <div class="categories-inner">
       <h2 class="section-title">Explore por categoria</h2>
       <div class="categories-grid">
@@ -89,15 +89,15 @@
         </a>
         {% else %}
         {% for item in [
-          {'name': 'Feminino',    'slug': 'feminino'},
-          {'name': 'Masculino',   'slug': 'masculino'},
-          {'name': 'Infantil',    'slug': 'infantil'},
-          {'name': 'Calçados',    'slug': 'calcados'},
-          {'name': 'Acessórios',  'slug': 'acessorios'}
+          {'name': 'Feminino',    'slug': 'feminino',   'letra': 'F'},
+          {'name': 'Masculino',   'slug': 'masculino',  'letra': 'M'},
+          {'name': 'Infantil',    'slug': 'infantil',   'letra': 'I'},
+          {'name': 'Calçados',    'slug': 'calcados',   'letra': 'C'},
+          {'name': 'Acessórios',  'slug': 'acessorios', 'letra': 'A'}
         ] %}
         <a href="{{ url_for('main.produtos', categoria=item.slug) }}" class="cat-card cat-card--placeholder">
           <div class="cat-card-img">
-            <span class="cat-placeholder-icon">{{ loop.index }}</span>
+            <span class="cat-placeholder-icon">{{ item.letra }}</span>
           </div>
           <span class="cat-card-label">{{ item.name }}</span>
         </a>
@@ -111,16 +111,16 @@
   <!-- ══════════════════════════════════════════════
        BANNER CTA (citação editorial)
   ══════════════════════════════════════════════ -->
-  <div class="mid-banner">
-    <p>"{{ banner.quote | default('A moda é a armadura para enfrentar a vida cotidiana.') }}"</p>
-    <a href="{{ url_for('main.produtos') }}">{{ banner.cta_text | default('Ver a coleção completa') }}</a>
+  <div class="mid-banner" data-reveal>
+    <p>{{ banner.quote | default('A moda é a armadura para enfrentar a vida cotidiana.') }}</p>
+    <a href="{{ url_for('main.produtos') }}" class="btn btn--solid btn--arrow">{{ banner.cta_text | default('Ver a coleção completa') }}</a>
   </div>
 
 
   <!-- ════════════════════════════════════════════════════════
      PROMOÇÕES ESPECIAIS
      ════════════════════════════════════════════════════════ -->
-    <section class="promo-section">
+    <section class="promo-section" data-reveal>
 
       <div class="promo-inner">
 
@@ -260,7 +260,7 @@
   <!-- ══════════════════════════════════════════════
        DEPOIMENTOS
   ══════════════════════════════════════════════ -->
-  <section class="testimonials-section">
+  <section class="testimonials-section" data-reveal>
     <div class="testimonials-inner">
       <h2 class="section-title">O que nossos clientes dizem</h2>
       <div class="testimonials-grid">
@@ -294,5 +294,25 @@
       </div>
     </div>
   </section>
+
+  <script>
+    // Revelação suave ao rolar — não depende de nenhum arquivo externo
+    (function () {
+      var els = document.querySelectorAll('[data-reveal]');
+      if (!('IntersectionObserver' in window) || !els.length) {
+        els.forEach(function (el) { el.classList.add('is-visible'); });
+        return;
+      }
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-visible');
+            io.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.12 });
+      els.forEach(function (el) { io.observe(el); });
+    })();
+  </script>
 
 {% endblock %}
