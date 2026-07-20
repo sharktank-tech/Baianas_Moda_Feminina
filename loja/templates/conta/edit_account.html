@@ -1,68 +1,40 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Editar Conta</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <link rel="icon" href="{{ url_for('static', filename='images/bolsa-de-compras.png') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
-</head>
-<body class="bg-gray-100 flex flex-col min-h-screen">
-    <!-- Navbar -->
-    <nav class="bg-white shadow-md">
-        <div class="container mx-auto px-4 py-2 flex justify-between items-center">
-            <h1 class="text-2xl font-bold text-red-600">E-commerce</h1>
-            <ul class="flex space-x-4">
-                <li><a href="/" class="text-gray-700 hover:text-red-600">Página Inicial</a></li>
-                <li><a href="{{ url_for('main.conta') }}" class="text-gray-700 hover:text-red-600">Minha Conta</a></li>
-                <li>
-                    <form action="{{ url_for('main.logout') }}" method="POST">
-                        <button type="submit" class="text-gray-700 hover:text-red-600">Sair</button>
-                    </form>
-                </li>
-            </ul>
-        </div>
-    </nav>
+{% extends "base.html" %}
 
-    <!-- Main Content -->
-    <main class="flex-grow container mx-auto px-4 py-8">
-        <h2 class="text-2xl font-bold mb-4">Editar Conta</h2>
-        <div class="bg-white shadow-md rounded-lg p-6">
-            <form action="{{ url_for('main.conta') }}" method="POST">
-                <div class="mb-4">
-                    <label for="username" class="block text-gray-700 font-semibold mb-2">Nome:</label>
-                    <input type="text" id="username" name="username" value="{{ username }}"
-                           class="w-full border-gray-300 rounded-lg shadow-sm focus:ring focus:ring-red-300">
-                </div>
-                <div class="mb-4">
-                    <label for="email" class="block text-gray-700 font-semibold mb-2">Email:</label>
-                    <input type="email" id="email" name="email" value="{{ email }}"
-                           class="w-full border-gray-300 rounded-lg shadow-sm focus:ring focus:ring-red-300">
-                </div>
-                <div class="mb-4">
-                    <label for="password" class="block text-gray-700 font-semibold mb-2">Nova Senha:</label>
-                    <input type="password" id="password" name="password"
-                           class="w-full border-gray-300 rounded-lg shadow-sm focus:ring focus:ring-red-300">
-                </div>
-                <div class="flex justify-end space-x-4">
-                    <a href="{{ url_for('main.conta') }}" class="text-gray-600 hover:underline">Cancelar</a>
-                    <button type="submit" class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">
-                        Salvar Alterações
-                    </button>
-                </div>
-            </form>
-        </div>
-    </main>
+{% block title %}Editar conta — {% if site and site.name %}{{ site.name }}{% else %}Pollo Modas{% endif %}{% endblock %}
 
-    <!-- Footer -->
-    <footer class="bg-gray-200 py-4 shadow-inner">
-        <div class="container mx-auto px-4 text-center">
-            <p class="text-gray-500 text-sm">&copy; 2024 E-commerce. Todos os direitos reservados.</p>
-        </div>
-    </footer>
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles/conta.css') }}">
+{% endblock %}
 
-    <!-- JavaScript -->
-    <script src="{{ url_for('static', filename='scripts/index.js') }}"></script>
-</body>
-</html>
+{% block content %}
+<section class="account-stage">
+  <div class="auth-card auth-card--single">
+    <div class="auth-form-side">
+      <div class="auth-form-head">
+        <h1 class="auth-form-title">Editar conta</h1>
+        <p class="auth-form-sub">Atualize seus dados de acesso.</p>
+      </div>
+
+      <form action="{{ url_for('main.edit_account') }}" method="POST" novalidate>
+        <div class="field">
+          <label for="username" class="field-label">Nome</label>
+          <input type="text" id="username" name="username" class="field-input"
+                 value="{{ username }}" autocomplete="username" required>
+        </div>
+
+        <div class="field">
+          <label for="email" class="field-label">E-mail</label>
+          <input type="email" id="email" name="email" class="field-input"
+                 value="{{ email }}" autocomplete="email" required>
+        </div>
+
+        <button type="submit" class="btn-account" style="margin-top:0.5rem;">Salvar alterações</button>
+      </form>
+
+      <p class="auth-alt">
+        <a href="{{ url_for('main.conta') }}">← Voltar para minha conta</a>
+      </p>
+    </div>
+  </div>
+</section>
+{% endblock %}

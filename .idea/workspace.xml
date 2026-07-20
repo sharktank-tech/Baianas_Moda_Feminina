@@ -4,17 +4,15 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="310da70a-5095-47e0-b4d5-9b337aa34487" name="Changes" comment="- Melhoria na barra d enavegação&#10;- Substituição do icone de favicon">
-      <change afterPath="$PROJECT_DIR$/loja/modules/scraping.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/loja/static/styles/produtos_individual.css" afterDir="false" />
+    <list default="true" id="310da70a-5095-47e0-b4d5-9b337aa34487" name="Changes" comment="- Melhoria no design">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/modules/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/loja/modules/models.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/static/img/imagem.png" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/base.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/base.html" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/loja/templates/conta/conta.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/conta/conta.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/main/produto_individual.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/main/produto_individual.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/views/admin_routes.py" beforeDir="false" afterPath="$PROJECT_DIR$/loja/views/admin_routes.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/templates/conta/edit_account.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/conta/edit_account.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/templates/conta/login.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/conta/login.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/templates/conta/register.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/conta/register.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/templates/main/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/main/index.html" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/loja/views/routes.py" beforeDir="false" afterPath="$PROJECT_DIR$/loja/views/routes.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/run.py" beforeDir="false" afterPath="$PROJECT_DIR$/run.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -122,7 +120,7 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-python-sdk-245168a56dbd-c2ffad84badb-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.25134.203" />
+        <option value="bundled-python-sdk-50341a9f1f9c-c2ffad84badb-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.26222.68" />
       </set>
     </attachedChunks>
   </component>

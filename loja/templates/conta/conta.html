@@ -1,67 +1,108 @@
 {% extends "base.html" %}
 
-{% block title %}Minha Conta{% endblock %}
+{% block title %}Minha conta — {% if site and site.name %}{{ site.name }}{% else %}Pollo Modas{% endif %}{% endblock %}
+
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles/conta.css') }}">
+{% endblock %}
 
 {% block content %}
-<div class="container mx-auto px-4 py-8 flex-grow">
-    <h2 class="text-2xl font-bold mb-4">Minha Conta</h2>
+<div class="account-wrap">
 
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-
-        <!-- Detalhes do Usuário -->
-        <div>
-            <h3 class="text-xl font-semibold mb-4">
-                Detalhes do Usuário
-            </h3>
-
-            <div class="space-y-2 text-gray-700">
-                <p><strong>Nome:</strong> {{ username }}</p>
-                <p><strong>Email:</strong> {{ email }}</p>
-                <p><strong>Telefone:</strong> {{ telefone }}</p>
-            </div>
-        </div>
-
-        <!-- Endereço -->
-        {% if adress %}
-        <div>
-            <h3 class="text-xl font-semibold mb-4">
-                Endereço
-            </h3>
-
-            <div class="space-y-2 text-gray-700">
-                <p><strong>CEP:</strong> {{ adress.zip_code }}</p>
-                <p><strong>Rua:</strong> {{ adress.street }}</p>
-                <p><strong>Número:</strong> {{ adress.number }}</p>
-                <p><strong>Bairro:</strong> {{ adress.neighborhood }}</p>
-                <p><strong>Cidade:</strong> {{ adress.city }}</p>
-                <p><strong>Estado:</strong> {{ adress.state }}</p>
-                <p><strong>Complemento:</strong> {{ adress.complement }}</p>
-            </div>
-        </div>
-        {% endif %}
-
-        <!-- Ações -->
-        <div>
-            <h3 class="text-xl font-semibold mb-4">
-                Ações
-            </h3>
-
-            <div class="flex flex-col gap-3">
-                <a href="{{ url_for('main.edit_account') }}"
-                   class="text-blue-600 hover:text-blue-800 hover:underline">
-                    Editar Conta
-                </a>
-
-                <form action="{{ url_for('main.delete_account') }}" method="POST">
-                    <button type="submit"
-                            class="text-red-600 hover:text-red-800 hover:underline">
-                        Excluir Conta
-                    </button>
-                </form>
-            </div>
-        </div>
-
+  <div class="account-header">
+    <div>
+      <p class="account-header-eyebrow">Área do cliente</p>
+      <h1>Olá, {{ username }}</h1>
     </div>
-</div>
+    <a href="{{ url_for('main.logout') }}" class="account-logout">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      Sair
+    </a>
+  </div>
+
+  <div class="account-grid">
+
+    <!-- Coluna principal -->
+    <div>
+      <div class="account-panel">
+        <div class="account-panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <h2 class="account-panel-title">Detalhes do usuário</h2>
+        </div>
+        <div class="info-list">
+          <div class="info-row">
+            <span class="info-key">Nome</span>
+            <span class="info-value">{{ username }}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-key">E-mail</span>
+            <span class="info-value">{{ email }}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-key">Telefone</span>
+            <span class="info-value {% if not telefone %}info-value--muted{% endif %}">
+              {{ telefone if telefone else 'Não informado' }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="account-panel" style="margin-top:1.75rem;">
+        <div class="account-panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          <h2 class="account-panel-title">Endereço</h2>
+        </div>
+        {% if adress %}
+        <div class="info-list">
+          <div class="info-row"><span class="info-key">CEP</span><span class="info-value">{{ adress.zip_code }}</span></div>
+          <div class="info-row"><span class="info-key">Rua</span><span class="info-value">{{ adress.street }}, {{ adress.number }}</span></div>
+          <div class="info-row"><span class="info-key">Bairro</span><span class="info-value">{{ adress.neighborhood }}</span></div>
+          <div class="info-row"><span class="info-key">Cidade / UF</span><span class="info-value">{{ adress.city }} — {{ adress.state }}</span></div>
+          {% if adress.complement %}
+          <div class="info-row"><span class="info-key">Complemento</span><span class="info-value">{{ adress.complement }}</span></div>
+          {% endif %}
+        </div>
+        {% else %}
+        <p class="empty-state">
+          Você ainda não cadastrou um endereço. Ele será solicitado ao finalizar sua próxima compra.
+        </p>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Coluna lateral: ações -->
+    <div class="account-side">
+      <div class="account-panel">
+        <div class="account-panel-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <h2 class="account-panel-title">Ações</h2>
+        </div>
+        <div class="account-actions">
+          <a href="{{ url_for('main.edit_account') }}" class="action-btn action-btn--primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            Editar conta
+          </a>
+          {% if admin %}
+          <a href="{{ url_for('admin.admin_dashboard') }}" class="action-btn action-btn--ghost">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            Painel administrativo
+          </a>
+          {% endif %}
+          <a href="{{ url_for('main.produtos') }}" class="action-btn action-btn--ghost">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+            Continuar comprando
+          </a>
+          <form action="{{ url_for('main.delete_account') }}" method="POST" class="account-action-form"
+                onsubmit="return confirm('Tem certeza que deseja excluir sua conta? Esta ação não pode ser desfeita.');">
+            <button type="submit" class="action-btn action-btn--danger">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              Excluir conta
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+  </div>
 </div>
 {% endblock %}

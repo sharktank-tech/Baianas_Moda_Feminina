@@ -1,74 +1,76 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Login</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles/animation.css') }}"> <!-- Link para o CSS -->
-  <link rel="icon" href="{{ url_for('static', filename='img/favicon.jpg') }}">
-</head>
-<body class="bg-gray-100">
+{% extends "base.html" %}
 
-  <!-- Navbar -->
-  <nav class="bg-black text-white px-4 py-2 flex justify-between items-center">
-    <h1 class="text-xl font-bold">Painel Administrativo</h1>
-    <ul class="flex gap-4">
-      <li><a href="{{ url_for('main.home') }}" class="hover:underline">Home</a></li>
-    </ul>
-  </nav>
+{% block title %}Entrar — {% if site and site.name %}{{ site.name }}{% else %}Pollo Modas{% endif %}{% endblock %}
+{% block meta_description %}Acesse sua conta Pollo Modas para acompanhar pedidos e finalizar suas compras.{% endblock %}
 
-  <!-- Formulário de Login -->
-  <main class="mt-10 px-4 max-w-md mx-auto">
-    <h1 class="text-3xl font-bold text-center mb-6">Login</h1>
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles/conta.css') }}">
+{% endblock %}
 
-    <!-- Mensagens Flash -->
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}
-        <div id="flash-message" class="mb-4">
-          {% for message in messages %}
-            <div class="p-4 mb-4 text-white {{ 'bg-green-500' if 'erro' in message else 'bg-red-500' }} rounded">
-              {{ message }}
-            </div>
-          {% endfor %}
+{% block content %}
+<section class="account-stage">
+  <div class="auth-card">
+
+    <!-- Lateral editorial -->
+    <aside class="auth-aside">
+      <a href="{{ url_for('main.home') }}" class="auth-aside-brand">
+        {% if site and site.name %}{{ site.name }}{% else %}Pollo<span>.</span>Modas{% endif %}
+      </a>
+      <div class="auth-aside-copy">
+        <span class="auth-aside-eyebrow">Bem-vindo de volta</span>
+        <h2 class="auth-aside-title">Sua moda, do seu jeito.</h2>
+        <p class="auth-aside-text">Entre para acompanhar pedidos, salvar seus favoritos e finalizar a compra mais rápido.</p>
+        <ul class="auth-aside-perks">
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            Frete grátis acima de R$ 249
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            Troca grátis em 30 dias
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            Até 12× sem juros
+          </li>
+        </ul>
+      </div>
+    </aside>
+
+    <!-- Formulário -->
+    <div class="auth-form-side">
+      <div class="auth-form-head">
+        <h1 class="auth-form-title">Entrar</h1>
+        <p class="auth-form-sub">Acesse com seu e-mail e senha.</p>
+      </div>
+
+      <form method="POST" novalidate>
+        <div class="field">
+          <label for="email" class="field-label">E-mail</label>
+          <input type="email" id="email" name="email" class="field-input"
+                 placeholder="voce@email.com" autocomplete="email" required>
         </div>
-      {% endif %}
-    {% endwith %}
 
-    <form method="POST" class="bg-white p-6 rounded shadow">
-      <div class="mb-4">
-        <label for="email" class="block text-lg font-medium text-gray-700">Usuário</label>
-        <input type="text" id="email" name="email" placeholder="Digite seu email" required
-               class="w-full mt-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-black">
-      </div>
+        <div class="field">
+          <label for="password" class="field-label">Senha</label>
+          <input type="password" id="password" name="password" class="field-input"
+                 placeholder="Sua senha" autocomplete="current-password" required>
+        </div>
 
-      <div class="mb-4">
-        <label for="password" class="block text-lg font-medium text-gray-700">Senha</label>
-        <input type="password" id="password" name="password" placeholder="Digite sua senha" required
-               class="w-full mt-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-black">
-      </div>
+        <div class="auth-row">
+          <label class="auth-check">
+            <input type="checkbox" name="remember" value="1"> Manter conectado
+          </label>
+        </div>
 
-      <button type="submit" class="w-full bg-black text-white py-2 rounded hover:bg-gray-800">Entrar</button>
-    </form>
+        <button type="submit" class="btn-account">Entrar</button>
+      </form>
 
-    <!-- Link para cadastro -->
-    <p class="text-center mt-4 text-gray-600">
-      Não tem uma conta? <a href="{{ url_for('main.register') }}" class="text-black font-semibold hover:underline">Cadastre-se</a>
-    </p>
-  </main>
+      <p class="auth-alt">
+        Não tem uma conta? <a href="{{ url_for('main.register') }}">Cadastre-se</a>
+      </p>
+    </div>
 
-  <!-- Script para desaparecer a mensagem flash após 3 segundos -->
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      var flashMessage = document.getElementById('flash-message');
-      if (flashMessage) {
-        setTimeout(function() {
-          flashMessage.style.opacity = '0';
-          flashMessage.style.transition = 'opacity 0.5s ease-out';
-        }, 3000); // Mensagem desaparecerá após 3 segundos
-      }
-    });
-  </script>
-
-</body>
-</html>
+  </div>
+</section>
+{% endblock %}

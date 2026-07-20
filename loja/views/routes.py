@@ -235,7 +235,7 @@ def register():
     if request.method == "POST":
         username = (request.form.get("username", "").strip())
         email = (request.form.get("email", "").strip().lower())
-        telefone = request.form.get("password", "")
+        telefone = request.form.get("telefone", "")
         password = request.form.get("password","")
         print(username, email, telefone, password)
 
