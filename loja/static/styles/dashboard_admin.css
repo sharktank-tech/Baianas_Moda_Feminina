@@ -1,6 +1,24 @@
 /* ── Reset de escopo ──────────────────────────────────────── */
 .adm-wrap * { box-sizing: border-box; }
 
+/* ── Tokens locais (novo design system Pollo Modas) ─────────
+   base.html ainda define o :root global antigo (accent vermelho,
+   radius pequeno). Redefinimos aqui, no escopo do painel, para
+   que o dashboard adote o novo sistema: rosa vibrante + radius 8px.
+──────────────────────────────────────────────────────────── */
+.adm-wrap {
+  --accent:          #EC008C;
+  --accent-hover:    #B0006A;
+  --accent-light:    #FCE4F1;
+  --brand-pink:      #EC008C;
+  --brand-pink-dark: #B0006A;
+  --sale-red:        #E5251B;
+  --ink:             #1A1A1A;
+  --radius-sm:       6px;
+  --radius-md:       8px;
+  --radius-pill:     999px;
+}
+
 /* ── Layout raiz ──────────────────────────────────────────── */
 .adm-wrap {
   display: flex;
@@ -26,7 +44,7 @@
 }
 
 .adm-sidebar-logo {
-  font-family: 'Playfair Display', serif;
+  font-family: 'Poppins', sans-serif;
   font-size: 1.2rem;
   font-weight: 700;
   color: #fff;
@@ -85,7 +103,7 @@
 .adm-nav-link.active {
   color: #fff;
   border-left-color: var(--accent);
-  background: rgba(200,16,46,0.08);
+  background: rgba(236,0,140,0.10);
 }
 .adm-nav-link .adm-icon { font-size: 0.9rem; opacity: 0.75; }
 
@@ -126,7 +144,7 @@
   z-index: 50;
 }
 .adm-topbar-title {
-  font-family: 'Playfair Display', serif;
+  font-family: 'Poppins', sans-serif;
   font-size: 1.15rem;
   font-weight: 700;
   color: var(--black);
@@ -145,14 +163,14 @@
   text-transform: uppercase;
   text-decoration: none;
   padding: 8px 18px;
-  border-radius: 2px;
+  border-radius: var(--radius-md);
   border: none;
   cursor: pointer;
   transition: background 0.18s, transform 0.15s;
 }
 .adm-btn:active { transform: scale(0.97); }
-.adm-btn-primary   { background: var(--accent); color: #fff; }
-.adm-btn-primary:hover { background: #a00d25; }
+.adm-btn-primary   { background: var(--brand-pink); color: #fff; }
+.adm-btn-primary:hover { background: var(--brand-pink-dark); }
 .adm-btn-dark      { background: var(--black); color: #fff; }
 .adm-btn-dark:hover { background: #2a2a2a; }
 .adm-btn-outline   { background: transparent; color: var(--black); border: 1px solid #ccc; }
@@ -185,7 +203,7 @@
 .adm-stat-card {
   background: #fff;
   border: 1px solid #e8e6e1;
-  border-radius: 3px;
+  border-radius: var(--radius-md);
   padding: 1.25rem 1.5rem;
   border-top: 3px solid var(--accent);
 }
@@ -200,7 +218,7 @@
   margin-bottom: 0.5rem;
 }
 .adm-stat-value {
-  font-family: 'Playfair Display', serif;
+  font-family: 'Poppins', sans-serif;
   font-size: 2rem;
   font-weight: 700;
   color: var(--black);
@@ -218,7 +236,7 @@
 .adm-card {
   background: #fff;
   border: 1px solid #e8e6e1;
-  border-radius: 3px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   margin-bottom: 2rem;
 }
@@ -232,7 +250,7 @@
   flex-wrap: wrap;
 }
 .adm-card-title {
-  font-family: 'Playfair Display', serif;
+  font-family: 'Poppins', sans-serif;
   font-size: 1rem;
   font-weight: 700;
   color: var(--black);
@@ -271,7 +289,7 @@
   width: 44px;
   height: 52px;
   object-fit: cover;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   border: 1px solid #e8e6e1;
   display: block;
 }
@@ -284,13 +302,14 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   padding: 3px 9px;
-  border-radius: 2px;
+  border-radius: var(--radius-pill);
 }
 .adm-badge-green  { background: #d1fae5; color: #065f46; }
 .adm-badge-gray   { background: #f3f4f6; color: #6b7280; }
 .adm-badge-red    { background: #fee2e2; color: #991b1b; }
 .adm-badge-yellow { background: #fef3c7; color: #92400e; }
-.adm-badge-accent { background: #fde8ec; color: var(--accent); }
+.adm-badge-accent { background: var(--accent-light); color: var(--accent); }
+.adm-badge-sale   { background: var(--sale-red); color: #fff; }
 
 /* Ações inline */
 .adm-actions { display: flex; gap: 0.5rem; align-items: center; }
@@ -304,7 +323,7 @@
   align-items: center;
   background: #faf9f7;
   border: 1px solid #e8e6e1;
-  border-radius: 2px;
+  border-radius: var(--radius-md);
   padding: 6px 12px;
   gap: 0.5rem;
   font-family: 'DM Sans', sans-serif;
@@ -342,7 +361,7 @@
 .adm-config-item {
   background: #fff;
   border: 1px solid #e8e6e1;
-  border-radius: 3px;
+  border-radius: var(--radius-md);
   padding: 1.25rem 1.5rem;
   display: flex;
   flex-direction: column;

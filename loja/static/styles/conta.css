@@ -10,15 +10,15 @@
   --white:        #fafaf8;
   --cream:        #f5f0e8;
   --cream-dark:   #ede8df;
-  --accent:       #c8102e;
-  --accent-hover: #a00d25;
-  --accent-light: #f9dde2;
+  --accent:       #EC008C;
+  --accent-hover: #B0006A;
+  --accent-light: #fbd9ee;
   --gray-mid:     #6b6b6b;
   --gray-muted:   #999999;
   --border:       #e2ddd5;
   --border-dark:  #222222;
   --radius-sm:    2px;
-  --radius-md:    6px;
+  --radius-md:    8px;
   --shadow-soft:  0 14px 36px rgba(0,0,0,0.08);
   --shadow-lift:  0 24px 60px rgba(0,0,0,0.12);
   --transition:   0.22s ease;
@@ -48,7 +48,7 @@
   max-width: 980px;
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-lift);
   overflow: hidden;
   display: grid;
@@ -65,8 +65,8 @@
 /* ── Lateral editorial (preto) ── */
 .auth-aside {
   position: relative;
-  background: var(--black);
-  color: #fff;
+  background: var(--gray-100);
+  color: var(--ink);
   padding: 3.25rem 2.75rem;
   display: flex;
   flex-direction: column;
@@ -80,15 +80,15 @@
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(520px 320px at 120% -10%, rgba(200,16,46,0.35), transparent 60%),
-    radial-gradient(420px 360px at -20% 120%, rgba(200,16,46,0.16), transparent 62%);
+    radial-gradient(520px 320px at 120% -10%, rgba(236,0,140,0.12), transparent 60%),
+    radial-gradient(420px 360px at -20% 120%, rgba(236,0,140,0.06), transparent 62%);
 }
 .auth-aside-brand {
-  font-family: 'Playfair Display', serif;
+  font-family: 'Poppins', sans-serif;
   font-size: 1.6rem;
   font-weight: 700;
   letter-spacing: 0.03em;
-  color: #fff;
+  color: var(--ink);
   text-decoration: none;
 }
 .auth-aside-brand span { color: var(--accent); }
@@ -102,7 +102,7 @@
   font-weight: 600;
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: rgba(255,255,255,0.65);
+  color: var(--gray-700);
   margin-bottom: 1.1rem;
 }
 .auth-aside-eyebrow::before {
@@ -112,7 +112,7 @@
   background: var(--accent);
 }
 .auth-aside-title {
-  font-family: 'Playfair Display', serif;
+  font-family: 'Poppins', sans-serif;
   font-size: clamp(1.7rem, 3vw, 2.3rem);
   font-weight: 700;
   line-height: 1.15;
@@ -121,7 +121,7 @@
 .auth-aside-text {
   font-size: 0.9rem;
   line-height: 1.75;
-  color: rgba(255,255,255,0.6);
+  color: var(--gray-700);
   max-width: 300px;
   margin: 0;
 }
@@ -138,7 +138,7 @@
   align-items: center;
   gap: 0.65rem;
   font-size: 0.82rem;
-  color: rgba(255,255,255,0.75);
+  color: var(--gray-700);
 }
 .auth-aside-perks svg { width: 16px; height: 16px; stroke: var(--accent); flex-shrink: 0; }
 
@@ -151,7 +151,7 @@
 }
 .auth-form-head { margin-bottom: 2rem; }
 .auth-form-title {
-  font-family: 'Playfair Display', serif;
+  font-family: 'Poppins', sans-serif;
   font-size: 1.9rem;
   font-weight: 700;
   color: var(--black);
@@ -207,7 +207,7 @@
 .btn-account {
   width: 100%;
   border: none;
-  background: var(--black);
+  background: var(--brand-pink);
   color: #fff;
   padding: 15px;
   border-radius: var(--radius-md);
@@ -219,7 +219,7 @@
   cursor: pointer;
   transition: background var(--transition), transform var(--transition), letter-spacing var(--transition);
 }
-.btn-account:hover { background: var(--accent); transform: translateY(-2px); letter-spacing: 0.17em; }
+.btn-account:hover { background: var(--brand-pink-dark); transform: translateY(-2px); letter-spacing: 0.17em; }
 .btn-account:active { transform: translateY(0); }
 
 .auth-alt {
@@ -258,7 +258,7 @@
   margin: 0 0 0.4rem;
 }
 .account-header h1 {
-  font-family: 'Playfair Display', serif;
+  font-family: 'Poppins', sans-serif;
   font-size: clamp(1.9rem, 3.5vw, 2.6rem);
   font-weight: 700;
   margin: 0;
@@ -293,7 +293,7 @@
 .account-panel {
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   padding: 2rem 2rem 2.15rem;
   box-shadow: var(--shadow-soft);
 }
@@ -305,7 +305,7 @@
 }
 .account-panel-head svg { width: 20px; height: 20px; stroke: var(--accent); flex-shrink: 0; }
 .account-panel-title {
-  font-family: 'Playfair Display', serif;
+  font-family: 'Poppins', sans-serif;
   font-size: 1.25rem;
   font-weight: 700;
   color: var(--black);
@@ -359,8 +359,8 @@
   transition: background var(--transition), border-color var(--transition), color var(--transition);
 }
 .action-btn svg { width: 17px; height: 17px; flex-shrink: 0; }
-.action-btn--primary { background: var(--black); color: #fff; border-color: var(--black); }
-.action-btn--primary:hover { background: var(--accent); border-color: var(--accent); }
+.action-btn--primary { background: var(--brand-pink); color: #fff; border-color: var(--brand-pink); }
+.action-btn--primary:hover { background: var(--brand-pink-dark); border-color: var(--brand-pink-dark); }
 .action-btn--ghost:hover { border-color: var(--black); }
 .action-btn--danger { color: var(--accent); }
 .action-btn--danger:hover { background: var(--accent); border-color: var(--accent); color: #fff; }

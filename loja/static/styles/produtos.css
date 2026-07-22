@@ -6,7 +6,7 @@
    PAGE HEADER
    ════════════════════════════════════════════════════════ */
 .page-header {
-  background: var(--black);
+  background: var(--gray-100);
   padding: 4rem 2rem 3.5rem;
   text-align: center;
 }
@@ -21,20 +21,20 @@
   color: var(--accent);
   margin-bottom: 0.75rem;
 }
-.page-header-eyebrow span { color: rgba(255,255,255,0.5); }
+.page-header-eyebrow span { color: var(--gray-300); }
 
 .page-header-title {
-  font-family: 'Playfair Display', serif;
+  font-family: 'Poppins', sans-serif;
   font-size: clamp(2rem, 5vw, 3rem);
   font-weight: 700;
-  color: var(--white);
+  color: var(--ink);
   margin: 0 0 0.75rem;
   line-height: 1.15;
 }
 
 .page-header-sub {
   font-size: 0.9rem;
-  color: rgba(255,255,255,0.4);
+  color: var(--gray-700);
   margin: 0;
 }
 
@@ -64,7 +64,7 @@
 .sidebar-inner {
   background: var(--white);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   padding: 1.75rem;
   display: flex;
   flex-direction: column;
@@ -122,7 +122,7 @@
   width: 100%;
   padding: 9px 12px 9px 34px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   font-family: 'DM Sans', sans-serif;
   font-size: 0.85rem;
   color: var(--black);
@@ -151,7 +151,7 @@
 }
 .category-link:hover { background: var(--cream); color: var(--black); }
 .category-link.active {
-  background: var(--black);
+  background: var(--brand-pink);
   color: var(--white);
   font-weight: 600;
 }
@@ -201,7 +201,7 @@
   gap: 6px;
   background: var(--white);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 8px 14px;
   font-family: 'DM Sans', sans-serif;
   font-size: 0.8rem;
@@ -233,7 +233,7 @@
   appearance: none;
   background: var(--white) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b6b6b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") no-repeat right 10px center;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 8px 32px 8px 12px;
   font-family: 'DM Sans', sans-serif;
   font-size: 0.82rem;
@@ -257,7 +257,7 @@
   gap: 6px;
   background: var(--cream);
   border: 1px solid var(--border);
-  border-radius: 100px;
+  border-radius: var(--radius-pill);
   padding: 4px 12px;
   font-size: 0.78rem;
   font-weight: 500;
@@ -288,7 +288,7 @@
   flex-direction: column;
   background: var(--white);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   text-decoration: none;
   color: inherit;
@@ -344,7 +344,7 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   padding: 9px 22px;
-  border-radius: 2px;
+  border-radius: var(--radius-md);
 }
 
 /* favorito */
@@ -505,7 +505,7 @@
   margin-top: auto;
   padding: 11px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   font-size: 0.82rem;
   font-weight: 600;
   color: var(--accent);

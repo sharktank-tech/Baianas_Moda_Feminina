@@ -52,6 +52,7 @@ def produtos():
 
     categoria = request.args.get("categoria")
     ordenar = request.args.get("ordenar", "recentes")
+    busca = (request.args.get("q") or "").strip()
 
     query = Product.query.filter(
         Product.is_active == True
@@ -61,6 +62,12 @@ def produtos():
     if categoria:
         query = query.filter(
             Product.category == categoria
+        )
+
+    # Busca textual (nome do produto)
+    if busca:
+        query = query.filter(
+            Product.name.ilike(f"%{busca}%")
         )
 
     # Ordenação
@@ -108,8 +115,20 @@ def produtos():
         products=products,
         categorias=categorias,
         categoria_atual=categoria,
-        ordenar_atual=ordenar
+        ordenar_atual=ordenar,
+        busca_atual=busca
     )
+
+# ── Newsletter ────────────────────────────────────────────────────────────────
+
+@main_blueprint.route('/newsletter', methods=['POST'])
+def newsletter():
+    email = (request.form.get("email") or "").strip()
+    if email and "@" in email:
+        flash("Pronto! Você vai receber nossas ofertas em primeira mão. 💌", "success")
+    else:
+        flash("Informe um e-mail válido para se cadastrar.", "warning")
+    return redirect(request.referrer or url_for("main.home"))
 
 # ── Produto individual ───────────────────────────────────────────────
 

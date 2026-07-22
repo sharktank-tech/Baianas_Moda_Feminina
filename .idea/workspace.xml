@@ -4,15 +4,22 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="310da70a-5095-47e0-b4d5-9b337aa34487" name="Changes" comment="- Melhoria no design">
+    <list default="true" id="310da70a-5095-47e0-b4d5-9b337aa34487" name="Changes" comment="- Correção de bugs nas rotas&#10;- Reafirmação de base.hmtl como estrutura para todas as paginas">
+      <change afterPath="$PROJECT_DIR$/design.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/conta/conta.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/conta/conta.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/conta/edit_account.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/conta/edit_account.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/conta/login.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/conta/login.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/conta/register.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/conta/register.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/static/styles/conta.css" beforeDir="false" afterPath="$PROJECT_DIR$/loja/static/styles/conta.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/static/styles/dashboard_admin.css" beforeDir="false" afterPath="$PROJECT_DIR$/loja/static/styles/dashboard_admin.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/static/styles/produtos.css" beforeDir="false" afterPath="$PROJECT_DIR$/loja/static/styles/produtos.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/static/styles/produtos_individual.css" beforeDir="false" afterPath="$PROJECT_DIR$/loja/static/styles/produtos_individual.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/static/styles/styles.css" beforeDir="false" afterPath="$PROJECT_DIR$/loja/static/styles/styles.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/templates/admin/dashboard.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/admin/dashboard.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/templates/admin/users/edit_user.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/admin/users/edit_user.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/templates/base.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/base.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/templates/cart/carrinho.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/cart/carrinho.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/templates/cart/checkout.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/cart/checkout.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/templates/institucional/sobre.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/institucional/sobre.html" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/loja/templates/main/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/main/index.html" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/loja/views/routes.py" beforeDir="false" afterPath="$PROJECT_DIR$/loja/views/routes.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/run.py" beforeDir="false" afterPath="$PROJECT_DIR$/run.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -293,7 +300,15 @@
       <option name="project" value="LOCAL" />
       <updated>1782583801808</updated>
     </task>
-    <option name="localTasksCounter" value="21" />
+    <task id="LOCAL-00021" summary="- Correção de bugs nas rotas&#10;- Reafirmação de base.hmtl como estrutura para todas as paginas">
+      <option name="closed" value="true" />
+      <created>1784573612773</created>
+      <option name="number" value="00021" />
+      <option name="presentableId" value="LOCAL-00021" />
+      <option name="project" value="LOCAL" />
+      <updated>1784573612773</updated>
+    </task>
+    <option name="localTasksCounter" value="22" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -319,6 +334,7 @@
     <MESSAGE value="- Melhoria da pagina de produtos" />
     <MESSAGE value="- Redesign da pagina inicial&#10;- Melhoria do modelo de categoria no banco de dados" />
     <MESSAGE value="- Melhoria na barra d enavegação&#10;- Substituição do icone de favicon" />
-    <option name="LAST_COMMIT_MESSAGE" value="- Melhoria na barra d enavegação&#10;- Substituição do icone de favicon" />
+    <MESSAGE value="- Correção de bugs nas rotas&#10;- Reafirmação de base.hmtl como estrutura para todas as paginas" />
+    <option name="LAST_COMMIT_MESSAGE" value="- Correção de bugs nas rotas&#10;- Reafirmação de base.hmtl como estrutura para todas as paginas" />
   </component>
 </project>

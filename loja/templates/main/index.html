@@ -74,6 +74,38 @@
 
 
   <!-- ══════════════════════════════════════════════
+       TIRA DE CATEGORIAS EM ÍCONE CIRCULAR
+  ══════════════════════════════════════════════ -->
+  <section class="cat-strip" data-reveal aria-label="Categorias em destaque">
+    <div class="cat-strip-track">
+      {% for cat in categories %}
+      <a href="{{ url_for('main.produtos', categoria=cat.slug) }}" class="cat-strip-item">
+        <span class="cat-strip-circle">
+          {% if cat.image %}<img src="{{ cat.image }}" alt="{{ cat.label }}" loading="lazy">{% else %}<span class="cat-strip-mono">{{ cat.label[0] }}</span>{% endif %}
+        </span>
+        <span class="cat-strip-label">{{ cat.label }}</span>
+      </a>
+      {% else %}
+      {% for item in [
+        {'name': 'Feminino',   'slug': 'feminino'},
+        {'name': 'Masculino',  'slug': 'masculino'},
+        {'name': 'Infantil',   'slug': 'infantil'},
+        {'name': 'Calçados',   'slug': 'calcados'},
+        {'name': 'Bolsas',     'slug': 'bolsas'},
+        {'name': 'Beleza',     'slug': 'beleza'},
+        {'name': 'Acessórios', 'slug': 'acessorios'}
+      ] %}
+      <a href="{{ url_for('main.produtos', categoria=item.slug) }}" class="cat-strip-item">
+        <span class="cat-strip-circle"><span class="cat-strip-mono">{{ item.name[0] }}</span></span>
+        <span class="cat-strip-label">{{ item.name }}</span>
+      </a>
+      {% endfor %}
+      {% endfor %}
+    </div>
+  </section>
+
+
+  <!-- ══════════════════════════════════════════════
        CATEGORIAS EM DESTAQUE
   ══════════════════════════════════════════════ -->
   <section class="categories-section" data-reveal>
@@ -117,9 +149,131 @@
   </div>
 
 
-  <!-- ════════════════════════════════════════════════════════
-     PROMOÇÕES ESPECIAIS
-     ════════════════════════════════════════════════════════ -->
+  <!-- ══════════════════════════════════════════════
+       OFERTAS DO DIA (com cronômetro regressivo)
+  ══════════════════════════════════════════════ -->
+  <section class="deals" data-reveal aria-label="Ofertas do dia">
+    <div class="deals-inner">
+      <div class="deals-head">
+        <div class="deals-title-wrap">
+          <span aria-hidden="true">🔥</span>
+          <h2 class="deals-title">Ofertas <span class="flash">do dia</span></h2>
+        </div>
+        <div class="deals-countdown">
+          <span>Acaba em</span>
+          <span class="countdown-clock" id="dealsCountdown" role="timer" aria-label="Tempo restante">
+            <span class="countdown-box" data-h>00</span><span class="countdown-sep">:</span>
+            <span class="countdown-box" data-m>00</span><span class="countdown-sep">:</span>
+            <span class="countdown-box" data-s>00</span>
+          </span>
+        </div>
+      </div>
+
+      {% if promotions %}
+      <div class="pcard-grid">
+        {% for promo in promotions %}
+        {% set price = promo.sale_price if promo.sale_price is not none else promo.original_price %}
+        {% set has_disc = promo.original_price and promo.sale_price and promo.original_price > promo.sale_price %}
+        <article class="pcard">
+          <a class="pcard-media{% if not promo.image %} pcard-media--empty{% endif %}" href="{{ url_for('main.produtos') }}">
+            {% if promo.image %}<img src="{{ promo.image }}" alt="{{ promo.name }}" loading="lazy">{% else %}{{ (promo.name or '?')[0] }}{% endif %}
+            {% if has_disc %}<span class="pcard-badge">-{{ ((promo.original_price - promo.sale_price) / promo.original_price * 100) | float | round(0, 'floor') | int }}%</span>{% endif %}
+            <button type="button" class="pcard-fav" data-fav aria-label="Favoritar">
+              <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 1 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            </button>
+          </a>
+          <div class="pcard-body">
+            <a class="pcard-name" href="{{ url_for('main.produtos') }}">{{ promo.name }}</a>
+            {% if price is not none %}
+            <div class="pcard-price">
+              {% if has_disc %}<span class="pcard-price-old">R$ {{ '%.2f'|format(promo.original_price) | replace('.', ',') }}</span>{% endif %}
+              <span class="pcard-price-now pcard-price-now--sale">R$ {{ '%.2f'|format(price) | replace('.', ',') }}</span>
+            </div>
+            <p class="pcard-installment">em 3x de R$ {{ '%.2f'|format(price / 3) | replace('.', ',') }} sem juros</p>
+            {% endif %}
+            <a class="pcard-buy" href="{{ url_for('main.produtos') }}">Aproveitar</a>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="deals-empty">As ofertas do dia chegam já já. Enquanto isso, dê uma olhada nas novidades abaixo. ✨</p>
+      {% endif %}
+    </div>
+  </section>
+
+
+  <!-- ══════════════════════════════════════════════
+       VITRINE — NOVIDADES
+  ══════════════════════════════════════════════ -->
+  <section class="vitrine" data-reveal aria-label="Novidades">
+    <div class="vitrine-head">
+      <h2 class="vitrine-title">Novidades</h2>
+      <a class="vitrine-link" href="{{ url_for('main.produtos') }}">Ver tudo →</a>
+    </div>
+    {% if products %}
+    <div class="pcard-grid">
+      {% for p in products %}
+      <article class="pcard">
+        <a class="pcard-media{% if not p.image1 %} pcard-media--empty{% endif %}" href="{{ url_for('main.produto_individual', id=p.id) }}">
+          {% if p.image1 %}<img src="{{ p.image1 }}" alt="{{ p.name }}" loading="lazy">{% else %}{{ (p.name or '?')[0] }}{% endif %}
+          <button type="button" class="pcard-fav" data-fav aria-label="Favoritar">
+            <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 1 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          </button>
+        </a>
+        <div class="pcard-body">
+          <a class="pcard-name" href="{{ url_for('main.produto_individual', id=p.id) }}">{{ p.name }}</a>
+          <div class="pcard-price">
+            <span class="pcard-price-now">R$ {{ '%.2f'|format(p.price) | replace('.', ',') }}</span>
+          </div>
+          <p class="pcard-installment">em 3x de R$ {{ '%.2f'|format(p.price / 3) | replace('.', ',') }} sem juros</p>
+          <a class="pcard-buy" href="{{ url_for('main.produto_individual', id=p.id) }}">Comprar</a>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="deals-empty">Em breve novidades por aqui.</p>
+    {% endif %}
+  </section>
+
+
+  <!-- ══════════════════════════════════════════════
+       SELOS DE CONFIANÇA
+  ══════════════════════════════════════════════ -->
+  <section class="trust" data-reveal aria-label="Vantagens da loja">
+    <div class="trust-item">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <div><strong>Compra segura</strong><span>Seus dados protegidos</span></div>
+    </div>
+    <div class="trust-item">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+      <div><strong>Troca fácil</strong><span>Até 30 dias</span></div>
+    </div>
+    <div class="trust-item">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+      <div><strong>Até 12x sem juros</strong><span>No cartão</span></div>
+    </div>
+    <div class="trust-item">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+      <div><strong>Entrega Brasil todo</strong><span>Frete grátis acima de R$ 249</span></div>
+    </div>
+  </section>
+
+
+  <!-- ══════════════════════════════════════════════
+       NEWSLETTER
+  ══════════════════════════════════════════════ -->
+  <section class="newsletter" data-reveal>
+    <div class="newsletter-inner">
+      <h2 class="newsletter-title">Ganhe 10% na primeira compra</h2>
+      <p class="newsletter-sub">Cadastre seu e-mail e receba ofertas e novidades em primeira mão.</p>
+      <form class="newsletter-form" action="{{ url_for('main.newsletter') }}" method="post">
+        <input type="email" name="email" placeholder="Seu melhor e-mail" required aria-label="Seu e-mail">
+        <button type="submit" class="btn btn--solid">Quero receber</button>
+      </form>
+    </div>
+  </section>
 
 
   <!-- ══════════════════════════════════════════════

@@ -12,7 +12,7 @@
 <!-- ═══════════════════════════════════════════════════════════
      PAINEL ADMINISTRATIVO — POLLO MODAS
      Requer vars CSS: --black, --accent, --cream, --border
-     Requer fontes:   Playfair Display, DM Sans
+     Requer fontes:   Poppins, DM Sans
 ═══════════════════════════════════════════════════════════ -->
 
 <div class="adm-wrap">
@@ -361,12 +361,12 @@
                   <td style="text-decoration:line-through;color:#aaa">
                     {% if promo.original_price %}R$ {{ "%.2f"|format(promo.original_price|float) }}{% else %}—{% endif %}
                   </td>
-                  <td style="color:var(--accent);font-weight:700">
+                  <td style="color:var(--sale-red);font-weight:700">
                     {% if promo.sale_price %}R$ {{ "%.2f"|format(promo.sale_price|float) }}{% else %}—{% endif %}
                   </td>
                   <td>
                     {% if disc > 0 %}
-                    <span class="adm-badge adm-badge-accent">-{{ disc }}%</span>
+                    <span class="adm-badge adm-badge-sale">-{{ disc }}%</span>
                     {% else %}—{% endif %}
                   </td>
                   <td>
