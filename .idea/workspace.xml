@@ -5,21 +5,14 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="310da70a-5095-47e0-b4d5-9b337aa34487" name="Changes" comment="- Correção de bugs nas rotas&#10;- Reafirmação de base.hmtl como estrutura para todas as paginas">
-      <change afterPath="$PROJECT_DIR$/design.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/PolloModas.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/PolloModas.iml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/static/styles/conta.css" beforeDir="false" afterPath="$PROJECT_DIR$/loja/static/styles/conta.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/static/styles/dashboard_admin.css" beforeDir="false" afterPath="$PROJECT_DIR$/loja/static/styles/dashboard_admin.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/static/styles/produtos.css" beforeDir="false" afterPath="$PROJECT_DIR$/loja/static/styles/produtos.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/static/styles/produtos_individual.css" beforeDir="false" afterPath="$PROJECT_DIR$/loja/static/styles/produtos_individual.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/static/styles/styles.css" beforeDir="false" afterPath="$PROJECT_DIR$/loja/static/styles/styles.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/admin/dashboard.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/admin/dashboard.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/admin/users/edit_user.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/admin/users/edit_user.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/base.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/base.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/cart/carrinho.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/cart/carrinho.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/cart/checkout.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/cart/checkout.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/loja/templates/institucional/sobre.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/institucional/sobre.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/modules/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/loja/modules/models.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/loja/modules/teste.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/loja/templates/main/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/loja/templates/main/index.html" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/loja/views/routes.py" beforeDir="false" afterPath="$PROJECT_DIR$/loja/views/routes.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/teste.py" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -48,7 +41,7 @@
   <component name="GithubPullRequestsUISettings">{
   &quot;selectedUrlAndAccountId&quot;: {
     &quot;url&quot;: &quot;https://github.com/sharktank-tech/PolloModas.git&quot;,
-    &quot;accountId&quot;: &quot;13c53860-af9d-4f5e-b674-83f92abbaa55&quot;
+    &quot;accountId&quot;: &quot;348bcaf9-66ce-4f53-b0dc-09065c40f4b9&quot;
   }
 }</component>
   <component name="ProjectColorInfo">{
@@ -71,11 +64,13 @@
     &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
     &quot;git-widget-placeholder&quot;: &quot;master&quot;,
     &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/home/danilo/PycharmProjects/PolloModas/loja/modules&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/home/danilocs/Downloads/env&quot;,
     &quot;list.type.of.created.stylesheet&quot;: &quot;CSS&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.jshint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.jshint&quot;: &quot;&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
     &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
@@ -108,6 +103,7 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="DEBUG_JUST_MY_CODE" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="RUN_TOOL" value="" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/run.py" />
       <option name="PARAMETERS" value="" />
@@ -127,7 +123,7 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-python-sdk-50341a9f1f9c-c2ffad84badb-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.26222.68" />
+        <option value="bundled-python-sdk-6fa658e1df1a-5bd6d13a2a75-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-262.8665.369" />
       </set>
     </attachedChunks>
   </component>
@@ -139,6 +135,7 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1732625908952</updated>
+      <workItem from="1785758834935" duration="6773000" />
     </task>
     <task id="LOCAL-00001" summary="commit inicial">
       <option name="closed" value="true" />
@@ -336,5 +333,8 @@
     <MESSAGE value="- Melhoria na barra d enavegação&#10;- Substituição do icone de favicon" />
     <MESSAGE value="- Correção de bugs nas rotas&#10;- Reafirmação de base.hmtl como estrutura para todas as paginas" />
     <option name="LAST_COMMIT_MESSAGE" value="- Correção de bugs nas rotas&#10;- Reafirmação de base.hmtl como estrutura para todas as paginas" />
+  </component>
+  <component name="com.intellij.coverage.CoverageDataManagerImpl">
+    <SUITE FILE_PATH="coverage/PolloModas$run.coverage" NAME="run Coverage Results" MODIFIED="1785785308766" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
   </component>
 </project>

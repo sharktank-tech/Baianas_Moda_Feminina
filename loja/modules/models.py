@@ -44,9 +44,15 @@ class SiteConfig(db.Model):
     meta_description = db.Column(db.Text)
     banner_quote = db.Column(db.Text)
     banner_cta_text = db.Column(db.String(100))
+    banner_cta_url = db.Column(db.String(255))  # NOVO: link do CTA do banner (antes só ia pra /produtos)
     promo_badge = db.Column(db.String(100))
     copyright_year = db.Column(db.Integer)
     copyright_text = db.Column(db.String(255))
+
+    # NOVOS: usados na seção "Selos de confiança" da home (antes eram valores fixos no HTML)
+    exchange_days = db.Column(db.Integer, default=30)
+    max_installments = db.Column(db.Integer, default=12)
+    free_shipping_min = db.Column(db.Numeric(10, 2), default=249)
 
 
 # ==========================================================
@@ -64,6 +70,15 @@ class HeroSlide(db.Model):
     alt = db.Column(db.String(255))
     eyebrow = db.Column(db.String(100))
     title = db.Column(db.String(100))
+    link = db.Column(db.String(255))          # NOVO: destino do botão "Ver coleção"
+
+    is_active = db.Column(db.Boolean, default=True)   # NOVO: liga/desliga sem apagar
+    order = db.Column(db.Integer, default=0)          # NOVO: ordem de exibição no carrossel
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<HeroSlide {self.title}>"
+
 
 # ==========================================================
 # Fornecedores
@@ -93,6 +108,7 @@ class Supplier(db.Model):
         back_populates="suppliers",
         lazy=True
     )
+
 
 # ==========================================================
 # Produtos
@@ -136,8 +152,16 @@ class Product(db.Model):
         lazy=True
     )
 
+    favorited_by = db.relationship(   # NOVO: para a lista "meus favoritos"
+        "Favorite",
+        backref="product",
+        lazy=True,
+        cascade="all, delete-orphan"
+    )
+
     def __repr__(self):
         return f"<Product {self.name}>"
+
 
 # ==========================================================
 # Promoções
@@ -150,6 +174,16 @@ class Promotion(db.Model):
         primary_key=True,
         default=uuid.uuid4
     )
+
+    # NOVO: liga a promoção a um produto real do catálogo. Sem isso o botão
+    # "Aproveitar" da home não tinha para onde ir (Promotion.id != Product.id).
+    product_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("products.id"),
+        nullable=True
+    )
+    product = db.relationship("Product", lazy=True)
+
     name = db.Column(db.String(255))
     image = db.Column(db.Text)
     original_price = db.Column(
@@ -162,6 +196,9 @@ class Promotion(db.Model):
         db.Boolean,
         default=True
     )
+    starts_at = db.Column(db.DateTime)            # NOVO
+    ends_at = db.Column(db.DateTime)               # NOVO: alimenta o cronômetro da home
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 # ==========================================================
@@ -182,6 +219,54 @@ class Testimonial(db.Model):
         db.Boolean,
         default=True
     )
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)  # NOVO: para ordenar "mais recentes"
+
+
+# ==========================================================
+# Newsletter
+# ==========================================================
+class NewsletterSubscriber(db.Model):   # NOVO: faltava para o form de newsletter funcionar
+    __tablename__ = "newsletter_subscribers"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+    email = db.Column(db.String(150), nullable=False, unique=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<NewsletterSubscriber {self.email}>"
+
+
+# ==========================================================
+# Favoritos
+# ==========================================================
+class Favorite(db.Model):   # NOVO: favoritos ligados ao usuário (persistem entre dispositivos)
+    __tablename__ = "favorites"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+    user_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    product_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "product_id", name="uq_favorite_user_product"),
+    )
+
 
 # ==========================================================
 # Rodapé
@@ -200,6 +285,7 @@ class FooterConfig(db.Model):
     )
     brand_description = db.Column(db.Text)
 
+
 # ==========================================================
 # Redes sociais
 # ==========================================================
@@ -217,6 +303,7 @@ class SocialLink(db.Model):
     )
     url = db.Column(db.Text)
     icon = db.Column(db.String(50))
+
 
 # ==========================================================
 # Links de navegação
@@ -237,6 +324,7 @@ class NavLink(db.Model):
         db.String(255),
         nullable=False
     )
+
 
 # ==========================================================
 # Categorias
@@ -270,6 +358,7 @@ class CategoryLink(db.Model):
         nullable=False
     )
 
+
 # ==========================================================
 # Contato
 # ==========================================================
@@ -285,6 +374,7 @@ class ContactInfo(db.Model):
     phone = db.Column(db.String(30))
     email = db.Column(db.String(150))
     hours = db.Column(db.String(100))
+
 
 # ==========================================================
 # Links legais
@@ -382,6 +472,7 @@ class Address(db.Model):
         default=datetime.utcnow
     )
 
+
 # ==========================================================
 # Usuários
 # ==========================================================
@@ -430,15 +521,25 @@ class User(UserMixin, db.Model):
         cascade="all, delete-orphan"
     )
 
+    favorites = db.relationship(   # NOVO: acesso via user.favorites
+        "Favorite",
+        backref="user",
+        lazy=True,
+        cascade="all, delete-orphan"
+    )
+
     is_admin = db.Column(
         db.Boolean,
         nullable=False,
         default=False
     )
 
-
     def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
+        # CORRIGIDO: a coluna se chama `password`, não `password_hash`.
+        # Como estava, set_password() criava um atributo novo em memória
+        # (self.password_hash) que nunca era salvo no banco, e a senha
+        # real (self.password) nunca era hasheada.
+        self.password = generate_password_hash(password)
 
     def check_password(self, password):
         return check_password_hash(self.password, password)
@@ -448,6 +549,7 @@ class User(UserMixin, db.Model):
 
     def __repr__(self):
         return f"<User {self.email}>"
+
 
 # ==========================================================
 # Carrinhos
