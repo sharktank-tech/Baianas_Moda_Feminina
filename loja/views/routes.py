@@ -232,7 +232,7 @@ def produtos():
 def produto_individual(id):
     product = Product.query.filter_by(id=id, is_active=True).first_or_404()
     product.is_favorited = product.id in _get_favorited_ids()
-    return render_template("main/produto.html", product=product)
+    return render_template("main/produto_individual.html", product=product)
 
 
 # ── Favoritar (exige login, favorito persiste no banco) ──────────────────────
