@@ -213,7 +213,7 @@
         {% set price = promo.sale_price if promo.sale_price is not none else promo.original_price %}
         {% set has_disc = promo.original_price and promo.sale_price and promo.original_price > promo.sale_price %}
         <article class="pcard">
-          <a class="pcard-media{% if not promo.image %} pcard-media--empty{% endif %}" href="{{ url_for('main.produto_individual', id=promo.id) }}">
+          <a class="pcard-media{% if not promotions.image %} pcard-media--empty{% endif %}" href="{{ url_for('main.produto_individual', id=promo.id) }}">
             {% if promo.image %}<img src="{{ promo.image }}" alt="{{ promo.name }}" loading="lazy" width="400" height="500">{% else %}<span aria-hidden="true">{{ (promo.name or '?')[0] }}</span>{% endif %}
             {% if has_disc %}<span class="pcard-badge">-{{ ((promo.original_price - promo.sale_price) / promo.original_price * 100) | round(0, 'floor') | int }}%</span>{% endif %}
             <button type="button" class="pcard-fav" data-fav data-product-id="{{ promo.id }}" aria-label="Favoritar {{ promo.name }}" aria-pressed="{{ 'true' if promo.is_favorited else 'false' }}">
