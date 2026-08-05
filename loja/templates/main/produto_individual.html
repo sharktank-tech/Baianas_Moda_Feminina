@@ -1,81 +1,665 @@
 {% extends "base.html" %}
 
 {% block title %}{{ product.name }} — {{ site.name }}{% endblock %}
-{% block description %}{{ product.description[:160] }}{% endblock %}
+{% block meta_description %}{{ (product.description or product.name)[:160] }}{% endblock %}
 
 {% block extra_head %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles/produtos_individual.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='styles/produtos_individual.css') }}">
+
+<style>
+/* =========================================================
+   Galeria do produto
+   ========================================================= */
+
+.product-gallery {
+    display: grid;
+    grid-template-columns: 82px minmax(0, 1fr);
+    grid-template-areas: "thumbs stage";
+    align-items: start;
+    gap: 1rem;
+    min-width: 0;
+}
+
+.product-gallery-thumbs {
+    grid-area: thumbs;
+    display: flex;
+    flex-direction: column;
+    gap: .75rem;
+    max-height: 690px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    overscroll-behavior: contain;
+}
+
+.product-gallery-thumb {
+    display: block;
+    width: 100%;
+    aspect-ratio: 4 / 5;
+    padding: 0;
+    overflow: hidden;
+    border: 2px solid transparent;
+    border-radius: 9px;
+    background: #f6f6f6;
+    cursor: pointer;
+    transition:
+        border-color .2s ease,
+        opacity .2s ease,
+        transform .2s ease;
+}
+
+.product-gallery-thumb:hover {
+    opacity: .82;
+    transform: translateY(-1px);
+}
+
+.product-gallery-thumb.is-active {
+    border-color: var(--accent, #EC008C);
+}
+
+.product-gallery-thumb:focus-visible,
+.product-gallery-main-button:focus-visible,
+.product-gallery-arrow:focus-visible,
+.product-gallery-zoom:focus-visible,
+.product-lightbox-close:focus-visible,
+.product-lightbox-arrow:focus-visible {
+    outline: 3px solid rgba(236, 0, 140, .25);
+    outline-offset: 3px;
+}
+
+.product-gallery-thumb img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.product-gallery-stage {
+    grid-area: stage;
+    position: relative;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--border, #e5e5e5);
+    border-radius: 12px;
+    background: #f7f7f7;
+}
+
+.product-gallery-main-button {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: zoom-in;
+}
+
+.product-gallery-main {
+    display: block;
+    width: 100%;
+    aspect-ratio: 4 / 5;
+    max-height: 720px;
+    object-fit: contain;
+    background: #f7f7f7;
+    transition: opacity .18s ease, transform .3s ease;
+}
+
+.product-gallery-main.is-changing {
+    opacity: .45;
+}
+
+.product-gallery-main-button:hover .product-gallery-main {
+    transform: scale(1.012);
+}
+
+.product-gallery-placeholder {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    aspect-ratio: 4 / 5;
+    color: #888;
+    font-size: clamp(2.5rem, 7vw, 5rem);
+    font-weight: 700;
+}
+
+.product-gallery-arrow,
+.product-gallery-zoom {
+    position: absolute;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(0, 0, 0, .1);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, .9);
+    color: #222;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .1);
+    backdrop-filter: blur(6px);
+    transition:
+        background .2s ease,
+        color .2s ease,
+        transform .2s ease;
+}
+
+.product-gallery-arrow {
+    top: 50%;
+    width: 42px;
+    height: 42px;
+    transform: translateY(-50%);
+    font-size: 1.35rem;
+}
+
+.product-gallery-arrow:hover,
+.product-gallery-zoom:hover {
+    background: var(--accent, #EC008C);
+    color: #fff;
+}
+
+.product-gallery-arrow:hover {
+    transform: translateY(-50%) scale(1.04);
+}
+
+.product-gallery-prev {
+    left: 14px;
+}
+
+.product-gallery-next {
+    right: 14px;
+}
+
+.product-gallery-zoom {
+    right: 14px;
+    bottom: 14px;
+    width: 42px;
+    height: 42px;
+    font-size: 1rem;
+}
+
+.product-gallery-counter {
+    position: absolute;
+    left: 14px;
+    bottom: 14px;
+    z-index: 2;
+    padding: .45rem .7rem;
+    border-radius: 999px;
+    background: rgba(20, 20, 20, .7);
+    color: #fff;
+    font-size: .78rem;
+    font-weight: 700;
+    backdrop-filter: blur(6px);
+}
+
+.product-gallery-hint {
+    margin: .75rem 0 0;
+    color: #777;
+    font-size: .8rem;
+    text-align: center;
+}
+
+/* =========================================================
+   Lightbox
+   ========================================================= */
+
+.product-lightbox[hidden] {
+    display: none;
+}
+
+.product-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: grid;
+    place-items: center;
+    padding: 1.25rem;
+    background: rgba(8, 8, 8, .94);
+}
+
+.product-lightbox-dialog {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: min(1100px, 100%);
+    height: min(900px, calc(100vh - 2.5rem));
+}
+
+.product-lightbox-image {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    user-select: none;
+}
+
+.product-lightbox-close,
+.product-lightbox-arrow {
+    position: absolute;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, .92);
+    color: #222;
+    cursor: pointer;
+}
+
+.product-lightbox-close {
+    top: 0;
+    right: 0;
+    width: 44px;
+    height: 44px;
+    font-size: 1.45rem;
+}
+
+.product-lightbox-arrow {
+    top: 50%;
+    width: 48px;
+    height: 48px;
+    transform: translateY(-50%);
+    font-size: 1.5rem;
+}
+
+.product-lightbox-prev {
+    left: 0;
+}
+
+.product-lightbox-next {
+    right: 0;
+}
+
+.product-lightbox-counter {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: .5rem .8rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .92);
+    color: #222;
+    font-size: .8rem;
+    font-weight: 700;
+}
+
+body.product-lightbox-open {
+    overflow: hidden;
+}
+
+@media (max-width: 800px) {
+    .product-gallery {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "stage"
+            "thumbs";
+    }
+
+    .product-gallery-thumbs {
+        flex-direction: row;
+        max-height: none;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding-bottom: .3rem;
+    }
+
+    .product-gallery-thumb {
+        flex: 0 0 72px;
+    }
+
+    .product-gallery-main {
+        max-height: none;
+    }
+}
+
+@media (max-width: 520px) {
+    .product-gallery-arrow {
+        width: 38px;
+        height: 38px;
+    }
+
+    .product-gallery-prev {
+        left: 8px;
+    }
+
+    .product-gallery-next {
+        right: 8px;
+    }
+
+    .product-gallery-zoom {
+        right: 8px;
+        bottom: 8px;
+    }
+
+    .product-gallery-counter {
+        left: 8px;
+        bottom: 8px;
+    }
+
+    .product-lightbox {
+        padding: .5rem;
+    }
+
+    .product-lightbox-dialog {
+        height: calc(100vh - 1rem);
+    }
+
+    .product-lightbox-arrow {
+        width: 42px;
+        height: 42px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .product-gallery-thumb,
+    .product-gallery-main,
+    .product-gallery-arrow,
+    .product-gallery-zoom {
+        transition: none;
+    }
+}
+</style>
 {% endblock %}
 
 {% block content %}
+
+{% set primary_image = product.image1 or product.image2 or product.image3 or product.image4 %}
+{% set image_count =
+    (1 if product.image1 else 0)
+    + (1 if product.image2 else 0)
+    + (1 if product.image3 else 0)
+    + (1 if product.image4 else 0)
+%}
 
 <div class="product-container">
 
     <div class="product-main">
 
-        <div class="product-gallery">
+        <div
+            class="product-gallery"
+            id="productGallery"
+            aria-label="Galeria de imagens de {{ product.name }}"
+            data-image-count="{{ image_count }}"
+        >
 
-            <img src="{{ product.image1 }}" alt="{{ product.name }}">
+            {% if primary_image %}
 
-            {% if product.image2 %}
-            <img src="{{ product.image2 }}">
-            {% endif %}
+            <div class="product-gallery-thumbs" role="tablist" aria-label="Selecionar imagem">
 
-            {% if product.image3 %}
-            <img src="{{ product.image3 }}">
+                {% if product.image1 %}
+                <button
+                    class="product-gallery-thumb is-active"
+                    type="button"
+                    role="tab"
+                    aria-selected="true"
+                    aria-label="Exibir imagem 1 de {{ product.name }}"
+                    data-gallery-index="0"
+                    data-gallery-src="{{ product.image1 }}"
+                    data-gallery-alt="{{ product.name }} — imagem 1"
+                >
+                    <img src="{{ product.image1 }}" alt="" width="90" height="112" loading="eager">
+                </button>
+                {% endif %}
+
+                {% if product.image2 %}
+                <button
+                    class="product-gallery-thumb"
+                    type="button"
+                    role="tab"
+                    aria-selected="false"
+                    aria-label="Exibir imagem 2 de {{ product.name }}"
+                    data-gallery-index="{{ 1 if product.image1 else 0 }}"
+                    data-gallery-src="{{ product.image2 }}"
+                    data-gallery-alt="{{ product.name }} — imagem 2"
+                >
+                    <img src="{{ product.image2 }}" alt="" width="90" height="112" loading="lazy">
+                </button>
+                {% endif %}
+
+                {% if product.image3 %}
+                <button
+                    class="product-gallery-thumb"
+                    type="button"
+                    role="tab"
+                    aria-selected="false"
+                    aria-label="Exibir imagem 3 de {{ product.name }}"
+                    data-gallery-index="{{ (1 if product.image1 else 0) + (1 if product.image2 else 0) }}"
+                    data-gallery-src="{{ product.image3 }}"
+                    data-gallery-alt="{{ product.name }} — imagem 3"
+                >
+                    <img src="{{ product.image3 }}" alt="" width="90" height="112" loading="lazy">
+                </button>
+                {% endif %}
+
+                {% if product.image4 %}
+                <button
+                    class="product-gallery-thumb"
+                    type="button"
+                    role="tab"
+                    aria-selected="false"
+                    aria-label="Exibir imagem 4 de {{ product.name }}"
+                    data-gallery-index="{{ (1 if product.image1 else 0) + (1 if product.image2 else 0) + (1 if product.image3 else 0) }}"
+                    data-gallery-src="{{ product.image4 }}"
+                    data-gallery-alt="{{ product.name }} — imagem 4"
+                >
+                    <img src="{{ product.image4 }}" alt="" width="90" height="112" loading="lazy">
+                </button>
+                {% endif %}
+
+            </div>
+
+            <div class="product-gallery-stage">
+
+                <button
+                    class="product-gallery-main-button"
+                    type="button"
+                    id="productGalleryOpen"
+                    aria-label="Ampliar imagem de {{ product.name }}"
+                >
+                    <img
+                        class="product-gallery-main"
+                        id="productGalleryMain"
+                        src="{{ primary_image }}"
+                        alt="{{ product.name }} — imagem 1"
+                        width="800"
+                        height="1000"
+                        loading="eager"
+                        fetchpriority="high"
+                    >
+                </button>
+
+                {% if image_count > 1 %}
+                <button
+                    class="product-gallery-arrow product-gallery-prev"
+                    type="button"
+                    data-gallery-prev
+                    aria-label="Imagem anterior"
+                >
+                    ‹
+                </button>
+
+                <button
+                    class="product-gallery-arrow product-gallery-next"
+                    type="button"
+                    data-gallery-next
+                    aria-label="Próxima imagem"
+                >
+                    ›
+                </button>
+                {% endif %}
+
+                <button
+                    class="product-gallery-zoom"
+                    type="button"
+                    data-gallery-zoom
+                    aria-label="Abrir imagem ampliada"
+                    title="Ampliar imagem"
+                >
+                    ⛶
+                </button>
+
+                <span
+                    class="product-gallery-counter"
+                    id="productGalleryCounter"
+                    aria-live="polite"
+                >
+                    1 / {{ image_count }}
+                </span>
+
+            </div>
+
+            <p class="product-gallery-hint">
+                Clique na imagem para ampliar
+                {% if image_count > 1 %}· deslize no celular para navegar{% endif %}
+            </p>
+
+            {% else %}
+
+            <div class="product-gallery-stage">
+                <div class="product-gallery-placeholder" aria-label="Produto sem imagem">
+                    {{ (product.name or '?')[0] }}
+                </div>
+            </div>
+
             {% endif %}
 
         </div>
 
         <div class="product-info">
 
+            {% if product.category %}
             <div class="product-category">
                 {{ product.category }}
             </div>
+            {% endif %}
 
             <h1 class="product-name">
                 {{ product.name }}
             </h1>
 
             <div class="product-price">
-                R$ {{ '%.2f'|format(product.price) }}
+                R$ {{ '%.2f'|format(product.price)|replace('.', ',') }}
             </div>
 
+            {% if product.description %}
             <div class="product-description">
                 {{ product.description }}
             </div>
+            {% endif %}
 
-            <div class="size-title">
-                Tamanho
-            </div>
+            <form
+                class="product-purchase-form"
+                action="{{ url_for('main.processar_produto', product_id=product.id) }}"
+                method="post"
+                id="productPurchaseForm"
+            >
+                {% if csrf_token %}
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                {% endif %}
 
-            <div class="size-options">
+                <input
+                    type="hidden"
+                    name="action"
+                    id="purchaseAction"
+                    value=""
+                >
 
-                <button class="size-option">P</button>
-                <button class="size-option">M</button>
-                <button class="size-option">G</button>
-                <button class="size-option">GG</button>
+                <fieldset class="size-fieldset">
+                    <legend class="size-title">Tamanho</legend>
 
-            </div>
+                    <div class="size-options">
+                        {% for size in ['P', 'M', 'G', 'GG'] %}
+                        <input
+                            class="size-option-input"
+                            type="radio"
+                            name="size"
+                            id="size-{{ size|lower }}"
+                            value="{{ size }}"
+                            required
+                        >
+                        <label class="size-option" for="size-{{ size|lower }}">
+                            {{ size }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                </fieldset>
 
-            <button class="buy-btn">
-                Comprar Agora
-            </button>
+                <div class="quantity-field">
+                    <label class="quantity-title" for="productQuantity">Quantidade</label>
+
+                    <div class="quantity-control">
+                        <button
+                            type="button"
+                            class="quantity-button"
+                            data-quantity-minus
+                            aria-label="Diminuir quantidade"
+                        >
+                            −
+                        </button>
+
+                        <input
+                            id="productQuantity"
+                            class="quantity-input"
+                            type="number"
+                            name="quantity"
+                            value="1"
+                            min="1"
+                            max="{{ product.stock if product.stock is not none and product.stock > 0 else 99 }}"
+                            inputmode="numeric"
+                            required
+                        >
+
+                        <button
+                            type="button"
+                            class="quantity-button"
+                            data-quantity-plus
+                            aria-label="Aumentar quantidade"
+                        >
+                            +
+                        </button>
+                    </div>
+
+                    {% if product.stock is not none %}
+                    <small class="stock-info">
+                        {% if product.stock > 0 %}
+                            {{ product.stock }} unidade{% if product.stock != 1 %}s{% endif %}
+                            disponível{% if product.stock != 1 %}is{% endif %}
+                        {% else %}
+                            Produto temporariamente indisponível
+                        {% endif %}
+                    </small>
+                    {% endif %}
+                </div>
+
+                <div class="product-actions">
+                    <button
+                        class="buy-btn"
+                        type="submit"
+                        value="buy_now"
+                        data-purchase-action="buy_now"
+                        {% if product.stock is not none and product.stock <= 0 %}disabled{% endif %}
+                    >
+                        Comprar Agora
+                    </button>
+
+                    <button
+                        class="cart-btn"
+                        type="submit"
+                        value="add_to_cart"
+                        data-purchase-action="add_to_cart"
+                        {% if product.stock is not none and product.stock <= 0 %}disabled{% endif %}
+                    >
+                        Carrinho
+                    </button>
+                </div>
+
+                <p
+                    class="purchase-form-feedback"
+                    id="purchaseFormFeedback"
+                    role="alert"
+                    aria-live="polite"
+                ></p>
+            </form>
 
             <div class="product-benefits">
-
-                <div class="benefit">
-                    ✓ Frete para todo Brasil
-                </div>
-
-                <div class="benefit">
-                    ✓ Troca fácil em até 7 dias
-                </div>
-
-                <div class="benefit">
-                    ✓ Pagamento seguro
-                </div>
-
+                <div class="benefit">✓ Frete para todo Brasil</div>
+                <div class="benefit">✓ Troca fácil em até 7 dias</div>
+                <div class="benefit">✓ Pagamento seguro</div>
             </div>
 
         </div>
@@ -86,9 +670,7 @@
 
 <section class="details-section">
 
-    <h2 class="section-title">
-        Descrição
-    </h2>
+    <h2 class="section-title">Descrição</h2>
 
     <div class="details-text">
         {{ product.description }}
@@ -108,9 +690,11 @@
 
         <div class="product-card">
 
-            <a href="{{ url_for('main.produtos', product_id=p.id) }}">
+            <a href="{{ url_for('main.produto_individual', id=p.id) }}">
 
-                <img src="{{ p.image1 }}" alt="{{ p.name }}">
+                {% if p.image1 %}
+                <img src="{{ p.image1 }}" alt="{{ p.name }}" loading="lazy">
+                {% endif %}
 
                 <div class="card-info">
 
@@ -119,7 +703,7 @@
                     </div>
 
                     <div class="card-price">
-                        R$ {{ '%.2f'|format(p.price) }}
+                        R$ {{ '%.2f'|format(p.price)|replace('.', ',') }}
                     </div>
 
                 </div>
@@ -128,10 +712,445 @@
 
         </div>
 
+        {% else %}
+        <p class="related-products-empty">
+            Nenhum produto relacionado encontrado.
+        </p>
         {% endfor %}
 
     </div>
 
 </section>
 
+{% if primary_image %}
+<div
+    class="product-lightbox"
+    id="productLightbox"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Visualização ampliada de {{ product.name }}"
+    hidden
+>
+    <div class="product-lightbox-dialog">
+
+        <button
+            class="product-lightbox-close"
+            type="button"
+            data-lightbox-close
+            aria-label="Fechar imagem ampliada"
+        >
+            ×
+        </button>
+
+        {% if image_count > 1 %}
+        <button
+            class="product-lightbox-arrow product-lightbox-prev"
+            type="button"
+            data-lightbox-prev
+            aria-label="Imagem anterior"
+        >
+            ‹
+        </button>
+        {% endif %}
+
+        <img
+            class="product-lightbox-image"
+            id="productLightboxImage"
+            src="{{ primary_image }}"
+            alt="{{ product.name }} — imagem ampliada"
+        >
+
+        {% if image_count > 1 %}
+        <button
+            class="product-lightbox-arrow product-lightbox-next"
+            type="button"
+            data-lightbox-next
+            aria-label="Próxima imagem"
+        >
+            ›
+        </button>
+        {% endif %}
+
+        <span
+            class="product-lightbox-counter"
+            id="productLightboxCounter"
+            aria-live="polite"
+        >
+            1 / {{ image_count }}
+        </span>
+
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+    /* =====================================================
+       Galeria de imagens
+       ===================================================== */
+
+    var gallery = document.getElementById('productGallery');
+
+    if (gallery) {
+        var thumbs = Array.prototype.slice.call(
+            gallery.querySelectorAll('[data-gallery-src]')
+        );
+
+        var mainImage = document.getElementById('productGalleryMain');
+        var mainButton = document.getElementById('productGalleryOpen');
+        var mainCounter = document.getElementById('productGalleryCounter');
+        var previousButton = gallery.querySelector('[data-gallery-prev]');
+        var nextButton = gallery.querySelector('[data-gallery-next]');
+        var zoomButton = gallery.querySelector('[data-gallery-zoom]');
+
+        var lightbox = document.getElementById('productLightbox');
+        var lightboxImage = document.getElementById('productLightboxImage');
+        var lightboxCounter = document.getElementById('productLightboxCounter');
+        var lightboxClose = lightbox
+            ? lightbox.querySelector('[data-lightbox-close]')
+            : null;
+        var lightboxPrevious = lightbox
+            ? lightbox.querySelector('[data-lightbox-prev]')
+            : null;
+        var lightboxNext = lightbox
+            ? lightbox.querySelector('[data-lightbox-next]')
+            : null;
+
+        var currentIndex = 0;
+        var lastFocusedElement = null;
+        var touchStartX = null;
+
+        function normalizeIndex(index) {
+            if (!thumbs.length) return 0;
+
+            if (index < 0) {
+                return thumbs.length - 1;
+            }
+
+            if (index >= thumbs.length) {
+                return 0;
+            }
+
+            return index;
+        }
+
+        function showImage(index, focusThumbnail) {
+            if (!thumbs.length || !mainImage) return;
+
+            currentIndex = normalizeIndex(index);
+
+            var selectedThumb = thumbs[currentIndex];
+            var source = selectedThumb.dataset.gallerySrc;
+            var alt = selectedThumb.dataset.galleryAlt || '{{ product.name }}';
+
+            mainImage.classList.add('is-changing');
+
+            window.setTimeout(function () {
+                mainImage.src = source;
+                mainImage.alt = alt;
+                mainImage.classList.remove('is-changing');
+            }, 90);
+
+            thumbs.forEach(function (thumb, thumbIndex) {
+                var active = thumbIndex === currentIndex;
+
+                thumb.classList.toggle('is-active', active);
+                thumb.setAttribute('aria-selected', active ? 'true' : 'false');
+            });
+
+            if (focusThumbnail) {
+                selectedThumb.focus();
+            }
+
+            selectedThumb.scrollIntoView({
+                block: 'nearest',
+                inline: 'nearest',
+                behavior: 'smooth'
+            });
+
+            var counterText = String(currentIndex + 1) + ' / ' + String(thumbs.length);
+
+            if (mainCounter) {
+                mainCounter.textContent = counterText;
+            }
+
+            if (lightboxImage) {
+                lightboxImage.src = source;
+                lightboxImage.alt = alt + ' ampliada';
+            }
+
+            if (lightboxCounter) {
+                lightboxCounter.textContent = counterText;
+            }
+        }
+
+        function showPrevious() {
+            showImage(currentIndex - 1, false);
+        }
+
+        function showNext() {
+            showImage(currentIndex + 1, false);
+        }
+
+        function openLightbox() {
+            if (!lightbox || !lightboxImage || !thumbs.length) return;
+
+            lastFocusedElement = document.activeElement;
+            showImage(currentIndex, false);
+
+            lightbox.hidden = false;
+            document.body.classList.add('product-lightbox-open');
+
+            window.requestAnimationFrame(function () {
+                if (lightboxClose) {
+                    lightboxClose.focus();
+                }
+            });
+        }
+
+        function closeLightbox() {
+            if (!lightbox) return;
+
+            lightbox.hidden = true;
+            document.body.classList.remove('product-lightbox-open');
+
+            if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
+                lastFocusedElement.focus();
+            }
+        }
+
+        thumbs.forEach(function (thumb, index) {
+            thumb.addEventListener('click', function () {
+                showImage(index, false);
+            });
+        });
+
+        if (previousButton) {
+            previousButton.addEventListener('click', showPrevious);
+        }
+
+        if (nextButton) {
+            nextButton.addEventListener('click', showNext);
+        }
+
+        if (mainButton) {
+            mainButton.addEventListener('click', openLightbox);
+
+            mainButton.addEventListener('keydown', function (event) {
+                if (event.key === 'ArrowLeft') {
+                    event.preventDefault();
+                    showPrevious();
+                }
+
+                if (event.key === 'ArrowRight') {
+                    event.preventDefault();
+                    showNext();
+                }
+            });
+        }
+
+        if (zoomButton) {
+            zoomButton.addEventListener('click', openLightbox);
+        }
+
+        if (lightboxClose) {
+            lightboxClose.addEventListener('click', closeLightbox);
+        }
+
+        if (lightboxPrevious) {
+            lightboxPrevious.addEventListener('click', showPrevious);
+        }
+
+        if (lightboxNext) {
+            lightboxNext.addEventListener('click', showNext);
+        }
+
+        if (lightbox) {
+            lightbox.addEventListener('click', function (event) {
+                if (event.target === lightbox) {
+                    closeLightbox();
+                }
+            });
+
+            lightbox.addEventListener('touchstart', function (event) {
+                touchStartX = event.changedTouches[0].clientX;
+            }, { passive: true });
+
+            lightbox.addEventListener('touchend', function (event) {
+                if (touchStartX === null) return;
+
+                var touchEndX = event.changedTouches[0].clientX;
+                var distance = touchEndX - touchStartX;
+
+                if (Math.abs(distance) > 45) {
+                    if (distance > 0) {
+                        showPrevious();
+                    } else {
+                        showNext();
+                    }
+                }
+
+                touchStartX = null;
+            }, { passive: true });
+        }
+
+        if (mainButton) {
+            mainButton.addEventListener('touchstart', function (event) {
+                touchStartX = event.changedTouches[0].clientX;
+            }, { passive: true });
+
+            mainButton.addEventListener('touchend', function (event) {
+                if (touchStartX === null) return;
+
+                var touchEndX = event.changedTouches[0].clientX;
+                var distance = touchEndX - touchStartX;
+
+                /*
+                 * Movimento curto continua sendo clique e abre o lightbox.
+                 * Movimento maior navega pelas imagens.
+                 */
+                if (Math.abs(distance) > 45) {
+                    event.preventDefault();
+
+                    if (distance > 0) {
+                        showPrevious();
+                    } else {
+                        showNext();
+                    }
+                }
+
+                touchStartX = null;
+            }, { passive: false });
+        }
+
+        document.addEventListener('keydown', function (event) {
+            var lightboxIsOpen = lightbox && !lightbox.hidden;
+
+            if (lightboxIsOpen) {
+                if (event.key === 'Escape') {
+                    closeLightbox();
+                }
+
+                if (event.key === 'ArrowLeft') {
+                    event.preventDefault();
+                    showPrevious();
+                }
+
+                if (event.key === 'ArrowRight') {
+                    event.preventDefault();
+                    showNext();
+                }
+            }
+        });
+
+        showImage(0, false);
+    }
+
+    /* =====================================================
+       Formulário de compra
+       ===================================================== */
+
+    var form = document.getElementById('productPurchaseForm');
+    var quantityInput = document.getElementById('productQuantity');
+    var minusButton = document.querySelector('[data-quantity-minus]');
+    var plusButton = document.querySelector('[data-quantity-plus]');
+    var feedback = document.getElementById('purchaseFormFeedback');
+    var actionInput = document.getElementById('purchaseAction');
+    var purchaseButtons = form
+        ? form.querySelectorAll('[data-purchase-action]')
+        : [];
+
+    if (!form || !quantityInput || !actionInput) return;
+
+    function normalizeQuantity(value) {
+        var min = Number(quantityInput.min || 1);
+        var max = Number(quantityInput.max || 99);
+        var parsed = Number.parseInt(value, 10);
+
+        if (!Number.isFinite(parsed)) {
+            parsed = min;
+        }
+
+        return Math.min(max, Math.max(min, parsed));
+    }
+
+    if (minusButton) {
+        minusButton.addEventListener('click', function () {
+            quantityInput.value = normalizeQuantity(
+                Number(quantityInput.value) - 1
+            );
+        });
+    }
+
+    if (plusButton) {
+        plusButton.addEventListener('click', function () {
+            quantityInput.value = normalizeQuantity(
+                Number(quantityInput.value) + 1
+            );
+        });
+    }
+
+    quantityInput.addEventListener('change', function () {
+        quantityInput.value = normalizeQuantity(quantityInput.value);
+    });
+
+    purchaseButtons.forEach(function (button) {
+        button.addEventListener('click', function () {
+            actionInput.value =
+                button.dataset.purchaseAction ||
+                button.value ||
+                '';
+        });
+    });
+
+    form.addEventListener('submit', function (event) {
+        var selectedSize = form.querySelector('input[name="size"]:checked');
+
+        if (!selectedSize) {
+            event.preventDefault();
+            feedback.textContent = 'Selecione um tamanho antes de continuar.';
+
+            var firstSize = form.querySelector('input[name="size"]');
+
+            if (firstSize) {
+                firstSize.focus();
+            }
+
+            return;
+        }
+
+        quantityInput.value = normalizeQuantity(quantityInput.value);
+        feedback.textContent = '';
+
+        var submitButton = event.submitter;
+
+        if (submitButton) {
+            actionInput.value =
+                submitButton.dataset.purchaseAction ||
+                submitButton.value ||
+                actionInput.value;
+        }
+
+        if (!['buy_now', 'add_to_cart'].includes(actionInput.value)) {
+            event.preventDefault();
+            feedback.textContent = 'Escolha Comprar Agora ou Carrinho.';
+            return;
+        }
+
+        if (submitButton) {
+            submitButton.dataset.originalText = submitButton.textContent.trim();
+
+            submitButton.textContent =
+                actionInput.value === 'buy_now'
+                    ? 'Abrindo checkout...'
+                    : 'Adicionando...';
+
+            submitButton.disabled = true;
+        }
+    });
+})();
+</script>
 {% endblock %}

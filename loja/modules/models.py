@@ -159,6 +159,16 @@ class Product(db.Model):
         cascade="all, delete-orphan"
     )
 
+    # Itens de carrinho que apontam para este produto. O produto continua sendo
+    # a fonte de verdade para nome, descrição e imagens; o CartItem guarda apenas
+    # a seleção feita pelo cliente e o preço aplicado naquele momento.
+    cart_items = db.relationship(
+        "CartItem",
+        back_populates="product",
+        lazy=True,
+        passive_deletes=True
+    )
+
     def __repr__(self):
         return f"<Product {self.name}>"
 
@@ -509,9 +519,10 @@ class User(UserMixin, db.Model):
 
     carts = db.relationship(
         "Cart",
-        backref="user",
+        back_populates="user",
         lazy=True,
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
+        passive_deletes=True
     )
 
     addresses = db.relationship(
@@ -565,21 +576,50 @@ class Cart(db.Model):
 
     user_id = db.Column(
         UUID(as_uuid=True),
-        db.ForeignKey("users.id"),
-        nullable=False
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
     )
 
     created_at = db.Column(
         db.DateTime,
-        default=datetime.utcnow
+        default=datetime.utcnow,
+        nullable=False
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False
+    )
+
+    user = db.relationship(
+        "User",
+        back_populates="carts"
     )
 
     items = db.relationship(
         "CartItem",
-        backref="cart",
+        back_populates="cart",
         lazy=True,
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="CartItem.created_at"
     )
+
+    @property
+    def total_items(self):
+        """Quantidade total de unidades presentes no carrinho."""
+        return sum(item.quantity for item in self.items)
+
+    @property
+    def subtotal(self):
+        """Soma dos preços registrados nos itens do carrinho."""
+        return sum((item.line_total for item in self.items), 0)
+
+    def __repr__(self):
+        return f"<Cart {self.id} user={self.user_id}>"
 
 
 # ==========================================================
@@ -596,27 +636,97 @@ class CartItem(db.Model):
 
     cart_id = db.Column(
         UUID(as_uuid=True),
-        db.ForeignKey("carts.id"),
-        nullable=False
+        db.ForeignKey("carts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
     )
 
     product_id = db.Column(
         UUID(as_uuid=True),
-        db.ForeignKey("products.id"),
+        db.ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    # Tamanho escolhido na página do produto. O nome selected_size foi mantido
+    # explícito para não confundir com dimensões físicas ou estoque do produto.
+    selected_size = db.Column(
+        db.String(10),
         nullable=False
     )
 
     quantity = db.Column(
         db.Integer,
-        default=1
+        default=1,
+        nullable=False
     )
 
+    # Snapshot do preço no momento em que o item entra no carrinho. Assim uma
+    # alteração posterior em Product.price não muda silenciosamente o carrinho.
     unit_price = db.Column(
         db.Numeric(10, 2),
         nullable=False
     )
 
+    created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        nullable=False
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False
+    )
+
+    cart = db.relationship(
+        "Cart",
+        back_populates="items"
+    )
+
     product = db.relationship(
         "Product",
-        lazy=True
+        back_populates="cart_items",
+        lazy="joined"
     )
+
+    __table_args__ = (
+        # O mesmo produto pode aparecer em tamanhos diferentes, mas não deve
+        # criar duas linhas para o mesmo produto e o mesmo tamanho no carrinho.
+        db.UniqueConstraint(
+            "cart_id",
+            "product_id",
+            "selected_size",
+            name="uq_cart_item_product_size"
+        ),
+        db.CheckConstraint(
+            "quantity >= 1",
+            name="ck_cart_item_quantity_positive"
+        ),
+        db.CheckConstraint(
+            "unit_price >= 0",
+            name="ck_cart_item_unit_price_nonnegative"
+        ),
+    )
+
+    @property
+    def line_total(self):
+        """Preço total deste item, sem frete."""
+        return self.unit_price * self.quantity
+
+    # Compatibilidade opcional com templates antigos que usem item.size.
+    @property
+    def size(self):
+        return self.selected_size
+
+    @size.setter
+    def size(self, value):
+        self.selected_size = value
+
+    def __repr__(self):
+        return (
+            f"<CartItem {self.id} product={self.product_id} "
+            f"size={self.selected_size} quantity={self.quantity}>"
+        )
