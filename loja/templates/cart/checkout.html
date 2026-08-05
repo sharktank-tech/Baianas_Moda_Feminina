@@ -230,6 +230,111 @@
     text-align: right;
 }
 
+.coupon-box {
+    margin: 1.5rem 0;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: #fafafa;
+}
+
+.coupon-label {
+    display: block;
+    margin-bottom: .55rem;
+    color: #555;
+    font-size: .85rem;
+    font-weight: 700;
+}
+
+.coupon-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: .6rem;
+}
+
+.coupon-input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    background: #fff;
+    color: #222;
+    font: inherit;
+    text-transform: uppercase;
+    outline: none;
+}
+
+.coupon-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(236, 0, 140, .1);
+}
+
+.coupon-apply-btn {
+    border: 0;
+    border-radius: 8px;
+    padding: 0 1rem;
+    background: #222;
+    color: #fff;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background .2s, opacity .2s;
+}
+
+.coupon-apply-btn:hover {
+    background: var(--accent);
+}
+
+.coupon-apply-btn:disabled {
+    opacity: .6;
+    cursor: wait;
+}
+
+.coupon-feedback {
+    min-height: 1.15rem;
+    margin: .6rem 0 0;
+    color: #777;
+    font-size: .78rem;
+    line-height: 1.45;
+}
+
+.coupon-feedback.success {
+    color: #268044;
+}
+
+.coupon-feedback.error {
+    color: #b42323;
+}
+
+.coupon-remove-btn {
+    margin-top: .55rem;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    font-size: .78rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.coupon-remove-btn:hover {
+    text-decoration: underline;
+}
+
+.summary-discount span {
+    color: #248342 !important;
+}
+
+.summary-discount small {
+    display: block;
+    margin-top: .18rem;
+    color: #777;
+    font-size: .7rem;
+    font-weight: 500;
+}
+
 .summary-total {
     border-top: 1px solid var(--border);
     padding-top: 1.5rem;
@@ -312,6 +417,14 @@
     .form-group.full {
         grid-column: auto;
     }
+
+    .coupon-control {
+        grid-template-columns: 1fr;
+    }
+
+    .coupon-apply-btn {
+        min-height: 44px;
+    }
 }
 </style>
 {% endblock %}
@@ -324,6 +437,8 @@
     Caso o usuário não tenha endereço, saved_address permanece como none.
 #}
 {% set saved_address = none %}
+{% set current_coupon = applied_coupon if applied_coupon is defined else none %}
+{% set current_discount = discount if discount is defined else 0 %}
 
 {% if current_user.is_authenticated and current_user.addresses %}
     {% set default_addresses = current_user.addresses
@@ -370,6 +485,13 @@
                 {% if csrf_token %}
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 {% endif %}
+
+                <input
+                    type="hidden"
+                    name="coupon_code"
+                    id="checkoutCouponCode"
+                    value="{{ current_coupon.code if current_coupon else '' }}"
+                >
 
                 <div class="form-grid">
 
@@ -631,9 +753,62 @@
 
             {% endif %}
 
+            <div
+                class="coupon-box"
+                id="couponBox"
+                data-apply-url="/checkout/aplicar-cupom"
+                data-remove-url="/checkout/remover-cupom"
+            >
+                <label class="coupon-label" for="couponCode">
+                    Cupom de desconto
+                </label>
+
+                <div class="coupon-control">
+                    <input
+                        class="coupon-input"
+                        type="text"
+                        id="couponCode"
+                        maxlength="50"
+                        autocomplete="off"
+                        placeholder="Digite seu cupom"
+                        value="{{ current_coupon.code if current_coupon else '' }}"
+                        {% if current_coupon %}disabled{% endif %}
+                    >
+
+                    <button
+                        class="coupon-apply-btn"
+                        type="button"
+                        id="applyCouponButton"
+                        {% if current_coupon %}disabled{% endif %}
+                    >
+                        {% if current_coupon %}Aplicado{% else %}Aplicar{% endif %}
+                    </button>
+                </div>
+
+                <p
+                    class="coupon-feedback {% if current_coupon %}success{% endif %}"
+                    id="couponFeedback"
+                    role="status"
+                    aria-live="polite"
+                >
+                    {% if current_coupon %}
+                        Cupom {{ current_coupon.code }} aplicado ao pedido.
+                    {% endif %}
+                </p>
+
+                <button
+                    class="coupon-remove-btn"
+                    type="button"
+                    id="removeCouponButton"
+                    {% if not current_coupon %}hidden{% endif %}
+                >
+                    Remover cupom
+                </button>
+            </div>
+
             <div class="summary-row">
                 <span>Subtotal</span>
-                <span>
+                <span id="subtotal-price">
                     R$ {{ '%.2f'|format(subtotal) | replace('.', ',') }}
                 </span>
             </div>
@@ -648,6 +823,23 @@
                     {% else %}
                         Calcular
                     {% endif %}
+                </span>
+            </div>
+
+            <div
+                class="summary-row summary-discount"
+                id="discountRow"
+                {% if not current_discount or current_discount|float <= 0 %}hidden{% endif %}
+            >
+                <span>
+                    Desconto
+                    <small id="discountCouponLabel">
+                        {% if current_coupon %}Cupom {{ current_coupon.code }}{% endif %}
+                    </small>
+                </span>
+
+                <span id="discount-price">
+                    - R$ {{ '%.2f'|format(current_discount|float) | replace('.', ',') }}
                 </span>
             </div>
 
@@ -679,6 +871,20 @@
     const estadoInput = document.getElementById("estado");
     const checkoutForm = document.getElementById("checkoutForm");
     const finishButton = document.getElementById("finishButton");
+
+    const couponBox = document.getElementById("couponBox");
+    const couponInput = document.getElementById("couponCode");
+    const applyCouponButton = document.getElementById("applyCouponButton");
+    const removeCouponButton = document.getElementById("removeCouponButton");
+    const couponFeedback = document.getElementById("couponFeedback");
+    const checkoutCouponCode = document.getElementById("checkoutCouponCode");
+    const discountRow = document.getElementById("discountRow");
+    const discountPrice = document.getElementById("discount-price");
+    const discountCouponLabel = document.getElementById("discountCouponLabel");
+    const totalPrice = document.getElementById("total-price");
+    const csrfInput = checkoutForm
+        ? checkoutForm.querySelector('input[name="csrf_token"]')
+        : null;
 
     if (!cepInput) return;
 
@@ -801,6 +1007,216 @@
             console.error("Não foi possível calcular o frete:", error);
         }
         {% endif %}
+    }
+
+    function formatMoney(value) {
+        const number = Number(value || 0);
+
+        return number.toLocaleString("pt-BR", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    }
+
+    function setCouponFeedback(message, type) {
+        if (!couponFeedback) return;
+
+        couponFeedback.textContent = message || "";
+        couponFeedback.classList.remove("success", "error");
+
+        if (type) {
+            couponFeedback.classList.add(type);
+        }
+    }
+
+    function setCouponLoading(loading, label) {
+        if (!applyCouponButton) return;
+
+        applyCouponButton.disabled = loading;
+
+        if (loading) {
+            applyCouponButton.textContent = label || "Aplicando...";
+        }
+    }
+
+    function updateCouponSummary(data) {
+        if (!data) return;
+
+        const discount = Number(data.discount || 0);
+        const code = String(data.code || "").toUpperCase();
+
+        if (checkoutCouponCode) {
+            checkoutCouponCode.value = code;
+        }
+
+        if (couponInput) {
+            couponInput.value = code;
+            couponInput.disabled = discount > 0;
+        }
+
+        if (discountRow) {
+            discountRow.hidden = discount <= 0;
+        }
+
+        if (discountPrice) {
+            discountPrice.textContent = "- R$ " + formatMoney(discount);
+        }
+
+        if (discountCouponLabel) {
+            discountCouponLabel.textContent = code ? "Cupom " + code : "";
+        }
+
+        if (totalPrice && data.total !== undefined) {
+            totalPrice.textContent = "R$ " + formatMoney(data.total);
+        }
+
+        if (removeCouponButton) {
+            removeCouponButton.hidden = discount <= 0;
+        }
+
+        if (applyCouponButton) {
+            applyCouponButton.disabled = discount > 0;
+            applyCouponButton.textContent = discount > 0
+                ? "Aplicado"
+                : "Aplicar";
+        }
+    }
+
+    if (couponInput) {
+        couponInput.addEventListener("input", function () {
+            this.value = this.value
+                .toUpperCase()
+                .replace(/\s+/g, "");
+        });
+
+        couponInput.addEventListener("keydown", function (event) {
+            if (event.key === "Enter") {
+                event.preventDefault();
+
+                if (applyCouponButton && !applyCouponButton.disabled) {
+                    applyCouponButton.click();
+                }
+            }
+        });
+    }
+
+    if (applyCouponButton && couponBox) {
+        applyCouponButton.addEventListener("click", async function () {
+            const code = couponInput
+                ? couponInput.value.trim().toUpperCase()
+                : "";
+
+            if (!code) {
+                setCouponFeedback("Digite um código de cupom.", "error");
+
+                if (couponInput) {
+                    couponInput.focus();
+                }
+
+                return;
+            }
+
+            setCouponLoading(true, "Aplicando...");
+            setCouponFeedback("Validando cupom...", "");
+
+            try {
+                const headers = {
+                    "Content-Type": "application/json",
+                    "X-Requested-With": "XMLHttpRequest"
+                };
+
+                if (csrfInput && csrfInput.value) {
+                    headers["X-CSRFToken"] = csrfInput.value;
+                }
+
+                const response = await fetch(couponBox.dataset.applyUrl, {
+                    method: "POST",
+                    headers: headers,
+                    body: JSON.stringify({
+                        code: code,
+                        checkout_type: "{% if cart_items is defined and cart_items %}cart{% else %}product{% endif %}",
+                        product_id: "{% if product is defined and product %}{{ product.id }}{% endif %}",
+                        quantity: {{ quantity | default(1) }}
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok || !data.success) {
+                    throw new Error(
+                        data.message || "Não foi possível aplicar o cupom."
+                    );
+                }
+
+                updateCouponSummary(data);
+                setCouponFeedback(
+                    data.message || "Cupom aplicado com sucesso!",
+                    "success"
+                );
+
+            } catch (error) {
+                setCouponFeedback(error.message, "error");
+                setCouponLoading(false, "Aplicar");
+            }
+        });
+    }
+
+    if (removeCouponButton && couponBox) {
+        removeCouponButton.addEventListener("click", async function () {
+            removeCouponButton.disabled = true;
+            setCouponFeedback("Removendo cupom...", "");
+
+            try {
+                const headers = {
+                    "Content-Type": "application/json",
+                    "X-Requested-With": "XMLHttpRequest"
+                };
+
+                if (csrfInput && csrfInput.value) {
+                    headers["X-CSRFToken"] = csrfInput.value;
+                }
+
+                const response = await fetch(couponBox.dataset.removeUrl, {
+                    method: "POST",
+                    headers: headers,
+                    body: JSON.stringify({
+                        checkout_type: "{% if cart_items is defined and cart_items %}cart{% else %}product{% endif %}",
+                        product_id: "{% if product is defined and product %}{{ product.id }}{% endif %}",
+                        quantity: {{ quantity | default(1) }}
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok || !data.success) {
+                    throw new Error(
+                        data.message || "Não foi possível remover o cupom."
+                    );
+                }
+
+                updateCouponSummary({
+                    code: "",
+                    discount: 0,
+                    total: data.total
+                });
+
+                if (couponInput) {
+                    couponInput.disabled = false;
+                    couponInput.value = "";
+                    couponInput.focus();
+                }
+
+                setCouponFeedback(
+                    data.message || "Cupom removido.",
+                    "success"
+                );
+
+            } catch (error) {
+                setCouponFeedback(error.message, "error");
+            } finally {
+                removeCouponButton.disabled = false;
+            }
+        });
     }
 
     /*

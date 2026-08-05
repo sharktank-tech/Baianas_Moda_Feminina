@@ -1,8 +1,10 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from loja import db
 from flask_login import UserMixin
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import validates
 from werkzeug.security import generate_password_hash, check_password_hash
 
 
@@ -248,6 +250,233 @@ class NewsletterSubscriber(db.Model):   # NOVO: faltava para o form de newslette
 
     def __repr__(self):
         return f"<NewsletterSubscriber {self.email}>"
+
+
+# ==========================================================
+# Cupons de desconto
+# ==========================================================
+class Coupon(db.Model):
+    __tablename__ = "coupons"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+
+    # O código é normalizado para maiúsculas pelo validator abaixo.
+    # O índice funcional em UPPER(code) também impede duplicações com
+    # diferenças apenas entre letras maiúsculas e minúsculas.
+    code = db.Column(
+        db.String(50),
+        nullable=False
+    )
+
+    description = db.Column(
+        db.String(255)
+    )
+
+    # Tipos aceitos:
+    # - percentage: percentual sobre o subtotal
+    # - fixed: valor fixo em reais
+    discount_type = db.Column(
+        db.String(20),
+        nullable=False
+    )
+
+    discount_value = db.Column(
+        db.Numeric(10, 2),
+        nullable=False
+    )
+
+    minimum_order_amount = db.Column(
+        db.Numeric(10, 2),
+        nullable=False,
+        default=0
+    )
+
+    # Limita o desconto calculado em cupons percentuais.
+    # Exemplo: 20% de desconto com teto máximo de R$ 50,00.
+    maximum_discount_amount = db.Column(
+        db.Numeric(10, 2)
+    )
+
+    starts_at = db.Column(
+        db.DateTime
+    )
+
+    ends_at = db.Column(
+        db.DateTime
+    )
+
+    # Limite total de utilizações do cupom. NULL significa ilimitado.
+    usage_limit = db.Column(
+        db.Integer
+    )
+
+    # Deve ser incrementado somente depois que o pedido for confirmado.
+    times_used = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0
+    )
+
+    # Permite marcar cupons exclusivos para a primeira compra.
+    first_purchase_only = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False
+    )
+
+    is_active = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=True
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (
+        db.Index(
+            "uq_coupons_code_upper",
+            db.func.upper(code),
+            unique=True
+        ),
+        db.Index(
+            "ix_coupons_active_period",
+            "is_active",
+            "starts_at",
+            "ends_at"
+        ),
+        db.CheckConstraint(
+            "discount_type IN ('percentage', 'fixed')",
+            name="ck_coupon_discount_type"
+        ),
+        db.CheckConstraint(
+            "discount_value > 0",
+            name="ck_coupon_discount_value_positive"
+        ),
+        db.CheckConstraint(
+            "discount_type <> 'percentage' OR discount_value <= 100",
+            name="ck_coupon_percentage_max_100"
+        ),
+        db.CheckConstraint(
+            "minimum_order_amount >= 0",
+            name="ck_coupon_minimum_order_nonnegative"
+        ),
+        db.CheckConstraint(
+            "maximum_discount_amount IS NULL "
+            "OR maximum_discount_amount >= 0",
+            name="ck_coupon_maximum_discount_nonnegative"
+        ),
+        db.CheckConstraint(
+            "usage_limit IS NULL OR usage_limit >= 1",
+            name="ck_coupon_usage_limit_positive"
+        ),
+        db.CheckConstraint(
+            "times_used >= 0",
+            name="ck_coupon_times_used_nonnegative"
+        ),
+        db.CheckConstraint(
+            "usage_limit IS NULL OR times_used <= usage_limit",
+            name="ck_coupon_times_used_within_limit"
+        ),
+        db.CheckConstraint(
+            "starts_at IS NULL OR ends_at IS NULL OR ends_at > starts_at",
+            name="ck_coupon_valid_period"
+        ),
+    )
+
+    @validates("code")
+    def validate_code(self, key, value):
+        normalized_code = (value or "").strip().upper()
+
+        if not normalized_code:
+            raise ValueError("O código do cupom é obrigatório.")
+
+        if len(normalized_code) > 50:
+            raise ValueError(
+                "O código do cupom deve possuir no máximo 50 caracteres."
+            )
+
+        return normalized_code
+
+    @property
+    def remaining_uses(self):
+        """Retorna quantos usos ainda restam ou None quando for ilimitado."""
+        if self.usage_limit is None:
+            return None
+
+        return max(self.usage_limit - self.times_used, 0)
+
+    def is_available(self, subtotal=0, now=None):
+        """
+        Verifica se o cupom está ativo, dentro da validade, com usos
+        disponíveis e se o pedido atingiu o valor mínimo.
+        """
+        current_time = now or datetime.utcnow()
+        order_subtotal = Decimal(str(subtotal or 0))
+
+        if not self.is_active:
+            return False
+
+        if self.starts_at and current_time < self.starts_at:
+            return False
+
+        if self.ends_at and current_time >= self.ends_at:
+            return False
+
+        if self.usage_limit is not None and self.times_used >= self.usage_limit:
+            return False
+
+        if order_subtotal < Decimal(str(self.minimum_order_amount or 0)):
+            return False
+
+        return True
+
+    def calculate_discount(self, subtotal):
+        """
+        Calcula o desconto sem permitir que o valor ultrapasse o subtotal.
+        Retorna Decimal('0.00') quando o cupom não puder ser utilizado.
+        """
+        order_subtotal = Decimal(str(subtotal or 0))
+
+        if order_subtotal <= 0 or not self.is_available(order_subtotal):
+            return Decimal("0.00")
+
+        discount_value = Decimal(str(self.discount_value))
+
+        if self.discount_type == "percentage":
+            discount = (
+                order_subtotal * discount_value / Decimal("100")
+            )
+
+            if self.maximum_discount_amount is not None:
+                discount = min(
+                    discount,
+                    Decimal(str(self.maximum_discount_amount))
+                )
+        else:
+            discount = discount_value
+
+        return min(discount, order_subtotal).quantize(Decimal("0.01"))
+
+    def __repr__(self):
+        return (
+            f"<Coupon {self.code} type={self.discount_type} "
+            f"value={self.discount_value}>"
+        )
 
 
 # ==========================================================

@@ -1,0 +1,516 @@
+{% extends "base.html" %}
+
+{% block title %}Editar cupom — {{ site.name if site else 'Pollo Modas' }}{% endblock %}
+
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles/dashboard_admin.css') }}">
+
+<style>
+  .coupon-page {
+    width: min(920px, calc(100% - 2rem));
+    margin: 3rem auto;
+  }
+
+  .coupon-card {
+    background: #fff;
+    border: 1px solid var(--border, #e5e5e5);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .coupon-card-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1.5rem 1.75rem;
+    border-bottom: 1px solid var(--border, #e5e5e5);
+  }
+
+  .coupon-card-title {
+    margin: 0;
+    font-family: 'Poppins', sans-serif;
+    font-size: 1.55rem;
+  }
+
+  .coupon-card-sub {
+    margin: .35rem 0 0;
+    color: #777;
+    font-size: .9rem;
+  }
+
+  .coupon-back {
+    align-self: center;
+    color: #666;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .coupon-back:hover {
+    color: var(--accent, #EC008C);
+  }
+
+  .coupon-form {
+    padding: 1.75rem;
+  }
+
+  .coupon-section + .coupon-section {
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border, #e5e5e5);
+  }
+
+  .coupon-section-title {
+    margin: 0 0 1.25rem;
+    font-family: 'Poppins', sans-serif;
+    font-size: 1.08rem;
+  }
+
+  .coupon-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+  }
+
+  .coupon-field {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .coupon-field--full {
+    grid-column: 1 / -1;
+  }
+
+  .coupon-label {
+    margin-bottom: .45rem;
+    color: #555;
+    font-size: .84rem;
+    font-weight: 700;
+  }
+
+  .coupon-input,
+  .coupon-select,
+  .coupon-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--border, #dcdcdc);
+    border-radius: 8px;
+    background: #fff;
+    padding: .85rem .9rem;
+    color: #222;
+    font: inherit;
+  }
+
+  .coupon-textarea {
+    min-height: 105px;
+    resize: vertical;
+  }
+
+  .coupon-input:focus,
+  .coupon-select:focus,
+  .coupon-textarea:focus {
+    border-color: var(--accent, #EC008C);
+    outline: 3px solid rgba(236, 0, 140, .1);
+  }
+
+  .coupon-help {
+    margin-top: .4rem;
+    color: #888;
+    font-size: .76rem;
+    line-height: 1.4;
+  }
+
+  .coupon-checks {
+    display: grid;
+    gap: .8rem;
+  }
+
+  .coupon-check {
+    display: flex;
+    align-items: flex-start;
+    gap: .7rem;
+    cursor: pointer;
+  }
+
+  .coupon-check input {
+    width: 18px;
+    height: 18px;
+    margin-top: .1rem;
+    accent-color: var(--accent, #EC008C);
+  }
+
+  .coupon-check strong {
+    display: block;
+    font-size: .9rem;
+  }
+
+  .coupon-check small {
+    display: block;
+    margin-top: .15rem;
+    color: #888;
+    line-height: 1.4;
+  }
+
+  .coupon-actions {
+    display: flex;
+    align-items: center;
+    gap: .8rem;
+    margin-top: 2rem;
+  }
+
+  .coupon-submit,
+  .coupon-cancel {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    border-radius: 8px;
+    padding: .75rem 1.2rem;
+    font-weight: 700;
+  }
+
+  .coupon-submit {
+    border: 0;
+    background: var(--accent, #EC008C);
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .coupon-submit:hover {
+    filter: brightness(.9);
+  }
+
+  .coupon-submit:disabled {
+    opacity: .65;
+    cursor: wait;
+  }
+
+  .coupon-cancel {
+    border: 1px solid var(--border, #ddd);
+    color: #555;
+    text-decoration: none;
+  }
+
+  .coupon-alerts {
+    display: grid;
+    gap: .75rem;
+    margin-bottom: 1rem;
+  }
+
+  .coupon-alert {
+    padding: .8rem 1rem;
+    border: 1px solid var(--border, #ddd);
+    border-radius: 8px;
+  }
+
+  .coupon-alert.danger,
+  .coupon-alert.error {
+    border-color: #e49a9a;
+  }
+
+  .coupon-alert.success {
+    border-color: #83c79a;
+  }
+
+  .coupon-readonly {
+    padding: .85rem .9rem;
+    border-radius: 8px;
+    background: #f6f6f6;
+    color: #555;
+  }
+
+  @media (max-width: 680px) {
+    .coupon-card-head {
+      flex-direction: column;
+    }
+
+    .coupon-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .coupon-field--full {
+      grid-column: auto;
+    }
+
+    .coupon-actions {
+      align-items: stretch;
+      flex-direction: column;
+    }
+  }
+</style>
+
+{% endblock %}
+
+{% block content %}
+<main class="coupon-page">
+  <section class="coupon-card">
+    <header class="coupon-card-head">
+      <div>
+        <h1 class="coupon-card-title">Editar cupom</h1>
+        <p class="coupon-card-sub">
+          Atualize as regras do cupom {{ coupon.code }}.
+        </p>
+      </div>
+
+      <a href="{{ url_for('admin.dashboard') }}#coupons" class="coupon-back">
+        ← Voltar ao painel
+      </a>
+    </header>
+
+    <form method="POST"
+          action="{{ url_for('admin.edit_coupon', id=coupon.id) }}"
+          class="coupon-form"
+          id="couponForm">
+
+      {% if csrf_token %}
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {% endif %}
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="coupon-alerts" aria-live="polite">
+          {% for category, message in messages %}
+          <div class="coupon-alert {{ category }}" role="status">{{ message }}</div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      {% endwith %}
+
+      <section class="coupon-section">
+        <h2 class="coupon-section-title">Identificação e desconto</h2>
+
+        <div class="coupon-grid">
+          <div class="coupon-field">
+            <label class="coupon-label" for="code">Código</label>
+            <input class="coupon-input"
+                   type="text"
+                   id="code"
+                   name="code"
+                   value="{{ request.form.get('code', coupon.code) }}"
+                   maxlength="50"
+                   autocomplete="off"
+                   required>
+          </div>
+
+          <div class="coupon-field">
+            <label class="coupon-label" for="discount_type">Tipo de desconto</label>
+            {% set selected_type = request.form.get('discount_type', coupon.discount_type) %}
+            <select class="coupon-select"
+                    id="discount_type"
+                    name="discount_type"
+                    required>
+              <option value="percentage"
+                      {% if selected_type == 'percentage' %}selected{% endif %}>
+                Percentual
+              </option>
+              <option value="fixed"
+                      {% if selected_type == 'fixed' %}selected{% endif %}>
+                Valor fixo
+              </option>
+            </select>
+          </div>
+
+          <div class="coupon-field">
+            <label class="coupon-label" for="discount_value" id="discountValueLabel">
+              Desconto
+            </label>
+            <input class="coupon-input"
+                   type="number"
+                   id="discount_value"
+                   name="discount_value"
+                   value="{{ request.form.get('discount_value', '%.2f'|format(coupon.discount_value|float)) }}"
+                   min="0.01"
+                   step="0.01"
+                   inputmode="decimal"
+                   required>
+          </div>
+
+          <div class="coupon-field">
+            <label class="coupon-label" for="minimum_order_amount">
+              Pedido mínimo
+            </label>
+            <input class="coupon-input"
+                   type="number"
+                   id="minimum_order_amount"
+                   name="minimum_order_amount"
+                   value="{{ request.form.get('minimum_order_amount', '%.2f'|format(coupon.minimum_order_amount|float)) }}"
+                   min="0"
+                   step="0.01"
+                   inputmode="decimal">
+          </div>
+
+          <div class="coupon-field">
+            <label class="coupon-label" for="maximum_discount_amount">
+              Desconto máximo
+            </label>
+            <input class="coupon-input"
+                   type="number"
+                   id="maximum_discount_amount"
+                   name="maximum_discount_amount"
+                   value="{{ request.form.get('maximum_discount_amount', '%.2f'|format(coupon.maximum_discount_amount|float) if coupon.maximum_discount_amount is not none else '') }}"
+                   min="0"
+                   step="0.01"
+                   inputmode="decimal">
+          </div>
+
+          <div class="coupon-field coupon-field--full">
+            <label class="coupon-label" for="description">Descrição interna</label>
+            <textarea class="coupon-textarea"
+                      id="description"
+                      name="description"
+                      maxlength="255">{{ request.form.get('description', coupon.description or '') }}</textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="coupon-section">
+        <h2 class="coupon-section-title">Validade e utilização</h2>
+
+        <div class="coupon-grid">
+          <div class="coupon-field">
+            <label class="coupon-label" for="starts_at">Início</label>
+            <input class="coupon-input"
+                   type="datetime-local"
+                   id="starts_at"
+                   name="starts_at"
+                   value="{{ request.form.get('starts_at', coupon.starts_at.strftime('%Y-%m-%dT%H:%M') if coupon.starts_at else '') }}">
+          </div>
+
+          <div class="coupon-field">
+            <label class="coupon-label" for="ends_at">Encerramento</label>
+            <input class="coupon-input"
+                   type="datetime-local"
+                   id="ends_at"
+                   name="ends_at"
+                   value="{{ request.form.get('ends_at', coupon.ends_at.strftime('%Y-%m-%dT%H:%M') if coupon.ends_at else '') }}">
+          </div>
+
+          <div class="coupon-field">
+            <label class="coupon-label" for="usage_limit">Limite total de usos</label>
+            <input class="coupon-input"
+                   type="number"
+                   id="usage_limit"
+                   name="usage_limit"
+                   value="{{ request.form.get('usage_limit', coupon.usage_limit if coupon.usage_limit is not none else '') }}"
+                   min="{{ coupon.times_used if coupon.times_used > 0 else 1 }}"
+                   step="1"
+                   inputmode="numeric">
+            <span class="coupon-help">
+              Não pode ser inferior aos {{ coupon.times_used }} usos já registrados.
+            </span>
+          </div>
+
+          <div class="coupon-field">
+            <span class="coupon-label">Usos registrados</span>
+            <div class="coupon-readonly">{{ coupon.times_used }}</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="coupon-section">
+        <h2 class="coupon-section-title">Regras</h2>
+
+        <div class="coupon-checks">
+          <label class="coupon-check" for="first_purchase_only">
+            <input type="checkbox"
+                   id="first_purchase_only"
+                   name="first_purchase_only"
+                   value="1"
+                   {% if request.method == 'POST' %}
+                     {% if request.form.get('first_purchase_only') == '1' %}checked{% endif %}
+                   {% elif coupon.first_purchase_only %}
+                     checked
+                   {% endif %}>
+            <span>
+              <strong>Somente primeira compra</strong>
+              <small>O cupom será limitado a clientes sem pedidos anteriores.</small>
+            </span>
+          </label>
+
+          <label class="coupon-check" for="is_active">
+            <input type="checkbox"
+                   id="is_active"
+                   name="is_active"
+                   value="1"
+                   {% if request.method == 'POST' %}
+                     {% if request.form.get('is_active') == '1' %}checked{% endif %}
+                   {% elif coupon.is_active %}
+                     checked
+                   {% endif %}>
+            <span>
+              <strong>Cupom ativo</strong>
+              <small>Desmarque para impedir novas aplicações sem excluir o cadastro.</small>
+            </span>
+          </label>
+        </div>
+      </section>
+
+      <div class="coupon-actions">
+        <button type="submit" class="coupon-submit" id="couponSubmit">
+          Salvar alterações
+        </button>
+
+        <a href="{{ url_for('admin.dashboard') }}#coupons" class="coupon-cancel">
+          Cancelar
+        </a>
+      </div>
+    </form>
+  </section>
+</main>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  const form = document.getElementById('couponForm');
+  const typeInput = document.getElementById('discount_type');
+  const valueInput = document.getElementById('discount_value');
+  const valueLabel = document.getElementById('discountValueLabel');
+  const maxInput = document.getElementById('maximum_discount_amount');
+  const startInput = document.getElementById('starts_at');
+  const endInput = document.getElementById('ends_at');
+  const codeInput = document.getElementById('code');
+  const submitButton = document.getElementById('couponSubmit');
+
+  function updateDiscountFields() {
+    const isPercentage = typeInput.value === 'percentage';
+
+    valueLabel.textContent = isPercentage
+      ? 'Percentual de desconto'
+      : 'Valor do desconto';
+
+    valueInput.max = isPercentage ? '100' : '';
+    maxInput.disabled = !isPercentage;
+
+    if (!isPercentage) {
+      maxInput.value = '';
+    }
+  }
+
+  typeInput.addEventListener('change', updateDiscountFields);
+  updateDiscountFields();
+
+  codeInput.addEventListener('input', function () {
+    this.value = this.value.toUpperCase().replace(/\s+/g, '');
+  });
+
+  form.addEventListener('submit', function (event) {
+    if (startInput.value && endInput.value && endInput.value <= startInput.value) {
+      event.preventDefault();
+      endInput.setCustomValidity('O encerramento deve ser posterior ao início.');
+      endInput.reportValidity();
+      return;
+    }
+
+    endInput.setCustomValidity('');
+    submitButton.disabled = true;
+    submitButton.textContent = 'Salvando...';
+  });
+
+  endInput.addEventListener('input', function () {
+    this.setCustomValidity('');
+  });
+})();
+</script>
+{% endblock %}

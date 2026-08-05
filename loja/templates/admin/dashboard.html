@@ -9,6 +9,8 @@
 
 {% block content %}
 
+{% set coupon_list = coupons|default([], true) %}
+
 <!-- ═══════════════════════════════════════════════════════════
      PAINEL ADMINISTRATIVO — POLLO MODAS
      Requer vars CSS: --black, --accent, --cream, --border
@@ -39,6 +41,9 @@
         </button>
         <button class="adm-nav-link" data-panel="promotions">
           <span class="adm-icon">◎</span> Promoções
+        </button>
+        <button class="adm-nav-link" data-panel="coupons">
+          <span class="adm-icon">%</span> Cupons
         </button>
         <button class="adm-nav-link" data-panel="suppliers">
           <span class="adm-icon">◇</span> Fornecedores
@@ -84,6 +89,7 @@
       <button class="adm-nav-link active" data-panel="overview">Dashboard</button>
       <button class="adm-nav-link" data-panel="products">Produtos</button>
       <button class="adm-nav-link" data-panel="promotions">Promoções</button>
+      <button class="adm-nav-link" data-panel="coupons">Cupons</button>
       <button class="adm-nav-link" data-panel="suppliers">Fornecedores</button>
       <button class="adm-nav-link" data-panel="users">Usuários</button>
       <button class="adm-nav-link" data-panel="testimonials">Depoimentos</button>
@@ -122,6 +128,14 @@
             <div class="adm-stat-value">{{ promotions|length }}</div>
             <div class="adm-stat-sub">
               {{ promotions|selectattr('is_active')|list|length }} ativas
+            </div>
+          </div>
+
+          <div class="adm-stat-card alt">
+            <div class="adm-stat-label">Cupons</div>
+            <div class="adm-stat-value">{{ coupon_list|length }}</div>
+            <div class="adm-stat-sub">
+              {{ coupon_list|selectattr('is_active')|list|length }} ativos
             </div>
           </div>
 
@@ -397,6 +411,164 @@
         </div>
 
       </div><!-- /promotions -->
+
+
+
+      <!-- ══════════════════════════════════════════════════
+           PAINEL: CUPONS
+      ══════════════════════════════════════════════════ -->
+      <div class="adm-panel" id="panel-coupons">
+
+        <div class="adm-card">
+          <div class="adm-card-header">
+            <div>
+              <span class="adm-card-title">Cupons de desconto</span>
+              <div style="font-size:0.78rem;color:#999;margin-top:3px">
+                Gerencie códigos, validade, limites e regras de primeira compra.
+              </div>
+            </div>
+
+            <a href="{{ url_for('admin.add_coupon') }}"
+               class="adm-btn adm-btn-primary adm-btn-sm">
+              + Cupom
+            </a>
+          </div>
+
+          <div class="adm-table-wrap">
+            <table class="adm-table">
+              <thead>
+                <tr>
+                  <th>Código</th>
+                  <th>Desconto</th>
+                  <th>Pedido mínimo</th>
+                  <th>Validade</th>
+                  <th>Utilizações</th>
+                  <th>Regra</th>
+                  <th>Status</th>
+                  <th style="text-align:center">Ações</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {% for coupon in coupon_list %}
+                {% set exhausted = coupon.usage_limit is not none and coupon.times_used >= coupon.usage_limit %}
+
+                <tr>
+                  <td>
+                    <strong style="font-family:monospace;letter-spacing:0.06em">
+                      {{ coupon.code }}
+                    </strong>
+
+                    {% if coupon.description %}
+                    <div style="font-size:0.76rem;color:#aaa;margin-top:3px;max-width:230px">
+                      {{ coupon.description[:75] }}{% if coupon.description|length > 75 %}…{% endif %}
+                    </div>
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    {% if coupon.discount_type == 'percentage' %}
+                      <strong>
+                        {{ "%.2f"|format(coupon.discount_value|float)|replace('.00', '') }}%
+                      </strong>
+
+                      {% if coupon.maximum_discount_amount is not none %}
+                      <div style="font-size:0.75rem;color:#999;margin-top:2px">
+                        teto R$ {{ "%.2f"|format(coupon.maximum_discount_amount|float)|replace('.', ',') }}
+                      </div>
+                      {% endif %}
+                    {% else %}
+                      <strong>
+                        R$ {{ "%.2f"|format(coupon.discount_value|float)|replace('.', ',') }}
+                      </strong>
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    {% if coupon.minimum_order_amount and coupon.minimum_order_amount|float > 0 %}
+                      R$ {{ "%.2f"|format(coupon.minimum_order_amount|float)|replace('.', ',') }}
+                    {% else %}
+                      <span style="color:#aaa">Sem mínimo</span>
+                    {% endif %}
+                  </td>
+
+                  <td style="font-size:0.78rem;color:#777;white-space:nowrap">
+                    <div>
+                      Início:
+                      {{ coupon.starts_at.strftime('%d/%m/%Y %H:%M') if coupon.starts_at else 'imediato' }}
+                    </div>
+                    <div style="margin-top:3px">
+                      Fim:
+                      {{ coupon.ends_at.strftime('%d/%m/%Y %H:%M') if coupon.ends_at else 'sem prazo' }}
+                    </div>
+                  </td>
+
+                  <td>
+                    {% if coupon.usage_limit is none %}
+                      <span class="adm-badge adm-badge-gray">
+                        {{ coupon.times_used }} / ∞
+                      </span>
+                    {% else %}
+                      <span class="adm-badge {{ 'adm-badge-red' if exhausted else 'adm-badge-gray' }}">
+                        {{ coupon.times_used }} / {{ coupon.usage_limit }}
+                      </span>
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    {% if coupon.first_purchase_only %}
+                      <span class="adm-badge adm-badge-accent">1ª compra</span>
+                    {% else %}
+                      <span class="adm-badge adm-badge-gray">Geral</span>
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    {% if exhausted %}
+                      <span class="adm-badge adm-badge-red">Esgotado</span>
+                    {% elif coupon.is_active %}
+                      <span class="adm-badge adm-badge-green">Ativo</span>
+                    {% else %}
+                      <span class="adm-badge adm-badge-red">Inativo</span>
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    <div class="adm-actions" style="justify-content:center">
+                      <a href="{{ url_for('admin.edit_coupon', id=coupon.id) }}"
+                         class="adm-btn adm-btn-edit adm-btn-sm">
+                        Editar
+                      </a>
+
+                      <form method="POST"
+                            action="{{ url_for('admin.delete_coupon', id=coupon.id) }}"
+                            onsubmit="return confirm('Excluir o cupom {{ coupon.code }}?')">
+                        {% if csrf_token %}
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        {% endif %}
+
+                        <button type="submit"
+                                class="adm-btn adm-btn-danger adm-btn-sm">
+                          Excluir
+                        </button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+
+                {% else %}
+                <tr>
+                  <td colspan="8" class="adm-empty">
+                    Nenhum cupom cadastrado.
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div><!-- /coupons -->
 
 
       <!-- ══════════════════════════════════════════════════

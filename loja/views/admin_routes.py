@@ -1,8 +1,10 @@
-from email.mime import image
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash
+from sqlalchemy.exc import IntegrityError
 from loja.utils.decorators import admin_required
 from loja.modules.services import get_home_data
 
@@ -12,7 +14,7 @@ from loja.modules.models import (
     LegalLink, CategoryLink, NavLink,
     ContactInfo, FooterConfig, SocialLink,
     SiteConfig, HeroSlide, Testimonial,
-    Supplier, Promotion,
+    Supplier, Promotion, Coupon,
 )
 
 admin_blueprint = Blueprint(
@@ -27,10 +29,162 @@ admin_blueprint = Blueprint(
 def inject_global_data():
     return get_home_data()
 
+
+def _normalize_coupon_code(value):
+    """Normaliza o código para comparação e gravação."""
+    return "".join((value or "").strip().upper().split())
+
+
+def _parse_decimal_field(
+    field_name,
+    *,
+    required=False,
+    default=None,
+    minimum=None,
+):
+    raw_value = (request.form.get(field_name) or "").strip().replace(",", ".")
+
+    if not raw_value:
+        if required:
+            raise ValueError(f"O campo {field_name} é obrigatório.")
+        return default
+
+    try:
+        value = Decimal(raw_value)
+    except InvalidOperation as error:
+        raise ValueError(f"O valor informado em {field_name} é inválido.") from error
+
+    if minimum is not None and value < minimum:
+        raise ValueError(
+            f"O campo {field_name} deve ser maior ou igual a {minimum}."
+        )
+
+    return value.quantize(Decimal("0.01"))
+
+
+def _parse_optional_integer(field_name):
+    raw_value = (request.form.get(field_name) or "").strip()
+
+    if not raw_value:
+        return None
+
+    try:
+        value = int(raw_value)
+    except ValueError as error:
+        raise ValueError(f"O campo {field_name} deve ser um número inteiro.") from error
+
+    if value < 1:
+        raise ValueError(f"O campo {field_name} deve ser maior ou igual a 1.")
+
+    return value
+
+
+def _parse_optional_datetime(field_name):
+    raw_value = (request.form.get(field_name) or "").strip()
+
+    if not raw_value:
+        return None
+
+    try:
+        return datetime.fromisoformat(raw_value)
+    except ValueError as error:
+        raise ValueError(
+            f"A data informada em {field_name} é inválida."
+        ) from error
+
+
+def _coupon_form_data(*, current_coupon=None):
+    code = _normalize_coupon_code(request.form.get("code"))
+    description = (request.form.get("description") or "").strip() or None
+    discount_type = (request.form.get("discount_type") or "").strip()
+
+    if not code:
+        raise ValueError("Informe o código do cupom.")
+
+    if len(code) > 50:
+        raise ValueError("O código do cupom deve possuir no máximo 50 caracteres.")
+
+    if description and len(description) > 255:
+        raise ValueError("A descrição deve possuir no máximo 255 caracteres.")
+
+    if discount_type not in {"percentage", "fixed"}:
+        raise ValueError("Selecione um tipo de desconto válido.")
+
+    discount_value = _parse_decimal_field(
+        "discount_value",
+        required=True,
+        minimum=Decimal("0.01"),
+    )
+
+    if discount_type == "percentage" and discount_value > Decimal("100"):
+        raise ValueError("O desconto percentual não pode ser maior que 100%.")
+
+    minimum_order_amount = _parse_decimal_field(
+        "minimum_order_amount",
+        default=Decimal("0.00"),
+        minimum=Decimal("0.00"),
+    )
+
+    maximum_discount_amount = _parse_decimal_field(
+        "maximum_discount_amount",
+        default=None,
+        minimum=Decimal("0.00"),
+    )
+
+    # O teto só é utilizado em cupons percentuais.
+    if discount_type == "fixed":
+        maximum_discount_amount = None
+
+    starts_at = _parse_optional_datetime("starts_at")
+    ends_at = _parse_optional_datetime("ends_at")
+
+    if starts_at and ends_at and ends_at <= starts_at:
+        raise ValueError("A data final deve ser posterior à data inicial.")
+
+    usage_limit = _parse_optional_integer("usage_limit")
+
+    if (
+        current_coupon is not None
+        and usage_limit is not None
+        and usage_limit < current_coupon.times_used
+    ):
+        raise ValueError(
+            "O limite de usos não pode ser menor que a quantidade já utilizada."
+        )
+
+    existing_query = Coupon.query.filter(
+        db.func.upper(Coupon.code) == code
+    )
+
+    if current_coupon is not None:
+        existing_query = existing_query.filter(
+            Coupon.id != current_coupon.id
+        )
+
+    if existing_query.first():
+        raise ValueError("Já existe um cupom com este código.")
+
+    return {
+        "code": code,
+        "description": description,
+        "discount_type": discount_type,
+        "discount_value": discount_value,
+        "minimum_order_amount": minimum_order_amount,
+        "maximum_discount_amount": maximum_discount_amount,
+        "starts_at": starts_at,
+        "ends_at": ends_at,
+        "usage_limit": usage_limit,
+        "first_purchase_only": (
+            request.form.get("first_purchase_only") == "1"
+        ),
+        "is_active": request.form.get("is_active") == "1",
+    }
+
 # -------------------------------------------------------------------
 # Dashboard
 # -------------------------------------------------------------------
 
+@admin_blueprint.route("/admin", endpoint="dashboard")
 @admin_blueprint.route("/admin")
 @admin_required
 def admin_dashboard():
@@ -44,6 +198,7 @@ def admin_dashboard():
         products     = Product.query.all(),
         users        = User.query.all(),
         promotions   = Promotion.query.all(),
+        coupons      = Coupon.query.order_by(Coupon.created_at.desc()).all(),
         suppliers    = Supplier.query.all(),
         testimonials = Testimonial.query.all(),
         hero_slides  = HeroSlide.query.all(),
@@ -235,6 +390,157 @@ def delete_promotion(id):
 
 
 # -------------------------------------------------------------------
+# Adicionar cupom
+# -------------------------------------------------------------------
+
+@admin_blueprint.route("/admin/coupons/add", methods=["GET", "POST"])
+@admin_required
+def add_coupon():
+    if request.method == "POST":
+        try:
+            data = _coupon_form_data()
+
+            coupon = Coupon(
+                code=data["code"],
+                description=data["description"],
+                discount_type=data["discount_type"],
+                discount_value=data["discount_value"],
+                minimum_order_amount=data["minimum_order_amount"],
+                maximum_discount_amount=data["maximum_discount_amount"],
+                starts_at=data["starts_at"],
+                ends_at=data["ends_at"],
+                usage_limit=data["usage_limit"],
+                times_used=0,
+                first_purchase_only=data["first_purchase_only"],
+                is_active=data["is_active"],
+            )
+
+            db.session.add(coupon)
+            db.session.commit()
+
+            flash("Cupom criado com sucesso!", "success")
+            return redirect(
+                url_for("admin.admin_dashboard", _anchor="coupons")
+            )
+
+        except ValueError as error:
+            db.session.rollback()
+            flash(str(error), "danger")
+
+        except IntegrityError:
+            db.session.rollback()
+            flash(
+                "Não foi possível criar o cupom. Verifique se o código já existe.",
+                "danger",
+            )
+
+        except Exception as error:
+            db.session.rollback()
+            print(f"Erro ao criar cupom: {error}")
+            flash("Ocorreu um erro ao criar o cupom.", "danger")
+
+    return render_template("admin/cupons/add_coupon.html")
+
+
+# -------------------------------------------------------------------
+# Editar cupom
+# -------------------------------------------------------------------
+
+@admin_blueprint.route(
+    "/admin/coupons/edit/<uuid:id>",
+    methods=["GET", "POST"],
+)
+@admin_required
+def edit_coupon(id):
+    coupon = Coupon.query.get_or_404(id)
+
+    if request.method == "POST":
+        try:
+            data = _coupon_form_data(current_coupon=coupon)
+
+            coupon.code = data["code"]
+            coupon.description = data["description"]
+            coupon.discount_type = data["discount_type"]
+            coupon.discount_value = data["discount_value"]
+            coupon.minimum_order_amount = data["minimum_order_amount"]
+            coupon.maximum_discount_amount = data["maximum_discount_amount"]
+            coupon.starts_at = data["starts_at"]
+            coupon.ends_at = data["ends_at"]
+            coupon.usage_limit = data["usage_limit"]
+            coupon.first_purchase_only = data["first_purchase_only"]
+            coupon.is_active = data["is_active"]
+
+            db.session.commit()
+
+            flash("Cupom atualizado com sucesso!", "success")
+            return redirect(
+                url_for("admin.admin_dashboard", _anchor="coupons")
+            )
+
+        except ValueError as error:
+            db.session.rollback()
+            flash(str(error), "danger")
+
+        except IntegrityError:
+            db.session.rollback()
+            flash(
+                "Não foi possível atualizar o cupom. "
+                "Verifique o código e os limites informados.",
+                "danger",
+            )
+
+        except Exception as error:
+            db.session.rollback()
+            print(f"Erro ao editar cupom: {error}")
+            flash("Ocorreu um erro ao atualizar o cupom.", "danger")
+
+    return render_template(
+        "admin/cupons/edit_coupon.html",
+        coupon=coupon,
+    )
+
+
+# -------------------------------------------------------------------
+# Excluir cupom
+# -------------------------------------------------------------------
+
+@admin_blueprint.route(
+    "/admin/coupons/delete/<uuid:id>",
+    methods=["POST"],
+)
+@admin_required
+def delete_coupon(id):
+    coupon = Coupon.query.get_or_404(id)
+
+    try:
+        # Preserva cupons já utilizados para não perder o histórico.
+        if coupon.times_used > 0:
+            coupon.is_active = False
+            db.session.commit()
+
+            flash(
+                "O cupom já possui utilizações e foi desativado "
+                "em vez de ser excluído.",
+                "warning",
+            )
+        else:
+            code = coupon.code
+            db.session.delete(coupon)
+            db.session.commit()
+
+            flash(f"Cupom {code} excluído com sucesso!", "success")
+
+    except Exception as error:
+        db.session.rollback()
+        print(f"Erro ao excluir cupom: {error}")
+        flash("Não foi possível excluir o cupom.", "danger")
+
+    return redirect(
+        url_for("admin.admin_dashboard", _anchor="coupons")
+    )
+
+
+# -------------------------------------------------------------------
 # Adicionar fornecedor
 # -------------------------------------------------------------------
 
@@ -263,7 +569,7 @@ def add_supplier():
             db.session.add(supplier)
             db.session.commit()
             flash("Fornecedor adicionado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard", _anchor="supplier"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="suppliers"))
 
         except Exception as e:
             db.session.rollback()
@@ -294,7 +600,7 @@ def edit_supplier(id):
         try:
             db.session.commit()
             flash("Fornecedor atualizado com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard", _anchor="supplier"))
+            return redirect(url_for("admin.admin_dashboard", _anchor="suppliers"))
 
         except Exception as e:
             db.session.rollback()
@@ -315,7 +621,7 @@ def delete_supplier(id):
     db.session.delete(supplier)
     db.session.commit()
     flash("Fornecedor excluído com sucesso!", "success")
-    return redirect(url_for("admin.admin_dashboard", _anchor="promotions"))
+    return redirect(url_for("admin.admin_dashboard", _anchor="suppliers"))
 
 
 # -------------------------------------------------------------------
