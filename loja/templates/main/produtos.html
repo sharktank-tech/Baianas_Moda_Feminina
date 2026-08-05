@@ -5,6 +5,24 @@
 
 {% block extra_head %}
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/produtos.css') }}">
+
+  <style>
+    /*
+     * Desacelera somente a troca das imagens quando o mouse está
+     * sobre o card. A animação completa passa a durar 16 segundos.
+     */
+    .product-card:hover .product-slides.auto-slider {
+      animation-duration: 16s !important;
+      transition-duration: 1s !important;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .product-card:hover .product-slides.auto-slider {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
+  </style>
 {% endblock %}
 
 {% block content %}

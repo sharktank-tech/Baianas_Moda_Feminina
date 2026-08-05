@@ -10,10 +10,12 @@ from flask_login import login_user, login_required, current_user, logout_user
 from sqlalchemy import asc, desc
 from sqlalchemy.exc import IntegrityError
 
+from loja.modules.newsletter import subscribe_newsletter
+
 from loja import db
 from loja.modules.models import (
     User, Product, Promotion, ContactInfo, SocialLink, Cart,
-    HeroSlide, Testimonial, NewsletterSubscriber, Favorite, SiteConfig
+    HeroSlide, Testimonial, NewsletterSubscriber, Favorite, SiteConfig, Address
 )
 from loja.modules.enviar_email import enviar_email
 from config import Config
@@ -514,21 +516,17 @@ def favoritar(id):
     return jsonify({"is_favorited": is_favorited})
 
 
-# ── Newsletter ────────────────────────────────────────────────────────────────
+# Substitua a rota antiga por esta:
 @main_blueprint.route("/newsletter", methods=["POST"])
 def newsletter():
-    email = (request.form.get("email") or "").strip().lower()
+    result = subscribe_newsletter(
+        request.form.get("email"),
+        send_welcome_email=True,
+    )
 
-    if not email or "@" not in email:
-        flash("Informe um e-mail válido.", "newsletter")
-        return redirect(url_for("main.home") + "#newsletter")
+    category = "newsletter" if result.success else "danger"
+    flash(result.message, category)
 
-    ja_existe = NewsletterSubscriber.query.filter_by(email=email).first()
-    if not ja_existe:
-        db.session.add(NewsletterSubscriber(id=uuid.uuid4(), email=email))
-        db.session.commit()
-
-    flash("Cadastro feito! Confira seu e-mail para o cupom de 10%.", "newsletter")
     return redirect(url_for("main.home") + "#newsletter")
 
 
@@ -749,27 +747,198 @@ def logout():
     return redirect(url_for('main.home'))
 
 
-# ── Editar conta ──────────────────────────────────────────────────────────────
+# ── Editar conta e endereço ──────────────────────────────────────────────────
 @main_blueprint.route('/edit_account', methods=['GET', 'POST'])
 @login_required
 def edit_account():
-    if request.method == 'POST':
-        new_username = request.form.get('username')
-        new_email = request.form.get('email')
+    # Prioriza o endereço marcado como padrão. Se não existir, usa o primeiro.
+    address = (
+        Address.query
+        .filter_by(user_id=current_user.id, is_default=True)
+        .order_by(Address.created_at.asc())
+        .first()
+    )
 
-        if new_username and new_email:
+    if address is None:
+        address = (
+            Address.query
+            .filter_by(user_id=current_user.id)
+            .order_by(Address.created_at.asc())
+            .first()
+        )
+
+    if request.method == 'POST':
+        new_username = (request.form.get('username') or '').strip()
+        new_email = (request.form.get('email') or '').strip().lower()
+        new_phone = (request.form.get('phone') or '').strip()
+
+        recipient_name = (request.form.get('recipient_name') or '').strip()
+        address_phone = (request.form.get('address_phone') or '').strip()
+        zip_code = (request.form.get('zip_code') or '').strip()
+        street = (request.form.get('street') or '').strip()
+        number = (request.form.get('number') or '').strip()
+        complement = (request.form.get('complement') or '').strip()
+        neighborhood = (request.form.get('neighborhood') or '').strip()
+        city = (request.form.get('city') or '').strip()
+        state = (request.form.get('state') or '').strip().upper()
+        make_default = request.form.get('is_default') == '1'
+
+        def render_edit_form(status_code=200):
+            return (
+                render_template(
+                    'conta/edit_account.html',
+                    username=new_username,
+                    email=new_email,
+                    phone=new_phone,
+                    address=address,
+                ),
+                status_code,
+            )
+
+        # Nome e e-mail continuam obrigatórios para a conta.
+        if not new_username or not new_email:
+            flash('Nome e e-mail são obrigatórios.', 'danger')
+            return render_edit_form(400)
+
+        if '@' not in new_email:
+            flash('Informe um e-mail válido.', 'danger')
+            return render_edit_form(400)
+
+        # Impede que outro usuário utilize o mesmo e-mail.
+        email_in_use = (
+            User.query
+            .filter(
+                User.email == new_email,
+                User.id != current_user.id,
+            )
+            .first()
+        )
+
+        if email_in_use:
+            flash('Este e-mail já está sendo usado por outra conta.', 'danger')
+            return render_edit_form(409)
+
+        address_values = [
+            recipient_name,
+            address_phone,
+            zip_code,
+            street,
+            number,
+            complement,
+            neighborhood,
+            city,
+            state,
+        ]
+
+        has_any_address_data = any(address_values)
+
+        # Quando já existe endereço, ele precisa permanecer completo.
+        # Para um usuário sem endereço, os campos podem continuar todos vazios.
+        should_save_address = address is not None or has_any_address_data
+
+        if should_save_address:
+            required_address_fields = {
+                'nome do destinatário': recipient_name,
+                'CEP': zip_code,
+                'rua/avenida': street,
+                'número': number,
+                'bairro': neighborhood,
+                'cidade': city,
+                'estado': state,
+            }
+
+            missing_fields = [
+                label
+                for label, value in required_address_fields.items()
+                if not value
+            ]
+
+            if missing_fields:
+                flash(
+                    'Preencha os campos obrigatórios do endereço: '
+                    + ', '.join(missing_fields)
+                    + '.',
+                    'danger',
+                )
+                return render_edit_form(400)
+
+            if len(state) != 2:
+                flash('O estado deve ser informado com uma sigla de duas letras.', 'danger')
+                return render_edit_form(400)
+
+        try:
             current_user.name = new_username
             current_user.email = new_email
+            current_user.phone = new_phone or None
+
+            if should_save_address:
+                if address is None:
+                    address = Address(
+                        id=uuid.uuid4(),
+                        user_id=current_user.id,
+                    )
+                    db.session.add(address)
+
+                    # O primeiro endereço cadastrado sempre vira o principal.
+                    if not current_user.addresses:
+                        make_default = True
+
+                if make_default:
+                    (
+                        Address.query
+                        .filter(
+                            Address.user_id == current_user.id,
+                            Address.id != address.id,
+                        )
+                        .update(
+                            {Address.is_default: False},
+                            synchronize_session=False,
+                        )
+                    )
+
+                address.recipient_name = recipient_name
+                address.phone = address_phone or None
+                address.zip_code = zip_code
+                address.street = street
+                address.number = number
+                address.complement = complement or None
+                address.neighborhood = neighborhood
+                address.city = city
+                address.state = state
+                address.is_default = (
+                    make_default
+                    or address.is_default
+                    or len(current_user.addresses) <= 1
+                )
+
             db.session.commit()
-            flash('Informações atualizadas com sucesso!', 'success')
+
+            flash('Conta e endereço atualizados com sucesso!', 'success')
             return redirect(url_for('main.conta'))
-        else:
-            flash('Por favor, preencha todos os campos.', 'danger')
+
+        except IntegrityError:
+            db.session.rollback()
+            flash(
+                'Não foi possível salvar. Verifique se o e-mail já está cadastrado.',
+                'danger',
+            )
+            return render_edit_form(409)
+
+        except Exception as error:
+            db.session.rollback()
+            print(f'Erro ao atualizar conta/endereço: {error}')
+            flash(
+                'Ocorreu um erro ao salvar as alterações. Tente novamente.',
+                'danger',
+            )
+            return render_edit_form(500)
 
     return render_template(
         'conta/edit_account.html',
         username=current_user.name,
         email=current_user.email,
+        phone=current_user.phone,
+        address=address,
     )
 
 
