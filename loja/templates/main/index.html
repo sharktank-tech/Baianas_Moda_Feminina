@@ -18,6 +18,215 @@
   <link rel="preload" as="image" href="{{ hero_slides[0].image if hero_slides else url_for('static', filename='img/agua-de-coco.jpg') }}">
 
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/styles.css') }}">
+
+  <style>
+    /* Hero carousel */
+    .hero-carousel {
+      position: relative;
+      width: 100%;
+      overflow: hidden;
+      background: #111;
+      isolation: isolate;
+    }
+
+    .hero-carousel__viewport {
+      width: 100%;
+      overflow: hidden;
+    }
+
+    .hero-carousel__track {
+      display: flex;
+      width: 100%;
+      transform: translate3d(0, 0, 0);
+      transition: transform 650ms cubic-bezier(.22, .61, .36, 1);
+      will-change: transform;
+    }
+
+    .hero-carousel__slide {
+      position: relative;
+      flex: 0 0 100%;
+      min-width: 100%;
+      overflow: hidden;
+    }
+
+    .hero-carousel__media {
+      position: relative;
+      min-height: clamp(420px, 52vw, 700px);
+    }
+
+    .hero-carousel__image {
+      display: block;
+      width: 100%;
+      height: clamp(420px, 52vw, 700px);
+      object-fit: cover;
+      object-position: center;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+
+    .hero-carousel__media::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(0, 0, 0, .68) 0%, rgba(0, 0, 0, .30) 45%, rgba(0, 0, 0, .08) 75%),
+        linear-gradient(0deg, rgba(0, 0, 0, .35) 0%, transparent 48%);
+      pointer-events: none;
+    }
+
+    .hero-carousel__content {
+      position: absolute;
+      z-index: 2;
+      left: max(6vw, 24px);
+      top: 50%;
+      width: min(620px, calc(100% - 48px));
+      color: #fff;
+      transform: translateY(-50%);
+    }
+
+    .hero-carousel__eyebrow {
+      display: inline-block;
+      margin-bottom: 14px;
+      font-size: clamp(.75rem, 1.2vw, .95rem);
+      font-weight: 700;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+
+    .hero-carousel__title {
+      max-width: 14ch;
+      margin: 0 0 24px;
+      font-size: clamp(2rem, 5vw, 4.8rem);
+      line-height: .98;
+      text-wrap: balance;
+    }
+
+    .hero-carousel__nav {
+      position: absolute;
+      z-index: 4;
+      top: 50%;
+      display: grid;
+      place-items: center;
+      width: 48px;
+      height: 48px;
+      border: 1px solid rgba(255, 255, 255, .65);
+      border-radius: 999px;
+      background: rgba(0, 0, 0, .28);
+      color: #fff;
+      font-size: 1.45rem;
+      cursor: pointer;
+      transform: translateY(-50%);
+      backdrop-filter: blur(5px);
+      transition: background-color .2s ease, transform .2s ease;
+    }
+
+    .hero-carousel__nav:hover {
+      background: rgba(0, 0, 0, .62);
+      transform: translateY(-50%) scale(1.05);
+    }
+
+    .hero-carousel__nav:focus-visible,
+    .hero-carousel__dot:focus-visible {
+      outline: 3px solid #fff;
+      outline-offset: 3px;
+    }
+
+    .hero-carousel__prev { left: 18px; }
+    .hero-carousel__next { right: 18px; }
+
+    .hero-carousel__dots {
+      position: absolute;
+      z-index: 4;
+      left: 50%;
+      bottom: 22px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      transform: translateX(-50%);
+    }
+
+    .hero-carousel__dot {
+      width: 10px;
+      height: 10px;
+      padding: 0;
+      border: 1px solid rgba(255, 255, 255, .9);
+      border-radius: 999px;
+      background: transparent;
+      cursor: pointer;
+      transition: width .25s ease, background-color .25s ease;
+    }
+
+    .hero-carousel__dot.is-active {
+      width: 30px;
+      background: #fff;
+    }
+
+    .hero-carousel__sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .hero-carousel[data-single-slide="true"] .hero-carousel__nav,
+    .hero-carousel[data-single-slide="true"] .hero-carousel__dots {
+      display: none;
+    }
+
+    @media (max-width: 700px) {
+      .hero-carousel__media,
+      .hero-carousel__image {
+        min-height: 520px;
+        height: 72vh;
+        max-height: 680px;
+      }
+
+      .hero-carousel__media::after {
+        background: linear-gradient(0deg, rgba(0, 0, 0, .76) 0%, rgba(0, 0, 0, .12) 78%);
+      }
+
+      .hero-carousel__content {
+        top: auto;
+        bottom: 76px;
+        left: 24px;
+        width: calc(100% - 48px);
+        transform: none;
+      }
+
+      .hero-carousel__title {
+        margin-bottom: 20px;
+        font-size: clamp(2rem, 11vw, 3.4rem);
+      }
+
+      .hero-carousel__nav {
+        top: auto;
+        bottom: 14px;
+        width: 42px;
+        height: 42px;
+        transform: none;
+      }
+
+      .hero-carousel__nav:hover {
+        transform: scale(1.04);
+      }
+
+      .hero-carousel__prev { left: 16px; }
+      .hero-carousel__next { right: 16px; }
+      .hero-carousel__dots { bottom: 29px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hero-carousel__track {
+        transition: none;
+      }
+    }
+  </style>
+
   <script src="{{ url_for('static', filename='scripts/carousel-1.js') }}" defer></script>
   <script src="{{ url_for('static', filename='scripts/carousel-2.js') }}" defer></script>
   <script src="{{ url_for('static', filename='scripts/index.js') }}" defer></script>
@@ -44,68 +253,142 @@
 
 {% block content %}
 
+
   <!-- ══════════════════════════════════════════════
-       HERO — Hero Slides Carousel (tabela hero_slides)
+       HERO — Carrossel real, responsivo e acessível
   ══════════════════════════════════════════════ -->
-  <section class="pb-banner" aria-label="Destaques da coleção">
-    <div class="pb-track-wrap">
-      <div class="pb-track" id="pbTrack">
+  <section
+    class="hero-carousel"
+    id="heroCarousel"
+    aria-label="Destaques da coleção"
+    aria-roledescription="carrossel"
+    data-autoplay="6500"
+  >
+    <div class="hero-carousel__viewport" id="heroViewport">
+      <div class="hero-carousel__track" id="heroTrack">
 
         {% for slide in hero_slides %}
-        <div class="pb-slide--fullwidth">
-          <div class="pb-img-side--full">
+        <article
+          class="hero-carousel__slide{% if loop.first %} is-active{% endif %}"
+          data-hero-slide
+          role="group"
+          aria-roledescription="slide"
+          aria-label="{{ loop.index }} de {{ hero_slides|length }}"
+          aria-hidden="{{ 'false' if loop.first else 'true' }}"
+        >
+          <div class="hero-carousel__media">
             <img
-              class="pb-img active"
+              class="hero-carousel__image"
               src="{{ slide.image }}"
               alt="{{ slide.alt or (slide.title or 'Destaque da coleção') }}"
-              width="1600" height="700"
+              width="1600"
+              height="700"
               loading="{% if loop.first %}eager{% else %}lazy{% endif %}"
               fetchpriority="{% if loop.first %}high{% else %}auto{% endif %}"
+              draggable="false"
             >
-            <div class="pb-slide-overlay">
+
+            <div class="hero-carousel__content">
               {% if slide.eyebrow %}
-              <span class="pb-slide-eyebrow">{{ slide.eyebrow }}</span>
+              <span class="hero-carousel__eyebrow">{{ slide.eyebrow }}</span>
               {% endif %}
+
               {% if slide.title %}
-              <h2 class="pb-slide-title">{{ slide.title }}</h2>
+              <h2 class="hero-carousel__title">{{ slide.title }}</h2>
               {% endif %}
-              <a href="{{ slide.link or url_for('main.produtos') }}" class="btn btn--outline btn--arrow">Ver coleção</a>
+
+              <a
+                href="{{ slide.link or url_for('main.produtos') }}"
+                class="btn btn--outline btn--arrow"
+              >
+                Ver coleção
+              </a>
             </div>
           </div>
-        </div>
+        </article>
+
         {% else %}
+        <article
+          class="hero-carousel__slide is-active"
+          data-hero-slide
+          role="group"
+          aria-roledescription="slide"
+          aria-label="1 de 1"
+          aria-hidden="false"
+        >
+          <div class="hero-carousel__media">
+            <img
+              class="hero-carousel__image"
+              src="{{ url_for('static', filename='img/agua-de-coco.jpg') }}"
+              alt="Coleção Outono Inverno 2026"
+              width="1600"
+              height="700"
+              loading="eager"
+              fetchpriority="high"
+              draggable="false"
+            >
 
-        {# Fallback estático caso hero_slides esteja vazio #}
-        <div class="pb-slide--fullwidth">
-          <div class="pb-img-side--full">
-            <img class="pb-img active" src="{{ url_for('static', filename='img/agua-de-coco.jpg') }}" alt="Coleção Outono Inverno 2026" width="1600" height="700" loading="eager" fetchpriority="high">
-            <div class="pb-slide-overlay">
-              <span class="pb-slide-eyebrow">Nova Coleção</span>
-              <h2 class="pb-slide-title">Outono Inverno 2026</h2>
-              <a href="{{ url_for('main.produtos') }}" class="btn btn--outline btn--arrow">Ver coleção</a>
+            <div class="hero-carousel__content">
+              <span class="hero-carousel__eyebrow">Nova Coleção</span>
+              <h2 class="hero-carousel__title">Outono Inverno 2026</h2>
+              <a href="{{ url_for('main.produtos') }}" class="btn btn--outline btn--arrow">
+                Ver coleção
+              </a>
             </div>
           </div>
-        </div>
-
+        </article>
         {% endfor %}
 
-      </div><!-- /pb-track -->
+      </div>
     </div>
 
-    <!-- nav botões: só fazem sentido com mais de 1 slide -->
-    {% if hero_slides|length > 1 or not hero_slides %}
-    <button class="pb-nav pb-prev" id="pbPrev" aria-label="Slide anterior">&#8592;</button>
-    <button class="pb-nav pb-next" id="pbNext" aria-label="Próximo slide">&#8594;</button>
-    {% endif %}
+    <button
+      class="hero-carousel__nav hero-carousel__prev"
+      id="heroPrev"
+      type="button"
+      aria-label="Mostrar slide anterior"
+      aria-controls="heroTrack"
+    >
+      &#8592;
+    </button>
 
-    <!-- dots -->
-    <div class="pb-dots" id="pbDots" role="tablist" aria-label="Selecionar slide">
+    <button
+      class="hero-carousel__nav hero-carousel__next"
+      id="heroNext"
+      type="button"
+      aria-label="Mostrar próximo slide"
+      aria-controls="heroTrack"
+    >
+      &#8594;
+    </button>
+
+    <div class="hero-carousel__dots" id="heroDots" role="tablist" aria-label="Selecionar destaque">
       {% for slide in hero_slides %}
-      <button class="pb-dot{% if loop.first %} active{% endif %}" role="tab" aria-label="Ir para slide {{ loop.index }}" aria-selected="{{ 'true' if loop.first else 'false' }}" data-slide-index="{{ loop.index0 }}"></button>
+      <button
+        class="hero-carousel__dot{% if loop.first %} is-active{% endif %}"
+        type="button"
+        role="tab"
+        data-hero-dot
+        data-slide-index="{{ loop.index0 }}"
+        aria-label="Ir para slide {{ loop.index }}"
+        aria-selected="{{ 'true' if loop.first else 'false' }}"
+        tabindex="{{ '0' if loop.first else '-1' }}"
+      ></button>
       {% else %}
-      <button class="pb-dot active" role="tab" aria-label="Ir para slide 1" aria-selected="true" data-slide-index="0"></button>
+      <button
+        class="hero-carousel__dot is-active"
+        type="button"
+        role="tab"
+        data-hero-dot
+        data-slide-index="0"
+        aria-label="Ir para slide 1"
+        aria-selected="true"
+        tabindex="0"
+      ></button>
       {% endfor %}
     </div>
+
+    <p class="hero-carousel__sr-only" id="heroStatus" aria-live="polite" aria-atomic="true"></p>
   </section>
 
 
@@ -362,6 +645,154 @@
 
 {% block extra_scripts %}
   <script>
+
+    // Hero carousel — autoplay, navegação, teclado, swipe e acessibilidade
+    (function () {
+      var carousel = document.getElementById('heroCarousel');
+      if (!carousel) return;
+
+      var track = document.getElementById('heroTrack');
+      var viewport = document.getElementById('heroViewport');
+      var prevButton = document.getElementById('heroPrev');
+      var nextButton = document.getElementById('heroNext');
+      var status = document.getElementById('heroStatus');
+      var slides = Array.prototype.slice.call(carousel.querySelectorAll('[data-hero-slide]'));
+      var dots = Array.prototype.slice.call(carousel.querySelectorAll('[data-hero-dot]'));
+      var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var autoplayDelay = Number(carousel.dataset.autoplay) || 6500;
+      var currentIndex = 0;
+      var autoplayTimer = null;
+      var touchStartX = null;
+      var touchStartY = null;
+
+      if (!track || !viewport || !slides.length) return;
+
+      carousel.dataset.singleSlide = slides.length <= 1 ? 'true' : 'false';
+
+      function normalizeIndex(index) {
+        return (index + slides.length) % slides.length;
+      }
+
+      function updateCarousel(index, announce) {
+        currentIndex = normalizeIndex(index);
+        track.style.transform = 'translate3d(-' + (currentIndex * 100) + '%, 0, 0)';
+
+        slides.forEach(function (slide, slideIndex) {
+          var active = slideIndex === currentIndex;
+          slide.classList.toggle('is-active', active);
+          slide.setAttribute('aria-hidden', active ? 'false' : 'true');
+        });
+
+        dots.forEach(function (dot, dotIndex) {
+          var active = dotIndex === currentIndex;
+          dot.classList.toggle('is-active', active);
+          dot.setAttribute('aria-selected', active ? 'true' : 'false');
+          dot.setAttribute('tabindex', active ? '0' : '-1');
+        });
+
+        if (announce && status) {
+          status.textContent = 'Slide ' + (currentIndex + 1) + ' de ' + slides.length;
+        }
+      }
+
+      function stopAutoplay() {
+        if (autoplayTimer) {
+          window.clearInterval(autoplayTimer);
+          autoplayTimer = null;
+        }
+      }
+
+      function startAutoplay() {
+        stopAutoplay();
+        if (slides.length <= 1 || reduceMotion || document.hidden) return;
+
+        autoplayTimer = window.setInterval(function () {
+          updateCarousel(currentIndex + 1, false);
+        }, autoplayDelay);
+      }
+
+      function goTo(index, announce) {
+        updateCarousel(index, announce);
+        startAutoplay();
+      }
+
+      prevButton.addEventListener('click', function () {
+        goTo(currentIndex - 1, true);
+      });
+
+      nextButton.addEventListener('click', function () {
+        goTo(currentIndex + 1, true);
+      });
+
+      dots.forEach(function (dot) {
+        dot.addEventListener('click', function () {
+          goTo(Number(dot.dataset.slideIndex), true);
+        });
+      });
+
+      carousel.addEventListener('keydown', function (event) {
+        if (event.key === 'ArrowLeft') {
+          event.preventDefault();
+          goTo(currentIndex - 1, true);
+        } else if (event.key === 'ArrowRight') {
+          event.preventDefault();
+          goTo(currentIndex + 1, true);
+        } else if (event.key === 'Home') {
+          event.preventDefault();
+          goTo(0, true);
+        } else if (event.key === 'End') {
+          event.preventDefault();
+          goTo(slides.length - 1, true);
+        }
+      });
+
+      viewport.addEventListener('touchstart', function (event) {
+        if (!event.touches || event.touches.length !== 1) return;
+        touchStartX = event.touches[0].clientX;
+        touchStartY = event.touches[0].clientY;
+        stopAutoplay();
+      }, { passive: true });
+
+      viewport.addEventListener('touchend', function (event) {
+        if (touchStartX === null || !event.changedTouches || !event.changedTouches.length) {
+          startAutoplay();
+          return;
+        }
+
+        var deltaX = event.changedTouches[0].clientX - touchStartX;
+        var deltaY = event.changedTouches[0].clientY - touchStartY;
+        touchStartX = null;
+        touchStartY = null;
+
+        if (Math.abs(deltaX) >= 45 && Math.abs(deltaX) > Math.abs(deltaY)) {
+          goTo(deltaX < 0 ? currentIndex + 1 : currentIndex - 1, true);
+        } else {
+          startAutoplay();
+        }
+      }, { passive: true });
+
+      viewport.addEventListener('touchcancel', function () {
+        touchStartX = null;
+        touchStartY = null;
+        startAutoplay();
+      }, { passive: true });
+
+      carousel.addEventListener('mouseenter', stopAutoplay);
+      carousel.addEventListener('mouseleave', startAutoplay);
+      carousel.addEventListener('focusin', stopAutoplay);
+      carousel.addEventListener('focusout', function (event) {
+        if (!carousel.contains(event.relatedTarget)) startAutoplay();
+      });
+
+      document.addEventListener('visibilitychange', function () {
+        if (document.hidden) stopAutoplay();
+        else startAutoplay();
+      });
+
+      updateCarousel(0, false);
+      startAutoplay();
+    })();
+
     // Revelação suave ao rolar
     (function () {
       var els = document.querySelectorAll('[data-reveal]');
