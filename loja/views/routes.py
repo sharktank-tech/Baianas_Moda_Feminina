@@ -15,7 +15,7 @@ from loja.modules.newsletter import subscribe_newsletter
 from loja import db
 from loja.modules.models import (
     User, Product, Promotion, ContactInfo, SocialLink, Cart,
-    HeroSlide, Testimonial, NewsletterSubscriber, Favorite, SiteConfig, Address
+    HeroSlide, Testimonial, NewsletterSubscriber, Favorite, SiteConfig, Address, Coupon
 )
 from loja.modules.enviar_email import enviar_email
 from config import Config
@@ -24,6 +24,11 @@ from loja.modules.models import Order
 from loja.modules.tracking_status import (
     TRACKING_STATUS,
     get_tracking_status,
+)
+
+from loja.modules.getway_mercado_pago.payment_service import (
+    calculate_shipping,
+    money,
 )
 
 tracking_blueprint = Blueprint(
@@ -612,6 +617,217 @@ def checkout(product_id):
         total=total,
     )
 
+# ── Aplicar cupom no checkout ────────────────────────────────────────────────
+@main_blueprint.post("/checkout/aplicar-cupom")
+@login_required
+def apply_checkout_coupon():
+    data = request.get_json(silent=True) or {}
+
+    code = "".join(
+        str(data.get("code") or "")
+        .strip()
+        .upper()
+        .split()
+    )
+
+    checkout_type = str(
+        data.get("checkout_type") or ""
+    ).strip().lower()
+
+    if not code:
+        return jsonify({
+            "success": False,
+            "message": "Digite um código de cupom.",
+        }), 400
+
+    try:
+        subtotal = _get_checkout_subtotal(
+            checkout_type=checkout_type,
+            product_id=data.get("product_id"),
+            quantity=data.get("quantity"),
+        )
+    except ValueError as error:
+        return jsonify({
+            "success": False,
+            "message": str(error),
+        }), 400
+
+    coupon = (
+        Coupon.query
+        .filter(
+            db.func.upper(Coupon.code) == code
+        )
+        .first()
+    )
+
+    if coupon is None:
+        return jsonify({
+            "success": False,
+            "message": "Cupom não encontrado.",
+        }), 404
+
+    if not coupon.is_available(subtotal):
+        return jsonify({
+            "success": False,
+            "message": (
+                "Cupom expirado, indisponível ou inválido "
+                "para este pedido."
+            ),
+        }), 400
+
+    # Cupom exclusivo para primeira compra.
+    if coupon.first_purchase_only:
+        from loja.modules.getway_mercado_pago.payment_models import Order
+
+        previous_order = Order.query.filter(
+            Order.user_id == current_user.id,
+            Order.status.in_(["paid", "manual_review"]),
+        ).first()
+
+        if previous_order:
+            return jsonify({
+                "success": False,
+                "message": (
+                    "Este cupom é exclusivo para a primeira compra."
+                ),
+            }), 400
+
+    discount = money(
+        coupon.calculate_discount(subtotal)
+    )
+
+    shipping = calculate_shipping(subtotal)
+
+    total = money(
+        max(
+            subtotal + shipping - discount,
+            Decimal("0.00"),
+        )
+    )
+
+    # A sessão é útil para manter o cupom caso o usuário
+    # atualize a página antes de finalizar a compra.
+    session["checkout_coupon"] = {
+        "code": coupon.code,
+        "checkout_type": checkout_type,
+        "product_id": str(data.get("product_id") or ""),
+    }
+
+    session.modified = True
+
+    return jsonify({
+        "success": True,
+        "message": f"Cupom {coupon.code} aplicado com sucesso.",
+        "code": coupon.code,
+        "subtotal": float(subtotal),
+        "shipping": float(shipping),
+        "discount": float(discount),
+        "total": float(total),
+    }), 200
+
+# Helper para calculo
+def _get_checkout_subtotal(
+    checkout_type,
+    product_id=None,
+    quantity=1,
+):
+    if checkout_type == "cart":
+        cart = Cart.query.filter_by(
+            user_id=current_user.id,
+        ).first()
+
+        if cart is None or not cart.items:
+            raise ValueError("Seu carrinho está vazio.")
+
+        subtotal = sum(
+            (
+                money(item.unit_price) * item.quantity
+                for item in cart.items
+            ),
+            Decimal("0.00"),
+        )
+
+        return money(subtotal)
+
+    if checkout_type == "product":
+        try:
+            parsed_product_id = uuid.UUID(
+                str(product_id)
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError("Produto inválido.") from error
+
+        product = Product.query.filter_by(
+            id=parsed_product_id,
+            is_active=True,
+        ).first()
+
+        if product is None:
+            raise ValueError(
+                "Produto não encontrado ou indisponível."
+            )
+
+        try:
+            parsed_quantity = int(quantity)
+        except (TypeError, ValueError):
+            parsed_quantity = 1
+
+        parsed_quantity = max(
+            1,
+            min(parsed_quantity, 99),
+        )
+
+        if (
+            product.stock is not None
+            and product.stock < parsed_quantity
+        ):
+            raise ValueError(
+                "Quantidade maior que o estoque disponível."
+            )
+
+        return money(
+            money(product.price) * parsed_quantity
+        )
+
+    raise ValueError("Tipo de checkout inválido.")
+
+# ── Remover cupom do checkout ────────────────────────────────────────────────
+@main_blueprint.post("/checkout/remover-cupom")
+@login_required
+def remove_checkout_coupon():
+    data = request.get_json(silent=True) or {}
+
+    checkout_type = str(
+        data.get("checkout_type") or ""
+    ).strip().lower()
+
+    try:
+        subtotal = _get_checkout_subtotal(
+            checkout_type=checkout_type,
+            product_id=data.get("product_id"),
+            quantity=data.get("quantity"),
+        )
+    except ValueError as error:
+        return jsonify({
+            "success": False,
+            "message": str(error),
+        }), 400
+
+    shipping = calculate_shipping(subtotal)
+    total = money(subtotal + shipping)
+
+    session.pop("checkout_coupon", None)
+    session.modified = True
+
+    return jsonify({
+        "success": True,
+        "message": "Cupom removido.",
+        "code": "",
+        "subtotal": float(subtotal),
+        "shipping": float(shipping),
+        "discount": 0,
+        "total": float(total),
+    }), 200
 
 # ── Cálculo do frete ──────────────────────────────────────────
 @main_blueprint.route("/calcular_frete", methods=["POST"])

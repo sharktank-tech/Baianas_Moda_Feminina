@@ -903,8 +903,8 @@
             <div
                 class="coupon-box"
                 id="couponBox"
-                data-apply-url="/checkout/aplicar-cupom"
-                data-remove-url="/checkout/remover-cupom"
+                data-apply-url="{{ url_for('main.apply_checkout_coupon') }}"
+                data-remove-url="{{ url_for('main.remove_checkout_coupon') }}"
             >
                 <label class="coupon-label" for="couponCode">
                     Cupom de desconto
@@ -1028,10 +1028,22 @@
     const discountRow = document.getElementById("discountRow");
     const discountPrice = document.getElementById("discount-price");
     const discountCouponLabel = document.getElementById("discountCouponLabel");
+    const subtotalPrice = document.getElementById("subtotal-price");
+    const shippingPrice = document.getElementById("shipping-price");
     const totalPrice = document.getElementById("total-price");
+
     const csrfInput = checkoutForm
         ? checkoutForm.querySelector('input[name="csrf_token"]')
         : null;
+
+    /*
+     * Esta variável pertence ao bloco extra_scripts. Por isso ela usa
+     * diretamente discount, com fallback para zero, e não current_discount,
+     * que foi definido apenas dentro do bloco content.
+     */
+    let appliedDiscount = Number(
+        {{ (discount if discount is defined else 0) | float | tojson }}
+    ) || 0;
 
     if (!cepInput) return;
 
@@ -1126,8 +1138,9 @@
     async function calcularFrete(cep) {
         {% if product is defined and product %}
         try {
-            const response = await fetch("/calcular_frete", {
+            const response = await fetch("{{ url_for('main.calcular_frete') }}", {
                 method: "POST",
+                credentials: "same-origin",
                 headers: {
                     "Content-Type": "application/json",
                     "X-Requested-With": "XMLHttpRequest"
@@ -1145,11 +1158,23 @@
                 return;
             }
 
-            document.getElementById("shipping-price").textContent =
-                "R$ " + String(data.valor).replace(".", ",");
+            const shippingValue = Number(data.valor || 0);
+            const totalWithoutDiscount = Number(data.total || 0);
+            const finalTotal = Math.max(
+                totalWithoutDiscount - appliedDiscount,
+                0
+            );
 
-            document.getElementById("total-price").textContent =
-                "R$ " + String(data.total).replace(".", ",");
+            if (shippingPrice) {
+                shippingPrice.textContent = shippingValue <= 0
+                    ? "Grátis"
+                    : "R$ " + formatMoney(shippingValue);
+            }
+
+            if (totalPrice) {
+                totalPrice.textContent =
+                    "R$ " + formatMoney(finalTotal);
+            }
         } catch (error) {
             console.error("Não foi possível calcular o frete:", error);
         }
@@ -1163,6 +1188,19 @@
             minimumFractionDigits: 2,
             maximumFractionDigits: 2
         });
+    }
+
+    async function readJsonResponse(response) {
+        const contentType = response.headers.get("content-type") || "";
+
+        if (contentType.includes("application/json")) {
+            return response.json();
+        }
+
+        return {
+            success: false,
+            message: "O servidor retornou uma resposta inválida."
+        };
     }
 
     function setCouponFeedback(message, type) {
@@ -1190,7 +1228,9 @@
         if (!data) return;
 
         const discount = Number(data.discount || 0);
-        const code = String(data.code || "").toUpperCase();
+        const code = String(data.code || "").trim().toUpperCase();
+
+        appliedDiscount = discount;
 
         if (checkoutCouponCode) {
             checkoutCouponCode.value = code;
@@ -1201,20 +1241,36 @@
             couponInput.disabled = discount > 0;
         }
 
+        if (subtotalPrice && data.subtotal !== undefined) {
+            subtotalPrice.textContent =
+                "R$ " + formatMoney(data.subtotal);
+        }
+
+        if (shippingPrice && data.shipping !== undefined) {
+            const shipping = Number(data.shipping || 0);
+
+            shippingPrice.textContent = shipping <= 0
+                ? "Grátis"
+                : "R$ " + formatMoney(shipping);
+        }
+
         if (discountRow) {
             discountRow.hidden = discount <= 0;
         }
 
         if (discountPrice) {
-            discountPrice.textContent = "- R$ " + formatMoney(discount);
+            discountPrice.textContent =
+                "- R$ " + formatMoney(discount);
         }
 
         if (discountCouponLabel) {
-            discountCouponLabel.textContent = code ? "Cupom " + code : "";
+            discountCouponLabel.textContent =
+                code ? "Cupom " + code : "";
         }
 
         if (totalPrice && data.total !== undefined) {
-            totalPrice.textContent = "R$ " + formatMoney(data.total);
+            totalPrice.textContent =
+                "R$ " + formatMoney(data.total);
         }
 
         if (removeCouponButton) {
@@ -1278,6 +1334,7 @@
 
                 const response = await fetch(couponBox.dataset.applyUrl, {
                     method: "POST",
+                    credentials: "same-origin",
                     headers: headers,
                     body: JSON.stringify({
                         code: code,
@@ -1287,7 +1344,7 @@
                     })
                 });
 
-                const data = await response.json();
+                const data = await readJsonResponse(response);
 
                 if (!response.ok || !data.success) {
                     throw new Error(
@@ -1325,6 +1382,7 @@
 
                 const response = await fetch(couponBox.dataset.removeUrl, {
                     method: "POST",
+                    credentials: "same-origin",
                     headers: headers,
                     body: JSON.stringify({
                         checkout_type: "{% if cart_items is defined and cart_items %}cart{% else %}product{% endif %}",
@@ -1333,7 +1391,7 @@
                     })
                 });
 
-                const data = await response.json();
+                const data = await readJsonResponse(response);
 
                 if (!response.ok || !data.success) {
                     throw new Error(
@@ -1344,6 +1402,8 @@
                 updateCouponSummary({
                     code: "",
                     discount: 0,
+                    subtotal: data.subtotal,
+                    shipping: data.shipping,
                     total: data.total
                 });
 
