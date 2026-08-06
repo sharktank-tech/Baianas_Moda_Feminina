@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}Status do pagamento — {{ site.name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.payment-result {
+    max-width: 720px;
+    margin: 4rem auto;
+    padding: 0 1.25rem;
+}
+.payment-result-card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2rem;
+    box-shadow: 0 12px 35px rgba(0, 0, 0, .06);
+    text-align: center;
+}
+.payment-result-card h1 {
+    font-family: 'Poppins', sans-serif;
+    margin-bottom: 1rem;
+}
+.payment-result-card p {
+    color: #666;
+    line-height: 1.65;
+}
+.payment-order-data {
+    margin: 1.5rem 0;
+    padding: 1rem;
+    border-radius: 8px;
+    background: #f8f8f8;
+    text-align: left;
+}
+.payment-order-data div {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .45rem 0;
+}
+.payment-result-link {
+    display: inline-block;
+    margin-top: 1rem;
+    padding: .9rem 1.2rem;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    text-decoration: none;
+    font-weight: 700;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<main class="payment-result">
+    <section class="payment-result-card">
+        {% if order and order.status == "paid" %}
+            <h1>Pagamento aprovado</h1>
+            <p>Recebemos seu pagamento e o pedido já está confirmado.</p>
+        {% elif order and order.status == "manual_review" %}
+            <h1>Pagamento recebido</h1>
+            <p>
+                O pagamento foi recebido, mas o pedido precisa de uma
+                conferência da loja antes da preparação.
+            </p>
+        {% elif order and order.status in ["pending_payment"] %}
+            <h1>Pagamento pendente</h1>
+            <p>
+                O pagamento ainda está sendo processado. A página será
+                atualizada quando o Mercado Pago confirmar a operação.
+            </p>
+        {% elif order and order.status == "payment_failed" %}
+            <h1>Pagamento não aprovado</h1>
+            <p>O pagamento não foi concluído. Nenhuma confirmação de compra foi feita.</p>
+        {% elif order and order.status in ["refunded", "charged_back"] %}
+            <h1>Pagamento estornado</h1>
+            <p>Consulte a loja para obter os detalhes do estorno.</p>
+        {% else %}
+            <h1>Status do pagamento</h1>
+            <p>
+                Ainda não foi possível localizar a confirmação do pedido.
+                O webhook continuará sendo a fonte oficial do status.
+            </p>
+        {% endif %}
+
+        {% if order %}
+        <div class="payment-order-data">
+            <div>
+                <span>Pedido</span>
+                <strong>{{ order.id }}</strong>
+            </div>
+            <div>
+                <span>Status</span>
+                <strong>{{ order.status }}</strong>
+            </div>
+            <div>
+                <span>Total</span>
+                <strong>
+                    R$ {{ '%.2f'|format(order.total)|replace('.', ',') }}
+                </strong>
+            </div>
+        </div>
+        {% endif %}
+
+        <a class="payment-result-link" href="{{ url_for('main.home') }}">
+            Voltar para a loja
+        </a>
+    </section>
+</main>
+{% endblock %}

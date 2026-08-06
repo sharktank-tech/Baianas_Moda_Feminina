@@ -20,6 +20,19 @@ from loja.modules.models import (
 from loja.modules.enviar_email import enviar_email
 from config import Config
 
+from loja.modules.models import Order
+from loja.modules.tracking_status import (
+    TRACKING_STATUS,
+    get_tracking_status,
+)
+
+tracking_blueprint = Blueprint(
+    "tracking",
+    __name__,
+    url_prefix="/acompanhar-pedido"
+)
+
+
 main_blueprint = Blueprint("main", __name__)
 
 
@@ -963,7 +976,54 @@ def delete_account():
         flash('Ocorreu um erro ao tentar excluir a conta. Tente novamente.', 'danger')
         return redirect(url_for('main.conta'))
 
+# ── Rastreio de pedidos ────────────────────────────────────
 
+@tracking_blueprint.route("/", methods=["GET", "POST"])
+def acompanhar_pedido():
+    order = None
+    error = None
+
+    if request.method == "POST":
+        order_number = request.form.get("order_number", "").strip()
+        email = request.form.get("email", "").strip().lower()
+
+        if not order_number or not email:
+            error = "Informe o número do pedido e o e-mail da compra."
+        else:
+            order = (
+                Order.query
+                .filter(
+                    Order.order_number == order_number,
+                    db.func.lower(Order.customer_email) == email
+                )
+                .first()
+            )
+
+            if not order:
+                error = (
+                    "Não encontramos um pedido com esses dados. "
+                    "Confira o número e o e-mail informados."
+                )
+
+    shipment_data = []
+
+    if order:
+        for shipment in order.shipments:
+            status_info = get_tracking_status(shipment.status)
+
+            shipment_data.append({
+                "shipment": shipment,
+                "status_info": status_info,
+                "events": shipment.events,
+            })
+
+    return render_template(
+        "tracking/acompanhar_pedido.html",
+        order=order,
+        error=error,
+        shipment_data=shipment_data,
+        all_statuses=TRACKING_STATUS
+    )
 # ── Institucionais ────────────────────────────────────────────────────────────
 @main_blueprint.route('/politica-privacidade')
 def politica_privacidade():

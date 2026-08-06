@@ -959,3 +959,151 @@ class CartItem(db.Model):
             f"<CartItem {self.id} product={self.product_id} "
             f"size={self.selected_size} quantity={self.quantity}>"
         )
+
+
+class Shipment(db.Model):
+    __tablename__ = "shipments"
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
+
+    # Order.id é UUID. A FK precisa possuir exatamente o mesmo tipo.
+    order_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    tracking_code = db.Column(
+        db.String(100),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    carrier = db.Column(
+        db.String(80),
+        nullable=True,
+    )
+
+    # Permite integrações futuras: AliExpress, 17TRACK, AfterShip etc.
+    provider = db.Column(
+        db.String(40),
+        nullable=False,
+        default="manual",
+    )
+
+    status = db.Column(
+        db.String(40),
+        nullable=False,
+        default="aguardando_postagem",
+    )
+
+    estimated_delivery = db.Column(
+        db.Date,
+        nullable=True,
+    )
+
+    last_checked_at = db.Column(
+        db.DateTime,
+        nullable=True,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    # O nome precisa combinar com Order.shipments.
+    order = db.relationship(
+        "Order",
+        back_populates="shipments",
+    )
+
+    events = db.relationship(
+        "TrackingEvent",
+        back_populates="shipment",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by=lambda: TrackingEvent.event_at.desc(),
+    )
+
+    def __repr__(self):
+        return (
+            f"<Shipment {self.id} order={self.order_id} "
+            f"tracking={self.tracking_code}>"
+        )
+
+
+class TrackingEvent(db.Model):
+    __tablename__ = "tracking_events"
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
+
+    shipment_id = db.Column(
+        db.Integer,
+        db.ForeignKey("shipments.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    status = db.Column(
+        db.String(40),
+        nullable=False,
+    )
+
+    description = db.Column(
+        db.String(255),
+        nullable=False,
+    )
+
+    location = db.Column(
+        db.String(150),
+        nullable=True,
+    )
+
+    event_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    shipment = db.relationship(
+        "Shipment",
+        back_populates="events",
+    )
+
+    def __repr__(self):
+        return (
+            f"<TrackingEvent {self.id} shipment={self.shipment_id} "
+            f"status={self.status}>"
+        )
+
+
+# Este import deve permanecer no final do arquivo, depois de Shipment.
+# Assim todos os nomes usados nos relacionamentos já estão registrados.
+from loja.modules.getway_mercado_pago.payment_models import (  # noqa: E402,F401
+    Order,
+    OrderItem,
+    Payment,
+)

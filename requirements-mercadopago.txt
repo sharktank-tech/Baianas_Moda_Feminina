@@ -1,0 +1,2 @@
+mercadopago==3.4.0
+pytest>=8.0,<9
