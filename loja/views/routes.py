@@ -14,8 +14,20 @@ from loja.modules.newsletter import subscribe_newsletter
 
 from loja import db
 from loja.modules.models import (
-    User, Product, Promotion, ContactInfo, SocialLink, Cart,
-    HeroSlide, Testimonial, NewsletterSubscriber, Favorite, SiteConfig, Address, Coupon
+    User,
+    Product,
+    Promotion,
+    ContactInfo,
+    SocialLink,
+    Cart,
+    CartItem,
+    HeroSlide,
+    Testimonial,
+    NewsletterSubscriber,
+    Favorite,
+    SiteConfig,
+    Address,
+    Coupon,
 )
 from loja.modules.enviar_email import enviar_email
 from config import Config
@@ -276,6 +288,7 @@ def produto_individual(id):
 
 # ── Helpers do fluxo produto → carrinho/checkout ─────────────────────────────
 VALID_PRODUCT_SIZES = {"P", "M", "G", "GG"}
+VALID_CART_SIZES = VALID_PRODUCT_SIZES | {"UNICO", "ÚNICO"}
 
 
 def _safe_internal_url(value):
@@ -323,15 +336,25 @@ def _get_or_create_cart():
 
 
 def _cart_items_as_list(cart):
+    """Retorna os itens como lista para relationships lazy ou dynamic."""
+    if cart is None:
+        return []
+
     items = cart.items
     return items.all() if hasattr(items, "all") else list(items)
 
 
 def _cart_item_size_field(item_model):
-    if hasattr(item_model, "size"):
-        return "size"
+    """
+    Prefere o campo canônico selected_size.
+
+    O model atual também possui a property size por compatibilidade com
+    templates antigos, mas selected_size é a coluna persistida.
+    """
     if hasattr(item_model, "selected_size"):
         return "selected_size"
+    if hasattr(item_model, "size"):
+        return "size"
     return None
 
 
@@ -464,6 +487,11 @@ def processar_produto(product_id):
     try:
         _add_product_to_cart(product, size, quantity)
         db.session.commit()
+
+        session.pop("checkout_cart", None)
+        session.pop("checkout_coupon", None)
+        session.modified = True
+
         flash("Produto adicionado ao carrinho.", "success")
         return redirect(url_for("main.carrinho"))
     except ValueError as exc:
@@ -501,6 +529,11 @@ def adicionar_carrinho_pendente():
     try:
         _add_product_to_cart(product, size, quantity)
         db.session.commit()
+
+        session.pop("checkout_cart", None)
+        session.pop("checkout_coupon", None)
+        session.modified = True
+
         flash("Produto adicionado ao carrinho.", "success")
     except ValueError as exc:
         db.session.rollback()
@@ -549,18 +582,232 @@ def newsletter():
 
 
 # ── Carrinho ────────────────────────────────────────────────────────────────
+def _get_user_cart():
+    """Carrinho persistido pertencente ao usuário autenticado."""
+    return Cart.query.filter_by(
+        user_id=current_user.id,
+    ).first()
+
+
+def _get_user_cart_item(item_id):
+    """
+    Busca um item somente quando ele pertence ao carrinho do usuário atual.
+
+    Evita que um usuário altere/remova um CartItem de outra conta apenas
+    conhecendo o UUID.
+    """
+    return (
+        CartItem.query
+        .join(Cart, CartItem.cart_id == Cart.id)
+        .filter(
+            CartItem.id == item_id,
+            Cart.user_id == current_user.id,
+        )
+        .first_or_404()
+    )
+
+
+def _invalidate_cart_checkout():
+    """Invalida dados derivados quando o conteúdo do carrinho muda."""
+    session.pop("checkout_cart", None)
+    session.pop("checkout_coupon", None)
+    session.modified = True
+
+
+def _calculate_cart_subtotal(cart_items):
+    return money(
+        sum(
+            (
+                money(item.unit_price) * int(item.quantity)
+                for item in cart_items
+            ),
+            Decimal("0.00"),
+        )
+    )
+
+
+def _calculate_checkout_totals(subtotal, discount=Decimal("0.00")):
+    subtotal = money(subtotal)
+    discount = money(discount)
+
+    if subtotal <= 0:
+        shipping = money(Decimal("0.00"))
+    else:
+        shipping = money(calculate_shipping(subtotal))
+
+    total = money(
+        max(
+            subtotal + shipping - discount,
+            Decimal("0.00"),
+        )
+    )
+
+    return shipping, total
+
+
+def _user_already_completed_purchase():
+    """
+    Usado pelos cupons de primeira compra.
+
+    Mantém a mesma regra já usada pela integração de pagamento:
+    pedidos pagos ou encaminhados para revisão manual contam como compra.
+    """
+    return (
+        Order.query
+        .filter(
+            Order.user_id == current_user.id,
+            Order.status.in_(["paid", "manual_review"]),
+        )
+        .first()
+        is not None
+    )
+
+
+def _restore_checkout_coupon(
+    checkout_type,
+    subtotal,
+    *,
+    product_id=None,
+):
+    """
+    Recupera o cupom salvo na sessão e o revalida no servidor.
+
+    Isso permite atualizar a página de checkout sem perder visualmente
+    o cupom, mas nunca confia somente no conteúdo da sessão.
+    """
+    saved = session.get("checkout_coupon") or {}
+
+    if saved.get("checkout_type") != checkout_type:
+        return None, money(Decimal("0.00"))
+
+    if checkout_type == "product":
+        saved_product_id = str(saved.get("product_id") or "")
+        if saved_product_id != str(product_id or ""):
+            return None, money(Decimal("0.00"))
+
+    code = "".join(
+        str(saved.get("code") or "")
+        .strip()
+        .upper()
+        .split()
+    )
+
+    if not code:
+        return None, money(Decimal("0.00"))
+
+    coupon = (
+        Coupon.query
+        .filter(db.func.upper(Coupon.code) == code)
+        .first()
+    )
+
+    if coupon is None or not coupon.is_available(subtotal):
+        session.pop("checkout_coupon", None)
+        session.modified = True
+        return None, money(Decimal("0.00"))
+
+    if coupon.first_purchase_only and _user_already_completed_purchase():
+        session.pop("checkout_coupon", None)
+        session.modified = True
+        return None, money(Decimal("0.00"))
+
+    discount = money(
+        coupon.calculate_discount(subtotal)
+    )
+
+    return coupon, discount
+
+
+def _validate_cart_for_checkout(cart):
+    """
+    Valida o carrinho no servidor antes de abrir o checkout.
+
+    Confirma produto, quantidade, tamanho, estoque e valor do item.
+    """
+    cart_items = _cart_items_as_list(cart)
+
+    if not cart_items:
+        raise ValueError("Seu carrinho está vazio.")
+
+    for item in cart_items:
+        product = Product.query.filter_by(
+            id=item.product_id,
+            is_active=True,
+        ).first()
+
+        if product is None:
+            raise ValueError(
+                "Um dos produtos do carrinho não está mais disponível."
+            )
+
+        try:
+            quantity = int(item.quantity)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"A quantidade de {product.name} é inválida."
+            ) from error
+
+        if quantity < 1 or quantity > 99:
+            raise ValueError(
+                f"A quantidade de {product.name} é inválida."
+            )
+
+        try:
+            unit_price = money(item.unit_price)
+        except Exception as error:
+            raise ValueError(
+                f"O valor de {product.name} é inválido."
+            ) from error
+
+        if unit_price < 0:
+            raise ValueError(
+                f"O valor de {product.name} é inválido."
+            )
+
+        stock = getattr(product, "stock", None)
+
+        if stock is not None:
+            if stock <= 0:
+                raise ValueError(
+                    f"{product.name} está sem estoque."
+                )
+
+            if quantity > stock:
+                raise ValueError(
+                    f"A quantidade de {product.name} excede o estoque. "
+                    f"Disponível: {stock}."
+                )
+
+        selected_size = (
+            getattr(item, "selected_size", None)
+            or getattr(item, "size", None)
+            or ""
+        )
+
+        selected_size = str(selected_size).strip().upper()
+
+        if selected_size not in VALID_CART_SIZES:
+            raise ValueError(
+                f"O tamanho selecionado para {product.name} é inválido."
+            )
+
+    return cart_items
+
+
 @main_blueprint.route("/cart")
 @login_required
 def carrinho():
-    cart = Cart.query.filter_by(user_id=current_user.id).first()
-    cart_items = _cart_items_as_list(cart) if cart else []
+    """Exibe o carrinho e o resumo usado pelo template cart/carrinho.html."""
+    cart = _get_user_cart()
+    cart_items = _cart_items_as_list(cart)
 
-    subtotal = sum(
-        (Decimal(str(item.unit_price)) * item.quantity for item in cart_items),
-        Decimal("0"),
-    )
-    shipping = Decimal("20") if cart_items else Decimal("0")
-    total = subtotal + shipping
+    subtotal = _calculate_cart_subtotal(cart_items)
+
+    if cart_items:
+        shipping, total = _calculate_checkout_totals(subtotal)
+    else:
+        shipping = money(Decimal("0.00"))
+        total = money(Decimal("0.00"))
 
     return render_template(
         "cart/carrinho.html",
@@ -569,6 +816,219 @@ def carrinho():
         subtotal=subtotal,
         shipping=shipping,
         total=total,
+    )
+
+
+@main_blueprint.post("/cart/item/<uuid:item_id>/quantidade")
+@login_required
+def atualizar_quantidade_carrinho(item_id):
+    """
+    Endpoint usado pelos botões + e - de cart/carrinho.html.
+    """
+    item = _get_user_cart_item(item_id)
+    action = (request.form.get("action") or "").strip().lower()
+
+    if action not in {"increase", "decrease"}:
+        flash("Ação de quantidade inválida.", "danger")
+        return redirect(url_for("main.carrinho"))
+
+    product = Product.query.filter_by(
+        id=item.product_id,
+        is_active=True,
+    ).first()
+
+    if product is None:
+        flash(
+            "Este produto não está mais disponível.",
+            "warning",
+        )
+        return redirect(url_for("main.carrinho"))
+
+    current_quantity = int(item.quantity or 0)
+
+    if action == "decrease":
+        if current_quantity <= 1:
+            flash(
+                "A quantidade mínima é 1. Use Remover produto para excluir o item.",
+                "info",
+            )
+            return redirect(url_for("main.carrinho"))
+
+        item.quantity = current_quantity - 1
+
+    else:
+        new_quantity = current_quantity + 1
+
+        if new_quantity > 99:
+            flash(
+                "A quantidade máxima permitida é 99.",
+                "warning",
+            )
+            return redirect(url_for("main.carrinho"))
+
+        stock = getattr(product, "stock", None)
+
+        if stock is not None and new_quantity > stock:
+            flash(
+                f"Há somente {stock} unidade(s) de {product.name} em estoque.",
+                "warning",
+            )
+            return redirect(url_for("main.carrinho"))
+
+        item.quantity = new_quantity
+
+    try:
+        cart = item.cart
+
+        if hasattr(cart, "updated_at"):
+            cart.updated_at = datetime.utcnow()
+
+        db.session.commit()
+        _invalidate_cart_checkout()
+
+        return redirect(url_for("main.carrinho"))
+
+    except Exception as error:
+        db.session.rollback()
+        print(f"Erro ao alterar quantidade do carrinho: {error}")
+        flash(
+            "Não foi possível atualizar a quantidade.",
+            "danger",
+        )
+        return redirect(url_for("main.carrinho"))
+
+
+@main_blueprint.post("/cart/item/<uuid:item_id>/remover")
+@login_required
+def remover_item_carrinho(item_id):
+    """Endpoint usado pelo botão Remover produto do carrinho."""
+    item = _get_user_cart_item(item_id)
+
+    try:
+        cart = item.cart
+        product_name = (
+            item.product.name
+            if getattr(item, "product", None)
+            else "Produto"
+        )
+
+        db.session.delete(item)
+
+        if hasattr(cart, "updated_at"):
+            cart.updated_at = datetime.utcnow()
+
+        db.session.commit()
+        _invalidate_cart_checkout()
+
+        flash(
+            f"{product_name} removido do carrinho.",
+            "success",
+        )
+
+    except Exception as error:
+        db.session.rollback()
+        print(f"Erro ao remover item do carrinho: {error}")
+        flash(
+            "Não foi possível remover o produto do carrinho.",
+            "danger",
+        )
+
+    return redirect(url_for("main.carrinho"))
+
+
+@main_blueprint.route(
+    "/cart/processar",
+    methods=["POST"],
+)
+@login_required
+def processar_carrinho():
+    """
+    Mesmo padrão de processar_produto():
+
+    carrinho -> validação no servidor -> sessão -> checkout.
+    """
+    action = (request.form.get("action") or "").strip().lower()
+
+    if action != "checkout":
+        flash("Ação de compra inválida.", "danger")
+        return redirect(url_for("main.carrinho"))
+
+    cart = _get_user_cart()
+
+    try:
+        cart_items = _validate_cart_for_checkout(cart)
+    except ValueError as error:
+        flash(str(error), "warning")
+        return redirect(url_for("main.carrinho"))
+
+    session.pop("checkout_product", None)
+    session.pop("checkout_coupon", None)
+
+    session["checkout_cart"] = {
+        "cart_id": str(cart.id),
+        "items_count": len(cart_items),
+    }
+
+    session.modified = True
+
+    return redirect(
+        url_for("main.checkout_carrinho")
+    )
+
+
+@main_blueprint.route(
+    "/checkout/carrinho",
+    methods=["GET"],
+)
+@login_required
+def checkout_carrinho():
+    """Checkout do carrinho completo."""
+    cart = _get_user_cart()
+
+    try:
+        cart_items = _validate_cart_for_checkout(cart)
+    except ValueError as error:
+        flash(str(error), "warning")
+        return redirect(url_for("main.carrinho"))
+
+    checkout_data = session.get("checkout_cart") or {}
+
+    if (
+        checkout_data.get("cart_id")
+        and checkout_data.get("cart_id") != str(cart.id)
+    ):
+        session.pop("checkout_cart", None)
+        session.pop("checkout_coupon", None)
+        session.modified = True
+
+        flash(
+            "O carrinho mudou. Revise os produtos antes de continuar.",
+            "warning",
+        )
+        return redirect(url_for("main.carrinho"))
+
+    subtotal = _calculate_cart_subtotal(cart_items)
+
+    applied_coupon, discount = _restore_checkout_coupon(
+        "cart",
+        subtotal,
+    )
+
+    shipping, total = _calculate_checkout_totals(
+        subtotal,
+        discount,
+    )
+
+    return render_template(
+        "cart/checkout.html",
+        checkout_mode="cart",
+        cart=cart,
+        cart_items=cart_items,
+        subtotal=subtotal,
+        shipping=shipping,
+        discount=discount,
+        total=total,
+        applied_coupon=applied_coupon,
     )
 
 
@@ -582,28 +1042,96 @@ def checkout(product_id):
     ).first_or_404()
 
     checkout_data = session.get("checkout_product") or {}
-    same_product = checkout_data.get("product_id") == str(product.id)
-
-    quantity = _parse_product_quantity(
-        checkout_data.get("quantity") if same_product else 1
-    ) or 1
-    selected_size = (
-        str(checkout_data.get("size") or "").upper()
-        if same_product
-        else None
+    same_product = (
+        checkout_data.get("product_id") == str(product.id)
     )
 
+    if not same_product:
+        flash(
+            "Selecione tamanho e quantidade antes de abrir o checkout.",
+            "warning",
+        )
+        return redirect(
+            url_for(
+                "main.produto_individual",
+                id=product.id,
+            )
+        )
+
+    quantity = _parse_product_quantity(
+        checkout_data.get("quantity")
+    )
+
+    selected_size = str(
+        checkout_data.get("size") or ""
+    ).strip().upper()
+
+    if quantity is None:
+        flash(
+            "A quantidade selecionada não é válida.",
+            "warning",
+        )
+        return redirect(
+            url_for(
+                "main.produto_individual",
+                id=product.id,
+            )
+        )
+
     if selected_size not in VALID_PRODUCT_SIZES:
-        selected_size = None
+        flash(
+            "Selecione um tamanho válido.",
+            "warning",
+        )
+        return redirect(
+            url_for(
+                "main.produto_individual",
+                id=product.id,
+            )
+        )
 
     stock = getattr(product, "stock", None)
-    if stock is not None and stock >= 0:
-        quantity = min(quantity, max(stock, 1))
 
-    unit_price = Decimal(str(product.price))
-    subtotal = unit_price * quantity
-    shipping = Decimal("0")
-    total = subtotal + shipping
+    if stock is not None:
+        if stock <= 0:
+            flash(
+                "Este produto está sem estoque.",
+                "warning",
+            )
+            return redirect(
+                url_for(
+                    "main.produto_individual",
+                    id=product.id,
+                )
+            )
+
+        if quantity > stock:
+            flash(
+                f"Há somente {stock} unidade(s) em estoque.",
+                "warning",
+            )
+            return redirect(
+                url_for(
+                    "main.produto_individual",
+                    id=product.id,
+                )
+            )
+
+    unit_price = money(product.price)
+    subtotal = money(
+        unit_price * quantity
+    )
+
+    applied_coupon, discount = _restore_checkout_coupon(
+        "product",
+        subtotal,
+        product_id=product.id,
+    )
+
+    shipping, total = _calculate_checkout_totals(
+        subtotal,
+        discount,
+    )
 
     return render_template(
         "cart/checkout.html",
@@ -614,8 +1142,77 @@ def checkout(product_id):
         unit_price=unit_price,
         subtotal=subtotal,
         shipping=shipping,
+        discount=discount,
         total=total,
+        applied_coupon=applied_coupon,
     )
+
+
+# ── Helper do subtotal do checkout ───────────────────────────────────────────
+def _get_checkout_subtotal(
+    checkout_type,
+    product_id=None,
+    quantity=1,
+):
+    checkout_type = str(
+        checkout_type or ""
+    ).strip().lower()
+
+    if checkout_type == "cart":
+        cart = _get_user_cart()
+        cart_items = _validate_cart_for_checkout(cart)
+        return _calculate_cart_subtotal(cart_items)
+
+    if checkout_type == "product":
+        try:
+            parsed_product_id = uuid.UUID(
+                str(product_id)
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "Produto inválido."
+            ) from error
+
+        product = Product.query.filter_by(
+            id=parsed_product_id,
+            is_active=True,
+        ).first()
+
+        if product is None:
+            raise ValueError(
+                "Produto não encontrado ou indisponível."
+            )
+
+        parsed_quantity = _parse_product_quantity(
+            quantity
+        )
+
+        if parsed_quantity is None:
+            raise ValueError(
+                "Quantidade inválida."
+            )
+
+        stock = getattr(product, "stock", None)
+
+        if stock is not None:
+            if stock <= 0:
+                raise ValueError(
+                    "Produto sem estoque."
+                )
+
+            if parsed_quantity > stock:
+                raise ValueError(
+                    "Quantidade maior que o estoque disponível."
+                )
+
+        return money(
+            money(product.price) * parsed_quantity
+        )
+
+    raise ValueError(
+        "Tipo de checkout inválido."
+    )
+
 
 # ── Aplicar cupom no checkout ────────────────────────────────────────────────
 @main_blueprint.post("/checkout/aplicar-cupom")
@@ -633,6 +1230,12 @@ def apply_checkout_coupon():
     checkout_type = str(
         data.get("checkout_type") or ""
     ).strip().lower()
+
+    if checkout_type not in {"cart", "product"}:
+        return jsonify({
+            "success": False,
+            "message": "Tipo de checkout inválido.",
+        }), 400
 
     if not code:
         return jsonify({
@@ -675,42 +1278,39 @@ def apply_checkout_coupon():
             ),
         }), 400
 
-    # Cupom exclusivo para primeira compra.
-    if coupon.first_purchase_only:
-        from loja.modules.getway_mercado_pago.payment_models import Order
-
-        previous_order = Order.query.filter(
-            Order.user_id == current_user.id,
-            Order.status.in_(["paid", "manual_review"]),
-        ).first()
-
-        if previous_order:
-            return jsonify({
-                "success": False,
-                "message": (
-                    "Este cupom é exclusivo para a primeira compra."
-                ),
-            }), 400
+    if (
+        coupon.first_purchase_only
+        and _user_already_completed_purchase()
+    ):
+        return jsonify({
+            "success": False,
+            "message": (
+                "Este cupom é exclusivo para a primeira compra."
+            ),
+        }), 400
 
     discount = money(
         coupon.calculate_discount(subtotal)
     )
 
-    shipping = calculate_shipping(subtotal)
-
-    total = money(
-        max(
-            subtotal + shipping - discount,
-            Decimal("0.00"),
-        )
+    shipping, total = _calculate_checkout_totals(
+        subtotal,
+        discount,
     )
 
-    # A sessão é útil para manter o cupom caso o usuário
-    # atualize a página antes de finalizar a compra.
     session["checkout_coupon"] = {
         "code": coupon.code,
         "checkout_type": checkout_type,
-        "product_id": str(data.get("product_id") or ""),
+        "product_id": (
+            str(data.get("product_id") or "")
+            if checkout_type == "product"
+            else ""
+        ),
+        "quantity": (
+            int(data.get("quantity") or 1)
+            if checkout_type == "product"
+            else None
+        ),
     }
 
     session.modified = True
@@ -725,71 +1325,6 @@ def apply_checkout_coupon():
         "total": float(total),
     }), 200
 
-# Helper para calculo
-def _get_checkout_subtotal(
-    checkout_type,
-    product_id=None,
-    quantity=1,
-):
-    if checkout_type == "cart":
-        cart = Cart.query.filter_by(
-            user_id=current_user.id,
-        ).first()
-
-        if cart is None or not cart.items:
-            raise ValueError("Seu carrinho está vazio.")
-
-        subtotal = sum(
-            (
-                money(item.unit_price) * item.quantity
-                for item in cart.items
-            ),
-            Decimal("0.00"),
-        )
-
-        return money(subtotal)
-
-    if checkout_type == "product":
-        try:
-            parsed_product_id = uuid.UUID(
-                str(product_id)
-            )
-        except (TypeError, ValueError) as error:
-            raise ValueError("Produto inválido.") from error
-
-        product = Product.query.filter_by(
-            id=parsed_product_id,
-            is_active=True,
-        ).first()
-
-        if product is None:
-            raise ValueError(
-                "Produto não encontrado ou indisponível."
-            )
-
-        try:
-            parsed_quantity = int(quantity)
-        except (TypeError, ValueError):
-            parsed_quantity = 1
-
-        parsed_quantity = max(
-            1,
-            min(parsed_quantity, 99),
-        )
-
-        if (
-            product.stock is not None
-            and product.stock < parsed_quantity
-        ):
-            raise ValueError(
-                "Quantidade maior que o estoque disponível."
-            )
-
-        return money(
-            money(product.price) * parsed_quantity
-        )
-
-    raise ValueError("Tipo de checkout inválido.")
 
 # ── Remover cupom do checkout ────────────────────────────────────────────────
 @main_blueprint.post("/checkout/remover-cupom")
@@ -813,8 +1348,10 @@ def remove_checkout_coupon():
             "message": str(error),
         }), 400
 
-    shipping = calculate_shipping(subtotal)
-    total = money(subtotal + shipping)
+    shipping, total = _calculate_checkout_totals(
+        subtotal,
+        Decimal("0.00"),
+    )
 
     session.pop("checkout_coupon", None)
     session.modified = True
@@ -825,39 +1362,90 @@ def remove_checkout_coupon():
         "code": "",
         "subtotal": float(subtotal),
         "shipping": float(shipping),
-        "discount": 0,
+        "discount": 0.0,
         "total": float(total),
     }), 200
 
-# ── Cálculo do frete ──────────────────────────────────────────
-@main_blueprint.route("/calcular_frete", methods=["POST"])
+
+# ── Cálculo do frete ────────────────────────────────────────────────────────
+@main_blueprint.route(
+    "/calcular_frete",
+    methods=["POST"],
+)
 @login_required
 def calcular_frete():
     dados = request.get_json(silent=True) or {}
-    cep = dados.get("cep")
-    product_id = dados.get("product_id")
-    quantity = _parse_product_quantity(dados.get("quantity")) or 1
 
-    if not cep or not product_id:
-        return jsonify({"error": "cep e product_id são obrigatórios"}), 400
+    cep = "".join(
+        character
+        for character in str(dados.get("cep") or "")
+        if character.isdigit()
+    )
+
+    product_id = dados.get("product_id")
+    quantity = _parse_product_quantity(
+        dados.get("quantity")
+    )
+
+    if len(cep) != 8:
+        return jsonify({
+            "error": "Informe um CEP válido com 8 dígitos.",
+        }), 400
+
+    if not product_id:
+        return jsonify({
+            "error": "product_id é obrigatório.",
+        }), 400
+
+    if quantity is None:
+        return jsonify({
+            "error": "Quantidade inválida.",
+        }), 400
 
     try:
-        product_uuid = uuid.UUID(str(product_id))
-    except ValueError:
-        return jsonify({"error": "product_id inválido"}), 400
+        product_uuid = uuid.UUID(
+            str(product_id)
+        )
+    except (ValueError, TypeError, AttributeError):
+        return jsonify({
+            "error": "product_id inválido.",
+        }), 400
 
-    produto = Product.query.get_or_404(product_uuid)
+    product = Product.query.filter_by(
+        id=product_uuid,
+        is_active=True,
+    ).first()
 
-    # posteriormente substituir por integração real (Melhor Envio, etc.)
-    valor_frete = Decimal("18.90")
-    subtotal = Decimal(str(produto.price)) * quantity
-    total = subtotal + valor_frete
+    if product is None:
+        return jsonify({
+            "error": "Produto não encontrado ou indisponível.",
+        }), 404
+
+    stock = getattr(product, "stock", None)
+
+    if stock is not None and quantity > stock:
+        return jsonify({
+            "error": "Quantidade maior que o estoque disponível.",
+        }), 400
+
+    subtotal = money(
+        money(product.price) * quantity
+    )
+
+    shipping = money(
+        calculate_shipping(subtotal)
+    )
+
+    total = money(
+        subtotal + shipping
+    )
 
     return jsonify({
-        "valor": f"{valor_frete:.2f}",
+        "valor": f"{shipping:.2f}",
         "subtotal": f"{subtotal:.2f}",
         "total": f"{total:.2f}",
         "quantity": quantity,
+        "cep": cep,
     })
 
 
@@ -1200,20 +1788,49 @@ def acompanhar_pedido():
     error = None
 
     if request.method == "POST":
-        order_number = request.form.get("order_number", "").strip()
-        email = request.form.get("email", "").strip().lower()
+        order_number = (
+            request.form.get("order_number", "")
+            .strip()
+        )
+
+        email = (
+            request.form.get("email", "")
+            .strip()
+            .lower()
+        )
 
         if not order_number or not email:
-            error = "Informe o número do pedido e o e-mail da compra."
-        else:
-            order = (
-                Order.query
-                .filter(
-                    Order.order_number == order_number,
-                    db.func.lower(Order.customer_email) == email
-                )
-                .first()
+            error = (
+                "Informe o número do pedido e o e-mail da compra."
             )
+        else:
+            # Algumas versões antigas do projeto possuíam order_number.
+            # O Order atual usa UUID como chave primária e pode não possuir
+            # essa coluna. Suportamos as duas estruturas.
+            if hasattr(Order, "order_number"):
+                order = (
+                    Order.query
+                    .filter(
+                        Order.order_number == order_number,
+                        db.func.lower(Order.customer_email) == email,
+                    )
+                    .first()
+                )
+            else:
+                try:
+                    parsed_order_id = uuid.UUID(order_number)
+                except (ValueError, TypeError, AttributeError):
+                    parsed_order_id = None
+
+                if parsed_order_id is not None:
+                    order = (
+                        Order.query
+                        .filter(
+                            Order.id == parsed_order_id,
+                            db.func.lower(Order.customer_email) == email,
+                        )
+                        .first()
+                    )
 
             if not order:
                 error = (
@@ -1224,8 +1841,15 @@ def acompanhar_pedido():
     shipment_data = []
 
     if order:
+        # Compatibilidade com templates de rastreio que ainda exibem
+        # order.order_number.
+        if not hasattr(Order, "order_number"):
+            order.order_number = str(order.id)
+
         for shipment in order.shipments:
-            status_info = get_tracking_status(shipment.status)
+            status_info = get_tracking_status(
+                shipment.status
+            )
 
             shipment_data.append({
                 "shipment": shipment,
@@ -1238,8 +1862,10 @@ def acompanhar_pedido():
         order=order,
         error=error,
         shipment_data=shipment_data,
-        all_statuses=TRACKING_STATUS
+        all_statuses=TRACKING_STATUS,
     )
+
+
 # ── Institucionais ────────────────────────────────────────────────────────────
 @main_blueprint.route('/politica-privacidade')
 def politica_privacidade():

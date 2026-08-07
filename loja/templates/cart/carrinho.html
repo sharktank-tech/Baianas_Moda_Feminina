@@ -358,9 +358,15 @@
     transition: background .2s ease, transform .2s ease;
 }
 
-.checkout-btn:hover {
+.checkout-btn:hover:not(:disabled) {
     background: var(--cart-accent-dark);
     transform: translateY(-1px);
+}
+
+.checkout-btn:disabled {
+    opacity: .65;
+    cursor: wait;
+    transform: none;
 }
 
 .checkout-btn:focus-visible,
@@ -732,10 +738,21 @@
 
             <form
                 class="checkout-form"
-                action="/checkout/carrinho"
-                method="get"
+                action="{{ url_for('main.processar_carrinho') }}"
+                method="post"
+                id="cartCheckoutForm"
             >
-                <button class="checkout-btn" type="submit">
+                {% if csrf_token %}
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                {% endif %}
+
+                <input type="hidden" name="action" value="checkout">
+
+                <button
+                    class="checkout-btn"
+                    type="submit"
+                    id="cartCheckoutButton"
+                >
                     Finalizar compra
                 </button>
             </form>
@@ -771,4 +788,29 @@
     {% endif %}
 
 </main>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+    var checkoutForm = document.getElementById('cartCheckoutForm');
+    var checkoutButton = document.getElementById('cartCheckoutButton');
+
+    if (!checkoutForm || !checkoutButton) return;
+
+    var submitting = false;
+
+    checkoutForm.addEventListener('submit', function (event) {
+        if (submitting) {
+            event.preventDefault();
+            return;
+        }
+
+        submitting = true;
+        checkoutForm.setAttribute('aria-busy', 'true');
+        checkoutButton.disabled = true;
+        checkoutButton.textContent = 'Abrindo checkout...';
+    });
+})();
+</script>
 {% endblock %}

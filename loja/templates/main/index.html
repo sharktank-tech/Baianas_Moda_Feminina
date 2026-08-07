@@ -242,7 +242,7 @@
       {
         "@type": "ListItem",
         "position": {{ loop.index }},
-        "url": "{{ request.url_root.rstrip('/') }}{{ url_for('main.produto_individual', id=p.id) }}"
+        "url": "{{ request.url_root.rstrip('/') }}{{ url_for('main.produto_individual', id=p.product_id) }}"
       }{% if not loop.last %},{% endif %}
       {% endfor %}
     ]
@@ -512,7 +512,7 @@
             </div>
             <p class="pcard-installment">em 3x de R$ {{ '%.2f'|format(price / 3) | replace('.', ',') }} sem juros</p>
             {% endif %}
-            <a class="pcard-buy" href="{{ url_for('main.produto_individual', id=promo.id) }}" data-product-id="{{ promo.id }}">Aproveitar</a>
+            <a class="pcard-buy" href="{{ url_for('main.produto_individual', id=promo.id) }}" data-product-id="{{ promo.product_id }}">Aproveitar</a>
           </div>
         </article>
         {% endfor %}
@@ -536,19 +536,19 @@
     <div class="pcard-grid">
       {% for p in products %}
       <article class="pcard">
-        <a class="pcard-media{% if not p.image1 %} pcard-media--empty{% endif %}" href="{{ url_for('main.produto_individual', id=p.id) }}">
+        <a class="pcard-media{% if not p.image1 %} pcard-media--empty{% endif %}" href="{{ url_for('main.produto_individual', id=p.product_id) }}">
           {% if p.image1 %}<img src="{{ p.image1 }}" alt="{{ p.name }}" loading="lazy" width="400" height="500">{% else %}<span aria-hidden="true">{{ (p.name or '?')[0] }}</span>{% endif %}
-          <button type="button" class="pcard-fav" data-fav data-product-id="{{ p.id }}" aria-label="Favoritar {{ p.name }}" aria-pressed="{{ 'true' if p.is_favorited else 'false' }}">
+          <button type="button" class="pcard-fav" data-fav data-product-id="{{ p.product_id }}" aria-label="Favoritar {{ p.name }}" aria-pressed="{{ 'true' if p.is_favorited else 'false' }}">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 1 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></svg>
           </button>
         </a>
         <div class="pcard-body">
-          <a class="pcard-name" href="{{ url_for('main.produto_individual', id=p.id) }}">{{ p.name }}</a>
+          <a class="pcard-name" href="{{ url_for('main.produto_individual', id=p.product_id) }}">{{ p.name }}</a>
           <div class="pcard-price">
             <span class="pcard-price-now">R$ {{ '%.2f'|format(p.price) | replace('.', ',') }}</span>
           </div>
           <p class="pcard-installment">em 3x de R$ {{ '%.2f'|format(p.price / 3) | replace('.', ',') }} sem juros</p>
-          <a class="pcard-buy" href="{{ url_for('main.produto_individual', id=p.id) }}" data-product-id="{{ p.id }}">Comprar</a>
+          <a class="pcard-buy" href="{{ url_for('main.produto_individual', id=p.product_id) }}" data-product-id="{{ p.product_id }}">Comprar</a>
         </div>
       </article>
       {% endfor %}
