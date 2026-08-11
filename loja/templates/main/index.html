@@ -473,17 +473,30 @@
   ══════════════════════════════════════════════ -->
   <section class="deals" data-reveal aria-label="Ofertas do dia">
     <div class="deals-inner">
+
       <div class="deals-head">
         <div class="deals-title-wrap">
           <span aria-hidden="true">🔥</span>
-          <h2 class="deals-title">Ofertas <span class="flash">do dia</span></h2>
+          <h2 class="deals-title">
+            Ofertas <span class="flash">do dia</span>
+          </h2>
         </div>
+
         {% if deals_end_at %}
         <div class="deals-countdown">
           <span>Acaba em</span>
-          <span class="countdown-clock" id="dealsCountdown" role="timer" aria-label="Tempo restante" data-end="{{ deals_end_at }}">
-            <span class="countdown-box" data-h>00</span><span class="countdown-sep">:</span>
-            <span class="countdown-box" data-m>00</span><span class="countdown-sep">:</span>
+
+          <span
+            class="countdown-clock"
+            id="dealsCountdown"
+            role="timer"
+            aria-label="Tempo restante"
+            data-end="{{ deals_end_at }}"
+          >
+            <span class="countdown-box" data-h>00</span>
+            <span class="countdown-sep">:</span>
+            <span class="countdown-box" data-m>00</span>
+            <span class="countdown-sep">:</span>
             <span class="countdown-box" data-s>00</span>
           </span>
         </div>
@@ -492,34 +505,128 @@
 
       {% if promotions %}
       <div class="pcard-grid">
+
         {% for promo in promotions %}
-        {% set price = promo.sale_price if promo.sale_price is not none else promo.original_price %}
-        {% set has_disc = promo.original_price and promo.sale_price and promo.original_price > promo.sale_price %}
-        <article class="pcard">
-          <a class="pcard-media{% if not promotions.image %} pcard-media--empty{% endif %}" href="{{ url_for('main.produto_individual', id=promo.id) }}">
-            {% if promo.image %}<img src="{{ promo.image }}" alt="{{ promo.name }}" loading="lazy" width="400" height="500">{% else %}<span aria-hidden="true">{{ (promo.name or '?')[0] }}</span>{% endif %}
-            {% if has_disc %}<span class="pcard-badge">-{{ ((promo.original_price - promo.sale_price) / promo.original_price * 100) | round(0, 'floor') | int }}%</span>{% endif %}
-            <button type="button" class="pcard-fav" data-fav data-product-id="{{ promo.id }}" aria-label="Favoritar {{ promo.name }}" aria-pressed="{{ 'true' if promo.is_favorited else 'false' }}">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 1 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></svg>
-            </button>
-          </a>
-          <div class="pcard-body">
-            <a class="pcard-name" href="{{ url_for('main.produto_individual', id=promo.id) }}">{{ promo.name }}</a>
-            {% if price is not none %}
-            <div class="pcard-price">
-              {% if has_disc %}<span class="pcard-price-old">R$ {{ '%.2f'|format(promo.original_price) | replace('.', ',') }}</span>{% endif %}
-              <span class="pcard-price-now pcard-price-now--sale">R$ {{ '%.2f'|format(price) | replace('.', ',') }}</span>
-            </div>
-            <p class="pcard-installment">em 3x de R$ {{ '%.2f'|format(price / 3) | replace('.', ',') }} sem juros</p>
-            {% endif %}
-            <a class="pcard-buy" href="{{ url_for('main.produto_individual', id=promo.id) }}" data-product-id="{{ promo.product_id }}">Aproveitar</a>
-          </div>
-        </article>
+          {% set product = promo.product %}
+
+          {% if product %}
+            {% set original_price = product.price %}
+            {% set sale_price = promo.sale_price %}
+            {% set product_name = product.name %}
+            {% set product_image = product.image1 %}
+            {% set has_disc =
+                original_price is not none
+                and sale_price is not none
+                and original_price > sale_price
+            %}
+
+            <article class="pcard">
+
+              <a
+                class="pcard-media{% if not product_image %} pcard-media--empty{% endif %}"
+                href="{{ url_for('main.produto_individual', id=product.id) }}"
+              >
+                {% if product_image %}
+                <img
+                  src="{{ product_image }}"
+                  alt="{{ product_name }}"
+                  loading="lazy"
+                  width="400"
+                  height="500"
+                >
+                {% else %}
+                <span aria-hidden="true">
+                  {{ (product_name or '?')[0] }}
+                </span>
+                {% endif %}
+
+                {% if has_disc %}
+                <span class="pcard-badge">
+                  -{{
+                    (
+                      (original_price - sale_price)
+                      / original_price
+                      * 100
+                    )
+                    | round(0, 'floor')
+                    | int
+                  }}%
+                </span>
+                {% endif %}
+
+                <button
+                  type="button"
+                  class="pcard-fav{% if promo.is_favorited %} is-active{% endif %}"
+                  data-fav
+                  data-product-id="{{ product.id }}"
+                  aria-label="Favoritar {{ product_name }}"
+                  aria-pressed="{{ 'true' if promo.is_favorited else 'false' }}"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 1 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/>
+                  </svg>
+                </button>
+              </a>
+
+              <div class="pcard-body">
+
+                <a
+                  class="pcard-name"
+                  href="{{ url_for('main.produto_individual', id=product.id) }}"
+                >
+                  {{ product_name }}
+                </a>
+
+                {% if sale_price is not none %}
+                <div class="pcard-price">
+
+                  {% if has_disc %}
+                  <span class="pcard-price-old">
+                    R$ {{
+                      '%.2f'|format(original_price|float)
+                      | replace('.', ',')
+                    }}
+                  </span>
+                  {% endif %}
+
+                  <span class="pcard-price-now pcard-price-now--sale">
+                    R$ {{
+                      '%.2f'|format(sale_price|float)
+                      | replace('.', ',')
+                    }}
+                  </span>
+                </div>
+
+                <p class="pcard-installment">
+                  em 3x de R$ {{
+                    '%.2f'|format((sale_price|float) / 3)
+                    | replace('.', ',')
+                  }} sem juros
+                </p>
+                {% endif %}
+
+                <a
+                  class="pcard-buy"
+                  href="{{ url_for('main.produto_individual', id=product.id) }}"
+                  data-product-id="{{ product.id }}"
+                >
+                  Aproveitar
+                </a>
+
+              </div>
+            </article>
+          {% endif %}
         {% endfor %}
+
       </div>
+
       {% else %}
-      <p class="deals-empty">As ofertas do dia chegam já já. Enquanto isso, dê uma olhada nas novidades abaixo. ✨</p>
+      <p class="deals-empty">
+        As ofertas do dia chegam já já. Enquanto isso,
+        dê uma olhada nas novidades abaixo. ✨
+      </p>
       {% endif %}
+
     </div>
   </section>
 
@@ -536,19 +643,19 @@
     <div class="pcard-grid">
       {% for p in products %}
       <article class="pcard">
-        <a class="pcard-media{% if not p.image1 %} pcard-media--empty{% endif %}" href="{{ url_for('main.produto_individual', id=p.product_id) }}">
+        <a class="pcard-media{% if not p.image1 %} pcard-media--empty{% endif %}" href="{{ url_for('main.produto_individual', id=p.id) }}">
           {% if p.image1 %}<img src="{{ p.image1 }}" alt="{{ p.name }}" loading="lazy" width="400" height="500">{% else %}<span aria-hidden="true">{{ (p.name or '?')[0] }}</span>{% endif %}
           <button type="button" class="pcard-fav" data-fav data-product-id="{{ p.product_id }}" aria-label="Favoritar {{ p.name }}" aria-pressed="{{ 'true' if p.is_favorited else 'false' }}">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 1 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></svg>
           </button>
         </a>
         <div class="pcard-body">
-          <a class="pcard-name" href="{{ url_for('main.produto_individual', id=p.product_id) }}">{{ p.name }}</a>
+          <a class="pcard-name" href="{{ url_for('main.produto_individual', id=p.id) }}">{{ p.name }}</a>
           <div class="pcard-price">
             <span class="pcard-price-now">R$ {{ '%.2f'|format(p.price) | replace('.', ',') }}</span>
           </div>
           <p class="pcard-installment">em 3x de R$ {{ '%.2f'|format(p.price / 3) | replace('.', ',') }} sem juros</p>
-          <a class="pcard-buy" href="{{ url_for('main.produto_individual', id=p.product_id) }}" data-product-id="{{ p.product_id }}">Comprar</a>
+          <a class="pcard-buy" href="{{ url_for('main.produto_individual', id=p.id) }}" data-product-id="{{ p.product_id }}">Comprar</a>
         </div>
       </article>
       {% endfor %}
