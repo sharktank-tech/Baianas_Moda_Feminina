@@ -99,7 +99,7 @@ def _get_favorited_ids():
     return {r[0] for r in rows}
 
 
-def _get_home_categories(limit=7):
+def _get_home_categories(limit=10):
     """
     Monta os cards de categoria da home (cat-strip / categories-grid).
     Usa uma imagem representativa (o produto mais recente daquela categoria).

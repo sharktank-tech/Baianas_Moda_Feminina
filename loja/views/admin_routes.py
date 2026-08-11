@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from uuid import UUID as PythonUUID
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, logout_user, current_user
@@ -92,6 +93,61 @@ def _parse_optional_datetime(field_name):
             f"A data informada em {field_name} é inválida."
         ) from error
 
+
+
+def _promotion_form_data():
+    """Valida e normaliza os dados enviados pelo formulário de promoção."""
+    product_id_raw = (request.form.get("product_id") or "").strip()
+
+    if not product_id_raw:
+        raise ValueError("Selecione um produto para a promoção.")
+
+    try:
+        product_id = PythonUUID(product_id_raw)
+    except (ValueError, TypeError) as error:
+        raise ValueError("O produto selecionado é inválido.") from error
+
+    product = Product.query.get(product_id)
+
+    if product is None:
+        raise ValueError("O produto selecionado não existe.")
+
+    sale_price = _parse_decimal_field(
+        "sale_price",
+        required=True,
+        minimum=Decimal("0.01"),
+    )
+
+    original_price = Decimal(str(product.price))
+
+    if sale_price >= original_price:
+        raise ValueError(
+            "O preço promocional deve ser menor que o preço original "
+            f"do produto (R$ {original_price:.2f})."
+        )
+
+    starts_at = _parse_optional_datetime("starts_at")
+    ends_at = _parse_optional_datetime("ends_at")
+
+    if starts_at and ends_at and ends_at <= starts_at:
+        raise ValueError(
+            "A data final da promoção deve ser posterior à data inicial."
+        )
+
+    is_active = request.form.get("is_active") in {
+        "1",
+        "on",
+        "true",
+        "True",
+    }
+
+    return {
+        "product": product,
+        "sale_price": sale_price,
+        "starts_at": starts_at,
+        "ends_at": ends_at,
+        "is_active": is_active,
+    }
 
 def _coupon_form_data(*, current_coupon=None):
     code = _normalize_coupon_code(request.form.get("code"))
@@ -197,7 +253,7 @@ def admin_dashboard():
         "admin/dashboard.html",
         products     = Product.query.all(),
         users        = User.query.all(),
-        promotions   = Promotion.query.all(),
+        promotions   = Promotion.query.order_by(Promotion.created_at.desc()).all(),
         coupons      = Coupon.query.order_by(Coupon.created_at.desc()).all(),
         suppliers    = Supplier.query.all(),
         testimonials = Testimonial.query.all(),
@@ -315,31 +371,66 @@ def delete_product(id):
 @admin_required
 def add_promotion():
 
+    # Apenas produtos ativos ficam disponíveis para novas promoções.
+    products = (
+        Product.query
+        .filter(Product.is_active.is_(True))
+        .order_by(Product.name.asc())
+        .all()
+    )
+
     if request.method == "POST":
 
-        name           = request.form.get("name", "").strip()
-        image          = request.form.get("image", "").strip()
-        original_price = request.form.get("original_price", "").strip()
-        sale_price     = request.form.get("sale_price", "").strip()
-
         try:
+            data = _promotion_form_data()
+
             promo = Promotion(
-                name           = name or None,
-                image          = image or None,
-                original_price = float(original_price) if original_price else None,
-                sale_price     = float(sale_price)     if sale_price     else None,
-                is_active      = True,
+                product_id=data["product"].id,
+                sale_price=data["sale_price"],
+                starts_at=data["starts_at"],
+                ends_at=data["ends_at"],
+                is_active=data["is_active"],
             )
+
             db.session.add(promo)
             db.session.commit()
-            flash("Promoção adicionada com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard", _anchor="promotions"))
 
-        except Exception as e:
+            flash(
+                f'Promoção para "{data["product"].name}" adicionada com sucesso!',
+                "success"
+            )
+
+            return redirect(
+                url_for(
+                    "admin.admin_dashboard",
+                    _anchor="promotions"
+                )
+            )
+
+        except ValueError as error:
             db.session.rollback()
-            flash(str(e), "danger")
+            flash(str(error), "danger")
 
-    return render_template("admin/promotions/add_promotions.html")
+        except IntegrityError:
+            db.session.rollback()
+            flash(
+                "Não foi possível criar a promoção. "
+                "Verifique os dados informados.",
+                "danger"
+            )
+
+        except Exception as error:
+            db.session.rollback()
+            print(f"Erro ao criar promoção: {error}")
+            flash(
+                "Ocorreu um erro ao criar a promoção.",
+                "danger"
+            )
+
+    return render_template(
+        "admin/promotions/add_promotions.html",
+        products=products,
+    )
 
 
 # -------------------------------------------------------------------
@@ -352,26 +443,64 @@ def edit_promotion(id):
 
     promo = Promotion.query.get_or_404(id)
 
+    # Na edição todos os produtos são exibidos para que uma promoção existente
+    # continue editável mesmo se o produto tiver sido desativado depois.
+    products = (
+        Product.query
+        .order_by(Product.name.asc())
+        .all()
+    )
+
     if request.method == "POST":
 
-        promo.name           = request.form.get("name") or None
-        promo.image          = request.form.get("image") or None
-        original_price       = request.form.get("original_price", "").strip()
-        sale_price           = request.form.get("sale_price", "").strip()
-        promo.original_price = float(original_price) if original_price else None
-        promo.sale_price     = float(sale_price)     if sale_price     else None
-        promo.is_active      = request.form.get("is_active") == "on"
-
         try:
+            data = _promotion_form_data()
+
+            promo.product_id = data["product"].id
+            promo.sale_price = data["sale_price"]
+            promo.starts_at = data["starts_at"]
+            promo.ends_at = data["ends_at"]
+            promo.is_active = data["is_active"]
+
             db.session.commit()
-            flash("Promoção atualizada com sucesso!", "success")
-            return redirect(url_for("admin.admin_dashboard", _anchor="promotions"))
 
-        except Exception as e:
+            flash(
+                f'Promoção de "{data["product"].name}" atualizada com sucesso!',
+                "success"
+            )
+
+            return redirect(
+                url_for(
+                    "admin.admin_dashboard",
+                    _anchor="promotions"
+                )
+            )
+
+        except ValueError as error:
             db.session.rollback()
-            flash(str(e), "danger")
+            flash(str(error), "danger")
 
-    return render_template("admin/promotions/edit_promotion.html", promotion=promo)
+        except IntegrityError:
+            db.session.rollback()
+            flash(
+                "Não foi possível atualizar a promoção. "
+                "Verifique os dados informados.",
+                "danger"
+            )
+
+        except Exception as error:
+            db.session.rollback()
+            print(f"Erro ao editar promoção: {error}")
+            flash(
+                "Ocorreu um erro ao atualizar a promoção.",
+                "danger"
+            )
+
+    return render_template(
+        "admin/promotions/edit_promotion.html",
+        promotion=promo,
+        products=products,
+    )
 
 
 # -------------------------------------------------------------------
@@ -383,10 +512,36 @@ def edit_promotion(id):
 def delete_promotion(id):
 
     promo = Promotion.query.get_or_404(id)
-    db.session.delete(promo)
-    db.session.commit()
-    flash("Promoção excluída com sucesso!", "success")
-    return redirect(url_for("admin.admin_dashboard", _anchor="promotions"))
+
+    try:
+        product_name = (
+            promo.product.name
+            if promo.product
+            else "Produto"
+        )
+
+        db.session.delete(promo)
+        db.session.commit()
+
+        flash(
+            f'Promoção de "{product_name}" excluída com sucesso!',
+            "success"
+        )
+
+    except Exception as error:
+        db.session.rollback()
+        print(f"Erro ao excluir promoção: {error}")
+        flash(
+            "Não foi possível excluir a promoção.",
+            "danger"
+        )
+
+    return redirect(
+        url_for(
+            "admin.admin_dashboard",
+            _anchor="promotions"
+        )
+    )
 
 
 # -------------------------------------------------------------------

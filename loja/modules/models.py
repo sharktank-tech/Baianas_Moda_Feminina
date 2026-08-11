@@ -123,17 +123,26 @@ class Product(db.Model):
         primary_key=True,
         default=uuid.uuid4
     )
-    name = db.Column(db.String(255), nullable=False)
+
+    name = db.Column(
+        db.String(255),
+        nullable=False
+    )
+
     description = db.Column(db.Text)
+
     price = db.Column(
         db.Numeric(10, 2),
         nullable=False
     )
+
     image1 = db.Column(db.Text)
     image2 = db.Column(db.Text)
     image3 = db.Column(db.Text)
     image4 = db.Column(db.Text)
+
     category = db.Column(db.String(100))
+
     stock = db.Column(
         db.Integer,
         default=0
@@ -143,10 +152,12 @@ class Product(db.Model):
         db.Boolean,
         default=True
     )
+
     created_at = db.Column(
         db.DateTime,
         default=datetime.utcnow
     )
+
     suppliers = db.relationship(
         "Supplier",
         secondary=product_supplier,
@@ -154,16 +165,13 @@ class Product(db.Model):
         lazy=True
     )
 
-    favorited_by = db.relationship(   # NOVO: para a lista "meus favoritos"
+    favorited_by = db.relationship(
         "Favorite",
         backref="product",
         lazy=True,
         cascade="all, delete-orphan"
     )
 
-    # Itens de carrinho que apontam para este produto. O produto continua sendo
-    # a fonte de verdade para nome, descrição e imagens; o CartItem guarda apenas
-    # a seleção feita pelo cliente e o preço aplicado naquele momento.
     cart_items = db.relationship(
         "CartItem",
         back_populates="product",
@@ -171,9 +179,17 @@ class Product(db.Model):
         passive_deletes=True
     )
 
+    # Promoções vinculadas ao produto
+    promotions = db.relationship(
+        "Promotion",
+        back_populates="product",
+        lazy=True,
+        cascade="all, delete-orphan",
+        passive_deletes=True
+    )
+
     def __repr__(self):
         return f"<Product {self.name}>"
-
 
 # ==========================================================
 # Promoções
@@ -187,30 +203,106 @@ class Promotion(db.Model):
         default=uuid.uuid4
     )
 
-    # NOVO: liga a promoção a um produto real do catálogo. Sem isso o botão
-    # "Aproveitar" da home não tinha para onde ir (Promotion.id != Product.id).
+    # Produto que está em promoção
     product_id = db.Column(
         UUID(as_uuid=True),
-        db.ForeignKey("products.id"),
-        nullable=True
+        db.ForeignKey(
+            "products.id",
+            ondelete="CASCADE"
+        ),
+        nullable=False,
+        index=True
     )
-    product = db.relationship("Product", lazy=True)
 
-    name = db.Column(db.String(255))
-    image = db.Column(db.Text)
-    original_price = db.Column(
-        db.Numeric(10, 2)
+    product = db.relationship(
+        "Product",
+        back_populates="promotions",
+        lazy="joined"
     )
+
+    # Único preço armazenado pela promoção.
+    # O preço original vem de Product.price.
     sale_price = db.Column(
-        db.Numeric(10, 2)
+        db.Numeric(10, 2),
+        nullable=False
     )
+
     is_active = db.Column(
         db.Boolean,
+        nullable=False,
         default=True
     )
-    starts_at = db.Column(db.DateTime)            # NOVO
-    ends_at = db.Column(db.DateTime)               # NOVO: alimenta o cronômetro da home
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    starts_at = db.Column(
+        db.DateTime
+    )
+
+    ends_at = db.Column(
+        db.DateTime
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow
+    )
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "sale_price >= 0",
+            name="ck_promotion_sale_price_nonnegative"
+        ),
+        db.CheckConstraint(
+            "starts_at IS NULL OR ends_at IS NULL OR ends_at > starts_at",
+            name="ck_promotion_valid_period"
+        ),
+    )
+
+    # ==========================================
+    # Dados obtidos automaticamente de Product
+    # ==========================================
+
+    @property
+    def name(self):
+        return self.product.name if self.product else None
+
+    @property
+    def description(self):
+        return self.product.description if self.product else None
+
+    @property
+    def image(self):
+        return self.product.image1 if self.product else None
+
+    @property
+    def image1(self):
+        return self.product.image1 if self.product else None
+
+    @property
+    def image2(self):
+        return self.product.image2 if self.product else None
+
+    @property
+    def image3(self):
+        return self.product.image3 if self.product else None
+
+    @property
+    def image4(self):
+        return self.product.image4 if self.product else None
+
+    @property
+    def original_price(self):
+        return self.product.price if self.product else None
+
+    @property
+    def category(self):
+        return self.product.category if self.product else None
+
+    def __repr__(self):
+        return (
+            f"<Promotion product={self.product_id} "
+            f"sale_price={self.sale_price}>"
+        )
 
 
 # ==========================================================
