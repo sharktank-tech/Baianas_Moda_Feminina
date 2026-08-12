@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block title %}
+{{ titulo }} — {% if site and site.name %}{{ site.name }}{% else %}Pollo Modas{% endif %}
+{% endblock %}
+
+{% block extra_head %}
+<link
+  rel="stylesheet"
+  href="{{ url_for('static', filename='styles/encomendas.css') }}"
+>
+{% endblock %}
+
+{% block content %}
+
+<div class="account-wrap">
+
+  <div class="account-header">
+
+    <div>
+      <p class="account-header-eyebrow">
+        Minhas compras
+      </p>
+
+      <h1>{{ titulo }}</h1>
+    </div>
+
+    <a
+      href="{{ url_for('main.conta') }}"
+      class="account-logout"
+    >
+      ← Minha conta
+    </a>
+
+  </div>
+
+
+  <!-- Filtros -->
+  <div class="orders-filters">
+
+    <a
+      href="{{ url_for('main.encomendas') }}"
+      class="orders-filter {% if filtro == 'todos' %}orders-filter--active{% endif %}"
+    >
+      Todos
+    </a>
+
+    <a
+      href="{{ url_for('main.encomendas_status', status='aguardando-pagamento') }}"
+      class="orders-filter {% if filtro == ' Pending Payment ' %}orders-filter--active{% endif %}"
+    >
+      Aguardando pagamento
+    </a>
+
+    <a
+      href="{{ url_for('main.encomendas_status', status='aguardando-envio') }}"
+      class="orders-filter {% if filtro == 'aguardando-envio' %}orders-filter--active{% endif %}"
+    >
+      Aguardando envio
+    </a>
+
+    <a
+      href="{{ url_for('main.encomendas_status', status='enviados') }}"
+      class="orders-filter {% if filtro == 'enviados' %}orders-filter--active{% endif %}"
+    >
+      Enviados
+    </a>
+
+    <a
+      href="{{ url_for('main.encomendas_status', status='aguardando-avaliacao') }}"
+      class="orders-filter {% if filtro == 'aguardando-avaliacao' %}orders-filter--active{% endif %}"
+    >
+      Avaliar
+    </a>
+
+  </div>
+
+
+  <div class="account-panel">
+
+    {% if pedidos %}
+
+      <div class="orders-list">
+
+        {% for pedido in pedidos %}
+
+        <div class="order-card">
+
+          <div class="order-card-header">
+
+            <div>
+              <span class="order-label">
+                Pedido
+              </span>
+
+              <strong>
+                #{{ pedido.id }}
+              </strong>
+            </div>
+
+            <span class="order-badge">
+              {{ pedido.status|replace('_', ' ')|title }}
+            </span>
+
+          </div>
+
+          <div class="order-card-body">
+
+            <a
+              href="{{ url_for('main.encomendas', order_id=pedido.id) }}"
+              class="action-btn action-btn--primary"
+            >
+              Ver pedido
+            </a>
+
+          </div>
+
+        </div>
+
+        {% endfor %}
+
+      </div>
+
+    {% else %}
+
+      <div class="empty-state">
+        <p>
+          Nenhuma compra encontrada nesta categoria.
+        </p>
+
+        <a
+          href="{{ url_for('main.produtos') }}"
+          class="action-btn action-btn--primary"
+        >
+          Ver produtos
+        </a>
+      </div>
+
+    {% endif %}
+
+  </div>
+
+</div>
+
+{% endblock %}

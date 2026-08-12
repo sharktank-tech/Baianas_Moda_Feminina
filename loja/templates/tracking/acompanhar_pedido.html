@@ -1,174 +1,755 @@
 {% extends "base.html" %}
 
-{% block title %}Acompanhar pedido | PolloModas{% endblock %}
+{% block title %}Acompanhar pedido — {% if site and site.name %}{{ site.name }}{% else %}Pollo Modas{% endif %}{% endblock %}
+
+{% block meta_description %}
+Acompanhe seu pedido na Pollo Modas utilizando o número do pedido e o e-mail da compra.
+{% endblock %}
+
+{% block extra_head %}
+
+<link
+    rel="stylesheet"
+    href="{{ url_for('static', filename='styles/tracking.css') }}"
+>
+{% endblock %}
 
 {% block content %}
-<section class="tracking-page">
-    <div class="tracking-container">
-        <header class="tracking-header">
-            <span class="tracking-eyebrow">PolloModas</span>
-            <h1>Acompanhe seu pedido</h1>
-            <p>
-                Digite o número do pedido e o e-mail usado na compra.
-            </p>
-        </header>
 
-        <form method="POST" class="tracking-form">
-            <div class="form-group">
-                <label for="order_number">Número do pedido</label>
-                <input
-                    type="text"
-                    id="order_number"
-                    name="order_number"
-                    placeholder="Ex.: PM-2026-000123"
-                    value="{{ request.form.get('order_number', '') }}"
-                    required
-                >
+<section class="track-page">
+
+```
+<div class="track-shell">
+
+    <!-- ==================================================
+         ÁREA DE CONSULTA
+    =================================================== -->
+    <div class="track-auth">
+
+        <!-- Lateral -->
+        <aside class="track-aside">
+
+            <a
+                href="{{ url_for('main.home') }}"
+                class="track-brand"
+            >
+                {% if site and site.name %}
+                    {{ site.name }}
+                {% else %}
+                    Pollo<span>.</span>Modas
+                {% endif %}
+            </a>
+
+            <div class="track-aside-content">
+
+                <span class="track-eyebrow">
+                    Acompanhe sua compra
+                </span>
+
+                <h2>
+                    Seu pedido,<br>
+                    sempre por perto.
+                </h2>
+
+                <p>
+                    Consulte o andamento da sua entrega de forma
+                    rápida e acompanhe cada nova atualização.
+                </p>
+
+                <ul class="track-benefits">
+
+                    <li>
+                        <span class="track-check">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M20 6 9 17l-5-5"/>
+                            </svg>
+                        </span>
+
+                        Consulte usando seu pedido e e-mail
+                    </li>
+
+                    <li>
+                        <span class="track-check">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M20 6 9 17l-5-5"/>
+                            </svg>
+                        </span>
+
+                        Veja todas as etapas da entrega
+                    </li>
+
+                    <li>
+                        <span class="track-check">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M20 6 9 17l-5-5"/>
+                            </svg>
+                        </span>
+
+                        Acompanhe mais de um envio por pedido
+                    </li>
+
+                </ul>
+
             </div>
 
-            <div class="form-group">
-                <label for="email">E-mail da compra</label>
-                <input
-                    type="email"
-                    id="email"
-                    name="email"
-                    placeholder="seuemail@exemplo.com"
-                    value="{{ request.form.get('email', '') }}"
-                    required
-                >
-            </div>
+        </aside>
 
-            <button type="submit" class="tracking-button">
-                Acompanhar pedido
-            </button>
-        </form>
 
-        {% if error %}
-            <div class="tracking-alert tracking-alert-error">
-                {{ error }}
-            </div>
-        {% endif %}
+        <!-- Formulário -->
+        <div class="track-form-side">
 
-        {% if order %}
-            <div class="order-result">
-                <div class="order-summary">
-                    <div>
-                        <span>Pedido</span>
-                        <strong>#{{ order.order_number }}</strong>
+            <header class="track-form-header">
+
+                <span class="track-form-eyebrow">
+                    Rastreamento
+                </span>
+
+                <h1>
+                    Acompanhar pedido
+                </h1>
+
+                <p>
+                    Informe os mesmos dados utilizados durante
+                    a finalização da compra.
+                </p>
+
+            </header>
+
+
+            <form
+                method="POST"
+                class="track-form"
+                autocomplete="on"
+            >
+
+                <!-- Pedido -->
+                <div class="track-field">
+
+                    <label for="order_number">
+                        Número do pedido
+                    </label>
+
+                    <div class="track-input-wrapper">
+
+                        <span class="track-input-icon">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M9 3h6l1 3h3v15H5V6h3l1-3Z"/>
+                                <path d="M9 11h6"/>
+                                <path d="M9 15h4"/>
+                            </svg>
+                        </span>
+
+                        <input
+                            type="text"
+                            id="order_number"
+                            name="order_number"
+                            placeholder="PM-74BD195B245F"
+                            value="{{ request.form.get('order_number', '') }}"
+                            autocapitalize="characters"
+                            autocomplete="off"
+                            spellcheck="false"
+                            required
+                        >
+
                     </div>
 
-                    <div>
-                        <span>Realizado em</span>
-                        <strong>
-                            {{ order.created_at.strftime('%d/%m/%Y') }}
-                        </strong>
-                    </div>
+                    <small>
+                        O número está disponível na confirmação da compra.
+                    </small>
+
                 </div>
 
-                {% if shipment_data %}
-                    {% for data in shipment_data %}
-                        {% set shipment = data.shipment %}
-                        {% set current_step = data.status_info.step %}
 
-                        <article class="shipment-card">
-                            <div class="shipment-heading">
-                                <div>
-                                    <span class="shipment-label">
-                                        Envio {{ loop.index }}
+                <!-- E-mail -->
+                <div class="track-field">
+
+                    <label for="email">
+                        E-mail da compra
+                    </label>
+
+                    <div class="track-input-wrapper">
+
+                        <span class="track-input-icon">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M4 5h16v14H4Z"/>
+                                <path d="m4 7 8 6 8-6"/>
+                            </svg>
+                        </span>
+
+                        <input
+                            type="email"
+                            id="email"
+                            name="email"
+                            placeholder="voce@email.com"
+                            value="{{ request.form.get('email', '') }}"
+                            autocomplete="email"
+                            required
+                        >
+
+                    </div>
+
+                    <small>
+                        Utilize o mesmo e-mail informado no checkout.
+                    </small>
+
+                </div>
+
+
+                <div class="track-secure">
+
+                    <svg viewBox="0 0 24 24">
+                        <rect x="5" y="11" width="14" height="10" rx="2"/>
+                        <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                    </svg>
+
+                    Consulta segura e protegida.
+
+                </div>
+
+
+                <button
+                    type="submit"
+                    class="track-submit"
+                >
+
+                    <span>
+                        Acompanhar pedido
+                    </span>
+
+                    <svg viewBox="0 0 24 24">
+                        <path d="M5 12h14"/>
+                        <path d="m13 6 6 6-6 6"/>
+                    </svg>
+
+                </button>
+
+            </form>
+
+
+            {% if error %}
+
+                <div
+                    class="track-alert track-alert-error"
+                    role="alert"
+                >
+
+                    <span class="track-alert-icon">
+                        !
+                    </span>
+
+                    <div>
+                        <strong>
+                            Não encontramos seu pedido
+                        </strong>
+
+                        <p>
+                            {{ error }}
+                        </p>
+                    </div>
+
+                </div>
+
+            {% endif %}
+
+
+            <div class="track-form-footer">
+
+                <span>
+                    Precisa de ajuda?
+                </span>
+
+                <a href="{{ url_for('main.home') }}">
+                    Voltar para a loja
+                </a>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <!-- ==================================================
+         RESULTADO
+    =================================================== -->
+    {% if order %}
+
+    <section class="track-result">
+
+        <header class="track-result-header">
+
+            <div>
+
+                <span class="track-result-eyebrow">
+                    Pedido encontrado
+                </span>
+
+                <h2>
+                    #{{ order.order_number }}
+                </h2>
+
+                <p>
+                    Confira abaixo o andamento da sua compra.
+                </p>
+
+            </div>
+
+
+            {% if order.status %}
+
+                <span class="track-order-status">
+                    {{ order.status | replace('_', ' ') | title }}
+                </span>
+
+            {% endif %}
+
+        </header>
+
+
+        <!-- Resumo -->
+        <div class="track-summary">
+
+            <div class="track-summary-item">
+
+                <span>
+                    Pedido
+                </span>
+
+                <strong>
+                    #{{ order.order_number }}
+                </strong>
+
+            </div>
+
+
+            {% if order.created_at %}
+
+                <div class="track-summary-item">
+
+                    <span>
+                        Realizado em
+                    </span>
+
+                    <strong>
+                        {{ order.created_at.strftime('%d/%m/%Y') }}
+                    </strong>
+
+                </div>
+
+            {% endif %}
+
+
+            {% if order.customer_name %}
+
+                <div class="track-summary-item">
+
+                    <span>
+                        Cliente
+                    </span>
+
+                    <strong>
+                        {{ order.customer_name }}
+                    </strong>
+
+                </div>
+
+            {% endif %}
+
+
+            {% if order.total_amount is defined and order.total_amount is not none %}
+
+                <div class="track-summary-item">
+
+                    <span>
+                        Total
+                    </span>
+
+                    <strong>
+                        R$ {{ "%.2f"|format(order.total_amount)|replace('.', ',') }}
+                    </strong>
+
+                </div>
+
+            {% endif %}
+
+        </div>
+
+
+        {% if shipment_data %}
+
+            <div class="track-shipments">
+
+                {% for data in shipment_data %}
+
+                    {% set shipment = data.shipment %}
+                    {% set current_step = data.status_info.step %}
+
+                    <article class="track-shipment">
+
+                        <header class="track-shipment-header">
+
+                            <div>
+
+                                <span class="track-shipment-eyebrow">
+
+                                    {% if shipment_data|length > 1 %}
+                                        Envio {{ loop.index }} de {{ shipment_data|length }}
+                                    {% else %}
+                                        Sua entrega
+                                    {% endif %}
+
+                                </span>
+
+                                <h3>
+                                    {{ data.status_info.label }}
+                                </h3>
+
+                                <p>
+                                    {{ data.status_info.description }}
+                                </p>
+
+                            </div>
+
+
+                            <span class="track-shipment-status">
+                                {{ data.status_info.label }}
+                            </span>
+
+                        </header>
+
+
+                        <!-- Progresso -->
+                        <div class="track-progress">
+
+                            {% for step in range(1, 6) %}
+
+                                {% if step == 1 %}
+                                    {% set step_label = "Preparando" %}
+                                {% elif step == 2 %}
+                                    {% set step_label = "Enviado" %}
+                                {% elif step == 3 %}
+                                    {% set step_label = "Em trânsito" %}
+                                {% elif step == 4 %}
+                                    {% set step_label = "Em entrega" %}
+                                {% else %}
+                                    {% set step_label = "Entregue" %}
+                                {% endif %}
+
+
+                                <div
+                                    class="
+                                        track-progress-step
+
+                                        {% if step < current_step %}
+                                            is-complete
+                                        {% elif step == current_step %}
+                                            is-active
+                                        {% endif %}
+                                    "
+                                >
+
+                                    <div class="track-progress-bar"></div>
+
+                                    <span class="track-progress-circle">
+
+                                        {% if step < current_step %}
+
+                                            <svg viewBox="0 0 24 24">
+                                                <path d="M20 6 9 17l-5-5"/>
+                                            </svg>
+
+                                        {% else %}
+
+                                            {{ step }}
+
+                                        {% endif %}
+
                                     </span>
 
-                                    <h2>{{ data.status_info.label }}</h2>
+                                    <small>
+                                        {{ step_label }}
+                                    </small>
+
+                                </div>
+
+                            {% endfor %}
+
+                        </div>
+
+
+                        <!-- Dados do envio -->
+                        <div class="track-shipment-info">
+
+                            <div class="track-info-item">
+
+                                <span>
+                                    Código de rastreio
+                                </span>
+
+                                <div class="track-code-wrapper">
+
+                                    <strong>
+                                        {{ shipment.tracking_code }}
+                                    </strong>
+
+                                    <button
+                                        type="button"
+                                        class="track-copy"
+                                        data-code="{{ shipment.tracking_code }}"
+                                    >
+                                        Copiar
+                                    </button>
+
+                                </div>
+
+                            </div>
+
+
+                            {% if shipment.carrier %}
+
+                                <div class="track-info-item">
+
+                                    <span>
+                                        Transportadora
+                                    </span>
+
+                                    <strong>
+                                        {{ shipment.carrier }}
+                                    </strong>
+
+                                </div>
+
+                            {% endif %}
+
+
+                            {% if shipment.estimated_delivery %}
+
+                                <div class="track-info-item">
+
+                                    <span>
+                                        Previsão
+                                    </span>
+
+                                    <strong>
+                                        {{ shipment.estimated_delivery.strftime('%d/%m/%Y') }}
+                                    </strong>
+
+                                </div>
+
+                            {% endif %}
+
+                        </div>
+
+
+                        <!-- Histórico -->
+                        <div class="track-history">
+
+                            <header class="track-history-header">
+
+                                <div>
+
+                                    <span>
+                                        Atualizações
+                                    </span>
+
+                                    <h4>
+                                        Histórico do envio
+                                    </h4>
+
+                                </div>
+
+
+                                {% if data.events %}
+
+                                    <small>
+                                        {{ data.events|length }}
+
+                                        {% if data.events|length == 1 %}
+                                            atualização
+                                        {% else %}
+                                            atualizações
+                                        {% endif %}
+                                    </small>
+
+                                {% endif %}
+
+                            </header>
+
+
+                            {% if data.events %}
+
+                                <div class="track-history-list">
+
+                                    {% for event in data.events %}
+
+                                        <div
+                                            class="
+                                                track-history-item
+
+                                                {% if loop.first %}
+                                                    is-latest
+                                                {% endif %}
+                                            "
+                                        >
+
+                                            <div class="track-history-marker">
+                                                <span></span>
+                                            </div>
+
+                                            <div class="track-history-body">
+
+                                                {% if loop.first %}
+
+                                                    <span class="track-latest">
+                                                        Atualização mais recente
+                                                    </span>
+
+                                                {% endif %}
+
+
+                                                <strong>
+                                                    {{ event.description }}
+                                                </strong>
+
+
+                                                {% if event.location %}
+
+                                                    <p>
+                                                        {{ event.location }}
+                                                    </p>
+
+                                                {% endif %}
+
+
+                                                {% if event.event_at %}
+
+                                                    <time>
+                                                        {{ event.event_at.strftime('%d/%m/%Y às %H:%M') }}
+                                                    </time>
+
+                                                {% endif %}
+
+                                            </div>
+
+                                        </div>
+
+                                    {% endfor %}
+
+                                </div>
+
+
+                            {% else %}
+
+                                <div class="track-history-empty">
+
+                                    <strong>
+                                        Aguardando atualizações
+                                    </strong>
 
                                     <p>
-                                        {{ data.status_info.description }}
+                                        Assim que o transporte for iniciado,
+                                        as movimentações aparecerão aqui.
                                     </p>
+
                                 </div>
 
-                                <span class="status-badge">
-                                    {{ data.status_info.label }}
-                                </span>
-                            </div>
+                            {% endif %}
 
-                            <div class="tracking-progress">
-                                {% for step in range(1, 6) %}
-                                    <div class="progress-item
-                                        {% if step <= current_step %}
-                                            progress-item-active
-                                        {% endif %}
-                                    ">
-                                        <span class="progress-dot"></span>
+                        </div>
 
-                                        {% if step == 1 %}
-                                            <small>Preparando</small>
-                                        {% elif step == 2 %}
-                                            <small>Enviado</small>
-                                        {% elif step == 3 %}
-                                            <small>Em trânsito</small>
-                                        {% elif step == 4 %}
-                                            <small>Em entrega</small>
-                                        {% else %}
-                                            <small>Entregue</small>
-                                        {% endif %}
-                                    </div>
-                                {% endfor %}
-                            </div>
+                    </article>
 
-                            <div class="shipment-info">
-                                <div>
-                                    <span>Código de rastreio</span>
-                                    <strong>{{ shipment.tracking_code }}</strong>
-                                </div>
+                {% endfor %}
 
-                                {% if shipment.carrier %}
-                                    <div>
-                                        <span>Transportadora</span>
-                                        <strong>{{ shipment.carrier }}</strong>
-                                    </div>
-                                {% endif %}
-
-                                {% if shipment.estimated_delivery %}
-                                    <div>
-                                        <span>Previsão de entrega</span>
-                                        <strong>
-                                            {{ shipment.estimated_delivery.strftime('%d/%m/%Y') }}
-                                        </strong>
-                                    </div>
-                                {% endif %}
-                            </div>
-
-                            <div class="tracking-timeline">
-                                <h3>Histórico do envio</h3>
-
-                                {% for event in data.events %}
-                                    <div class="timeline-item">
-                                        <span class="timeline-marker"></span>
-
-                                        <div>
-                                            <strong>{{ event.description }}</strong>
-
-                                            {% if event.location %}
-                                                <p>{{ event.location }}</p>
-                                            {% endif %}
-
-                                            <time>
-                                                {{ event.event_at.strftime('%d/%m/%Y às %H:%M') }}
-                                            </time>
-                                        </div>
-                                    </div>
-                                {% else %}
-                                    <p>Aguardando atualizações do transporte.</p>
-                                {% endfor %}
-                            </div>
-                        </article>
-                    {% endfor %}
-                {% else %}
-                    <div class="tracking-alert">
-                        O pedido foi confirmado e está sendo preparado.
-                        O código de rastreio será disponibilizado após o envio.
-                    </div>
-                {% endif %}
             </div>
+
+
+        {% else %}
+
+            <div class="track-waiting">
+
+                <div class="track-waiting-icon">
+
+                    <svg viewBox="0 0 24 24">
+                        <path d="m21 8-9 5-9-5"/>
+                        <path d="M3 8l9-5 9 5v8l-9 5-9-5Z"/>
+                        <path d="M12 13v8"/>
+                    </svg>
+
+                </div>
+
+
+                <div>
+
+                    <span>
+                        Preparando seu pedido
+                    </span>
+
+                    <h3>
+                        O rastreio estará disponível em breve.
+                    </h3>
+
+                    <p>
+                        Sua compra já foi localizada. Assim que
+                        o envio for iniciado, o código de rastreio
+                        aparecerá automaticamente nesta página.
+                    </p>
+
+                </div>
+
+            </div>
+
         {% endif %}
-    </div>
+
+    </section>
+
+    {% endif %}
+
+</div>
+```
+
 </section>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+
+    const buttons = document.querySelectorAll(".track-copy");
+
+    buttons.forEach(function (button) {
+
+        button.addEventListener("click", async function () {
+
+            const code = button.dataset.code;
+
+            if (!code) {
+                return;
+            }
+
+            const original = button.textContent;
+
+            try {
+
+                await navigator.clipboard.writeText(code);
+
+                button.textContent = "Copiado ✓";
+                button.classList.add("is-copied");
+
+                setTimeout(function () {
+                    button.textContent = original;
+                    button.classList.remove("is-copied");
+                }, 1800);
+
+            } catch (error) {
+
+                console.error("Erro ao copiar rastreio:", error);
+
+            }
+
+        });
+
+    });
+
+});
+</script>
+
 {% endblock %}

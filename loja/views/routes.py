@@ -175,7 +175,7 @@ def get_home_data():
         Testimonial.query
         .filter(Testimonial.is_visible == True)
         .order_by(Testimonial.created_at.desc())
-        .limit(3)
+        .limit(6)
         .all()
     )
 
@@ -1448,6 +1448,90 @@ def calcular_frete():
         "cep": cep,
     })
 
+# ── Encomendas ──────────────────────────────
+@main_blueprint.route("/encomendas")
+@login_required
+def encomendas():
+    try:
+        pedidos = (
+            Order.query
+            .filter_by(user_id=current_user.id)
+            .order_by(Order.id.desc())
+            .all()
+        )
+
+        return render_template(
+            "conta/encomendas.html",
+            pedidos=pedidos,
+            titulo="Todas as compras",
+            filtro="todos"
+        )
+
+    except Exception as e:
+        print(f"Erro ao carregar encomendas: {e}")
+        flash("Não foi possível carregar suas compras.", "danger")
+        return redirect(url_for("main.conta"))
+
+# ── Encomendas dinâmicas ──────────────────────────────────────────
+@main_blueprint.route("/encomendas/<status>")
+@login_required
+def encomendas_status(status):
+
+    filtros = {
+        "aguardando-pagamento": {
+            "db_status": "aguardando_pagamento",
+            "titulo": "Aguardando pagamento",
+        },
+
+        "aguardando-envio": {
+            "db_status": "aguardando_envio",
+            "titulo": "Aguardando envio",
+        },
+
+        "enviados": {
+            "db_status": "enviado",
+            "titulo": "Pedidos enviados",
+        },
+
+        "aguardando-avaliacao": {
+            "db_status": "aguardando_avaliacao",
+            "titulo": "Aguardando avaliação",
+        },
+    }
+
+    filtro = filtros.get(status)
+
+    if not filtro:
+        flash("Categoria de pedidos inválida.", "warning")
+        return redirect(url_for("main.encomendas"))
+
+    try:
+        pedidos = (
+            Order.query
+            .filter_by(
+                user_id=current_user.id,
+                status=filtro["db_status"]
+            )
+            .order_by(Order.id.desc())
+            .all()
+        )
+
+        return render_template(
+            "conta/encomendas.html",
+            pedidos=pedidos,
+            titulo=filtro["titulo"],
+            filtro=status,
+        )
+
+    except Exception as e:
+        print(f"Erro ao carregar encomendas: {e}")
+
+        flash(
+            "Não foi possível carregar suas compras.",
+            "danger"
+        )
+
+        return redirect(url_for("main.conta"))
 
 # ── Conta ───────────────────────────────────────────────────────────────────
 @main_blueprint.route('/conta')
@@ -1455,16 +1539,44 @@ def calcular_frete():
 def conta():
     try:
         user = current_user
+
+        compras_status = {
+            "aguardando_pagamento": Order.query.filter_by(
+                user_id=user.id,
+                status="aguardando_pagamento"
+            ).count(),
+
+            "aguardando_envio": Order.query.filter_by(
+                user_id=user.id,
+                status="aguardando_envio"
+            ).count(),
+
+            "enviado": Order.query.filter_by(
+                user_id=user.id,
+                status="enviado"
+            ).count(),
+
+            "aguardando_avaliacao": Order.query.filter_by(
+                user_id=user.id,
+                status="aguardando_avaliacao"
+            ).count(),
+        }
+
         return render_template(
             'conta/conta.html',
             admin=user.is_admin,
             telefone=user.phone,
             username=user.name,
             email=user.email,
-            adress=user.addresses[0] if user.addresses else None,
+            address=user.addresses[0] if user.addresses else None,
+            compras_status=compras_status,
         )
+
     except Exception as e:
-        flash("Erro ao acessar os dados da conta. Tente novamente.", "danger")
+        flash(
+            "Erro ao acessar os dados da conta. Tente novamente.",
+            "danger"
+        )
         print(f"Erro ao acessar os dados da conta: {e}")
         return redirect(url_for('main.home'))
 

@@ -1,442 +1,1228 @@
 {% extends "base.html" %}
+
 {% block title %}Painel Administrativo — Pollo Modas{% endblock %}
 
 {% block extra_head %}
-  <script src="{{ url_for('static', filename='scripts/dashboard_admin.js') }}" defer></script>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles/dashboard_admin.css') }}">
+<link
+  rel="stylesheet"
+  href="{{ url_for('static', filename='styles/dashboard_admin.css') }}"
+>
 
+<script
+  src="{{ url_for('static', filename='scripts/dashboard_admin.js') }}"
+  defer
+></script>
 {% endblock %}
+
 
 {% block content %}
 
 {% set coupon_list = coupons|default([], true) %}
 
-<!-- ═══════════════════════════════════════════════════════════
-     PAINEL ADMINISTRATIVO — POLLO MODAS
-     Requer vars CSS: --black, --accent, --cream, --border
-     Requer fontes:   Poppins, DM Sans
-═══════════════════════════════════════════════════════════ -->
+
+<!-- =========================================================
+     PAINEL ADMINISTRATIVO
+========================================================= -->
 
 <div class="adm-wrap">
 
-  <!-- ═══ SIDEBAR (desktop) ═══════════════════════════════ -->
+
+  <!-- =======================================================
+       SIDEBAR DESKTOP
+  ======================================================== -->
+
   <aside class="adm-sidebar">
+
     <div class="adm-sidebar-logo">
       <span>Admin</span>
+      Pollo Modas
     </div>
 
-    <nav class="adm-nav" aria-label="Navegação admin">
+
+    <nav class="adm-nav" aria-label="Navegação administrativa">
+
+
+      <!-- Visão geral -->
 
       <div class="adm-nav-group">
-        <div class="adm-nav-group-label">Visão geral</div>
-        <button class="adm-nav-link active" data-panel="overview">
-          <span class="adm-icon">◈</span> Dashboard
+
+        <div class="adm-nav-group-label">
+          Visão geral
+        </div>
+
+        <button
+          type="button"
+          class="adm-nav-link active"
+          data-panel="overview"
+        >
+          <span class="adm-icon">◈</span>
+          Dashboard
         </button>
+
       </div>
 
-      <div class="adm-nav-group">
-        <div class="adm-nav-group-label">Catálogo</div>
-        <button class="adm-nav-link" data-panel="products">
-          <span class="adm-icon">⊞</span> Produtos
-        </button>
-        <button class="adm-nav-link" data-panel="promotions">
-          <span class="adm-icon">◎</span> Promoções
-        </button>
-        <button class="adm-nav-link" data-panel="coupons">
-          <span class="adm-icon">%</span> Cupons
-        </button>
-        <button class="adm-nav-link" data-panel="suppliers">
-          <span class="adm-icon">◇</span> Fornecedores
-        </button>
-      </div>
+
+      <!-- Catálogo -->
 
       <div class="adm-nav-group">
-        <div class="adm-nav-group-label">Comunidade</div>
-        <button class="adm-nav-link" data-panel="users">
-          <span class="adm-icon">○</span> Usuários
+
+        <div class="adm-nav-group-label">
+          Catálogo
+        </div>
+
+        <button
+          type="button"
+          class="adm-nav-link"
+          data-panel="products"
+        >
+          <span class="adm-icon">⊞</span>
+          Produtos
         </button>
-        <button class="adm-nav-link" data-panel="testimonials">
-          <span class="adm-icon">❝</span> Depoimentos
+
+        <button
+          type="button"
+          class="adm-nav-link"
+          data-panel="promotions"
+        >
+          <span class="adm-icon">◎</span>
+          Promoções
         </button>
+
+        <button
+          type="button"
+          class="adm-nav-link"
+          data-panel="coupons"
+        >
+          <span class="adm-icon">%</span>
+          Cupons
+        </button>
+
+        <button
+          type="button"
+          class="adm-nav-link"
+          data-panel="suppliers"
+        >
+          <span class="adm-icon">◇</span>
+          Fornecedores
+        </button>
+
       </div>
 
+
+      <!-- Comunidade -->
+
       <div class="adm-nav-group">
-        <div class="adm-nav-group-label">Site</div>
-        <button class="adm-nav-link" data-panel="hero">
-          <span class="adm-icon">▣</span> Hero slides
+
+        <div class="adm-nav-group-label">
+          Comunidade
+        </div>
+
+        <button
+          type="button"
+          class="adm-nav-link"
+          data-panel="users"
+        >
+          <span class="adm-icon">○</span>
+          Usuários
         </button>
-        <button class="adm-nav-link" data-panel="siteconfig">
-          <span class="adm-icon">◉</span> Configurações
+
+        <button
+          type="button"
+          class="adm-nav-link"
+          data-panel="testimonials"
+        >
+          <span class="adm-icon">❝</span>
+          Depoimentos
         </button>
-        <button class="adm-nav-link" data-panel="footer">
-          <span class="adm-icon">▽</span> Rodapé &amp; Links
+
+      </div>
+
+
+      <!-- Site -->
+
+      <div class="adm-nav-group">
+
+        <div class="adm-nav-group-label">
+          Site
+        </div>
+
+        <button
+          type="button"
+          class="adm-nav-link"
+          data-panel="hero"
+        >
+          <span class="adm-icon">▣</span>
+          Hero slides
         </button>
+
+        <button
+          type="button"
+          class="adm-nav-link"
+          data-panel="siteconfig"
+        >
+          <span class="adm-icon">◉</span>
+          Configurações
+        </button>
+
+        <button
+          type="button"
+          class="adm-nav-link"
+          data-panel="footer"
+        >
+          <span class="adm-icon">▽</span>
+          Rodapé &amp; Links
+        </button>
+
       </div>
 
     </nav>
+
 
     <div class="adm-sidebar-footer">
-      Logado como <strong style="color:#ccc">{{ current_user.name }}</strong><br>
-      <a href="{{ url_for('main.home') }}">← Ver loja</a>
+
+      Logado como
+
+      <strong>
+        {{ current_user.name }}
+      </strong>
+
+      <br>
+
+      <a href="{{ url_for('main.home') }}">
+        ← Ver loja
+      </a>
+
     </div>
+
   </aside>
 
-  <!-- ═══ MAIN ════════════════════════════════════════════ -->
+
+
+  <!-- =======================================================
+       CONTEÚDO PRINCIPAL
+  ======================================================== -->
+
   <div class="adm-main">
 
-    <!-- Nav mobile (scroll horizontal) -->
-    <nav class="adm-mobile-nav" aria-label="Navegação admin mobile">
-      <button class="adm-nav-link active" data-panel="overview">Dashboard</button>
-      <button class="adm-nav-link" data-panel="products">Produtos</button>
-      <button class="adm-nav-link" data-panel="promotions">Promoções</button>
-      <button class="adm-nav-link" data-panel="coupons">Cupons</button>
-      <button class="adm-nav-link" data-panel="suppliers">Fornecedores</button>
-      <button class="adm-nav-link" data-panel="users">Usuários</button>
-      <button class="adm-nav-link" data-panel="testimonials">Depoimentos</button>
-      <button class="adm-nav-link" data-panel="hero">Hero</button>
-      <button class="adm-nav-link" data-panel="siteconfig">Config</button>
-      <button class="adm-nav-link" data-panel="footer">Rodapé</button>
+
+    <!-- =====================================================
+         NAVEGAÇÃO MOBILE
+    ====================================================== -->
+
+    <nav
+      class="adm-mobile-nav"
+      aria-label="Navegação administrativa mobile"
+    >
+
+      <button
+        type="button"
+        class="adm-nav-link active"
+        data-panel="overview"
+      >
+        Dashboard
+      </button>
+
+      <button
+        type="button"
+        class="adm-nav-link"
+        data-panel="products"
+      >
+        Produtos
+      </button>
+
+      <button
+        type="button"
+        class="adm-nav-link"
+        data-panel="promotions"
+      >
+        Promoções
+      </button>
+
+      <button
+        type="button"
+        class="adm-nav-link"
+        data-panel="coupons"
+      >
+        Cupons
+      </button>
+
+      <button
+        type="button"
+        class="adm-nav-link"
+        data-panel="suppliers"
+      >
+        Fornecedores
+      </button>
+
+      <button
+        type="button"
+        class="adm-nav-link"
+        data-panel="users"
+      >
+        Usuários
+      </button>
+
+      <button
+        type="button"
+        class="adm-nav-link"
+        data-panel="testimonials"
+      >
+        Depoimentos
+      </button>
+
+      <button
+        type="button"
+        class="adm-nav-link"
+        data-panel="hero"
+      >
+        Hero
+      </button>
+
+      <button
+        type="button"
+        class="adm-nav-link"
+        data-panel="siteconfig"
+      >
+        Config
+      </button>
+
+      <button
+        type="button"
+        class="adm-nav-link"
+        data-panel="footer"
+      >
+        Rodapé
+      </button>
+
     </nav>
 
-    <div class="adm-content">
 
-      <!-- ══════════════════════════════════════════════════
-           PAINEL: OVERVIEW
-      ══════════════════════════════════════════════════ -->
-      <div class="adm-panel active" id="panel-overview">
+
+    <!-- =====================================================
+         TOPBAR
+    ====================================================== -->
+
+    <header class="adm-topbar">
+
+      <div class="adm-topbar-title">
+        Painel Administrativo
+      </div>
+
+      <div class="adm-topbar-actions">
+
+        <a
+          href="{{ url_for('main.home') }}"
+          class="adm-btn adm-btn-outline adm-btn-sm"
+        >
+          Ver loja
+        </a>
+
+      </div>
+
+    </header>
+
+
+
+    <!-- =====================================================
+         CONTEÚDO
+    ====================================================== -->
+
+    <main class="adm-content">
+
+
+      <!-- ===================================================
+           OVERVIEW
+      ==================================================== -->
+
+      <section
+        class="adm-panel active"
+        id="panel-overview"
+      >
+
+
+        <!-- ESTATÍSTICAS -->
 
         <div class="adm-stats">
 
-          <div class="adm-stat-card">
-            <div class="adm-stat-label">Produtos</div>
-            <div class="adm-stat-value">{{ products|length }}</div>
-            <div class="adm-stat-sub">
-              {{ products|selectattr('is_active')|list|length }} ativos
-            </div>
-          </div>
 
           <div class="adm-stat-card">
-            <div class="adm-stat-label">Estoque total</div>
+
+            <div class="adm-stat-label">
+              Produtos
+            </div>
+
+            <div class="adm-stat-value">
+              {{ products|length }}
+            </div>
+
+            <div class="adm-stat-sub">
+              {{ products|selectattr('is_active')|list|length }}
+              ativos
+            </div>
+
+          </div>
+
+
+          <div class="adm-stat-card">
+
+            <div class="adm-stat-label">
+              Estoque total
+            </div>
+
             <div class="adm-stat-value">
               {{ products|sum(attribute='stock') }}
             </div>
-            <div class="adm-stat-sub">unidades</div>
-          </div>
 
-          <div class="adm-stat-card alt">
-            <div class="adm-stat-label">Promoções</div>
-            <div class="adm-stat-value">{{ promotions|length }}</div>
             <div class="adm-stat-sub">
-              {{ promotions|selectattr('is_active')|list|length }} ativas
+              unidades
             </div>
+
           </div>
 
+
           <div class="adm-stat-card alt">
-            <div class="adm-stat-label">Cupons</div>
-            <div class="adm-stat-value">{{ coupon_list|length }}</div>
+
+            <div class="adm-stat-label">
+              Promoções
+            </div>
+
+            <div class="adm-stat-value">
+              {{ promotions|length }}
+            </div>
+
             <div class="adm-stat-sub">
-              {{ coupon_list|selectattr('is_active')|list|length }} ativos
+              {{ promotions|selectattr('is_active')|list|length }}
+              ativas
             </div>
+
           </div>
 
+
           <div class="adm-stat-card alt">
-            <div class="adm-stat-label">Fornecedores</div>
-            <div class="adm-stat-value">{{ suppliers|length }}</div>
-            <div class="adm-stat-sub">cadastrados</div>
+
+            <div class="adm-stat-label">
+              Cupons
+            </div>
+
+            <div class="adm-stat-value">
+              {{ coupon_list|length }}
+            </div>
+
+            <div class="adm-stat-sub">
+              {{ coupon_list|selectattr('is_active')|list|length }}
+              ativos
+            </div>
+
           </div>
+
+
+          <div class="adm-stat-card alt">
+
+            <div class="adm-stat-label">
+              Fornecedores
+            </div>
+
+            <div class="adm-stat-value">
+              {{ suppliers|length }}
+            </div>
+
+            <div class="adm-stat-sub">
+              cadastrados
+            </div>
+
+          </div>
+
 
           <div class="adm-stat-card muted">
-            <div class="adm-stat-label">Usuários</div>
-            <div class="adm-stat-value">{{ users|length }}</div>
-            <div class="adm-stat-sub">
-              {{ users|selectattr('is_admin')|list|length }} admins
+
+            <div class="adm-stat-label">
+              Usuários
             </div>
+
+            <div class="adm-stat-value">
+              {{ users|length }}
+            </div>
+
+            <div class="adm-stat-sub">
+              {{ users|selectattr('is_admin')|list|length }}
+              admins
+            </div>
+
           </div>
 
+
           <div class="adm-stat-card muted">
-            <div class="adm-stat-label">Depoimentos</div>
-            <div class="adm-stat-value">{{ testimonials|length }}</div>
-            <div class="adm-stat-sub">
-              {{ testimonials|selectattr('is_visible')|list|length }} visíveis
+
+            <div class="adm-stat-label">
+              Depoimentos
             </div>
+
+            <div class="adm-stat-value">
+              {{ testimonials|length }}
+            </div>
+
+            <div class="adm-stat-sub">
+              {{ testimonials|selectattr('is_visible')|list|length }}
+              visíveis
+            </div>
+
           </div>
 
         </div>
 
-        <!-- Produtos com estoque baixo -->
+
+
+        <!-- =================================================
+             ESTOQUE BAIXO
+        ================================================== -->
+
         <div class="adm-card">
+
           <div class="adm-card-header">
-            <span class="adm-card-title">Estoque baixo</span>
-            <button class="adm-nav-link adm-btn adm-btn-outline adm-btn-sm" data-panel="products"
-                    style="font-size:0.72rem;padding:6px 14px">
+
+            <span class="adm-card-title">
+              Estoque baixo
+            </span>
+
+            <button
+              type="button"
+              class="adm-btn adm-btn-outline adm-btn-sm"
+              data-panel="products"
+            >
               Ver todos →
             </button>
+
           </div>
+
+
           <div class="adm-table-wrap">
+
             <table class="adm-table">
+
               <thead>
+
                 <tr>
                   <th>Produto</th>
                   <th>Categoria</th>
                   <th>Estoque</th>
                   <th>Preço</th>
                 </tr>
+
               </thead>
+
+
               <tbody>
-                {% set low = products|selectattr('stock')|selectattr('stock', 'lt', 5)|list %}
+
+                {% set low = products
+                    |selectattr('stock')
+                    |selectattr('stock', 'lt', 5)
+                    |list
+                %}
+
+
                 {% for p in low %}
-                <tr>
-                  <td><strong>{{ p.name }}</strong></td>
-                  <td>{{ p.category or "—" }}</td>
-                  <td>
-                    <span class="adm-stock-pill {{ 'zero' if p.stock == 0 else 'low' }}">
-                      {{ "● " }}{{ p.stock }} un.
-                    </span>
-                  </td>
-                  <td>R$ {{ "%.2f"|format(p.price|float) }}</td>
-                </tr>
-                {% else %}
-                <tr><td colspan="4" class="adm-empty">Nenhum produto com estoque crítico.</td></tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </div>
 
-        <!-- Últimos usuários -->
-        <div class="adm-card">
-          <div class="adm-card-header">
-            <span class="adm-card-title">Últimos usuários cadastrados</span>
-          </div>
-          <div class="adm-table-wrap">
-            <table class="adm-table">
-              <thead>
                 <tr>
-                  <th>Nome</th><th>E-mail</th><th>Perfil</th><th>Cadastro</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for u in users|sort(attribute='created_at', reverse=True)|list %}
-                {% if loop.index <= 5 %}
-                <tr>
-                  <td>{{ u.name }}</td>
-                  <td>{{ u.email }}</td>
-                  <td>
-                    {% if u.is_admin %}
-                    <span class="adm-badge adm-badge-accent">Admin</span>
-                    {% else %}
-                    <span class="adm-badge adm-badge-gray">Cliente</span>
-                    {% endif %}
-                  </td>
-                  <td style="color:#aaa;font-size:0.8rem">
-                    {{ u.created_at.strftime('%d/%m/%Y') if u.created_at else "—" }}
-                  </td>
-                </tr>
-                {% endif %}
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </div>
 
-      </div><!-- /overview -->
-
-
-      <!-- ══════════════════════════════════════════════════
-           PAINEL: PRODUTOS
-      ══════════════════════════════════════════════════ -->
-      <div class="adm-panel" id="panel-products">
-
-        <div class="adm-card">
-          <div class="adm-card-header">
-            <span class="adm-card-title">Todos os produtos</span>
-            <div class="adm-actions">
-              <div class="adm-search">
-                <span style="color:#bbb;font-size:0.85rem">⌕</span>
-                <input type="text" placeholder="Buscar produto…" id="searchProducts">
-              </div>
-              <a href="{{ url_for('admin.add_product') }}" class="adm-btn adm-btn-primary adm-btn-sm">
-                + Produto
-              </a>
-            </div>
-          </div>
-          <div class="adm-table-wrap">
-            <table class="adm-table" id="tableProducts">
-              <thead>
-                <tr>
-                  <th style="width:52px"></th>
-                  <th>Nome</th>
-                  <th>Categoria</th>
-                  <th>Preço</th>
-                  <th>Estoque</th>
-                  <th>Status</th>
-                  <th>Fornecedor</th>
-                  <th style="text-align:center">Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for p in products %}
-                <tr>
-                  <td>
-                    {% if p.image1 %}
-                    <img src="{{ p.image1 }}" alt="{{ p.name }}" class="adm-thumb">
-                    {% else %}
-                    <div class="adm-thumb" style="background:#f0ede8;display:flex;align-items:center;justify-content:center;color:#ccc;font-size:1.2rem">◫</div>
-                    {% endif %}
-                  </td>
                   <td>
                     <strong>{{ p.name }}</strong>
-                    {% if p.description %}
-                    <div style="font-size:0.78rem;color:#aaa;margin-top:2px">
-                      {{ p.description[:70] }}{% if p.description|length > 70 %}…{% endif %}
-                    </div>
-                    {% endif %}
                   </td>
-                  <td>{{ p.category or "—" }}</td>
-                  <td>R$ {{ "%.2f"|format(p.price|float) }}</td>
+
                   <td>
-                    <span class="adm-stock-pill {{ 'zero' if p.stock == 0 else ('low' if p.stock < 5 else 'ok') }}">
-                      {{ "●" }} {{ p.stock }}
+                    {{ p.category or "—" }}
+                  </td>
+
+                  <td>
+
+                    <span
+                      class="adm-stock-pill {{ 'zero' if p.stock == 0 else 'low' }}"
+                    >
+                      ● {{ p.stock }} un.
                     </span>
+
                   </td>
+
                   <td>
-                    {% if p.is_active %}
-                    <span class="adm-badge adm-badge-green">Ativo</span>
-                    {% else %}
-                    <span class="adm-badge adm-badge-red">Inativo</span>
-                    {% endif %}
+                    R$ {{ "%.2f"|format(p.price|float) }}
                   </td>
-                  <td style="font-size:0.8rem;color:#888">
-                    {% if p.suppliers %}
-                      {{ p.suppliers|map(attribute='name')|join(', ') }}
-                    {% else %}—{% endif %}
-                  </td>
-                  <td>
-                    <div class="adm-actions" style="justify-content:center">
-                      <a href="{{ url_for('admin.edit_product', id=p.id) }}"
-                         class="adm-btn adm-btn-edit adm-btn-sm">Editar</a>
-                      <form method="POST"
-                            action="{{ url_for('admin.delete_product', id=p.id) }}"
-                            onsubmit="return confirm('Excluir {{ p.name }}?')">
-                        <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">Excluir</button>
-                      </form>
-                    </div>
-                  </td>
+
                 </tr>
+
+
                 {% else %}
-                <tr><td colspan="8" class="adm-empty">Nenhum produto cadastrado.</td></tr>
+
+                <tr>
+
+                  <td
+                    colspan="4"
+                    class="adm-empty"
+                  >
+                    Nenhum produto com estoque crítico.
+                  </td>
+
+                </tr>
+
                 {% endfor %}
+
               </tbody>
+
             </table>
+
           </div>
+
         </div>
 
-      </div><!-- /products -->
 
 
-      <!-- ══════════════════════════════════════════════════
-           PAINEL: PROMOÇÕES
-      ══════════════════════════════════════════════════ -->
-      <div class="adm-panel" id="panel-promotions">
+        <!-- =================================================
+             ÚLTIMOS USUÁRIOS
+        ================================================== -->
 
         <div class="adm-card">
+
           <div class="adm-card-header">
-            <span class="adm-card-title">Promoções</span>
-            <a href="{{ url_for('admin.add_promotion') }}" class="adm-btn adm-btn-primary adm-btn-sm">
+
+            <span class="adm-card-title">
+              Últimos usuários cadastrados
+            </span>
+
+          </div>
+
+
+          <div class="adm-table-wrap">
+
+            <table class="adm-table">
+
+              <thead>
+
+                <tr>
+                  <th>Nome</th>
+                  <th>E-mail</th>
+                  <th>Perfil</th>
+                  <th>Cadastro</th>
+                </tr>
+
+              </thead>
+
+
+              <tbody>
+
+                {% for u in users|sort(attribute='created_at', reverse=True)|list %}
+
+                {% if loop.index <= 5 %}
+
+                <tr>
+
+                  <td>
+                    <strong>{{ u.name }}</strong>
+                  </td>
+
+                  <td>
+                    {{ u.email }}
+                  </td>
+
+                  <td>
+
+                    {% if u.is_admin %}
+
+                    <span class="adm-badge adm-badge-accent">
+                      Admin
+                    </span>
+
+                    {% else %}
+
+                    <span class="adm-badge adm-badge-gray">
+                      Cliente
+                    </span>
+
+                    {% endif %}
+
+                  </td>
+
+                  <td>
+                    {{ u.created_at.strftime('%d/%m/%Y')
+                       if u.created_at
+                       else "—"
+                    }}
+                  </td>
+
+                </tr>
+
+                {% endif %}
+
+                {% endfor %}
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+
+      <!-- ===================================================
+           PRODUTOS
+      ==================================================== -->
+
+      <section
+        class="adm-panel"
+        id="panel-products"
+      >
+
+        <div class="adm-card">
+
+
+          <div class="adm-card-header">
+
+            <span class="adm-card-title">
+              Todos os produtos
+            </span>
+
+
+            <div class="adm-actions">
+
+
+              <!-- Busca -->
+
+              <div class="adm-search">
+
+                <span>⌕</span>
+
+                <input
+                  type="text"
+                  placeholder="Buscar produto…"
+                  id="searchProducts"
+                  autocomplete="off"
+                >
+
+              </div>
+
+
+              <a
+                href="{{ url_for('admin.add_product') }}"
+                class="adm-btn adm-btn-primary adm-btn-sm"
+              >
+                + Produto
+              </a>
+
+            </div>
+
+          </div>
+
+
+
+          <div class="adm-table-wrap">
+
+            <table
+              class="adm-table"
+              id="tableProducts"
+            >
+
+              <thead>
+
+                <tr>
+
+                  <th></th>
+
+                  <th>Nome</th>
+
+                  <th>Categoria</th>
+
+                  <th>Preço</th>
+
+                  <th>Estoque</th>
+
+                  <th>Status</th>
+
+                  <th>Fornecedor</th>
+
+                  <th>Ações</th>
+
+                </tr>
+
+              </thead>
+
+
+              <tbody>
+
+                {% for p in products %}
+
+                <tr>
+
+
+                  <!-- Imagem -->
+
+                  <td>
+
+                    {% if p.image1 %}
+
+                    <img
+                      src="{{ p.image1 }}"
+                      alt="{{ p.name }}"
+                      class="adm-thumb"
+                      loading="lazy"
+                    >
+
+                    {% else %}
+
+                    <div
+                      class="adm-thumb"
+                      aria-label="Produto sem imagem"
+                    ></div>
+
+                    {% endif %}
+
+                  </td>
+
+
+
+                  <!-- Produto -->
+
+                  <td>
+
+                    <strong>
+                      {{ p.name }}
+                    </strong>
+
+
+                    {% if p.description %}
+
+                    <div class="adm-stat-sub">
+
+                      {{ p.description[:70] }}
+
+                      {% if p.description|length > 70 %}
+                        …
+                      {% endif %}
+
+                    </div>
+
+                    {% endif %}
+
+                  </td>
+
+
+
+                  <!-- Categoria -->
+
+                  <td>
+                    {{ p.category or "—" }}
+                  </td>
+
+
+
+                  <!-- Preço -->
+
+                  <td>
+
+                    <strong>
+                      R$ {{ "%.2f"|format(p.price|float) }}
+                    </strong>
+
+                  </td>
+
+
+
+                  <!-- Estoque -->
+
+                  <td>
+
+                    <span
+                      class="adm-stock-pill {{
+                        'zero'
+                        if p.stock == 0
+                        else ('low' if p.stock < 5 else 'ok')
+                      }}"
+                    >
+                      ● {{ p.stock }}
+                    </span>
+
+                  </td>
+
+
+
+                  <!-- Status -->
+
+                  <td>
+
+                    {% if p.is_active %}
+
+                    <span class="adm-badge adm-badge-green">
+                      Ativo
+                    </span>
+
+                    {% else %}
+
+                    <span class="adm-badge adm-badge-red">
+                      Inativo
+                    </span>
+
+                    {% endif %}
+
+                  </td>
+
+
+
+                  <!-- Fornecedor -->
+
+                  <td>
+
+                    {% if p.suppliers %}
+
+                      {{ p.suppliers
+                          |map(attribute='name')
+                          |join(', ')
+                      }}
+
+                    {% else %}
+
+                      —
+
+                    {% endif %}
+
+                  </td>
+
+
+
+                  <!-- Ações -->
+
+                  <td>
+
+                    <div class="adm-actions">
+
+                      <a
+                        href="{{ url_for('admin.edit_product', id=p.id) }}"
+                        class="adm-btn adm-btn-edit adm-btn-sm"
+                      >
+                        Editar
+                      </a>
+
+
+                      <form
+                        method="POST"
+                        action="{{ url_for('admin.delete_product', id=p.id) }}"
+                        onsubmit="return confirm('Excluir {{ p.name }}?')"
+                      >
+
+                        <button
+                          type="submit"
+                          class="adm-btn adm-btn-danger adm-btn-sm"
+                        >
+                          Excluir
+                        </button>
+
+                      </form>
+
+                    </div>
+
+                  </td>
+
+                </tr>
+
+
+                {% else %}
+
+                <tr>
+
+                  <td
+                    colspan="8"
+                    class="adm-empty"
+                  >
+                    Nenhum produto cadastrado.
+                  </td>
+
+                </tr>
+
+                {% endfor %}
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+
+      <!-- ===================================================
+           PROMOÇÕES
+      ==================================================== -->
+
+      <section
+        class="adm-panel"
+        id="panel-promotions"
+      >
+
+        <div class="adm-card">
+
+          <div class="adm-card-header">
+
+            <span class="adm-card-title">
+              Promoções
+            </span>
+
+            <a
+              href="{{ url_for('admin.add_promotion') }}"
+              class="adm-btn adm-btn-primary adm-btn-sm"
+            >
               + Promoção
             </a>
+
           </div>
+
+
           <div class="adm-table-wrap">
+
             <table class="adm-table">
+
               <thead>
+
                 <tr>
-                  <th style="width:52px"></th>
+                  <th></th>
                   <th>Nome</th>
                   <th>Preço original</th>
                   <th>Preço promo</th>
                   <th>Desconto</th>
                   <th>Status</th>
-                  <th style="text-align:center">Ações</th>
+                  <th>Ações</th>
                 </tr>
+
               </thead>
+
+
               <tbody>
+
                 {% for promo in promotions %}
-                {% set disc = ((promo.original_price - promo.sale_price) / promo.original_price * 100)|int
-                              if promo.original_price and promo.original_price > 0 else 0 %}
+
+                {% set disc = (
+                    (
+                      promo.original_price - promo.sale_price
+                    )
+                    / promo.original_price
+                    * 100
+                  )|int
+                  if promo.original_price
+                  and promo.original_price > 0
+                  else 0
+                %}
+
+
                 <tr>
+
+
                   <td>
+
                     {% if promo.image %}
-                    <img src="{{ promo.image }}" alt="{{ promo.name }}" class="adm-thumb">
+
+                    <img
+                      src="{{ promo.image }}"
+                      alt="{{ promo.name }}"
+                      class="adm-thumb"
+                      loading="lazy"
+                    >
+
                     {% else %}
-                    <div class="adm-thumb" style="background:#fde8ec;display:flex;align-items:center;justify-content:center;color:#e8a0b0;font-size:1.2rem">◎</div>
+
+                    <div
+                      class="adm-thumb"
+                      aria-label="Promoção sem imagem"
+                    ></div>
+
                     {% endif %}
+
                   </td>
-                  <td><strong>{{ promo.name or "—" }}</strong></td>
-                  <td style="text-decoration:line-through;color:#aaa">
-                    {% if promo.original_price %}R$ {{ "%.2f"|format(promo.original_price|float) }}{% else %}—{% endif %}
-                  </td>
-                  <td style="color:var(--sale-red);font-weight:700">
-                    {% if promo.sale_price %}R$ {{ "%.2f"|format(promo.sale_price|float) }}{% else %}—{% endif %}
-                  </td>
+
+
                   <td>
+
+                    <strong>
+                      {{ promo.name or "—" }}
+                    </strong>
+
+                  </td>
+
+
+                  <td>
+
+                    {% if promo.original_price %}
+
+                    <del>
+                      R$ {{ "%.2f"|format(promo.original_price|float) }}
+                    </del>
+
+                    {% else %}
+
+                    —
+
+                    {% endif %}
+
+                  </td>
+
+
+                  <td>
+
+                    {% if promo.sale_price %}
+
+                    <strong>
+                      R$ {{ "%.2f"|format(promo.sale_price|float) }}
+                    </strong>
+
+                    {% else %}
+
+                    —
+
+                    {% endif %}
+
+                  </td>
+
+
+                  <td>
+
                     {% if disc > 0 %}
-                    <span class="adm-badge adm-badge-sale">-{{ disc }}%</span>
-                    {% else %}—{% endif %}
-                  </td>
-                  <td>
-                    {% if promo.is_active %}
-                    <span class="adm-badge adm-badge-green">Ativa</span>
+
+                    <span class="adm-badge adm-badge-sale">
+                      -{{ disc }}%
+                    </span>
+
                     {% else %}
-                    <span class="adm-badge adm-badge-red">Inativa</span>
+
+                    —
+
                     {% endif %}
+
                   </td>
+
+
                   <td>
-                    <div class="adm-actions" style="justify-content:center">
-                      <a href="{{ url_for('admin.edit_promotion', id=promo.id) }}"
-                         class="adm-btn adm-btn-edit adm-btn-sm">Editar</a>
-                      <form method="POST"
-                            action="{{ url_for('admin.delete_promotion', id=promo.id) }}"
-                            onsubmit="return confirm('Excluir esta promoção?')">
-                        <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">Excluir</button>
-                      </form>
-                    </div>
+
+                    {% if promo.is_active %}
+
+                    <span class="adm-badge adm-badge-green">
+                      Ativa
+                    </span>
+
+                    {% else %}
+
+                    <span class="adm-badge adm-badge-red">
+                      Inativa
+                    </span>
+
+                    {% endif %}
+
                   </td>
+
+
+                  <td>
+
+                    <div class="adm-actions">
+
+                      <a
+                        href="{{ url_for('admin.edit_promotion', id=promo.id) }}"
+                        class="adm-btn adm-btn-edit adm-btn-sm"
+                      >
+                        Editar
+                      </a>
+
+
+                      <form
+                        method="POST"
+                        action="{{ url_for('admin.delete_promotion', id=promo.id) }}"
+                        onsubmit="return confirm('Excluir esta promoção?')"
+                      >
+
+                        <button
+                          type="submit"
+                          class="adm-btn adm-btn-danger adm-btn-sm"
+                        >
+                          Excluir
+                        </button>
+
+                      </form>
+
+                    </div>
+
+                  </td>
+
                 </tr>
+
+
                 {% else %}
-                <tr><td colspan="7" class="adm-empty">Nenhuma promoção cadastrada.</td></tr>
+
+                <tr>
+
+                  <td
+                    colspan="7"
+                    class="adm-empty"
+                  >
+                    Nenhuma promoção cadastrada.
+                  </td>
+
+                </tr>
+
                 {% endfor %}
+
               </tbody>
+
             </table>
+
           </div>
+
         </div>
 
-      </div><!-- /promotions -->
+      </section>
 
 
 
-      <!-- ══════════════════════════════════════════════════
-           PAINEL: CUPONS
-      ══════════════════════════════════════════════════ -->
-      <div class="adm-panel" id="panel-coupons">
+      <!-- ===================================================
+           CUPONS
+      ==================================================== -->
+
+      <section
+        class="adm-panel"
+        id="panel-coupons"
+      >
 
         <div class="adm-card">
+
           <div class="adm-card-header">
+
             <div>
-              <span class="adm-card-title">Cupons de desconto</span>
-              <div style="font-size:0.78rem;color:#999;margin-top:3px">
-                Gerencie códigos, validade, limites e regras de primeira compra.
+
+              <div class="adm-card-title">
+                Cupons de desconto
               </div>
+
+              <div class="adm-stat-sub">
+                Gerencie códigos, validade, limites e regras
+                de primeira compra.
+              </div>
+
             </div>
 
-            <a href="{{ url_for('admin.add_coupon') }}"
-               class="adm-btn adm-btn-primary adm-btn-sm">
+
+            <a
+              href="{{ url_for('admin.add_coupon') }}"
+              class="adm-btn adm-btn-primary adm-btn-sm"
+            >
               + Cupom
             </a>
+
           </div>
 
+
           <div class="adm-table-wrap">
+
             <table class="adm-table">
+
               <thead>
+
                 <tr>
                   <th>Código</th>
                   <th>Desconto</th>
@@ -445,147 +1231,336 @@
                   <th>Utilizações</th>
                   <th>Regra</th>
                   <th>Status</th>
-                  <th style="text-align:center">Ações</th>
+                  <th>Ações</th>
                 </tr>
+
               </thead>
 
+
               <tbody>
+
                 {% for coupon in coupon_list %}
-                {% set exhausted = coupon.usage_limit is not none and coupon.times_used >= coupon.usage_limit %}
+
+                {% set exhausted =
+                  coupon.usage_limit is not none
+                  and coupon.times_used >= coupon.usage_limit
+                %}
+
 
                 <tr>
+
+
                   <td>
-                    <strong style="font-family:monospace;letter-spacing:0.06em">
+
+                    <strong>
                       {{ coupon.code }}
                     </strong>
 
+
                     {% if coupon.description %}
-                    <div style="font-size:0.76rem;color:#aaa;margin-top:3px;max-width:230px">
-                      {{ coupon.description[:75] }}{% if coupon.description|length > 75 %}…{% endif %}
-                    </div>
-                    {% endif %}
-                  </td>
 
-                  <td>
-                    {% if coupon.discount_type == 'percentage' %}
-                      <strong>
-                        {{ "%.2f"|format(coupon.discount_value|float)|replace('.00', '') }}%
-                      </strong>
+                    <div class="adm-stat-sub">
 
-                      {% if coupon.maximum_discount_amount is not none %}
-                      <div style="font-size:0.75rem;color:#999;margin-top:2px">
-                        teto R$ {{ "%.2f"|format(coupon.maximum_discount_amount|float)|replace('.', ',') }}
-                      </div>
+                      {{ coupon.description[:75] }}
+
+                      {% if coupon.description|length > 75 %}
+                        …
                       {% endif %}
-                    {% else %}
-                      <strong>
-                        R$ {{ "%.2f"|format(coupon.discount_value|float)|replace('.', ',') }}
-                      </strong>
+
+                    </div>
+
                     {% endif %}
+
                   </td>
+
+
 
                   <td>
-                    {% if coupon.minimum_order_amount and coupon.minimum_order_amount|float > 0 %}
-                      R$ {{ "%.2f"|format(coupon.minimum_order_amount|float)|replace('.', ',') }}
-                    {% else %}
-                      <span style="color:#aaa">Sem mínimo</span>
+
+                    {% if coupon.discount_type == 'percentage' %}
+
+                    <strong>
+
+                      {{
+                        "%.2f"
+                        |format(coupon.discount_value|float)
+                        |replace('.00', '')
+                      }}%
+
+                    </strong>
+
+
+                    {% if coupon.maximum_discount_amount is not none %}
+
+                    <div class="adm-stat-sub">
+
+                      teto R$
+
+                      {{
+                        "%.2f"
+                        |format(coupon.maximum_discount_amount|float)
+                        |replace('.', ',')
+                      }}
+
+                    </div>
+
                     {% endif %}
+
+
+                    {% else %}
+
+                    <strong>
+
+                      R$
+
+                      {{
+                        "%.2f"
+                        |format(coupon.discount_value|float)
+                        |replace('.', ',')
+                      }}
+
+                    </strong>
+
+                    {% endif %}
+
                   </td>
 
-                  <td style="font-size:0.78rem;color:#777;white-space:nowrap">
+
+
+                  <td>
+
+                    {% if coupon.minimum_order_amount
+                       and coupon.minimum_order_amount|float > 0
+                    %}
+
+                      R$
+
+                      {{
+                        "%.2f"
+                        |format(coupon.minimum_order_amount|float)
+                        |replace('.', ',')
+                      }}
+
+                    {% else %}
+
+                      Sem mínimo
+
+                    {% endif %}
+
+                  </td>
+
+
+
+                  <td>
+
                     <div>
+
                       Início:
-                      {{ coupon.starts_at.strftime('%d/%m/%Y %H:%M') if coupon.starts_at else 'imediato' }}
+
+                      {{
+                        coupon.starts_at.strftime('%d/%m/%Y %H:%M')
+                        if coupon.starts_at
+                        else 'imediato'
+                      }}
+
                     </div>
-                    <div style="margin-top:3px">
+
+
+                    <div class="adm-stat-sub">
+
                       Fim:
-                      {{ coupon.ends_at.strftime('%d/%m/%Y %H:%M') if coupon.ends_at else 'sem prazo' }}
+
+                      {{
+                        coupon.ends_at.strftime('%d/%m/%Y %H:%M')
+                        if coupon.ends_at
+                        else 'sem prazo'
+                      }}
+
                     </div>
+
                   </td>
 
+
+
                   <td>
+
                     {% if coupon.usage_limit is none %}
-                      <span class="adm-badge adm-badge-gray">
-                        {{ coupon.times_used }} / ∞
-                      </span>
+
+                    <span class="adm-badge adm-badge-gray">
+                      {{ coupon.times_used }} / ∞
+                    </span>
+
                     {% else %}
-                      <span class="adm-badge {{ 'adm-badge-red' if exhausted else 'adm-badge-gray' }}">
-                        {{ coupon.times_used }} / {{ coupon.usage_limit }}
-                      </span>
+
+                    <span
+                      class="adm-badge {{
+                        'adm-badge-red'
+                        if exhausted
+                        else 'adm-badge-gray'
+                      }}"
+                    >
+                      {{ coupon.times_used }}
+                      /
+                      {{ coupon.usage_limit }}
+                    </span>
+
                     {% endif %}
+
                   </td>
 
+
+
                   <td>
+
                     {% if coupon.first_purchase_only %}
-                      <span class="adm-badge adm-badge-accent">1ª compra</span>
+
+                    <span class="adm-badge adm-badge-accent">
+                      1ª compra
+                    </span>
+
                     {% else %}
-                      <span class="adm-badge adm-badge-gray">Geral</span>
+
+                    <span class="adm-badge adm-badge-gray">
+                      Geral
+                    </span>
+
                     {% endif %}
+
                   </td>
 
+
+
                   <td>
+
                     {% if exhausted %}
-                      <span class="adm-badge adm-badge-red">Esgotado</span>
+
+                    <span class="adm-badge adm-badge-red">
+                      Esgotado
+                    </span>
+
                     {% elif coupon.is_active %}
-                      <span class="adm-badge adm-badge-green">Ativo</span>
+
+                    <span class="adm-badge adm-badge-green">
+                      Ativo
+                    </span>
+
                     {% else %}
-                      <span class="adm-badge adm-badge-red">Inativo</span>
+
+                    <span class="adm-badge adm-badge-red">
+                      Inativo
+                    </span>
+
                     {% endif %}
+
                   </td>
 
+
+
                   <td>
-                    <div class="adm-actions" style="justify-content:center">
-                      <a href="{{ url_for('admin.edit_coupon', id=coupon.id) }}"
-                         class="adm-btn adm-btn-edit adm-btn-sm">
+
+                    <div class="adm-actions">
+
+                      <a
+                        href="{{ url_for('admin.edit_coupon', id=coupon.id) }}"
+                        class="adm-btn adm-btn-edit adm-btn-sm"
+                      >
                         Editar
                       </a>
 
-                      <form method="POST"
-                            action="{{ url_for('admin.delete_coupon', id=coupon.id) }}"
-                            onsubmit="return confirm('Excluir o cupom {{ coupon.code }}?')">
+
+                      <form
+                        method="POST"
+                        action="{{ url_for('admin.delete_coupon', id=coupon.id) }}"
+                        onsubmit="return confirm('Excluir o cupom {{ coupon.code }}?')"
+                      >
+
                         {% if csrf_token %}
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                        <input
+                          type="hidden"
+                          name="csrf_token"
+                          value="{{ csrf_token() }}"
+                        >
+
                         {% endif %}
 
-                        <button type="submit"
-                                class="adm-btn adm-btn-danger adm-btn-sm">
+
+                        <button
+                          type="submit"
+                          class="adm-btn adm-btn-danger adm-btn-sm"
+                        >
                           Excluir
                         </button>
+
                       </form>
+
                     </div>
+
                   </td>
+
                 </tr>
+
 
                 {% else %}
+
                 <tr>
-                  <td colspan="8" class="adm-empty">
+
+                  <td
+                    colspan="8"
+                    class="adm-empty"
+                  >
                     Nenhum cupom cadastrado.
                   </td>
+
                 </tr>
+
                 {% endfor %}
+
               </tbody>
+
             </table>
+
           </div>
+
         </div>
 
-      </div><!-- /coupons -->
+      </section>
 
 
-      <!-- ══════════════════════════════════════════════════
-           PAINEL: FORNECEDORES
-      ══════════════════════════════════════════════════ -->
-      <div class="adm-panel" id="panel-suppliers">
+
+      <!-- ===================================================
+           FORNECEDORES
+      ==================================================== -->
+
+      <section
+        class="adm-panel"
+        id="panel-suppliers"
+      >
 
         <div class="adm-card">
+
           <div class="adm-card-header">
-            <span class="adm-card-title">Fornecedores</span>
-            <a href="{{ url_for('admin.add_supplier') }}" class="adm-btn adm-btn-primary adm-btn-sm">
+
+            <span class="adm-card-title">
+              Fornecedores
+            </span>
+
+            <a
+              href="{{ url_for('admin.add_supplier') }}"
+              class="adm-btn adm-btn-primary adm-btn-sm"
+            >
               + Fornecedor
             </a>
+
           </div>
+
+
           <div class="adm-table-wrap">
+
             <table class="adm-table">
+
               <thead>
+
                 <tr>
                   <th>Nome</th>
                   <th>Empresa</th>
@@ -593,529 +1568,1402 @@
                   <th>E-mail</th>
                   <th>Site</th>
                   <th>Produtos</th>
-                  <th style="text-align:center">Ações</th>
+                  <th>Ações</th>
                 </tr>
+
               </thead>
+
+
               <tbody>
+
                 {% for s in suppliers %}
+
                 <tr>
-                  <td><strong>{{ s.name }}</strong></td>
-                  <td>{{ s.company_name or "—" }}</td>
-                  <td>{{ s.phone or "—" }}</td>
-                  <td>{{ s.email or "—" }}</td>
+
                   <td>
+                    <strong>{{ s.name }}</strong>
+                  </td>
+
+                  <td>
+                    {{ s.company_name or "—" }}
+                  </td>
+
+                  <td>
+                    {{ s.phone or "—" }}
+                  </td>
+
+                  <td>
+                    {{ s.email or "—" }}
+                  </td>
+
+                  <td>
+
                     {% if s.website %}
-                    <a href="{{ s.website }}" target="_blank"
-                       style="color:var(--accent);font-size:0.8rem">
+
+                    <a
+                      href="{{ s.website }}"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       {{ s.website|truncate(28, true, '…') }}
                     </a>
-                    {% else %}—{% endif %}
+
+                    {% else %}
+
+                    —
+
+                    {% endif %}
+
                   </td>
+
+
                   <td>
+
                     <span class="adm-badge adm-badge-gray">
-                      {{ s.products|length }} produto{{ 's' if s.products|length != 1 }}
+
+                      {{ s.products|length }}
+
+                      produto{{ 's' if s.products|length != 1 }}
+
                     </span>
+
                   </td>
+
+
                   <td>
-                    <div class="adm-actions" style="justify-content:center">
-                      <a href="{{ url_for('admin.edit_supplier', id=s.id) }}"
-                         class="adm-btn adm-btn-edit adm-btn-sm">Editar</a>
-                      <form method="POST"
-                            action="{{ url_for('admin.delete_supplier', id=s.id) }}"
-                            onsubmit="return confirm('Excluir {{ s.name }}?')">
-                        <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">Excluir</button>
+
+                    <div class="adm-actions">
+
+                      <a
+                        href="{{ url_for('admin.edit_supplier', id=s.id) }}"
+                        class="adm-btn adm-btn-edit adm-btn-sm"
+                      >
+                        Editar
+                      </a>
+
+
+                      <form
+                        method="POST"
+                        action="{{ url_for('admin.delete_supplier', id=s.id) }}"
+                        onsubmit="return confirm('Excluir {{ s.name }}?')"
+                      >
+
+                        <button
+                          type="submit"
+                          class="adm-btn adm-btn-danger adm-btn-sm"
+                        >
+                          Excluir
+                        </button>
+
                       </form>
+
                     </div>
+
                   </td>
+
                 </tr>
+
+
                 {% else %}
-                <tr><td colspan="7" class="adm-empty">Nenhum fornecedor cadastrado.</td></tr>
+
+                <tr>
+
+                  <td
+                    colspan="7"
+                    class="adm-empty"
+                  >
+                    Nenhum fornecedor cadastrado.
+                  </td>
+
+                </tr>
+
                 {% endfor %}
+
               </tbody>
+
             </table>
+
           </div>
+
         </div>
 
-      </div><!-- /suppliers -->
+      </section>
 
 
-      <!-- ══════════════════════════════════════════════════
-           PAINEL: USUÁRIOS
-      ══════════════════════════════════════════════════ -->
-      <div class="adm-panel" id="panel-users">
+
+      <!-- ===================================================
+           USUÁRIOS
+      ==================================================== -->
+
+      <section
+        class="adm-panel"
+        id="panel-users"
+      >
 
         <div class="adm-card">
+
           <div class="adm-card-header">
-            <span class="adm-card-title">Usuários</span>
-            <a href="{{ url_for('admin.add_user') }}" class="adm-btn adm-btn-dark adm-btn-sm">
+
+            <span class="adm-card-title">
+              Usuários
+            </span>
+
+            <a
+              href="{{ url_for('admin.add_user') }}"
+              class="adm-btn adm-btn-dark adm-btn-sm"
+            >
               + Usuário
             </a>
+
           </div>
+
+
           <div class="adm-table-wrap">
+
             <table class="adm-table">
+
               <thead>
+
                 <tr>
                   <th>Nome</th>
                   <th>E-mail</th>
                   <th>Telefone</th>
                   <th>Perfil</th>
                   <th>Cadastro</th>
-                  <th style="text-align:center">Ações</th>
+                  <th>Ações</th>
                 </tr>
+
               </thead>
+
+
               <tbody>
+
                 {% for u in users %}
+
                 <tr>
-                  <td><strong>{{ u.name }}</strong></td>
-                  <td>{{ u.email }}</td>
-                  <td>{{ u.phone or "—" }}</td>
+
                   <td>
+                    <strong>{{ u.name }}</strong>
+                  </td>
+
+                  <td>
+                    {{ u.email }}
+                  </td>
+
+                  <td>
+                    {{ u.phone or "—" }}
+                  </td>
+
+                  <td>
+
                     {% if u.is_admin %}
-                    <span class="adm-badge adm-badge-accent">Admin</span>
+
+                    <span class="adm-badge adm-badge-accent">
+                      Admin
+                    </span>
+
                     {% else %}
-                    <span class="adm-badge adm-badge-gray">Cliente</span>
+
+                    <span class="adm-badge adm-badge-gray">
+                      Cliente
+                    </span>
+
                     {% endif %}
+
                   </td>
-                  <td style="font-size:0.8rem;color:#aaa">
-                    {{ u.created_at.strftime('%d/%m/%Y') if u.created_at else "—" }}
-                  </td>
+
+
                   <td>
-                    <div class="adm-actions" style="justify-content:center">
-                      {% if not u.is_admin %}
-                      <a href="{{ url_for('admin.edit_user', id=u.id) }}"
-                         class="adm-btn adm-btn-edit adm-btn-sm">Editar</a>
-                      {% endif %}
-                      {% if current_user.id != u.id %}
-                      <form method="POST"
-                            action="{{ url_for('admin.delete_user', id=u.id) }}"
-                            onsubmit="return confirm('Excluir {{ u.name }}?')">
-                        <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">Excluir</button>
-                      </form>
-                      {% endif %}
-                    </div>
+
+                    {{
+                      u.created_at.strftime('%d/%m/%Y')
+                      if u.created_at
+                      else "—"
+                    }}
+
                   </td>
+
+
+                  <td>
+
+                    <div class="adm-actions">
+
+                      {% if not u.is_admin %}
+
+                      <a
+                        href="{{ url_for('admin.edit_user', id=u.id) }}"
+                        class="adm-btn adm-btn-edit adm-btn-sm"
+                      >
+                        Editar
+                      </a>
+
+                      {% endif %}
+
+
+                      {% if current_user.id != u.id %}
+
+                      <form
+                        method="POST"
+                        action="{{ url_for('admin.delete_user', id=u.id) }}"
+                        onsubmit="return confirm('Excluir {{ u.name }}?')"
+                      >
+
+                        <button
+                          type="submit"
+                          class="adm-btn adm-btn-danger adm-btn-sm"
+                        >
+                          Excluir
+                        </button>
+
+                      </form>
+
+                      {% endif %}
+
+                    </div>
+
+                  </td>
+
                 </tr>
+
+
                 {% else %}
-                <tr><td colspan="6" class="adm-empty">Nenhum usuário cadastrado.</td></tr>
+
+                <tr>
+
+                  <td
+                    colspan="6"
+                    class="adm-empty"
+                  >
+                    Nenhum usuário cadastrado.
+                  </td>
+
+                </tr>
+
                 {% endfor %}
+
               </tbody>
+
             </table>
+
           </div>
+
         </div>
 
-      </div><!-- /users -->
+      </section>
 
 
-      <!-- ══════════════════════════════════════════════════
-           PAINEL: DEPOIMENTOS
-      ══════════════════════════════════════════════════ -->
-      <div class="adm-panel" id="panel-testimonials">
+
+      <!-- ===================================================
+           DEPOIMENTOS
+      ==================================================== -->
+
+      <section
+        class="adm-panel"
+        id="panel-testimonials"
+      >
 
         <div class="adm-card">
+
           <div class="adm-card-header">
-            <span class="adm-card-title">Depoimentos</span>
-            <a href="{{ url_for('admin.add_testimonial') }}" class="adm-btn adm-btn-primary adm-btn-sm">
+
+            <span class="adm-card-title">
+              Depoimentos
+            </span>
+
+            <a
+              href="{{ url_for('admin.add_testimonial') }}"
+              class="adm-btn adm-btn-primary adm-btn-sm"
+            >
               + Depoimento
             </a>
+
           </div>
+
+
           <div class="adm-table-wrap">
+
             <table class="adm-table">
+
               <thead>
+
                 <tr>
                   <th>Autor</th>
                   <th>Avaliação</th>
                   <th>Texto</th>
                   <th>Visível</th>
-                  <th style="text-align:center">Ações</th>
+                  <th>Ações</th>
                 </tr>
+
               </thead>
+
+
               <tbody>
+
                 {% for t in testimonials %}
+
                 <tr>
-                  <td><strong>{{ t.author or "Anônimo" }}</strong></td>
+
                   <td>
+                    <strong>
+                      {{ t.author or "Anônimo" }}
+                    </strong>
+                  </td>
+
+
+                  <td>
+
                     <span class="adm-stars">
-                      {% for i in range(5) %}{{ "★" if i < t.rating else "☆" }}{% endfor %}
+
+                      {% for i in range(5) %}
+                        {{ "★" if i < t.rating else "☆" }}
+                      {% endfor %}
+
                     </span>
-                    <span style="font-size:0.78rem;color:#aaa;margin-left:4px">{{ t.rating }}/5</span>
-                  </td>
-                  <td style="max-width:320px">
-                    <span style="font-style:italic;color:#666;font-size:0.85rem">
-                      "{{ t.text[:100] if t.text else '—' }}{% if t.text and t.text|length > 100 %}…{% endif %}"
-                    </span>
-                  </td>
-                  <td>
-                    {% if t.is_visible %}
-                    <span class="adm-badge adm-badge-green">Visível</span>
-                    {% else %}
-                    <span class="adm-badge adm-badge-red">Oculto</span>
-                    {% endif %}
-                  </td>
-                  <td>
-                    <div class="adm-actions" style="justify-content:center">
-                      <a href="{{ url_for('admin.edit_testimonial', id=t.id) }}"
-                         class="adm-btn adm-btn-edit adm-btn-sm">Editar</a>
-                      <form method="POST"
-                            action="{{ url_for('admin.delete_testimonial', id=t.id) }}"
-                            onsubmit="return confirm('Excluir este depoimento?')">
-                        <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">Excluir</button>
-                      </form>
+
+                    <div class="adm-stat-sub">
+                      {{ t.rating }}/5
                     </div>
+
                   </td>
+
+
+                  <td>
+
+                    <em>
+
+                      "{{ t.text[:100] if t.text else '—' }}
+
+                      {% if t.text and t.text|length > 100 %}
+                        …
+                      {% endif %}"
+
+                    </em>
+
+                  </td>
+
+
+                  <td>
+
+                    {% if t.is_visible %}
+
+                    <span class="adm-badge adm-badge-green">
+                      Visível
+                    </span>
+
+                    {% else %}
+
+                    <span class="adm-badge adm-badge-red">
+                      Oculto
+                    </span>
+
+                    {% endif %}
+
+                  </td>
+
+
+                  <td>
+
+                    <div class="adm-actions">
+
+                      <a
+                        href="{{ url_for('admin.edit_testimonial', id=t.id) }}"
+                        class="adm-btn adm-btn-edit adm-btn-sm"
+                      >
+                        Editar
+                      </a>
+
+
+                      <form
+                        method="POST"
+                        action="{{ url_for('admin.delete_testimonial', id=t.id) }}"
+                        onsubmit="return confirm('Excluir este depoimento?')"
+                      >
+
+                        <button
+                          type="submit"
+                          class="adm-btn adm-btn-danger adm-btn-sm"
+                        >
+                          Excluir
+                        </button>
+
+                      </form>
+
+                    </div>
+
+                  </td>
+
                 </tr>
+
+
                 {% else %}
-                <tr><td colspan="5" class="adm-empty">Nenhum depoimento cadastrado.</td></tr>
+
+                <tr>
+
+                  <td
+                    colspan="5"
+                    class="adm-empty"
+                  >
+                    Nenhum depoimento cadastrado.
+                  </td>
+
+                </tr>
+
                 {% endfor %}
+
               </tbody>
+
             </table>
+
           </div>
+
         </div>
 
-      </div><!-- /testimonials -->
+      </section>
 
 
-      <!-- ══════════════════════════════════════════════════
-           PAINEL: HERO SLIDES
-      ══════════════════════════════════════════════════ -->
-      <div class="adm-panel" id="panel-hero">
+
+      <!-- ===================================================
+           HERO SLIDES
+      ==================================================== -->
+
+      <section
+        class="adm-panel"
+        id="panel-hero"
+      >
 
         <div class="adm-card">
+
           <div class="adm-card-header">
-            <span class="adm-card-title">Hero slides</span>
-            <a href="{{ url_for('admin.add_hero_slide') }}" class="adm-btn adm-btn-primary adm-btn-sm">
+
+            <span class="adm-card-title">
+              Hero slides
+            </span>
+
+            <a
+              href="{{ url_for('admin.add_hero_slide') }}"
+              class="adm-btn adm-btn-primary adm-btn-sm"
+            >
               + Slide
             </a>
+
           </div>
+
+
           <div class="adm-table-wrap">
+
             <table class="adm-table">
+
               <thead>
+
                 <tr>
-                  <th style="width:52px"></th>
+                  <th></th>
                   <th>Eyebrow</th>
                   <th>Título</th>
                   <th>Alt</th>
-                  <th style="text-align:center">Ações</th>
+                  <th>Ações</th>
                 </tr>
+
               </thead>
+
+
               <tbody>
+
                 {% for slide in hero_slides %}
+
                 <tr>
+
                   <td>
-                    <img src="{{ slide.image }}" alt="{{ slide.alt }}" class="adm-thumb">
+
+                    <img
+                      src="{{ slide.image }}"
+                      alt="{{ slide.alt }}"
+                      class="adm-thumb"
+                      loading="lazy"
+                    >
+
                   </td>
-                  <td style="font-size:0.78rem;color:#aaa;letter-spacing:0.06em;text-transform:uppercase">
+
+
+                  <td>
                     {{ slide.eyebrow or "—" }}
                   </td>
-                  <td><strong>{{ slide.title or "—" }}</strong></td>
-                  <td style="font-size:0.8rem;color:#999">{{ slide.alt or "—" }}</td>
+
+
                   <td>
-                    <div class="adm-actions" style="justify-content:center">
-                      <a href="{{ url_for('admin.edit_hero_slide', id=slide.id) }}"
-                         class="adm-btn adm-btn-edit adm-btn-sm">Editar</a>
-                      <form method="POST"
-                            action="{{ url_for('admin.delete_hero_slide', id=slide.id) }}"
-                            onsubmit="return confirm('Excluir este slide?')">
-                        <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">Excluir</button>
-                      </form>
-                    </div>
+
+                    <strong>
+                      {{ slide.title or "—" }}
+                    </strong>
+
                   </td>
+
+
+                  <td>
+                    {{ slide.alt or "—" }}
+                  </td>
+
+
+                  <td>
+
+                    <div class="adm-actions">
+
+                      <a
+                        href="{{ url_for('admin.edit_hero_slide', id=slide.id) }}"
+                        class="adm-btn adm-btn-edit adm-btn-sm"
+                      >
+                        Editar
+                      </a>
+
+
+                      <form
+                        method="POST"
+                        action="{{ url_for('admin.delete_hero_slide', id=slide.id) }}"
+                        onsubmit="return confirm('Excluir este slide?')"
+                      >
+
+                        <button
+                          type="submit"
+                          class="adm-btn adm-btn-danger adm-btn-sm"
+                        >
+                          Excluir
+                        </button>
+
+                      </form>
+
+                    </div>
+
+                  </td>
+
                 </tr>
+
+
                 {% else %}
-                <tr><td colspan="5" class="adm-empty">Nenhum slide cadastrado.</td></tr>
+
+                <tr>
+
+                  <td
+                    colspan="5"
+                    class="adm-empty"
+                  >
+                    Nenhum slide cadastrado.
+                  </td>
+
+                </tr>
+
                 {% endfor %}
+
               </tbody>
+
             </table>
+
           </div>
+
         </div>
 
-      </div><!-- /hero -->
+      </section>
 
 
-      <!-- ══════════════════════════════════════════════════
-           PAINEL: CONFIGURAÇÕES DO SITE
-      ══════════════════════════════════════════════════ -->
-      <div class="adm-panel" id="panel-siteconfig">
 
-        <div class="adm-card" style="margin-bottom:1.5rem">
+      <!-- ===================================================
+           CONFIGURAÇÕES DO SITE
+      ==================================================== -->
+
+      <section
+        class="adm-panel"
+        id="panel-siteconfig"
+      >
+
+
+        <!-- Configurações gerais -->
+
+        <div class="adm-card">
+
           <div class="adm-card-header">
-            <span class="adm-card-title">Configurações gerais</span>
+
+            <span class="adm-card-title">
+              Configurações gerais
+            </span>
+
+
             {% if config %}
-            <a href="{{ url_for('admin.edit_site_config') }}" class="adm-btn adm-btn-dark adm-btn-sm">
+
+            <a
+              href="{{ url_for('admin.edit_site_config') }}"
+              class="adm-btn adm-btn-dark adm-btn-sm"
+            >
               Editar
             </a>
+
             {% else %}
-            <a href="{{ url_for('admin.add_site_config') }}" class="adm-btn adm-btn-primary adm-btn-sm">
+
+            <a
+              href="{{ url_for('admin.add_site_config') }}"
+              class="adm-btn adm-btn-primary adm-btn-sm"
+            >
               Configurar
             </a>
+
             {% endif %}
+
           </div>
+
+
           {% if config %}
-          <div class="adm-config-grid" style="padding:1.5rem">
+
+          <div class="adm-config-grid">
+
+
             <div class="adm-config-item">
-              <span class="adm-config-item-label">Nome do site</span>
-              <span class="adm-config-item-value">{{ config.name }}</span>
+
+              <span class="adm-config-item-label">
+                Nome do site
+              </span>
+
+              <span class="adm-config-item-value">
+                {{ config.name }}
+              </span>
+
             </div>
+
+
             <div class="adm-config-item">
-              <span class="adm-config-item-label">Meta description</span>
-              <span class="adm-config-item-value {{ '' if config.meta_description else 'empty' }}">
+
+              <span class="adm-config-item-label">
+                Meta description
+              </span>
+
+              <span
+                class="adm-config-item-value {{
+                  '' if config.meta_description else 'empty'
+                }}"
+              >
                 {{ config.meta_description or "Não definida" }}
               </span>
+
             </div>
+
+
             <div class="adm-config-item">
-              <span class="adm-config-item-label">Frase do banner CTA</span>
-              <span class="adm-config-item-value {{ '' if config.banner_quote else 'empty' }}">
+
+              <span class="adm-config-item-label">
+                Frase do banner CTA
+              </span>
+
+              <span
+                class="adm-config-item-value {{
+                  '' if config.banner_quote else 'empty'
+                }}"
+              >
                 {{ config.banner_quote or "Não definida" }}
               </span>
+
             </div>
+
+
             <div class="adm-config-item">
-              <span class="adm-config-item-label">Texto CTA</span>
-              <span class="adm-config-item-value {{ '' if config.banner_cta_text else 'empty' }}">
+
+              <span class="adm-config-item-label">
+                Texto CTA
+              </span>
+
+              <span
+                class="adm-config-item-value {{
+                  '' if config.banner_cta_text else 'empty'
+                }}"
+              >
                 {{ config.banner_cta_text or "Não definido" }}
               </span>
+
             </div>
+
+
             <div class="adm-config-item">
-              <span class="adm-config-item-label">Badge promoções</span>
-              <span class="adm-config-item-value {{ '' if config.promo_badge else 'empty' }}">
+
+              <span class="adm-config-item-label">
+                Badge promoções
+              </span>
+
+              <span
+                class="adm-config-item-value {{
+                  '' if config.promo_badge else 'empty'
+                }}"
+              >
                 {{ config.promo_badge or "Não definido" }}
               </span>
+
             </div>
+
+
             <div class="adm-config-item">
-              <span class="adm-config-item-label">Copyright</span>
-              <span class="adm-config-item-value">
-                © {{ config.copyright_year }} {{ config.copyright_text }}
+
+              <span class="adm-config-item-label">
+                Copyright
               </span>
+
+              <span class="adm-config-item-value">
+
+                ©
+                {{ config.copyright_year }}
+                {{ config.copyright_text }}
+
+              </span>
+
             </div>
+
           </div>
+
+
           {% else %}
-          <div class="adm-empty">Configurações do site ainda não definidas.</div>
+
+          <div class="adm-empty">
+            Configurações do site ainda não definidas.
+          </div>
+
           {% endif %}
+
         </div>
+
+
 
         <!-- Redes sociais -->
+
         <div class="adm-card">
+
           <div class="adm-card-header">
-            <span class="adm-card-title">Redes sociais</span>
-            <a href="{{ url_for('admin.add_social_link') }}" class="adm-btn adm-btn-primary adm-btn-sm">
+
+            <span class="adm-card-title">
+              Redes sociais
+            </span>
+
+            <a
+              href="{{ url_for('admin.add_social_link') }}"
+              class="adm-btn adm-btn-primary adm-btn-sm"
+            >
               + Link
             </a>
+
           </div>
+
+
           <div class="adm-table-wrap">
+
             <table class="adm-table">
+
               <thead>
-                <tr><th>Label</th><th>Ícone</th><th>URL</th><th style="text-align:center">Ações</th></tr>
-              </thead>
-              <tbody>
-                {% for sl in social_links %}
+
                 <tr>
-                  <td><strong>{{ sl.label }}</strong></td>
-                  <td>{{ sl.icon or "—" }}</td>
-                  <td style="font-size:0.8rem;color:#888">{{ sl.url or "—" }}</td>
-                  <td>
-                    <div class="adm-actions" style="justify-content:center">
-                      <a href="{{ url_for('admin.edit_social_link', id=sl.id) }}"
-                         class="adm-btn adm-btn-edit adm-btn-sm">Editar</a>
-                      <form method="POST" action="{{ url_for('admin.delete_social_link', id=sl.id) }}"
-                            onsubmit="return confirm('Excluir?')">
-                        <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">Excluir</button>
-                      </form>
-                    </div>
-                  </td>
+                  <th>Label</th>
+                  <th>Ícone</th>
+                  <th>URL</th>
+                  <th>Ações</th>
                 </tr>
+
+              </thead>
+
+
+              <tbody>
+
+                {% for sl in social_links %}
+
+                <tr>
+
+                  <td>
+                    <strong>{{ sl.label }}</strong>
+                  </td>
+
+                  <td>
+                    {{ sl.icon or "—" }}
+                  </td>
+
+                  <td>
+                    {{ sl.url or "—" }}
+                  </td>
+
+                  <td>
+
+                    <div class="adm-actions">
+
+                      <a
+                        href="{{ url_for('admin.edit_social_link', id=sl.id) }}"
+                        class="adm-btn adm-btn-edit adm-btn-sm"
+                      >
+                        Editar
+                      </a>
+
+
+                      <form
+                        method="POST"
+                        action="{{ url_for('admin.delete_social_link', id=sl.id) }}"
+                        onsubmit="return confirm('Excluir?')"
+                      >
+
+                        <button
+                          type="submit"
+                          class="adm-btn adm-btn-danger adm-btn-sm"
+                        >
+                          Excluir
+                        </button>
+
+                      </form>
+
+                    </div>
+
+                  </td>
+
+                </tr>
+
+
                 {% else %}
-                <tr><td colspan="4" class="adm-empty">Nenhuma rede social cadastrada.</td></tr>
+
+                <tr>
+
+                  <td
+                    colspan="4"
+                    class="adm-empty"
+                  >
+                    Nenhuma rede social cadastrada.
+                  </td>
+
+                </tr>
+
                 {% endfor %}
+
               </tbody>
+
             </table>
+
           </div>
+
         </div>
 
-      </div><!-- /siteconfig -->
+      </section>
 
 
-      <!-- ══════════════════════════════════════════════════
-           PAINEL: RODAPÉ & LINKS
-      ══════════════════════════════════════════════════ -->
-      <div class="adm-panel" id="panel-footer">
 
-        <!-- FooterConfig -->
-        <div class="adm-card" style="margin-bottom:1.5rem">
+      <!-- ===================================================
+           RODAPÉ E LINKS
+      ==================================================== -->
+
+      <section
+        class="adm-panel"
+        id="panel-footer"
+      >
+
+
+        <!-- Marca -->
+
+        <div class="adm-card">
+
           <div class="adm-card-header">
-            <span class="adm-card-title">Marca no rodapé</span>
+
+            <span class="adm-card-title">
+              Marca no rodapé
+            </span>
+
+
             {% if footer_config %}
-            <a href="{{ url_for('admin.edit_footer_config') }}" class="adm-btn adm-btn-dark adm-btn-sm">
+
+            <a
+              href="{{ url_for('admin.edit_footer_config') }}"
+              class="adm-btn adm-btn-dark adm-btn-sm"
+            >
               Editar
             </a>
+
             {% else %}
-            <a href="{{ url_for('admin.add_footer_config') }}" class="adm-btn adm-btn-primary adm-btn-sm">
+
+            <a
+              href="{{ url_for('admin.add_footer_config') }}"
+              class="adm-btn adm-btn-primary adm-btn-sm"
+            >
               Configurar
             </a>
+
             {% endif %}
+
           </div>
+
+
           {% if footer_config %}
-          <div class="adm-config-grid" style="padding:1.5rem">
+
+          <div class="adm-config-grid">
+
+
             <div class="adm-config-item">
-              <span class="adm-config-item-label">Nome da marca</span>
-              <span class="adm-config-item-value">{{ footer_config.brand_name }}</span>
+
+              <span class="adm-config-item-label">
+                Nome da marca
+              </span>
+
+              <span class="adm-config-item-value">
+                {{ footer_config.brand_name }}
+              </span>
+
             </div>
+
+
             <div class="adm-config-item">
-              <span class="adm-config-item-label">Descrição</span>
-              <span class="adm-config-item-value {{ '' if footer_config.brand_description else 'empty' }}">
+
+              <span class="adm-config-item-label">
+                Descrição
+              </span>
+
+              <span
+                class="adm-config-item-value {{
+                  '' if footer_config.brand_description else 'empty'
+                }}"
+              >
                 {{ footer_config.brand_description or "Não definida" }}
               </span>
+
             </div>
+
           </div>
+
+
           {% else %}
-          <div class="adm-empty">Configuração do rodapé ainda não definida.</div>
+
+          <div class="adm-empty">
+            Configuração do rodapé ainda não definida.
+          </div>
+
           {% endif %}
+
         </div>
+
+
 
         <!-- Contato -->
-        <div class="adm-card" style="margin-bottom:1.5rem">
+
+        <div class="adm-card">
+
           <div class="adm-card-header">
-            <span class="adm-card-title">Informações de contato</span>
+
+            <span class="adm-card-title">
+              Informações de contato
+            </span>
+
+
             {% if contact_info %}
-            <a href="{{ url_for('admin.edit_contact_info') }}" class="adm-btn adm-btn-dark adm-btn-sm">
+
+            <a
+              href="{{ url_for('admin.edit_contact_info') }}"
+              class="adm-btn adm-btn-dark adm-btn-sm"
+            >
               Editar
             </a>
+
             {% else %}
-            <a href="{{ url_for('admin.add_contact_info') }}" class="adm-btn adm-btn-primary adm-btn-sm">
+
+            <a
+              href="{{ url_for('admin.add_contact_info') }}"
+              class="adm-btn adm-btn-primary adm-btn-sm"
+            >
               Configurar
             </a>
+
             {% endif %}
+
           </div>
+
+
           {% if contact_info %}
-          <div class="adm-config-grid" style="padding:1.5rem">
+
+          <div class="adm-config-grid">
+
+
             <div class="adm-config-item">
-              <span class="adm-config-item-label">Endereço</span>
-              <span class="adm-config-item-value">{{ contact_info.address or "—" }}</span>
+
+              <span class="adm-config-item-label">
+                Endereço
+              </span>
+
+              <span class="adm-config-item-value">
+                {{ contact_info.address or "—" }}
+              </span>
+
             </div>
+
+
             <div class="adm-config-item">
-              <span class="adm-config-item-label">Telefone</span>
-              <span class="adm-config-item-value">{{ contact_info.phone or "—" }}</span>
+
+              <span class="adm-config-item-label">
+                Telefone
+              </span>
+
+              <span class="adm-config-item-value">
+                {{ contact_info.phone or "—" }}
+              </span>
+
             </div>
+
+
             <div class="adm-config-item">
-              <span class="adm-config-item-label">E-mail</span>
-              <span class="adm-config-item-value">{{ contact_info.email or "—" }}</span>
+
+              <span class="adm-config-item-label">
+                E-mail
+              </span>
+
+              <span class="adm-config-item-value">
+                {{ contact_info.email or "—" }}
+              </span>
+
             </div>
+
+
             <div class="adm-config-item">
-              <span class="adm-config-item-label">Horário</span>
-              <span class="adm-config-item-value">{{ contact_info.hours or "—" }}</span>
+
+              <span class="adm-config-item-label">
+                Horário
+              </span>
+
+              <span class="adm-config-item-value">
+                {{ contact_info.hours or "—" }}
+              </span>
+
             </div>
+
           </div>
+
+
           {% else %}
-          <div class="adm-empty">Informações de contato ainda não definidas.</div>
+
+          <div class="adm-empty">
+            Informações de contato ainda não definidas.
+          </div>
+
           {% endif %}
-        </div>
-
-        <!-- Nav links + Category links + Legal links em grid -->
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1rem">
-
-          <!-- Nav links -->
-          <div class="adm-card">
-            <div class="adm-card-header">
-              <span class="adm-card-title">Links de navegação</span>
-              <a href="{{ url_for('admin.add_nav_link') }}" class="adm-btn adm-btn-primary adm-btn-sm">+</a>
-            </div>
-            <div class="adm-table-wrap">
-              <table class="adm-table">
-                <thead><tr><th>Label</th><th>URL</th><th></th></tr></thead>
-                <tbody>
-                  {% for nl in nav_links %}
-                  <tr>
-                    <td>{{ nl.label }}</td>
-                    <td style="font-size:0.78rem;color:#aaa">{{ nl.url }}</td>
-                    <td>
-                      <div class="adm-actions">
-                        <a href="{{ url_for('admin.edit_nav_link', id=nl.id) }}"
-                           class="adm-btn adm-btn-edit adm-btn-sm">✎</a>
-                        <form method="POST" action="{{ url_for('admin.delete_nav_link', id=nl.id) }}"
-                              onsubmit="return confirm('Excluir?')">
-                          <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">✕</button>
-                        </form>
-                      </div>
-                    </td>
-                  </tr>
-                  {% else %}
-                  <tr><td colspan="3" class="adm-empty">Vazio</td></tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- Category links -->
-          <div class="adm-card">
-            <div class="adm-card-header">
-              <span class="adm-card-title">Links de categorias</span>
-              <a href="{{ url_for('admin.add_category_link') }}" class="adm-btn adm-btn-primary adm-btn-sm">+</a>
-            </div>
-            <div class="adm-table-wrap">
-              <table class="adm-table">
-                <thead><tr><th>Label</th><th>URL</th><th></th></tr></thead>
-                <tbody>
-                  {% for cl in category_links %}
-                  <tr>
-                    <td>{{ cl.label }}</td>
-                    <td style="font-size:0.78rem;color:#aaa">{{ cl.url }}</td>
-                    <td>
-                      <div class="adm-actions">
-                        <a href="{{ url_for('admin.edit_category_link', id=cl.id) }}"
-                           class="adm-btn adm-btn-edit adm-btn-sm">✎</a>
-                        <form method="POST" action="{{ url_for('admin.delete_category_link', id=cl.id) }}"
-                              onsubmit="return confirm('Excluir?')">
-                          <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">✕</button>
-                        </form>
-                      </div>
-                    </td>
-                  </tr>
-                  {% else %}
-                  <tr><td colspan="3" class="adm-empty">Vazio</td></tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- Legal links -->
-          <div class="adm-card">
-            <div class="adm-card-header">
-              <span class="adm-card-title">Links legais</span>
-              <a href="{{ url_for('admin.add_legal_link') }}" class="adm-btn adm-btn-primary adm-btn-sm">+</a>
-            </div>
-            <div class="adm-table-wrap">
-              <table class="adm-table">
-                <thead><tr><th>Label</th><th>URL</th><th></th></tr></thead>
-                <tbody>
-                  {% for ll in legal_links %}
-                  <tr>
-                    <td>{{ ll.label }}</td>
-                    <td style="font-size:0.78rem;color:#aaa">{{ ll.url }}</td>
-                    <td>
-                      <div class="adm-actions">
-                        <a href="{{ url_for('admin.edit_legal_link', id=ll.id) }}"
-                           class="adm-btn adm-btn-edit adm-btn-sm">✎</a>
-                        <form method="POST" action="{{ url_for('admin.delete_legal_link', id=ll.id) }}"
-                              onsubmit="return confirm('Excluir?')">
-                          <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">✕</button>
-                        </form>
-                      </div>
-                    </td>
-                  </tr>
-                  {% else %}
-                  <tr><td colspan="3" class="adm-empty">Vazio</td></tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          </div>
 
         </div>
 
-      </div><!-- /footer -->
 
-    </div><!-- /adm-content -->
-  </div><!-- /adm-main -->
-</div><!-- /adm-wrap -->
 
+        <!-- Links de navegação -->
+
+        <div class="adm-card">
+
+          <div class="adm-card-header">
+
+            <span class="adm-card-title">
+              Links de navegação
+            </span>
+
+            <a
+              href="{{ url_for('admin.add_nav_link') }}"
+              class="adm-btn adm-btn-primary adm-btn-sm"
+            >
+              + Link
+            </a>
+
+          </div>
+
+
+          <div class="adm-table-wrap">
+
+            <table class="adm-table">
+
+              <thead>
+
+                <tr>
+                  <th>Label</th>
+                  <th>URL</th>
+                  <th>Ações</th>
+                </tr>
+
+              </thead>
+
+
+              <tbody>
+
+                {% for nl in nav_links %}
+
+                <tr>
+
+                  <td>
+                    <strong>{{ nl.label }}</strong>
+                  </td>
+
+                  <td>
+                    {{ nl.url }}
+                  </td>
+
+                  <td>
+
+                    <div class="adm-actions">
+
+                      <a
+                        href="{{ url_for('admin.edit_nav_link', id=nl.id) }}"
+                        class="adm-btn adm-btn-edit adm-btn-sm"
+                      >
+                        Editar
+                      </a>
+
+                      <form
+                        method="POST"
+                        action="{{ url_for('admin.delete_nav_link', id=nl.id) }}"
+                        onsubmit="return confirm('Excluir?')"
+                      >
+
+                        <button
+                          type="submit"
+                          class="adm-btn adm-btn-danger adm-btn-sm"
+                        >
+                          Excluir
+                        </button>
+
+                      </form>
+
+                    </div>
+
+                  </td>
+
+                </tr>
+
+
+                {% else %}
+
+                <tr>
+
+                  <td
+                    colspan="3"
+                    class="adm-empty"
+                  >
+                    Nenhum link cadastrado.
+                  </td>
+
+                </tr>
+
+                {% endfor %}
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+        </div>
+
+
+
+        <!-- Links de categorias -->
+
+        <div class="adm-card">
+
+          <div class="adm-card-header">
+
+            <span class="adm-card-title">
+              Links de categorias
+            </span>
+
+            <a
+              href="{{ url_for('admin.add_category_link') }}"
+              class="adm-btn adm-btn-primary adm-btn-sm"
+            >
+              + Link
+            </a>
+
+          </div>
+
+
+          <div class="adm-table-wrap">
+
+            <table class="adm-table">
+
+              <thead>
+
+                <tr>
+                  <th>Label</th>
+                  <th>URL</th>
+                  <th>Ações</th>
+                </tr>
+
+              </thead>
+
+
+              <tbody>
+
+                {% for cl in category_links %}
+
+                <tr>
+
+                  <td>
+                    <strong>{{ cl.label }}</strong>
+                  </td>
+
+                  <td>
+                    {{ cl.url }}
+                  </td>
+
+                  <td>
+
+                    <div class="adm-actions">
+
+                      <a
+                        href="{{ url_for('admin.edit_category_link', id=cl.id) }}"
+                        class="adm-btn adm-btn-edit adm-btn-sm"
+                      >
+                        Editar
+                      </a>
+
+                      <form
+                        method="POST"
+                        action="{{ url_for('admin.delete_category_link', id=cl.id) }}"
+                        onsubmit="return confirm('Excluir?')"
+                      >
+
+                        <button
+                          type="submit"
+                          class="adm-btn adm-btn-danger adm-btn-sm"
+                        >
+                          Excluir
+                        </button>
+
+                      </form>
+
+                    </div>
+
+                  </td>
+
+                </tr>
+
+
+                {% else %}
+
+                <tr>
+
+                  <td
+                    colspan="3"
+                    class="adm-empty"
+                  >
+                    Nenhum link de categoria cadastrado.
+                  </td>
+
+                </tr>
+
+                {% endfor %}
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+        </div>
+
+
+
+        <!-- Links legais -->
+
+        <div class="adm-card">
+
+          <div class="adm-card-header">
+
+            <span class="adm-card-title">
+              Links legais
+            </span>
+
+            <a
+              href="{{ url_for('admin.add_legal_link') }}"
+              class="adm-btn adm-btn-primary adm-btn-sm"
+            >
+              + Link
+            </a>
+
+          </div>
+
+
+          <div class="adm-table-wrap">
+
+            <table class="adm-table">
+
+              <thead>
+
+                <tr>
+                  <th>Label</th>
+                  <th>URL</th>
+                  <th>Ações</th>
+                </tr>
+
+              </thead>
+
+
+              <tbody>
+
+                {% for ll in legal_links %}
+
+                <tr>
+
+                  <td>
+                    <strong>{{ ll.label }}</strong>
+                  </td>
+
+                  <td>
+                    {{ ll.url }}
+                  </td>
+
+                  <td>
+
+                    <div class="adm-actions">
+
+                      <a
+                        href="{{ url_for('admin.edit_legal_link', id=ll.id) }}"
+                        class="adm-btn adm-btn-edit adm-btn-sm"
+                      >
+                        Editar
+                      </a>
+
+                      <form
+                        method="POST"
+                        action="{{ url_for('admin.delete_legal_link', id=ll.id) }}"
+                        onsubmit="return confirm('Excluir?')"
+                      >
+
+                        <button
+                          type="submit"
+                          class="adm-btn adm-btn-danger adm-btn-sm"
+                        >
+                          Excluir
+                        </button>
+
+                      </form>
+
+                    </div>
+
+                  </td>
+
+                </tr>
+
+
+                {% else %}
+
+                <tr>
+
+                  <td
+                    colspan="3"
+                    class="adm-empty"
+                  >
+                    Nenhum link legal cadastrado.
+                  </td>
+
+                </tr>
+
+                {% endfor %}
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+    </main>
+
+  </div>
+
+</div>
 
 {% endblock %}
