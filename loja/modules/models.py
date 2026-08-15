@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from loja import db
 from flask_login import UserMixin
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import validates
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -125,7 +125,7 @@ class Product(db.Model):
     )
 
     name = db.Column(
-        db.String(255),
+        db.Text,
         nullable=False
     )
 
@@ -1057,11 +1057,10 @@ class Shipment(db.Model):
     __tablename__ = "shipments"
 
     id = db.Column(
-        db.Integer,
+        db.BigInteger,
         primary_key=True,
     )
 
-    # Order.id é UUID. A FK precisa possuir exatamente o mesmo tipo.
     order_id = db.Column(
         UUID(as_uuid=True),
         db.ForeignKey("orders.id", ondelete="CASCADE"),
@@ -1070,26 +1069,25 @@ class Shipment(db.Model):
     )
 
     tracking_code = db.Column(
-        db.String(100),
+        db.Text,
         unique=True,
         nullable=False,
         index=True,
     )
 
     carrier = db.Column(
-        db.String(80),
+        db.Text,
         nullable=True,
     )
 
-    # Permite integrações futuras: AliExpress, 17TRACK, AfterShip etc.
     provider = db.Column(
-        db.String(40),
+        db.Text,
         nullable=False,
         default="manual",
     )
 
     status = db.Column(
-        db.String(40),
+        db.Text,
         nullable=False,
         default="aguardando_postagem",
     )
@@ -1100,24 +1098,30 @@ class Shipment(db.Model):
     )
 
     last_checked_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # "metadata" é reservado pelo SQLAlchemy Declarative.
+    shipment_metadata = db.Column(
+        "metadata",
+        JSONB,
         nullable=True,
     )
 
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=False,
         default=datetime.utcnow,
     )
 
     updated_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=False,
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
     )
 
-    # O nome precisa combinar com Order.shipments.
     order = db.relationship(
         "Order",
         back_populates="shipments",
@@ -1142,40 +1146,50 @@ class TrackingEvent(db.Model):
     __tablename__ = "tracking_events"
 
     id = db.Column(
-        db.Integer,
+        db.BigInteger,
         primary_key=True,
     )
 
     shipment_id = db.Column(
-        db.Integer,
+        db.BigInteger,
         db.ForeignKey("shipments.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
 
+    provider_event_id = db.Column(
+        db.Text,
+        nullable=True,
+    )
+
     status = db.Column(
-        db.String(40),
+        db.Text,
         nullable=False,
     )
 
     description = db.Column(
-        db.String(255),
+        db.Text,
         nullable=False,
     )
 
     location = db.Column(
-        db.String(150),
+        db.Text,
         nullable=True,
     )
 
     event_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=False,
         default=datetime.utcnow,
     )
 
+    raw_payload = db.Column(
+        JSONB,
+        nullable=True,
+    )
+
     created_at = db.Column(
-        db.DateTime,
+        db.DateTime(timezone=True),
         nullable=False,
         default=datetime.utcnow,
     )
