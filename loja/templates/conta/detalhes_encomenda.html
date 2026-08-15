@@ -1,0 +1,1443 @@
+{% extends "base.html" %}
+
+{% block title %}
+Pedido #{{ pedido.order_number or pedido.id }} —
+{% if site and site.name %}{{ site.name }}{% else %}Pollo Modas{% endif %}
+{% endblock %}
+
+{% block meta_description %}
+Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
+{% endblock %}
+
+{% block extra_head %}
+<link
+    rel="stylesheet"
+    href="{{ url_for('static', filename='styles/detalhes_encomenda.css') }}"
+>
+{% endblock %}
+
+{% block content %}
+
+{% set pedido_status = pedido.status|default('processando', true) %}
+
+<section class="order-page">
+    <div class="order-container">
+
+        <!-- =====================================================
+             VOLTAR
+        ====================================================== -->
+        <nav class="order-breadcrumb" aria-label="Navegação">
+            <a href="{{ url_for('main.encomendas') }}">
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                >
+                    <path d="m15 18-6-6 6-6"/>
+                </svg>
+
+                Meus pedidos
+            </a>
+
+            <span>/</span>
+
+            <strong>
+                #{{ pedido.order_number or pedido.id }}
+            </strong>
+        </nav>
+
+
+        <!-- =====================================================
+             CABEÇALHO
+        ====================================================== -->
+        <header class="order-header">
+
+            <div class="order-header-main">
+                <span class="order-eyebrow">
+                    Detalhes da encomenda
+                </span>
+
+                <h1>
+                    Pedido #{{ pedido.order_number or pedido.id }}
+                </h1>
+
+                <div class="order-header-meta">
+
+                    {% if pedido.created_at %}
+                        <span>
+                            Realizado em
+                            <strong>
+                                {{ pedido.created_at.strftime('%d/%m/%Y') }}
+                            </strong>
+                        </span>
+                    {% endif %}
+
+                </div>
+            </div>
+
+
+            <span
+                class="
+                    order-status-badge
+                    order-status-{{ pedido_status|replace('_', '-') }}
+                "
+            >
+                <span class="order-status-dot"></span>
+
+                {{ pedido_status|replace('_', ' ')|title }}
+            </span>
+
+        </header>
+
+
+        <!-- =====================================================
+             CARD DO STATUS
+        ====================================================== -->
+        <section class="order-status-card">
+
+            <div class="order-status-icon">
+
+                {% if pedido_status == 'entregue' %}
+
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <circle cx="12" cy="12" r="9"/>
+                        <path d="M8 12l3 3 5-6"/>
+                    </svg>
+
+                {% elif pedido_status in [
+                    'enviado',
+                    'em_transito',
+                    'saiu_para_entrega'
+                ] %}
+
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path d="M3 7h11v10H3z"/>
+                        <path d="M14 10h4l3 3v4h-7"/>
+                        <circle cx="7" cy="18" r="2"/>
+                        <circle cx="18" cy="18" r="2"/>
+                    </svg>
+
+                {% else %}
+
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path d="m21 8-9 5-9-5"/>
+                        <path d="M3 8l9-5 9 5v8l-9 5-9-5Z"/>
+                        <path d="M12 13v8"/>
+                    </svg>
+
+                {% endif %}
+
+            </div>
+
+
+            <div class="order-status-content">
+
+                {% if pedido_status == 'aguardando_pagamento' %}
+
+                    <span>Aguardando pagamento</span>
+
+                    <h2>
+                        Estamos aguardando a confirmação do pagamento.
+                    </h2>
+
+                    <p>
+                        Assim que o pagamento for aprovado, começaremos
+                        a preparar sua encomenda.
+                    </p>
+
+
+                {% elif pedido_status in [
+                    'processando',
+                    'preparando',
+                    'pago'
+                ] %}
+
+                    <span>Preparando sua compra</span>
+
+                    <h2>
+                        Seu pedido está sendo preparado.
+                    </h2>
+
+                    <p>
+                        Estamos organizando os itens para envio.
+                        Os códigos de rastreio aparecerão aqui assim
+                        que estiverem disponíveis.
+                    </p>
+
+
+                {% elif pedido_status == 'enviado' %}
+
+                    <span>Pedido enviado</span>
+
+                    <h2>
+                        Sua encomenda já está a caminho.
+                    </h2>
+
+                    <p>
+                        Confira abaixo as informações de rastreamento
+                        disponíveis para cada envio.
+                    </p>
+
+
+                {% elif pedido_status == 'em_transito' %}
+
+                    <span>Em trânsito</span>
+
+                    <h2>
+                        Seu pedido está viajando até você.
+                    </h2>
+
+                    <p>
+                        A transportadora já está movimentando sua encomenda.
+                    </p>
+
+
+                {% elif pedido_status == 'saiu_para_entrega' %}
+
+                    <span>Saiu para entrega</span>
+
+                    <h2>
+                        Sua encomenda está próxima de chegar.
+                    </h2>
+
+                    <p>
+                        O pacote está com a equipe responsável
+                        pela entrega no endereço informado.
+                    </p>
+
+
+                {% elif pedido_status == 'entregue' %}
+
+                    <span>Entregue</span>
+
+                    <h2>
+                        Sua encomenda foi entregue.
+                    </h2>
+
+                    <p>
+                        Esperamos que você aproveite sua compra.
+                        Obrigado por comprar na Pollo Modas.
+                    </p>
+
+
+                {% elif pedido_status == 'cancelado' %}
+
+                    <span>Cancelado</span>
+
+                    <h2>
+                        Este pedido foi cancelado.
+                    </h2>
+
+                    <p>
+                        Caso tenha alguma dúvida, entre em contato
+                        com nosso atendimento.
+                    </p>
+
+
+                {% else %}
+
+                    <span>Pedido em andamento</span>
+
+                    <h2>
+                        Estamos acompanhando sua encomenda.
+                    </h2>
+
+                    <p>
+                        As próximas atualizações serão exibidas
+                        nesta página.
+                    </p>
+
+                {% endif %}
+
+            </div>
+
+        </section>
+
+
+        <!-- =====================================================
+             GRID PRINCIPAL
+        ====================================================== -->
+        <div class="order-layout">
+
+            <!-- =================================================
+                 CONTEÚDO PRINCIPAL
+            ================================================== -->
+            <main class="order-main">
+
+                <!-- =============================================
+                     PRODUTOS
+                ============================================== -->
+                <section class="order-card">
+
+                    <header class="order-card-header">
+
+                        <div>
+                            <span class="order-section-eyebrow">
+                                Sua compra
+                            </span>
+
+                            <h2>
+                                Produtos
+                            </h2>
+                        </div>
+
+
+                        {% if pedido.items %}
+                            <span class="order-card-count">
+                                {{ pedido.items|length }}
+
+                                {% if pedido.items|length == 1 %}
+                                    item
+                                {% else %}
+                                    itens
+                                {% endif %}
+                            </span>
+                        {% endif %}
+
+                    </header>
+
+
+                    {% if pedido.items %}
+
+                        <div class="order-products">
+
+                            {% for item in pedido.items %}
+
+                                <article class="order-product">
+
+                                    <!-- Imagem -->
+                                    <div class="order-product-image">
+
+                                        {% if item.image_url is defined and item.image_url %}
+
+                                            <img
+                                                src="{{ item.image_url }}"
+                                                alt="{{ item.product_name|default('Produto') }}"
+                                                loading="lazy"
+                                            >
+
+                                        {% elif item.product is defined
+                                            and item.product
+                                            and item.product.image_url is defined
+                                            and item.product.image_url %}
+
+                                            <img
+                                                src="{{ item.product.image_url }}"
+                                                alt="{{ item.product.name|default('Produto') }}"
+                                                loading="lazy"
+                                            >
+
+                                        {% else %}
+
+                                            <div class="order-product-placeholder">
+                                                <svg
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    stroke-width="1.6"
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                >
+                                                    <path d="m21 8-9 5-9-5"/>
+                                                    <path d="M3 8l9-5 9 5v8l-9 5-9-5Z"/>
+                                                    <path d="M12 13v8"/>
+                                                </svg>
+                                            </div>
+
+                                        {% endif %}
+
+                                    </div>
+
+
+                                    <!-- Informações -->
+                                    <div class="order-product-info">
+
+                                        <div class="order-product-title-row">
+
+                                            <div>
+                                                <h3>
+
+                                                    {% if item.product_name is defined
+                                                        and item.product_name %}
+
+                                                        {{ item.product_name }}
+
+                                                    {% elif item.name is defined
+                                                        and item.name %}
+
+                                                        {{ item.name }}
+
+                                                    {% elif item.product is defined
+                                                        and item.product %}
+
+                                                        {{ item.product.name }}
+
+                                                    {% else %}
+
+                                                        Produto
+
+                                                    {% endif %}
+
+                                                </h3>
+
+
+                                                <div class="order-product-options">
+
+                                                    {% if item.size is defined and item.size %}
+                                                        <span>
+                                                            Tamanho:
+                                                            <strong>{{ item.size }}</strong>
+                                                        </span>
+                                                    {% endif %}
+
+
+                                                    {% if item.color is defined and item.color %}
+                                                        <span>
+                                                            Cor:
+                                                            <strong>{{ item.color }}</strong>
+                                                        </span>
+                                                    {% endif %}
+
+
+                                                    {% if item.sku is defined and item.sku %}
+                                                        <span>
+                                                            SKU:
+                                                            <strong>{{ item.sku }}</strong>
+                                                        </span>
+                                                    {% endif %}
+
+                                                </div>
+                                            </div>
+
+
+                                            {% if item.total_price is defined
+                                                and item.total_price is not none %}
+
+                                                <strong class="order-product-price">
+                                                    R$
+                                                    {{ "%.2f"|format(item.total_price)|replace('.', ',') }}
+                                                </strong>
+
+                                            {% elif item.price is defined
+                                                and item.price is not none %}
+
+                                                <strong class="order-product-price">
+                                                    R$
+                                                    {{
+                                                        "%.2f"|format(
+                                                            item.price *
+                                                            (item.quantity|default(1))
+                                                        )|replace('.', ',')
+                                                    }}
+                                                </strong>
+
+                                            {% elif item.unit_price is defined
+                                                and item.unit_price is not none %}
+
+                                                <strong class="order-product-price">
+                                                    R$
+                                                    {{
+                                                        "%.2f"|format(
+                                                            item.unit_price *
+                                                            (item.quantity|default(1))
+                                                        )|replace('.', ',')
+                                                    }}
+                                                </strong>
+
+                                            {% endif %}
+
+                                        </div>
+
+
+                                        <div class="order-product-bottom">
+
+                                            <span>
+                                                Quantidade:
+                                                <strong>
+                                                    {{ item.quantity|default(1) }}
+                                                </strong>
+                                            </span>
+
+                                        </div>
+
+                                    </div>
+
+                                </article>
+
+                            {% endfor %}
+
+                        </div>
+
+
+                    {% else %}
+
+                        <div class="order-empty">
+
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.6"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="m21 8-9 5-9-5"/>
+                                <path d="M3 8l9-5 9 5v8l-9 5-9-5Z"/>
+                            </svg>
+
+                            <div>
+                                <strong>
+                                    Nenhum produto encontrado
+                                </strong>
+
+                                <p>
+                                    Não há itens associados a esta encomenda.
+                                </p>
+                            </div>
+
+                        </div>
+
+                    {% endif %}
+
+                </section>
+
+
+                <!-- =============================================
+                     RASTREAMENTO
+                ============================================== -->
+                <section class="order-card">
+
+                    <header class="order-card-header">
+
+                        <div>
+                            <span class="order-section-eyebrow">
+                                Entrega
+                            </span>
+
+                            <h2>
+                                Rastreamento
+                            </h2>
+                        </div>
+
+
+                        {% if pedido.shipments %}
+                            <span class="order-card-count">
+                                {{ pedido.shipments|length }}
+
+                                {% if pedido.shipments|length == 1 %}
+                                    envio
+                                {% else %}
+                                    envios
+                                {% endif %}
+                            </span>
+                        {% endif %}
+
+                    </header>
+
+
+                    {% if pedido.shipments %}
+
+                        <div class="order-shipments">
+
+                            {% for shipment in pedido.shipments %}
+
+                                {% set shipment_status =
+                                    shipment.status|default(
+                                        'aguardando_postagem',
+                                        true
+                                    )
+                                %}
+
+                                <article class="order-shipment">
+
+                                    <!-- Cabeçalho do envio -->
+                                    <header class="order-shipment-header">
+
+                                        <div>
+
+                                            <span class="order-shipment-number">
+
+                                                {% if pedido.shipments|length > 1 %}
+
+                                                    Envio {{ loop.index }}
+                                                    de {{ pedido.shipments|length }}
+
+                                                {% else %}
+
+                                                    Sua entrega
+
+                                                {% endif %}
+
+                                            </span>
+
+
+                                            <h3>
+
+                                                {% if shipment_status == 'aguardando_postagem' %}
+                                                    Preparando o envio
+
+                                                {% elif shipment_status == 'postado' %}
+                                                    Pedido postado
+
+                                                {% elif shipment_status == 'enviado' %}
+                                                    Pedido enviado
+
+                                                {% elif shipment_status == 'em_transito' %}
+                                                    Em trânsito
+
+                                                {% elif shipment_status == 'saiu_para_entrega' %}
+                                                    Saiu para entrega
+
+                                                {% elif shipment_status == 'entregue' %}
+                                                    Entregue
+
+                                                {% elif shipment_status == 'tentativa_entrega' %}
+                                                    Tentativa de entrega
+
+                                                {% else %}
+                                                    {{ shipment_status|replace('_', ' ')|title }}
+                                                {% endif %}
+
+                                            </h3>
+
+
+                                            <p>
+
+                                                {% if shipment_status == 'aguardando_postagem' %}
+
+                                                    O envio está sendo preparado
+                                                    para a transportadora.
+
+                                                {% elif shipment_status in ['postado', 'enviado'] %}
+
+                                                    O pacote já foi encaminhado
+                                                    para transporte.
+
+                                                {% elif shipment_status == 'em_transito' %}
+
+                                                    Sua encomenda está a caminho
+                                                    do endereço de entrega.
+
+                                                {% elif shipment_status == 'saiu_para_entrega' %}
+
+                                                    Sua encomenda está na etapa
+                                                    final da entrega.
+
+                                                {% elif shipment_status == 'entregue' %}
+
+                                                    Este envio foi entregue.
+
+                                                {% else %}
+
+                                                    Acompanhe as informações
+                                                    disponíveis para este envio.
+
+                                                {% endif %}
+
+                                            </p>
+
+                                        </div>
+
+
+                                        <span class="order-shipment-badge">
+                                            {{ shipment_status|replace('_', ' ')|title }}
+                                        </span>
+
+                                    </header>
+
+
+                                    <!-- =====================================
+                                         PROGRESSO
+                                    ====================================== -->
+
+                                    {% if shipment_status == 'aguardando_postagem' %}
+                                        {% set current_step = 1 %}
+
+                                    {% elif shipment_status in ['postado', 'enviado'] %}
+                                        {% set current_step = 2 %}
+
+                                    {% elif shipment_status == 'em_transito' %}
+                                        {% set current_step = 3 %}
+
+                                    {% elif shipment_status in [
+                                        'saiu_para_entrega',
+                                        'tentativa_entrega'
+                                    ] %}
+                                        {% set current_step = 4 %}
+
+                                    {% elif shipment_status == 'entregue' %}
+                                        {% set current_step = 5 %}
+
+                                    {% else %}
+                                        {% set current_step = 1 %}
+                                    {% endif %}
+
+
+                                    <div class="order-progress">
+
+                                        {% for step in range(1, 6) %}
+
+                                            {% if step == 1 %}
+                                                {% set step_label = 'Preparando' %}
+
+                                            {% elif step == 2 %}
+                                                {% set step_label = 'Enviado' %}
+
+                                            {% elif step == 3 %}
+                                                {% set step_label = 'Em trânsito' %}
+
+                                            {% elif step == 4 %}
+                                                {% set step_label = 'Em entrega' %}
+
+                                            {% else %}
+                                                {% set step_label = 'Entregue' %}
+                                            {% endif %}
+
+
+                                            <div
+                                                class="
+                                                    order-progress-step
+
+                                                    {% if step < current_step %}
+                                                        is-complete
+
+                                                    {% elif step == current_step %}
+                                                        is-current
+                                                    {% endif %}
+                                                "
+                                            >
+
+                                                <div class="order-progress-line"></div>
+
+
+                                                <span class="order-progress-circle">
+
+                                                    {% if step < current_step %}
+
+                                                        <svg
+                                                            viewBox="0 0 24 24"
+                                                            fill="none"
+                                                            stroke="currentColor"
+                                                            stroke-width="2.5"
+                                                            stroke-linecap="round"
+                                                            stroke-linejoin="round"
+                                                        >
+                                                            <path d="M20 6 9 17l-5-5"/>
+                                                        </svg>
+
+                                                    {% else %}
+
+                                                        {{ step }}
+
+                                                    {% endif %}
+
+                                                </span>
+
+
+                                                <small>
+                                                    {{ step_label }}
+                                                </small>
+
+                                            </div>
+
+                                        {% endfor %}
+
+                                    </div>
+
+
+                                    <!-- =====================================
+                                         DADOS DO ENVIO
+                                    ====================================== -->
+                                    <div class="order-shipment-data">
+
+                                        {% if shipment.tracking_code %}
+
+                                            <div>
+
+                                                <span>
+                                                    Código de rastreio
+                                                </span>
+
+                                                <div class="order-tracking-code">
+
+                                                    <strong>
+                                                        {{ shipment.tracking_code }}
+                                                    </strong>
+
+
+                                                    <button
+                                                        type="button"
+                                                        class="order-copy-code"
+                                                        data-code="{{ shipment.tracking_code }}"
+                                                        aria-label="Copiar código de rastreio"
+                                                    >
+
+                                                        <svg
+                                                            viewBox="0 0 24 24"
+                                                            fill="none"
+                                                            stroke="currentColor"
+                                                            stroke-width="1.8"
+                                                            stroke-linecap="round"
+                                                            stroke-linejoin="round"
+                                                        >
+                                                            <rect
+                                                                x="9"
+                                                                y="9"
+                                                                width="11"
+                                                                height="11"
+                                                                rx="2"
+                                                            />
+
+                                                            <path
+                                                                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                                                            />
+                                                        </svg>
+
+                                                        <span>
+                                                            Copiar
+                                                        </span>
+
+                                                    </button>
+
+                                                </div>
+
+                                            </div>
+
+                                        {% endif %}
+
+
+                                        {% if shipment.carrier %}
+
+                                            <div>
+
+                                                <span>
+                                                    Transportadora
+                                                </span>
+
+                                                <strong>
+                                                    {{ shipment.carrier }}
+                                                </strong>
+
+                                            </div>
+
+                                        {% endif %}
+
+
+                                        {% if shipment.estimated_delivery %}
+
+                                            <div>
+
+                                                <span>
+                                                    Previsão de entrega
+                                                </span>
+
+                                                <strong>
+                                                    {{
+                                                        shipment.estimated_delivery
+                                                        .strftime('%d/%m/%Y')
+                                                    }}
+                                                </strong>
+
+                                            </div>
+
+                                        {% endif %}
+
+
+                                        {% if shipment.last_checked_at %}
+
+                                            <div>
+
+                                                <span>
+                                                    Última consulta
+                                                </span>
+
+                                                <strong>
+                                                    {{
+                                                        shipment.last_checked_at
+                                                        .strftime('%d/%m/%Y às %H:%M')
+                                                    }}
+                                                </strong>
+
+                                            </div>
+
+                                        {% endif %}
+
+                                    </div>
+
+                                </article>
+
+                            {% endfor %}
+
+                        </div>
+
+
+                    {% else %}
+
+                        <div class="order-shipment-waiting">
+
+                            <div class="order-shipment-waiting-icon">
+
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <path d="m21 8-9 5-9-5"/>
+                                    <path d="M3 8l9-5 9 5v8l-9 5-9-5Z"/>
+                                    <path d="M12 13v8"/>
+                                </svg>
+
+                            </div>
+
+
+                            <div>
+
+                                <span>
+                                    Preparando o envio
+                                </span>
+
+                                <h3>
+                                    O rastreio estará disponível em breve.
+                                </h3>
+
+                                <p>
+                                    Seu pedido já está sendo processado.
+                                    Quando o fornecedor disponibilizar o
+                                    código de rastreamento, ele aparecerá
+                                    nesta página.
+                                </p>
+
+                            </div>
+
+                        </div>
+
+                    {% endif %}
+
+                </section>
+
+            </main>
+
+
+            <!-- =================================================
+                 SIDEBAR
+            ================================================== -->
+            <aside class="order-sidebar">
+
+                <!-- =============================================
+                     RESUMO
+                ============================================== -->
+                <section class="order-side-card">
+
+                    <header>
+                        <span>
+                            Pagamento
+                        </span>
+
+                        <h2>
+                            Resumo do pedido
+                        </h2>
+                    </header>
+
+
+                    <div class="order-values">
+
+                        <div>
+
+                            <span>
+                                Subtotal
+                            </span>
+
+                            <strong>
+                                R$
+                                {{
+                                    "%.2f"|format(
+                                        pedido.subtotal|default(0, true)
+                                    )|replace('.', ',')
+                                }}
+                            </strong>
+
+                        </div>
+
+
+                        <div>
+
+                            <span>
+                                Frete
+                            </span>
+
+                            {% if pedido.shipping_amount|default(0, true) == 0 %}
+
+                                <strong class="order-free">
+                                    Grátis
+                                </strong>
+
+                            {% else %}
+
+                                <strong>
+                                    R$
+                                    {{
+                                        "%.2f"|format(
+                                            pedido.shipping_amount
+                                        )|replace('.', ',')
+                                    }}
+                                </strong>
+
+                            {% endif %}
+
+                        </div>
+
+
+                        {% if pedido.discount_amount|default(0, true) > 0 %}
+
+                            <div class="order-discount">
+
+                                <span>
+                                    Desconto
+                                </span>
+
+                                <strong>
+                                    − R$
+                                    {{
+                                        "%.2f"|format(
+                                            pedido.discount_amount
+                                        )|replace('.', ',')
+                                    }}
+                                </strong>
+
+                            </div>
+
+                        {% endif %}
+
+
+                        <div class="order-total">
+
+                            <span>
+                                Total
+                            </span>
+
+                            <strong>
+                                R$
+                                {{
+                                    "%.2f"|format(
+                                        pedido.total_amount|default(0, true)
+                                    )|replace('.', ',')
+                                }}
+                            </strong>
+
+                        </div>
+
+                    </div>
+
+
+                    {% if pedido.payment_status %}
+
+                        <div class="order-payment-status">
+
+                            <span class="order-payment-dot"></span>
+
+                            <div>
+
+                                <small>
+                                    Status do pagamento
+                                </small>
+
+                                <strong>
+                                    {{
+                                        pedido.payment_status
+                                        |replace('_', ' ')
+                                        |title
+                                    }}
+                                </strong>
+
+                            </div>
+
+                        </div>
+
+                    {% endif %}
+
+                </section>
+
+
+                <!-- =============================================
+                     ENDEREÇO
+                ============================================== -->
+                {% if pedido.shipping_address %}
+
+                    <section class="order-side-card">
+
+                        <header>
+                            <span>
+                                Entrega
+                            </span>
+
+                            <h2>
+                                Endereço
+                            </h2>
+                        </header>
+
+
+                        <div class="order-address">
+
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.8"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path
+                                    d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"
+                                />
+                                <circle cx="12" cy="10" r="2"/>
+                            </svg>
+
+
+                            <address>
+
+                                {% if pedido.shipping_address is mapping %}
+
+                                    {% if pedido.customer_name %}
+                                        <strong>
+                                            {{ pedido.customer_name }}
+                                        </strong>
+                                    {% endif %}
+
+
+                                    {% if pedido.shipping_address.street %}
+                                        <span>
+                                            {{ pedido.shipping_address.street }}
+
+                                            {% if pedido.shipping_address.number %}
+                                                , {{ pedido.shipping_address.number }}
+                                            {% endif %}
+                                        </span>
+                                    {% endif %}
+
+
+                                    {% if pedido.shipping_address.complement %}
+                                        <span>
+                                            {{ pedido.shipping_address.complement }}
+                                        </span>
+                                    {% endif %}
+
+
+                                    {% if pedido.shipping_address.neighborhood %}
+                                        <span>
+                                            {{ pedido.shipping_address.neighborhood }}
+                                        </span>
+                                    {% endif %}
+
+
+                                    {% if pedido.shipping_address.city %}
+                                        <span>
+
+                                            {{ pedido.shipping_address.city }}
+
+                                            {% if pedido.shipping_address.state %}
+                                                — {{ pedido.shipping_address.state }}
+                                            {% endif %}
+
+                                        </span>
+                                    {% endif %}
+
+
+                                    {% if pedido.shipping_address.postal_code %}
+                                        <span>
+                                            CEP {{ pedido.shipping_address.postal_code }}
+                                        </span>
+                                    {% endif %}
+
+                                {% else %}
+
+                                    <span>
+                                        {{ pedido.shipping_address }}
+                                    </span>
+
+                                {% endif %}
+
+                            </address>
+
+                        </div>
+
+                    </section>
+
+                {% endif %}
+
+
+                <!-- =============================================
+                     CONTATO
+                ============================================== -->
+                <section class="order-side-card">
+
+                    <header>
+                        <span>
+                            Dados da compra
+                        </span>
+
+                        <h2>
+                            Contato
+                        </h2>
+                    </header>
+
+
+                    <div class="order-contact-list">
+
+                        {% if pedido.customer_name %}
+
+                            <div>
+
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <circle cx="12" cy="8" r="4"/>
+                                    <path d="M4 21a8 8 0 0 1 16 0"/>
+                                </svg>
+
+                                <div>
+                                    <small>Cliente</small>
+
+                                    <strong>
+                                        {{ pedido.customer_name }}
+                                    </strong>
+                                </div>
+
+                            </div>
+
+                        {% endif %}
+
+
+                        {% if pedido.customer_email %}
+
+                            <div>
+
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <rect
+                                        x="3"
+                                        y="5"
+                                        width="18"
+                                        height="14"
+                                        rx="2"
+                                    />
+
+                                    <path d="m3 7 9 6 9-6"/>
+                                </svg>
+
+                                <div>
+                                    <small>E-mail</small>
+
+                                    <strong>
+                                        {{ pedido.customer_email }}
+                                    </strong>
+                                </div>
+
+                            </div>
+
+                        {% endif %}
+
+
+                        {% if pedido.customer_phone %}
+
+                            <div>
+
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <path
+                                        d="M22 16.92v3a2 2 0 0 1-2.18
+                                        2 19.8 19.8 0 0 1-8.63-3.07
+                                        19.5 19.5 0 0 1-6-6
+                                        A19.8 19.8 0 0 1 2.12 4.18
+                                        2 2 0 0 1 4.11 2h3
+                                        a2 2 0 0 1 2 1.72
+                                        c.12.9.33 1.78.62 2.63
+                                        a2 2 0 0 1-.45 2.11
+                                        L8 9.73a16 16 0 0 0 6 6
+                                        l1.27-1.27
+                                        a2 2 0 0 1 2.11-.45
+                                        c.85.29 1.73.5 2.63.62
+                                        A2 2 0 0 1 22 16.92Z"
+                                    />
+                                </svg>
+
+                                <div>
+                                    <small>Telefone</small>
+
+                                    <strong>
+                                        {{ pedido.customer_phone }}
+                                    </strong>
+                                </div>
+
+                            </div>
+
+                        {% endif %}
+
+                    </div>
+
+                </section>
+
+
+                <!-- =============================================
+                     AJUDA
+                ============================================== -->
+                <section class="order-support">
+
+                    <span class="order-support-icon">
+
+                        <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.8"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <circle cx="12" cy="12" r="9"/>
+                            <path
+                                d="M9.5 9a2.6 2.6 0 1 1 4.1
+                                2.1c-1 .7-1.6 1.1-1.6 2.4"
+                            />
+                            <path d="M12 17h.01"/>
+                        </svg>
+
+                    </span>
+
+
+                    <div>
+
+                        <strong>
+                            Precisa de ajuda?
+                        </strong>
+
+                        <p>
+                            Ao entrar em contato conosco,
+                            informe o pedido
+                            <b>#{{ pedido.order_number or pedido.id }}</b>.
+                        </p>
+
+                        <a href="{{ url_for('main.home') }}">
+                            Voltar para a loja
+
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="M5 12h14"/>
+                                <path d="m13 6 6 6-6 6"/>
+                            </svg>
+                        </a>
+
+                    </div>
+
+                </section>
+
+            </aside>
+
+        </div>
+
+    </div>
+</section>
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+
+    const buttons = document.querySelectorAll(".order-copy-code");
+
+    buttons.forEach(function (button) {
+
+        button.addEventListener("click", async function () {
+
+            const code = button.dataset.code;
+            const label = button.querySelector("span");
+
+            if (!code) {
+                return;
+            }
+
+            try {
+
+                await navigator.clipboard.writeText(code);
+
+                if (label) {
+                    label.textContent = "Copiado ✓";
+                }
+
+                button.classList.add("is-copied");
+
+                setTimeout(function () {
+
+                    if (label) {
+                        label.textContent = "Copiar";
+                    }
+
+                    button.classList.remove("is-copied");
+
+                }, 1800);
+
+            } catch (error) {
+
+                console.error(
+                    "Não foi possível copiar o código:",
+                    error
+                );
+
+            }
+
+        });
+
+    });
+
+});
+</script>
+
+{% endblock %}
