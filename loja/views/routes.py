@@ -9,6 +9,7 @@ from flask import (
 from flask_login import login_user, login_required, current_user, logout_user
 from sqlalchemy import asc, desc
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 
 from loja.modules.newsletter import subscribe_newsletter
 
@@ -54,9 +55,10 @@ main_blueprint = Blueprint("main", __name__)
 
 
 # ── Injeção de configurações do site (title, meta description etc.) ─────────
-# Roda em TODAS as páginas porque o base.html usa site.name / site.meta_description
-# no <head>. É por faltar isso que dava "'site' is undefined".
-@main_blueprint.context_processor
+# Roda em todos os templates da aplicação porque o base.html usa
+# site.name / site.meta_description no <head>. Usamos app_context_processor
+# para também atender templates de outros blueprints, como tracking/admin.
+@main_blueprint.app_context_processor
 def inject_site_config():
     site = SiteConfig.query.first()
     if site is None:
@@ -68,8 +70,8 @@ def inject_site_config():
     return {"site": site}
 
 
-# ── Injeção de categorias (navbar/menu — roda em TODAS as páginas) ───────────
-@main_blueprint.context_processor
+# ── Injeção global de categorias (navbar/menu) ───────────────────────────────
+@main_blueprint.app_context_processor
 def inject_categories():
     categorias = (
         db.session
@@ -1448,73 +1450,228 @@ def calcular_frete():
         "cep": cep,
     })
 
-# ── Encomendas ──────────────────────────────
+# ── Encomendas / área de compras ─────────────────────────────────────────────
+# Order.status representa o estado interno do pedido/pagamento.
+# Shipment.status representa a etapa logística do envio.
+#
+# Regras usadas nos cards da conta:
+#   pending_payment                              -> aguardando pagamento
+#   paid + sem Shipment                          -> aguardando envio
+#   paid + Shipment aguardando_postagem          -> aguardando envio
+#   paid + Shipment em andamento                 -> enviado
+#   paid + Shipment entregue                     -> aguardando avaliação
+#
+# Pedidos em manual_review continuam aparecendo em "Todas as compras", mas não
+# são tratados como prontos para envio até que o pagamento seja efetivamente
+# confirmado como paid.
+
+PURCHASE_FILTERS = {
+    "aguardando-pagamento": {
+        "bucket": "aguardando_pagamento",
+        "titulo": "Aguardando pagamento",
+    },
+    "aguardando-envio": {
+        "bucket": "aguardando_envio",
+        "titulo": "Aguardando envio",
+    },
+    "enviados": {
+        "bucket": "enviado",
+        "titulo": "Pedidos enviados",
+    },
+    "aguardando-avaliacao": {
+        "bucket": "aguardando_avaliacao",
+        "titulo": "Aguardando avaliação",
+    },
+}
+
+
+PURCHASE_STATUS_LABELS = {
+    "aguardando_pagamento": "Aguardando pagamento",
+    "aguardando_envio": "Aguardando envio",
+    "enviado": "Enviado",
+    "aguardando_avaliacao": "Aguardando avaliação",
+}
+
+
+def _normalize_status(value):
+    """Normaliza chaves de status usadas pelo pedido/rastreio."""
+    return (
+        str(value or "")
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+
+
+def _shipment_is_waiting_posting(status):
+    """Status logístico que ainda não representa uma postagem efetiva."""
+    return _normalize_status(status) in {
+        "aguardando_postagem",
+        "pending_posting",
+        "pending_shipment",
+        "pre_transit",
+        "pre_transito",
+    }
+
+
+def _shipment_is_delivered(status):
+    """
+    Detecta entrega sem acoplar a rota a uma única integração de rastreio.
+
+    O model atual usa strings de status e o TRACKING_STATUS pode evoluir;
+    por isso aceitamos a chave canônica "entregue" e variações que contenham
+    "entreg"/"delivered".
+    """
+    normalized = _normalize_status(status)
+    return "entreg" in normalized or "delivered" in normalized
+
+
+def _order_purchase_bucket(order):
+    """Converte Order + Shipment para um dos quatro cards da área do cliente."""
+    order_status = _normalize_status(getattr(order, "status", None))
+
+    if order_status == "pending_payment":
+        return "aguardando_pagamento"
+
+    # Só pedidos efetivamente pagos entram no fluxo logístico.
+    if order_status != "paid":
+        return None
+
+    shipments = list(getattr(order, "shipments", None) or [])
+
+    # Pedido pago, mas ainda sem objeto de rastreio criado.
+    if not shipments:
+        return "aguardando_envio"
+
+    shipment_statuses = [
+        _normalize_status(getattr(shipment, "status", None))
+        for shipment in shipments
+    ]
+
+    # Se qualquer remessa estiver entregue, o pedido já pode ser avaliado.
+    if any(_shipment_is_delivered(status) for status in shipment_statuses):
+        return "aguardando_avaliacao"
+
+    # Todas as remessas ainda aguardam postagem.
+    if all(_shipment_is_waiting_posting(status) for status in shipment_statuses):
+        return "aguardando_envio"
+
+    # Existe pelo menos uma remessa em etapa posterior à postagem.
+    return "enviado"
+
+
+def _get_user_orders(user_id):
+    """Pedidos do usuário, mais recentes primeiro, com remessas pré-carregadas."""
+    return (
+        Order.query
+        .options(selectinload(Order.shipments))
+        .filter(Order.user_id == user_id)
+        .order_by(Order.created_at.desc())
+        .all()
+    )
+
+
+def _prepare_orders_for_customer(orders):
+    """
+    Anexa metadados somente em memória para os templates.
+
+    Não altera o status persistido do Order.
+    """
+    for order in orders:
+        bucket = _order_purchase_bucket(order)
+        order.customer_status = bucket
+        order.customer_status_label = PURCHASE_STATUS_LABELS.get(
+            bucket,
+            str(getattr(order, "status", "") or "Pedido").replace("_", " ").title(),
+        )
+    return orders
+
+
+def _purchase_status_counts(orders):
+    counts = {
+        "aguardando_pagamento": 0,
+        "aguardando_envio": 0,
+        "enviado": 0,
+        "aguardando_avaliacao": 0,
+    }
+
+    for order in orders:
+        bucket = _order_purchase_bucket(order)
+        if bucket in counts:
+            counts[bucket] += 1
+
+    return counts
+
+
 @main_blueprint.route("/encomendas")
 @login_required
 def encomendas():
     try:
-        pedidos = (
-            Order.query
-            .filter_by(user_id=current_user.id)
-            .order_by(Order.id.desc())
-            .all()
+        pedidos = _prepare_orders_for_customer(
+            _get_user_orders(current_user.id)
         )
 
         return render_template(
             "conta/encomendas.html",
             pedidos=pedidos,
             titulo="Todas as compras",
-            filtro="todos"
+            filtro="todos",
         )
 
-    except Exception as e:
-        print(f"Erro ao carregar encomendas: {e}")
+    except Exception as error:
+        print(f"Erro ao carregar encomendas: {error}")
         flash("Não foi possível carregar suas compras.", "danger")
         return redirect(url_for("main.conta"))
 
-# ── Encomendas dinâmicas ──────────────────────────────────────────
+
+# Rota opcional usada pelo botão "Ver pedido" do template encomendas.html.
+# O template conta/detalhes_encomenda.html precisa existir para a página abrir.
+@main_blueprint.route("/encomendas/pedido/<uuid:order_id>")
+@login_required
+def detalhes_encomenda(order_id):
+    pedido = (
+        Order.query
+        .options(
+            selectinload(Order.items),
+            selectinload(Order.shipments),
+        )
+        .filter(
+            Order.id == order_id,
+            Order.user_id == current_user.id,
+        )
+        .first_or_404()
+    )
+
+    _prepare_orders_for_customer([pedido])
+
+    return render_template(
+        "conta/detalhes_encomenda.html",
+        pedido=pedido,
+    )
+
+
+# ── Encomendas dinâmicas ─────────────────────────────────────────────────────
 @main_blueprint.route("/encomendas/<status>")
 @login_required
 def encomendas_status(status):
-
-    filtros = {
-        "aguardando-pagamento": {
-            "db_status": "aguardando_pagamento",
-            "titulo": "Aguardando pagamento",
-        },
-
-        "aguardando-envio": {
-            "db_status": "aguardando_envio",
-            "titulo": "Aguardando envio",
-        },
-
-        "enviados": {
-            "db_status": "enviado",
-            "titulo": "Pedidos enviados",
-        },
-
-        "aguardando-avaliacao": {
-            "db_status": "aguardando_avaliacao",
-            "titulo": "Aguardando avaliação",
-        },
-    }
-
-    filtro = filtros.get(status)
+    filtro = PURCHASE_FILTERS.get(status)
 
     if not filtro:
         flash("Categoria de pedidos inválida.", "warning")
         return redirect(url_for("main.encomendas"))
 
     try:
-        pedidos = (
-            Order.query
-            .filter_by(
-                user_id=current_user.id,
-                status=filtro["db_status"]
-            )
-            .order_by(Order.id.desc())
-            .all()
-        )
+        todos_pedidos = _get_user_orders(current_user.id)
+        bucket = filtro["bucket"]
+
+        pedidos = [
+            pedido
+            for pedido in todos_pedidos
+            if _order_purchase_bucket(pedido) == bucket
+        ]
+
+        _prepare_orders_for_customer(pedidos)
 
         return render_template(
             "conta/encomendas.html",
@@ -1523,62 +1680,59 @@ def encomendas_status(status):
             filtro=status,
         )
 
-    except Exception as e:
-        print(f"Erro ao carregar encomendas: {e}")
-
-        flash(
-            "Não foi possível carregar suas compras.",
-            "danger"
-        )
-
+    except Exception as error:
+        print(f"Erro ao carregar encomendas: {error}")
+        flash("Não foi possível carregar suas compras.", "danger")
         return redirect(url_for("main.conta"))
 
-# ── Conta ───────────────────────────────────────────────────────────────────
-@main_blueprint.route('/conta')
+
+# ── Conta ────────────────────────────────────────────────────────────────────
+@main_blueprint.route("/conta")
 @login_required
 def conta():
     try:
         user = current_user
 
-        compras_status = {
-            "aguardando_pagamento": Order.query.filter_by(
+        # Prioriza o endereço principal, mantendo o mesmo comportamento da
+        # página de edição de conta.
+        address = (
+            Address.query
+            .filter_by(
                 user_id=user.id,
-                status="aguardando_pagamento"
-            ).count(),
+                is_default=True,
+            )
+            .order_by(Address.created_at.asc())
+            .first()
+        )
 
-            "aguardando_envio": Order.query.filter_by(
-                user_id=user.id,
-                status="aguardando_envio"
-            ).count(),
+        if address is None:
+            address = (
+                Address.query
+                .filter_by(user_id=user.id)
+                .order_by(Address.created_at.asc())
+                .first()
+            )
 
-            "enviado": Order.query.filter_by(
-                user_id=user.id,
-                status="enviado"
-            ).count(),
-
-            "aguardando_avaliacao": Order.query.filter_by(
-                user_id=user.id,
-                status="aguardando_avaliacao"
-            ).count(),
-        }
+        pedidos = _get_user_orders(user.id)
+        compras_status = _purchase_status_counts(pedidos)
 
         return render_template(
-            'conta/conta.html',
+            "conta/conta.html",
             admin=user.is_admin,
             telefone=user.phone,
             username=user.name,
             email=user.email,
-            address=user.addresses[0] if user.addresses else None,
+            address=address,
             compras_status=compras_status,
         )
 
-    except Exception as e:
+    except Exception as error:
         flash(
             "Erro ao acessar os dados da conta. Tente novamente.",
-            "danger"
+            "danger",
         )
-        print(f"Erro ao acessar os dados da conta: {e}")
-        return redirect(url_for('main.home'))
+        print(f"Erro ao acessar os dados da conta: {error}")
+        return redirect(url_for("main.home"))
 
 
 # ── Cadastro ──────────────────────────────────────────────────────────────────
@@ -1872,25 +2026,50 @@ def edit_account():
 
 
 # ── Deletar conta ─────────────────────────────────────────────────────────────
-@main_blueprint.route('/delete_account', methods=['POST'])
+@main_blueprint.route("/delete_account", methods=["POST"])
 @login_required
 def delete_account():
     try:
-        # CORRIGIDO: current_user é um LocalProxy do Flask-Login, não a
-        # instância real do SQLAlchemy. Passar o proxy direto pro
-        # session.delete() é frágil; pegamos o objeto real com
-        # _get_current_object() antes de deletar.
         user = current_user._get_current_object()
-        logout_user()
+
+        # orders.user_id usa ON DELETE RESTRICT. Além de respeitar a FK,
+        # preservar o histórico de pedidos evita apagar dados comerciais que
+        # precisam continuar vinculados ao cliente.
+        possui_pedidos = (
+            Order.query
+            .filter(Order.user_id == user.id)
+            .first()
+            is not None
+        )
+
+        if possui_pedidos:
+            flash(
+                "Sua conta possui pedidos vinculados e não pode ser excluída "
+                "diretamente. Entre em contato com o atendimento caso precise "
+                "solicitar a desativação da conta.",
+                "warning",
+            )
+            return redirect(url_for("main.conta"))
+
         db.session.delete(user)
         db.session.commit()
-        flash('Conta excluída com sucesso!', 'success')
-        return redirect(url_for('main.login'))
-    except Exception as e:
+
+        # Faz logout somente depois do commit. Se o banco rejeitar a operação,
+        # o cliente continua autenticado e consegue retornar à própria conta.
+        logout_user()
+
+        flash("Conta excluída com sucesso!", "success")
+        return redirect(url_for("main.login"))
+
+    except Exception as error:
         db.session.rollback()
-        print(f"Erro ao excluir conta: {e}")
-        flash('Ocorreu um erro ao tentar excluir a conta. Tente novamente.', 'danger')
-        return redirect(url_for('main.conta'))
+        print(f"Erro ao excluir conta: {error}")
+        flash(
+            "Ocorreu um erro ao tentar excluir a conta. Tente novamente.",
+            "danger",
+        )
+        return redirect(url_for("main.conta"))
+
 
 # ── Rastreio de pedidos ────────────────────────────────────
 

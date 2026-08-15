@@ -11,32 +11,67 @@
 >
 {% endblock %}
 
+
 {% block content %}
 
-<div class="account-wrap">
+<div class="orders-page">
 
-  <div class="account-header">
 
-    <div>
-      <p class="account-header-eyebrow">
+  <!-- ======================================================
+       CABEÇALHO
+  ======================================================= -->
+
+  <header class="orders-header">
+
+    <div class="orders-header-content">
+
+      <p class="orders-eyebrow">
         Minhas compras
       </p>
 
-      <h1>{{ titulo }}</h1>
+      <h1 class="orders-title">
+        {{ titulo }}
+      </h1>
+
+      <p class="orders-subtitle">
+        Acompanhe seus pedidos, pagamentos e entregas.
+      </p>
+
     </div>
+
 
     <a
       href="{{ url_for('main.conta') }}"
-      class="account-logout"
+      class="orders-back"
     >
-      ← Minha conta
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M19 12H5"/>
+        <path d="M12 19l-7-7 7-7"/>
+      </svg>
+
+      Minha conta
     </a>
 
-  </div>
+  </header>
 
 
-  <!-- Filtros -->
-  <div class="orders-filters">
+
+  <!-- ======================================================
+       FILTROS
+  ======================================================= -->
+
+  <nav
+    class="orders-filters"
+    aria-label="Filtrar pedidos"
+  >
 
     <a
       href="{{ url_for('main.encomendas') }}"
@@ -45,100 +80,631 @@
       Todos
     </a>
 
+
     <a
-      href="{{ url_for('main.encomendas_status', status='aguardando-pagamento') }}"
-      class="orders-filter {% if filtro == ' Pending Payment ' %}orders-filter--active{% endif %}"
+      href="{{ url_for(
+        'main.encomendas_status',
+        status='aguardando-pagamento'
+      ) }}"
+      class="orders-filter {% if filtro == 'aguardando-pagamento' %}orders-filter--active{% endif %}"
     >
       Aguardando pagamento
     </a>
 
+
     <a
-      href="{{ url_for('main.encomendas_status', status='aguardando-envio') }}"
+      href="{{ url_for(
+        'main.encomendas_status',
+        status='aguardando-envio'
+      ) }}"
       class="orders-filter {% if filtro == 'aguardando-envio' %}orders-filter--active{% endif %}"
     >
       Aguardando envio
     </a>
 
+
     <a
-      href="{{ url_for('main.encomendas_status', status='enviados') }}"
+      href="{{ url_for(
+        'main.encomendas_status',
+        status='enviados'
+      ) }}"
       class="orders-filter {% if filtro == 'enviados' %}orders-filter--active{% endif %}"
     >
       Enviados
     </a>
 
+
     <a
-      href="{{ url_for('main.encomendas_status', status='aguardando-avaliacao') }}"
+      href="{{ url_for(
+        'main.encomendas_status',
+        status='aguardando-avaliacao'
+      ) }}"
       class="orders-filter {% if filtro == 'aguardando-avaliacao' %}orders-filter--active{% endif %}"
     >
       Avaliar
     </a>
 
-  </div>
+  </nav>
 
 
-  <div class="account-panel">
 
-    {% if pedidos %}
+  <!-- ======================================================
+       PEDIDOS
+  ======================================================= -->
 
-      <div class="orders-list">
+  {% if pedidos %}
 
-        {% for pedido in pedidos %}
+  <div class="orders-list">
 
-        <div class="order-card">
 
-          <div class="order-card-header">
+    {% for pedido in pedidos %}
 
-            <div>
-              <span class="order-label">
-                Pedido
-              </span>
+    {% set pedido_codigo = pedido.id|string %}
 
-              <strong>
-                #{{ pedido.id }}
-              </strong>
-            </div>
 
-            <span class="order-badge">
-              {{ pedido.status|replace('_', ' ')|title }}
+    <article class="order-card">
+
+
+      <!-- ==================================================
+           CABEÇALHO DO PEDIDO
+      =================================================== -->
+
+      <div class="order-card-header">
+
+
+        <div class="order-header-info">
+
+          <div class="order-number-wrapper">
+
+            <span class="order-label">
+              Pedido
             </span>
 
+            <strong class="order-number">
+              #{{ pedido_codigo[:8]|upper }}
+            </strong>
+
           </div>
 
-          <div class="order-card-body">
 
-            <a
-              href="{{ url_for('main.encomendas', order_id=pedido.id) }}"
-              class="action-btn action-btn--primary"
+          {% if pedido.created_at %}
+
+          <div class="order-date">
+
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
             >
-              Ver pedido
-            </a>
+              <rect x="3" y="4" width="18" height="17" rx="2"/>
+              <path d="M8 2v4"/>
+              <path d="M16 2v4"/>
+              <path d="M3 10h18"/>
+            </svg>
+
+            {{ pedido.created_at.strftime('%d/%m/%Y') }}
 
           </div>
 
+          {% endif %}
+
+        </div>
+
+
+
+        <!-- STATUS -->
+
+        <span
+          class="
+            order-badge
+
+            {% if pedido.customer_status == 'aguardando_pagamento' %}
+              order-badge--payment
+
+            {% elif pedido.customer_status == 'aguardando_envio' %}
+              order-badge--shipping
+
+            {% elif pedido.customer_status == 'enviado' %}
+              order-badge--sent
+
+            {% elif pedido.customer_status == 'aguardando_avaliacao' %}
+              order-badge--review
+            {% endif %}
+          "
+        >
+
+          {{ pedido.customer_status_label }}
+
+        </span>
+
+      </div>
+
+
+
+      <!-- ==================================================
+           PRODUTOS DO PEDIDO
+      =================================================== -->
+
+      <div class="order-products">
+
+
+        {% for item in pedido.items %}
+
+        <div class="order-product">
+
+
+          <!-- ==============================================
+               IMAGEM
+          =============================================== -->
+
+          <div class="order-product-image">
+
+            {% if item.product and item.product.image1 %}
+
+            <img
+              src="{{ item.product.image1 }}"
+              alt="{{ item.product_name }}"
+              loading="lazy"
+            >
+
+            {% else %}
+
+            <div
+              class="order-product-image-empty"
+              aria-label="Produto sem imagem"
+            >
+
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <rect
+                  x="3"
+                  y="3"
+                  width="18"
+                  height="18"
+                  rx="2"
+                />
+
+                <circle
+                  cx="8.5"
+                  cy="8.5"
+                  r="1.5"
+                />
+
+                <path d="m21 15-5-5L5 21"/>
+              </svg>
+
+            </div>
+
+            {% endif %}
+
+          </div>
+
+
+
+          <!-- ==============================================
+               INFORMAÇÕES DO PRODUTO
+          =============================================== -->
+
+          <div class="order-product-content">
+
+
+            <!-- Nome salvo no momento da compra -->
+
+            <div class="order-product-name">
+
+              {% if item.product and item.product.is_active %}
+
+              <a
+                href="{{ url_for(
+                  'main.produto_individual',
+                  id=item.product.id
+                ) }}"
+              >
+                {{ item.product_name }}
+              </a>
+
+              {% else %}
+
+              {{ item.product_name }}
+
+              {% endif %}
+
+            </div>
+
+
+
+            <!-- Tamanho / quantidade -->
+
+            <div class="order-product-meta">
+
+
+              {% if item.selected_size %}
+
+              <span class="order-product-meta-item">
+
+                <span class="order-product-meta-label">
+                  Tamanho:
+                </span>
+
+                {{ item.selected_size }}
+
+              </span>
+
+              {% endif %}
+
+
+              <span class="order-product-meta-item">
+
+                <span class="order-product-meta-label">
+                  Quantidade:
+                </span>
+
+                {{ item.quantity }}
+
+              </span>
+
+            </div>
+
+
+
+            <!-- Preço unitário -->
+
+            <div class="order-product-unit-price">
+
+              R$
+              {{
+                "%.2f"
+                |format(item.unit_price|float)
+                |replace('.', ',')
+              }}
+
+              {% if item.quantity > 1 %}
+                cada
+              {% endif %}
+
+            </div>
+
+          </div>
+
+
+
+          <!-- ==============================================
+               TOTAL DO ITEM
+          =============================================== -->
+
+          <div class="order-product-price">
+
+            <span class="order-product-price-label">
+              Total
+            </span>
+
+            <strong>
+
+              R$
+              {{
+                "%.2f"
+                |format(item.line_total|float)
+                |replace('.', ',')
+              }}
+
+            </strong>
+
+          </div>
+
+        </div>
+
+
+        {% else %}
+
+        <div class="order-products-empty">
+          Nenhum item encontrado neste pedido.
         </div>
 
         {% endfor %}
 
       </div>
 
-    {% else %}
 
-      <div class="empty-state">
-        <p>
-          Nenhuma compra encontrada nesta categoria.
-        </p>
 
-        <a
-          href="{{ url_for('main.produtos') }}"
-          class="action-btn action-btn--primary"
-        >
-          Ver produtos
-        </a>
+      <!-- ==================================================
+           RESUMO DO PEDIDO
+      =================================================== -->
+
+      <div class="order-summary">
+
+
+        <div class="order-summary-values">
+
+
+          {% if pedido.subtotal is not none %}
+
+          <div class="order-summary-row">
+
+            <span>
+              Subtotal
+            </span>
+
+            <strong>
+              R$
+              {{
+                "%.2f"
+                |format(pedido.subtotal|float)
+                |replace('.', ',')
+              }}
+            </strong>
+
+          </div>
+
+          {% endif %}
+
+
+
+          {% if pedido.shipping is not none %}
+
+          <div class="order-summary-row">
+
+            <span>
+              Frete
+            </span>
+
+            <strong>
+
+              {% if pedido.shipping|float > 0 %}
+
+                R$
+                {{
+                  "%.2f"
+                  |format(pedido.shipping|float)
+                  |replace('.', ',')
+                }}
+
+              {% else %}
+
+                Grátis
+
+              {% endif %}
+
+            </strong>
+
+          </div>
+
+          {% endif %}
+
+
+
+          {% if pedido.discount and pedido.discount|float > 0 %}
+
+          <div class="order-summary-row order-summary-row--discount">
+
+            <span>
+              Desconto
+            </span>
+
+            <strong>
+
+              − R$
+              {{
+                "%.2f"
+                |format(pedido.discount|float)
+                |replace('.', ',')
+              }}
+
+            </strong>
+
+          </div>
+
+          {% endif %}
+
+
+        </div>
+
+
+
+        <div class="order-total">
+
+          <span>
+            Total do pedido
+          </span>
+
+          <strong>
+
+            R$
+            {{
+              "%.2f"
+              |format(pedido.total|float)
+              |replace('.', ',')
+            }}
+
+          </strong>
+
+        </div>
+
       </div>
 
-    {% endif %}
+
+
+      <!-- ==================================================
+           RASTREAMENTO
+      =================================================== -->
+
+      {% if pedido.shipments %}
+
+        {% set shipment = pedido.shipments[-1] %}
+
+
+        {% if shipment.tracking_code %}
+
+        <div class="order-tracking">
+
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M3 7h11v10H3z"/>
+            <path d="M14 10h4l3 3v4h-7z"/>
+            <circle cx="7" cy="18" r="2"/>
+            <circle cx="18" cy="18" r="2"/>
+          </svg>
+
+
+          <div>
+
+            <span>
+              Código de rastreio
+            </span>
+
+            <strong>
+              {{ shipment.tracking_code }}
+            </strong>
+
+          </div>
+
+        </div>
+
+        {% endif %}
+
+      {% endif %}
+
+
+
+      <!-- ==================================================
+           AÇÕES
+      =================================================== -->
+
+      <footer class="order-actions">
+
+
+        {% if pedido.customer_status == 'aguardando_pagamento'
+              and pedido.mp_checkout_url
+        %}
+
+        <a
+          href="{{ pedido.mp_checkout_url }}"
+          class="order-btn order-btn--secondary"
+        >
+          Pagar pedido
+        </a>
+
+        {% endif %}
+
+
+
+        <a
+          href="{{ url_for(
+            'main.detalhes_encomenda',
+            order_id=pedido.id
+          ) }}"
+          class="order-btn order-btn--primary"
+        >
+
+          Ver detalhes
+
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M5 12h14"/>
+            <path d="m13 6 6 6-6 6"/>
+          </svg>
+
+        </a>
+
+      </footer>
+
+    </article>
+
+    {% endfor %}
+
 
   </div>
+
+
+
+  <!-- ======================================================
+       SEM PEDIDOS
+  ======================================================= -->
+
+  {% else %}
+
+  <div class="orders-panel">
+
+    <div class="orders-empty">
+
+
+      <div class="orders-empty-icon">
+
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+
+          <path d="M3 6h18"/>
+
+          <path d="M16 10a4 4 0 0 1-8 0"/>
+        </svg>
+
+      </div>
+
+
+      <h2>
+        Nenhum pedido encontrado
+      </h2>
+
+
+      <p>
+
+        {% if filtro == 'todos' %}
+
+          Você ainda não realizou nenhuma compra.
+
+        {% else %}
+
+          Nenhuma compra encontrada nesta categoria.
+
+        {% endif %}
+
+      </p>
+
+
+      <a
+        href="{{ url_for('main.produtos') }}"
+        class="order-btn order-btn--primary"
+      >
+        Ver produtos
+      </a>
+
+    </div>
+
+  </div>
+
+  {% endif %}
 
 </div>
 
