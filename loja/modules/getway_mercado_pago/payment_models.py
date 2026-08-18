@@ -6,11 +6,35 @@ from sqlalchemy.dialects.postgresql import UUID
 from loja import db
 
 
+def generate_order_number():
+    """
+    Gera um identificador público, curto e independente do UUID interno.
+
+    Exemplo:
+        PM-260818-A1B2C3D4
+
+    Estrutura:
+        PM        -> prefixo da Pollo Modas
+        260818    -> data UTC no formato AAMMDD
+        A1B2C3D4  -> sufixo aleatório derivado de UUID
+
+    A coluna possui UNIQUE no banco, portanto uma eventual colisão também
+    será bloqueada pela constraint de unicidade.
+    """
+    date_part = datetime.utcnow().strftime("%y%m%d")
+    random_part = uuid.uuid4().hex[:8].upper()
+    return f"PM-{date_part}-{random_part}"
+
+
 class Order(db.Model):
     """
     Pedido interno.
 
-    O Mercado Pago referencia este registro por external_reference.
+    `id` continua sendo a chave primária técnica (UUID).
+    `order_number` é o identificador público exibido ao cliente.
+
+    O Mercado Pago pode continuar referenciando `id` por
+    external_reference, sem expor a chave interna na interface.
     """
 
     __tablename__ = "orders"
@@ -19,6 +43,14 @@ class Order(db.Model):
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
+    )
+
+    order_number = db.Column(
+        db.String(32),
+        nullable=False,
+        unique=True,
+        index=True,
+        default=generate_order_number,
     )
 
     # Mantemos "users.id" no metadata do SQLAlchemy porque o model User
@@ -183,8 +215,8 @@ class Order(db.Model):
 
     def __repr__(self):
         return (
-            f"<Order {self.id} status={self.status} "
-            f"total={self.total}>"
+            f"<Order {self.order_number} id={self.id} "
+            f"status={self.status} total={self.total}>"
         )
 
 
