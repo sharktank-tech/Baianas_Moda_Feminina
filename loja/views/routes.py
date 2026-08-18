@@ -2,6 +2,10 @@ import uuid
 from decimal import Decimal
 from datetime import datetime
 
+import mercadopago
+import config
+sdk = mercadopago.SDK(config.Config.MERCADO_PAGO_ACCESS_TOKEN)
+
 from flask import (
     Blueprint, render_template, request, redirect, url_for,
     flash, jsonify, Response, session
