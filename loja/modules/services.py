@@ -117,10 +117,18 @@ def get_home_data() -> dict:
         .all()
     )
 
-    ends_ats = [p.ends_at for p in promotions if p.ends_at]
-    deals_end_at = min(ends_ats) if ends_ats else now.replace(
+    # "Acaba em" é uma contagem regressiva das ofertas do DIA: nunca passa do
+    # fim do dia, mesmo que a promoção esteja ativa por vários dias. Usa o
+    # término da promoção apenas quando ele acontece ainda hoje.
+    end_of_day = now.replace(
         hour=23, minute=59, second=59, microsecond=0
     )
+    ends_today = [
+        p.ends_at
+        for p in promotions
+        if p.ends_at and p.ends_at.date() == now.date()
+    ]
+    deals_end_at = min(ends_today) if ends_today else end_of_day
 
     return {
         "hero_slides": hero_slides,

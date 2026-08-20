@@ -400,6 +400,51 @@ def test_create_admin_cli(app, db):
     assert User.query.filter_by(email="admin-cli@teste.com").count() == 1
 
 
+# ── Contagem regressiva das ofertas ───────────────────────────────────────────
+
+def test_deals_countdown_is_capped_to_end_of_day(client, db, make_product):
+    """Regressão: o relógio "Acaba em" não pode mostrar dias/horas em excesso
+    quando a promoção está ativa por vários dias."""
+    from datetime import datetime, timedelta
+    from decimal import Decimal
+
+    from loja.modules.models import Promotion
+    from loja.utils import utcnow
+
+    product = make_product()
+    promo = Promotion(
+        id=uuid.uuid4(),
+        product_id=product.id,
+        sale_price=Decimal("39.90"),
+        is_active=True,
+        starts_at=None,
+        ends_at=utcnow() + timedelta(days=8),
+    )
+    db.session.add(promo)
+    db.session.commit()
+
+    resp = client.get("/")
+    html = resp.get_data(as_text=True)
+    match = re.search(r'data-end="([^"]+)"', html)
+    assert match, "Contagem regressiva não renderizada na home."
+
+    end = datetime.fromisoformat(match.group(1))
+    assert end.date() == utcnow().date()
+    assert end.hour == 23 and end.minute == 59
+
+    # Com uma promoção que termina ainda hoje, o relógio usa o término dela.
+    now = utcnow()
+    today_end = now.replace(hour=20, minute=0, second=0, microsecond=0)
+    if today_end > now:
+        promo.ends_at = today_end
+        db.session.commit()
+
+        resp = client.get("/")
+        match = re.search(r'data-end="([^"]+)"', resp.get_data(as_text=True))
+        end = datetime.fromisoformat(match.group(1))
+        assert end.hour == 20 and end.minute == 0
+
+
 # ── Rastreio ──────────────────────────────────────────────────────────────────
 
 def test_tracking_page_renders(client):
