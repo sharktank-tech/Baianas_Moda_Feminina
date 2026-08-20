@@ -1915,7 +1915,7 @@
                     <span class="adm-stars">
 
                       {% for i in range(5) %}
-                        {{ "★" if i < t.rating else "☆" }}
+                        {{ "★" if i < (t.rating or 0) else "☆" }}
                       {% endfor %}
 
                     </span>

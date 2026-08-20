@@ -249,6 +249,18 @@ def admin_dashboard():
         flash("Acesso negado.", "danger")
         return redirect(url_for("main.home"))
 
+    # O dashboard assume que os singletons existem. Em primeiro acesso,
+    # cria os registros com valores padrão para não quebrar o template.
+    if SiteConfig.query.first() is None:
+        db.session.add(SiteConfig(id=PythonUUID.uuid4(), name="Pollo Modas"))
+    if FooterConfig.query.first() is None:
+        db.session.add(FooterConfig(id=PythonUUID.uuid4(), brand_name="Pollo Modas"))
+    if ContactInfo.query.first() is None:
+        db.session.add(
+            ContactInfo(id=PythonUUID.uuid4(), email="contato@pollomodas.com.br")
+        )
+    db.session.commit()
+
     return render_template(
         "admin/dashboard.html",
         products     = Product.query.all(),

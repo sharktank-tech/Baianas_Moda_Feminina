@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block title %}Adicionar Configurações do Site{% endblock %}
+
+{% block content %}
+
+<div class="max-w-5xl mx-auto px-4 py-8">
+
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-gray-800">
+            Adicionar Configurações do Site
+        </h1>
+
+        <p class="text-gray-500 mt-2">
+            Configure as informações globais utilizadas pela loja.
+        </p>
+    </div>
+
+    <form
+        method="POST"
+        class="bg-white rounded-2xl shadow p-8 space-y-8"
+    >
+
+        <!-- Informações básicas -->
+        <div class="space-y-6">
+
+            <h2 class="text-xl font-semibold text-gray-800 border-b pb-3">
+                Informações Gerais
+            </h2>
+
+            <!-- Nome -->
+            <div>
+                <label class="block font-medium text-gray-700 mb-2">
+                    Nome da loja
+                </label>
+
+                <input
+                    type="text"
+                    name="name"
+                    required
+                    class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                    placeholder="Ex: Pollomodas"
+                >
+            </div>
+
+            <!-- Meta Description -->
+            <div>
+                <label class="block font-medium text-gray-700 mb-2">
+                    Meta descrição (SEO)
+                </label>
+
+                <textarea
+                    name="meta_description"
+                    rows="4"
+                    class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                    placeholder="Descrição que aparecerá nos mecanismos de busca..."
+                ></textarea>
+
+                <p class="text-sm text-gray-500 mt-1">
+                    Exemplo: "Pollomodas - Encontre roupas femininas, masculinas e acessórios com estilo, qualidade e preços incríveis."
+                </p>
+            </div>
+
+        </div>
+
+        <!-- Banner -->
+        <div class="space-y-6">
+
+            <h2 class="text-xl font-semibold text-gray-800 border-b pb-3">
+                Banner Principal
+            </h2>
+
+            <!-- Frase -->
+            <div>
+                <label class="block font-medium text-gray-700 mb-2">
+                    Frase do banner
+                </label>
+
+                <input
+                    type="text"
+                    name="banner_quote"
+                    class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                    placeholder="Ex: Moda que inspira confiança."
+                >
+            </div>
+
+            <!-- CTA -->
+            <div>
+                <label class="block font-medium text-gray-700 mb-2">
+                    Texto do botão (CTA)
+                </label>
+
+                <input
+                    type="text"
+                    name="banner_cta_text"
+                    class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                    placeholder="Ex: Comprar Agora"
+                >
+            </div>
+
+            <!-- Badge -->
+            <div>
+                <label class="block font-medium text-gray-700 mb-2">
+                    Badge promocional
+                </label>
+
+                <input
+                    type="text"
+                    name="promo_badge"
+                    class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                    placeholder="Ex: Frete grátis para todo o Brasil"
+                >
+            </div>
+
+        </div>
+
+        <!-- Rodapé -->
+        <div class="space-y-6">
+
+            <h2 class="text-xl font-semibold text-gray-800 border-b pb-3">
+                Rodapé
+            </h2>
+
+            <div class="grid md:grid-cols-2 gap-6">
+
+                <!-- Ano -->
+                <div>
+                    <label class="block font-medium text-gray-700 mb-2">
+                        Ano do copyright
+                    </label>
+
+                    <input
+                        type="number"
+                        name="copyright_year"
+                        min="2000"
+                        max="2100"
+                        class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                        placeholder="2026"
+                    >
+                </div>
+
+                <!-- Texto -->
+                <div>
+                    <label class="block font-medium text-gray-700 mb-2">
+                        Texto do copyright
+                    </label>
+
+                    <input
+                        type="text"
+                        name="copyright_text"
+                        class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                        placeholder="Todos os direitos reservados."
+                    >
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- Botões -->
+        <div class="flex gap-4 pt-4">
+
+            <button
+                type="submit"
+                class="bg-pink-600 hover:bg-pink-700 transition text-white px-8 py-3 rounded-lg font-medium"
+            >
+                Salvar Configurações
+            </button>
+
+            <a
+                href="{{ url_for('admin.admin_dashboard') }}"
+                class="bg-gray-200 hover:bg-gray-300 transition px-8 py-3 rounded-lg font-medium"
+            >
+                Cancelar
+            </a>
+
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

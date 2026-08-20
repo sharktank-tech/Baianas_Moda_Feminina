@@ -7,8 +7,6 @@ Responsabilidade: buscar, montar e retornar dados prontos para as rotas,
 mantendo as views limpas de lógica de negócio e consultas diretas ao banco.
 
 """
-import email
-
 from loja.modules.models import (
     Product,
     HeroSlide,

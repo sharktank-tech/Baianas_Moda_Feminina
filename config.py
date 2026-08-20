@@ -11,7 +11,7 @@ load_dotenv()
 class Config:
     # ============== Flask =================
     SECRET_KEY = os.getenv("SECRET_KEY", "rjh393sn1958ffn")
-    FLASK_APP = os.getenv("SECRET_KEY", "run")
+    FLASK_APP = os.getenv("FLASK_APP", "run")
 
     # ============== Database =================
     DATABASE_URL = os.getenv("DATABASE_URL")

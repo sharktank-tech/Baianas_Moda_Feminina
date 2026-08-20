@@ -7,6 +7,7 @@ from flask import (
     flash,
     redirect,
     request,
+    session,
     url_for,
 )
 from flask_login import current_user, login_required
@@ -242,7 +243,7 @@ def _get_cart_items():
             }
         )
 
-    return items
+    return items, cart
 
 
 def _get_coupon(code, subtotal):
@@ -269,6 +270,20 @@ def _get_coupon(code, subtotal):
             "Cupom expirado, indisponível ou inválido para este pedido."
         )
 
+    if coupon.first_purchase_only:
+        previous_order = (
+            Order.query
+            .filter(
+                Order.user_id == current_user.id,
+                Order.status.in_(["paid", "manual_review"]),
+            )
+            .first()
+        )
+        if previous_order:
+            raise ValueError(
+                "Este cupom é exclusivo para a primeira compra."
+            )
+
     discount = money(
         coupon.calculate_discount(subtotal)
     )
@@ -294,10 +309,10 @@ def create_mercado_pago_payment():
         ).strip().lower()
 
         if checkout_type == "product":
-            item_data = _get_direct_product_items()
+            item_data, cart = _get_direct_product_items(), None
 
         elif checkout_type == "cart":
-            item_data = _get_cart_items()
+            item_data, cart = _get_cart_items()
 
         else:
             raise ValueError(
@@ -365,7 +380,19 @@ def create_mercado_pago_payment():
             "checkout_url"
         ]
 
+        # O carrinho virou um pedido persistido. Em caso de pagamento pendente
+        # ou falho, o pedido continua disponível no banco para acompanhamento,
+        # mas os itens não devem permanecer disponíveis para uma nova compra.
+        if cart is not None:
+            for cart_item in list(cart.items):
+                db.session.delete(cart_item)
+
         db.session.commit()
+
+        session.pop("checkout_cart", None)
+        session.pop("checkout_coupon", None)
+        session.pop("checkout_product", None)
+        session.modified = True
 
         return redirect(
             preference["checkout_url"]

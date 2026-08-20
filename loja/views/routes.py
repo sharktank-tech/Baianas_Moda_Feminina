@@ -2,10 +2,6 @@ import uuid
 from decimal import Decimal
 from datetime import datetime
 
-import mercadopago
-import config
-sdk = mercadopago.SDK(config.Config.MERCADO_PAGO_ACCESS_TOKEN)
-
 from flask import (
     Blueprint, render_template, request, redirect, url_for,
     flash, jsonify, Response, session
@@ -2222,12 +2218,8 @@ def robots():
     linhas = [
         "User-agent: *",
         "Disallow: /conta/",
-        "Disallow: /admin_dashboard/",
-        "Disallow: /admin_products/",
-        "Disallow: /admin/products/add/",
-        "Disallow: /admin/products/edit/",
-        "Disallow: /admin/products/delete/",
-        "Disallow: /admin/categorias/add/",
-        "Disallow: /admin/users/delete/",
+        "Disallow: /admin/",
+        "Disallow: /cart/",
+        "Disallow: /checkout/",
     ]
     return Response("\n".join(linhas), mimetype="text/plain")
