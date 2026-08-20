@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import timedelta
 from decimal import Decimal
 
 from flask import (
@@ -16,6 +16,7 @@ from flask import (
 from flask_login import current_user, login_required
 
 from loja import db, csrf
+from loja.utils import utcnow
 from loja.modules.models import Cart, Coupon, Product
 from loja.modules.getway_mercado_pago.payment_models import (
     Order,
@@ -311,6 +312,85 @@ def _get_coupon(code, subtotal):
     return coupon, discount
 
 
+def _reserve_stock(item_data):
+    """Abate o estoque no momento da criação do pedido (reserva).
+
+    Roda dentro da mesma transação do pedido: se algo falhar depois
+    (ex.: erro no gateway), o rollback devolve o estoque automaticamente.
+    """
+    for item in item_data:
+        product = (
+            Product.query
+            .filter_by(id=item["product_id"])
+            .with_for_update()
+            .first()
+        )
+
+        if product is None or not product.is_active:
+            raise ValueError(
+                f"Produto {item['product_name']} não está mais disponível."
+            )
+
+        if product.stock is not None and product.stock < item["quantity"]:
+            raise ValueError(
+                f"Estoque insuficiente para {product.name}."
+            )
+
+        if product.stock is not None:
+            product.stock -= item["quantity"]
+
+
+def _release_stock(order):
+    """Devolve ao estoque o que foi reservado em um pedido não pago."""
+    if not order.stock_reserved:
+        return
+
+    for item in order.items:
+        if item.product_id is None:
+            continue
+
+        product = (
+            Product.query
+            .filter_by(id=item.product_id)
+            .with_for_update()
+            .first()
+        )
+
+        if product is not None and product.stock is not None:
+            product.stock += item.quantity
+
+    order.stock_reserved = False
+
+
+def release_expired_stock_reservations(hours=24):
+    """Libera reservas de pedidos pendentes abandonados.
+
+    A chamada ocorre nos pontos de contato com o provedor (webhook e
+    retorno), mantendo a operação simples sem exigir um agendador.
+    """
+    cutoff = utcnow() - timedelta(hours=hours)
+
+    stale_orders = (
+        Order.query
+        .filter(
+            Order.stock_reserved.is_(True),
+            Order.status == "pending_payment",
+            Order.created_at < cutoff,
+        )
+        .all()
+    )
+
+    for order in stale_orders:
+        _release_stock(order)
+
+    if stale_orders:
+        current_app.logger.info(
+            "Liberada reserva de estoque de %s pedido(s) pendente(s).",
+            len(stale_orders),
+        )
+        db.session.commit()
+
+
 # ── Criar pagamento no Mercado Pago ─────────────────────────────────────────
 @payments_blueprint.route(
     "/pagamentos/mercado-pago",
@@ -363,6 +443,10 @@ def create_mercado_pago_payment():
             )
         )
 
+        # Reserva o estoque na criação do pedido, impedindo que o mesmo
+        # item seja vendido para outro cliente enquanto o pagamento pende.
+        _reserve_stock(item_data)
+
         order = Order(
             id=uuid.uuid4(),
             user_id=current_user.id,
@@ -374,6 +458,7 @@ def create_mercado_pago_payment():
             shipping=shipping,
             discount=discount,
             total=total,
+            stock_reserved=True,
             **_get_customer_data(),
         )
 
@@ -531,7 +616,7 @@ def _sync_payment(payment_id):
             f"esperado BRL {money(order.total)}."
         )
         if mp_status == "approved" and order.paid_at is None:
-            order.paid_at = datetime.utcnow()
+            order.paid_at = utcnow()
         db.session.commit()
         return order
 
@@ -562,7 +647,8 @@ def _sync_payment(payment_id):
                         f"Produto não encontrado: {item.product_name}."
                     )
                 elif (
-                    product.stock is not None
+                    not order.stock_reserved
+                    and product.stock is not None
                     and product.stock < item.quantity
                 ):
                     review_reasons.append(
@@ -586,25 +672,36 @@ def _sync_payment(payment_id):
                         f"Limite do cupom {order.coupon_code} atingido."
                     )
 
-            order.paid_at = order.paid_at or datetime.utcnow()
+            order.paid_at = order.paid_at or utcnow()
 
             if review_reasons:
                 order.status = "manual_review"
                 order.manual_review_reason = " ".join(review_reasons)
             else:
-                for item in order.items:
-                    product = locked_products.get(item.id)
-                    if product is not None and product.stock is not None:
-                        product.stock -= item.quantity
+                # Pedidos com reserva já tiveram o estoque abatido na criação.
+                if not order.stock_reserved:
+                    for item in order.items:
+                        product = locked_products.get(item.id)
+                        if product is not None and product.stock is not None:
+                            product.stock -= item.quantity
 
                 if locked_coupon is not None:
                     locked_coupon.times_used += 1
-                    order.coupon_counted_at = datetime.utcnow()
+                    order.coupon_counted_at = utcnow()
 
                 order.status = "paid"
                 order.manual_review_reason = None
 
     elif mapped_status in {"refunded", "charged_back"}:
+        _release_stock(order)
+        order.status = mapped_status
+    elif mapped_status == "payment_failed" and order.status not in {
+        "paid",
+        "manual_review",
+        "refunded",
+        "charged_back",
+    }:
+        _release_stock(order)
         order.status = mapped_status
     elif order.status not in {"paid", "manual_review", "refunded", "charged_back"}:
         order.status = mapped_status
@@ -646,6 +743,7 @@ def mercado_pago_webhook():
         return jsonify({"ok": True}), 200
 
     try:
+        release_expired_stock_reservations()
         _sync_payment(payment_id)
     except PaymentGatewayError:
         db.session.rollback()
@@ -669,6 +767,14 @@ def mercado_pago_webhook():
 @payments_blueprint.route("/pagamentos/retorno/<result>")
 @login_required
 def payment_return(result):
+    try:
+        release_expired_stock_reservations()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Falha ao liberar reservas expiradas no retorno."
+        )
+
     payment_id = (
         request.args.get("payment_id")
         or request.args.get("collection_id")

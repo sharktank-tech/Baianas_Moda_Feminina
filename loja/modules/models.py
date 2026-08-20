@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime
 from decimal import Decimal
 from loja import db
+from loja.utils import utcnow
 from flask_login import UserMixin
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import validates
@@ -76,7 +76,7 @@ class HeroSlide(db.Model):
 
     is_active = db.Column(db.Boolean, default=True)   # NOVO: liga/desliga sem apagar
     order = db.Column(db.Integer, default=0)          # NOVO: ordem de exibição no carrossel
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow)
 
     def __repr__(self):
         return f"<HeroSlide {self.title}>"
@@ -101,7 +101,7 @@ class Supplier(db.Model):
     address = db.Column(db.Text)
     created_at = db.Column(
         db.DateTime,
-        default=datetime.utcnow
+        default=utcnow
     )
 
     products = db.relationship(
@@ -155,7 +155,7 @@ class Product(db.Model):
 
     created_at = db.Column(
         db.DateTime,
-        default=datetime.utcnow
+        default=utcnow
     )
 
     suppliers = db.relationship(
@@ -244,7 +244,7 @@ class Promotion(db.Model):
     created_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow
+        default=utcnow
     )
 
     __table_args__ = (
@@ -323,7 +323,7 @@ class Testimonial(db.Model):
         db.Boolean,
         default=True
     )
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)  # NOVO: para ordenar "mais recentes"
+    created_at = db.Column(db.DateTime, default=utcnow)  # NOVO: para ordenar "mais recentes"
 
 
 # ==========================================================
@@ -338,7 +338,7 @@ class NewsletterSubscriber(db.Model):   # NOVO: faltava para o form de newslette
         default=uuid.uuid4
     )
     email = db.Column(db.String(150), nullable=False, unique=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow)
 
     def __repr__(self):
         return f"<NewsletterSubscriber {self.email}>"
@@ -429,14 +429,14 @@ class Coupon(db.Model):
     created_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow
+        default=utcnow
     )
 
     updated_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow
+        default=utcnow,
+        onupdate=utcnow
     )
 
     __table_args__ = (
@@ -517,7 +517,7 @@ class Coupon(db.Model):
         Verifica se o cupom está ativo, dentro da validade, com usos
         disponíveis e se o pedido atingiu o valor mínimo.
         """
-        current_time = now or datetime.utcnow()
+        current_time = now or utcnow()
         order_subtotal = Decimal(str(subtotal or 0))
 
         if not self.is_active:
@@ -592,7 +592,7 @@ class Favorite(db.Model):   # NOVO: favoritos ligados ao usuário (persistem ent
         db.ForeignKey("products.id", ondelete="CASCADE"),
         nullable=False
     )
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow)
 
     __table_args__ = (
         db.UniqueConstraint("user_id", "product_id", name="uq_favorite_user_product"),
@@ -800,7 +800,7 @@ class Address(db.Model):
 
     created_at = db.Column(
         db.DateTime,
-        default=datetime.utcnow
+        default=utcnow
     )
 
 
@@ -835,7 +835,7 @@ class User(UserMixin, db.Model):
 
     created_at = db.Column(
         db.DateTime,
-        default=datetime.utcnow
+        default=utcnow
     )
 
     carts = db.relationship(
@@ -904,14 +904,14 @@ class Cart(db.Model):
 
     created_at = db.Column(
         db.DateTime,
-        default=datetime.utcnow,
+        default=utcnow,
         nullable=False
     )
 
     updated_at = db.Column(
         db.DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False
     )
 
@@ -991,14 +991,14 @@ class CartItem(db.Model):
 
     created_at = db.Column(
         db.DateTime,
-        default=datetime.utcnow,
+        default=utcnow,
         nullable=False
     )
 
     updated_at = db.Column(
         db.DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False
     )
 
@@ -1112,14 +1112,14 @@ class Shipment(db.Model):
     created_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=utcnow,
     )
 
     updated_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
     )
 
     order = db.relationship(
@@ -1180,7 +1180,7 @@ class TrackingEvent(db.Model):
     event_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=utcnow,
     )
 
     raw_payload = db.Column(
@@ -1191,7 +1191,7 @@ class TrackingEvent(db.Model):
     created_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=utcnow,
     )
 
     shipment = db.relationship(

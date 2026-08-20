@@ -18,8 +18,6 @@ class Config:
 
     # ============== Database =================
     DATABASE_URL = os.getenv("DATABASE_URL")
-    DATABASE_KEY = os.getenv("DATABASE_KEY")
-    DATABASE_SERVICE_ROLE_KEY = os.getenv("DATABASE_SERVICE_ROLE_KEY")
 
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL não configurada.")

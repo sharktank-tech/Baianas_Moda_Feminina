@@ -2,12 +2,20 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from uuid import UUID as PythonUUID
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask import (
+    Blueprint,
+    render_template,
+    request,
+    redirect,
+    url_for,
+    flash,
+    current_app,
+)
 from flask_login import login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash
 from sqlalchemy.exc import IntegrityError
 from loja.utils.decorators import admin_required
-from loja.modules.services import get_home_data
+from loja.modules.services import get_layout_data
 
 from loja.modules.models import (
     db,
@@ -28,7 +36,7 @@ admin_blueprint = Blueprint(
 
 @admin_blueprint.context_processor
 def inject_global_data():
-    return get_home_data()
+    return get_layout_data()
 
 
 def _normalize_coupon_code(value):
@@ -433,7 +441,7 @@ def add_promotion():
 
         except Exception as error:
             db.session.rollback()
-            print(f"Erro ao criar promoção: {error}")
+            current_app.logger.error("Erro ao criar promoção: %s", error)
             flash(
                 "Ocorreu um erro ao criar a promoção.",
                 "danger"
@@ -502,7 +510,7 @@ def edit_promotion(id):
 
         except Exception as error:
             db.session.rollback()
-            print(f"Erro ao editar promoção: {error}")
+            current_app.logger.error("Erro ao editar promoção: %s", error)
             flash(
                 "Ocorreu um erro ao atualizar a promoção.",
                 "danger"
@@ -542,7 +550,7 @@ def delete_promotion(id):
 
     except Exception as error:
         db.session.rollback()
-        print(f"Erro ao excluir promoção: {error}")
+        current_app.logger.error("Erro ao excluir promoção: %s", error)
         flash(
             "Não foi possível excluir a promoção.",
             "danger"
@@ -603,7 +611,7 @@ def add_coupon():
 
         except Exception as error:
             db.session.rollback()
-            print(f"Erro ao criar cupom: {error}")
+            current_app.logger.error("Erro ao criar cupom: %s", error)
             flash("Ocorreu um erro ao criar o cupom.", "danger")
 
     return render_template("admin/cupons/add_coupon.html")
@@ -658,7 +666,7 @@ def edit_coupon(id):
 
         except Exception as error:
             db.session.rollback()
-            print(f"Erro ao editar cupom: {error}")
+            current_app.logger.error("Erro ao editar cupom: %s", error)
             flash("Ocorreu um erro ao atualizar o cupom.", "danger")
 
     return render_template(
@@ -699,7 +707,7 @@ def delete_coupon(id):
 
     except Exception as error:
         db.session.rollback()
-        print(f"Erro ao excluir cupom: {error}")
+        current_app.logger.error("Erro ao excluir cupom: %s", error)
         flash("Não foi possível excluir o cupom.", "danger")
 
     return redirect(
@@ -1305,7 +1313,7 @@ def add_category_link():
 
         except Exception as e:
             db.session.rollback()
-            print(e)
+            current_app.logger.error("Erro: %s", e)
             flash(str(e), "danger")
 
     return render_template("admin/footer/add_category_link.html")

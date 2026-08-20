@@ -1,7 +1,6 @@
-from datetime import datetime
-
 from loja import db
 from loja.modules.models import Shipment, TrackingEvent
+from loja.utils import utcnow
 
 
 class TrackingService:
@@ -38,7 +37,7 @@ class TrackingService:
             shipment_id=shipment.id,
             status="aguardando_postagem",
             description="Código de rastreio cadastrado. Aguardando postagem.",
-            event_at=datetime.utcnow()
+            event_at=utcnow()
         )
 
         db.session.add(first_event)
@@ -54,7 +53,7 @@ class TrackingService:
         location=None,
         event_at=None
     ):
-        event_at = event_at or datetime.utcnow()
+        event_at = event_at or utcnow()
 
         latest_event = (
             TrackingEvent.query
@@ -81,7 +80,7 @@ class TrackingService:
         )
 
         shipment.status = status
-        shipment.last_checked_at = datetime.utcnow()
+        shipment.last_checked_at = utcnow()
 
         db.session.add(event)
         db.session.commit()

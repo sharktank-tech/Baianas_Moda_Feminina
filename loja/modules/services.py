@@ -7,6 +7,10 @@ Responsabilidade: buscar, montar e retornar dados prontos para as rotas,
 mantendo as views limpas de lógica de negócio e consultas diretas ao banco.
 
 """
+from flask import url_for
+from flask_login import current_user
+
+from loja import db
 from loja.modules.models import (
     Product,
     HeroSlide,
@@ -18,44 +22,179 @@ from loja.modules.models import (
     NavLink,
     CategoryLink,
     LegalLink,
-    ContactInfo
+    ContactInfo,
+    Favorite,
 )
+from loja.utils import utcnow
 
 
-# ── Home ──────────────────────────────────────────────────────────────────────
+# ── Layout base (contexto global de admin) ─────────────────────────────────────
 
-def get_home_data() -> dict:
+def get_layout_data() -> dict:
     """
-    Retorna todo o contexto necessário para renderizar base.html.
+    Contexto base usado pelo blueprint admin (base.html).
 
     Estrutura retornada:
         site          – SiteConfig | None
+        categories    – list[CategoryLink]
         hero_slides   – list[HeroSlide]
-        products      – list[Product]  (até 8, ativos, mais recentes)
+        products      – list[Product]  (ativos, mais recentes)
         promotions    – list[Promotion] (ativas)
-        testimonials  – list[Testimonial] (visíveis, até 3)
+        testimonials  – list[Testimonial] (visíveis)
         banner        – dict  { quote, cta_text }
         promo_badge   – str
-        footer        – dict  (ver _build_footer)
+        footer        – dict  (ver get_footer_data)
     """
     site = SiteConfig.query.first()
 
     return {
         "site":         site,
-        "categories": _get_categories(),
+        "categories":   _get_categories(),
         "hero_slides":  _get_hero_slides(),
         "products":     _get_active_products(),
         "promotions":   _get_active_promotions(),
         "testimonials": _get_visible_testimonials(),
         "banner":       _build_banner(site),
         "promo_badge":  site.promo_badge if site else "",
-        "footer":       _build_footer(site),
+        "footer":       get_footer_data(),
     }
+
+
+# ── Home ──────────────────────────────────────────────────────────────────────
+
+def get_home_data() -> dict:
+    """
+    Dados usados pela home (main/index.html).
+
+    Estrutura retornada:
+        hero_slides   – list[HeroSlide] (ativas, ordenadas)
+        categories    – cards de categoria
+        banner        – dict  { quote, cta_text, cta_link }
+        deals_end_at  – str (ISO) fim da menor promoção ativa
+        promotions    – list[Promotion] (ativas, não expiradas)
+        products      – list[Product] (até 8, ativos, favoritados)
+        testimonials  – list[Testimonial] (visíveis, até 6)
+        store_policy  – dict  { exchange_days, max_installments, free_shipping_min }
+    """
+    favoritos = get_favorited_ids()
+
+    hero_slides = (
+        HeroSlide.query
+        .filter(HeroSlide.is_active == True)  # noqa: E712
+        .order_by(HeroSlide.order.asc())
+        .all()
+    )
+
+    # Ofertas do dia: vêm de Promotion (Product não tem sale_price/original_price)
+    now = utcnow()
+    promotions = (
+        Promotion.query
+        .filter(
+            Promotion.is_active == True,  # noqa: E712
+            db.or_(Promotion.ends_at.is_(None), Promotion.ends_at > now),
+        )
+        .order_by(Promotion.created_at.desc())
+        .limit(8)
+        .all()
+    )
+    for promo in promotions:
+        promo.is_favorited = bool(promo.product_id) and promo.product_id in favoritos
+
+    products = (
+        Product.query
+        .filter(Product.is_active == True)  # noqa: E712
+        .order_by(Product.created_at.desc())
+        .limit(8)
+        .all()
+    )
+    products = [_serialize_product(p, favoritos) for p in products]
+
+    testimonials = (
+        Testimonial.query
+        .filter(Testimonial.is_visible == True)  # noqa: E712
+        .order_by(Testimonial.created_at.desc())
+        .limit(6)
+        .all()
+    )
+
+    ends_ats = [p.ends_at for p in promotions if p.ends_at]
+    deals_end_at = min(ends_ats) if ends_ats else now.replace(
+        hour=23, minute=59, second=59, microsecond=0
+    )
+
+    return {
+        "hero_slides": hero_slides,
+        "categories": _get_home_categories(),
+        "banner": {
+            "quote": "A moda é a armadura para enfrentar a vida cotidiana.",
+            "cta_text": "Ver a coleção completa",
+            "cta_link": url_for("main.produtos"),
+        },
+        "deals_end_at": deals_end_at.isoformat(),
+        "promotions": promotions,
+        "products": products,
+        "testimonials": testimonials,
+        "store_policy": {
+            "exchange_days": 30,
+            "max_installments": 12,
+            "free_shipping_min": 249,
+        },
+    }
+
+
+def get_favorited_ids() -> set:
+    """IDs de produtos favoritados pelo usuário logado. Anônimo = nenhum."""
+    if not current_user.is_authenticated:
+        return set()
+    rows = (
+        db.session.query(Favorite.product_id)
+        .filter(Favorite.user_id == current_user.id)
+        .all()
+    )
+    return {r[0] for r in rows}
+
+
+def _serialize_product(p, favoritos):
+    p.is_favorited = p.id in favoritos
+    return p
+
 
 # ── Categorias ────────────────────────────────────────────────────────────────
 
 def _get_categories() -> list:
     return CategoryLink.query.all()
+
+
+def _get_home_categories(limit=10):
+    """
+    Monta os cards de categoria da home (cat-strip / categories-grid).
+    Usa uma imagem representativa (o produto mais recente daquela categoria).
+    """
+    rows = (
+        db.session
+        .query(Product.category, Product.image1)
+        .filter(
+            Product.is_active == True,  # noqa: E712
+            Product.category.isnot(None),
+            Product.category != ''
+        )
+        .order_by(Product.category.asc(), Product.created_at.desc())
+        .all()
+    )
+    vistas, categorias = set(), []
+    for categoria, imagem in rows:
+        if categoria in vistas:
+            continue
+        vistas.add(categoria)
+        categorias.append({
+            "slug": categoria,
+            "label": categoria.replace("-", " ").title(),
+            "image": imagem,
+        })
+        if len(categorias) >= limit:
+            break
+    return categorias
+
 
 # ── Helpers privados ──────────────────────────────────────────────────────────
 
@@ -93,7 +232,9 @@ def _build_banner(site: "SiteConfig | None") -> dict:
     }
 
 
-def _build_footer(site: "SiteConfig | None") -> dict:
+def get_footer_data() -> dict:
+    """Dados do rodapé, baseado nas configurações da loja."""
+    site = SiteConfig.query.first()
     footer_config = FooterConfig.query.first()
     return {
         "brand_name":        footer_config.brand_name        if footer_config else "",

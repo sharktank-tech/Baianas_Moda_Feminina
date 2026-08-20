@@ -42,5 +42,7 @@ def create_app():
         except ValueError:
             return None         # corrigido: User
 
+    from loja import cli
+    app.cli.add_command(cli.create_admin)
 
     return app

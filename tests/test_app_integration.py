@@ -368,6 +368,38 @@ def test_admin_pages_render(client, db, admin_user, make_user, make_product,
         assert resp.status_code == 200, f"GET {url} retornou {resp.status_code}"
 
 
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+def test_create_admin_cli(app, db):
+    runner = app.test_cli_runner()
+    result = runner.invoke(
+        args=[
+            "create-admin",
+            "--email", "admin-cli@teste.com",
+            "--password", "segredo123",
+            "--name", "Admin CLI",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "criado com sucesso" in result.output
+
+    from loja.modules.models import User
+    user = User.query.filter_by(email="admin-cli@teste.com").first()
+    assert user is not None
+    assert user.is_admin is True
+
+    # Criar de novo não deve duplicar.
+    result = runner.invoke(
+        args=[
+            "create-admin",
+            "--email", "admin-cli@teste.com",
+            "--password", "segredo123",
+        ],
+    )
+    assert "já existe" in result.output
+    assert User.query.filter_by(email="admin-cli@teste.com").count() == 1
+
+
 # ── Rastreio ──────────────────────────────────────────────────────────────────
 
 def test_tracking_page_renders(client):

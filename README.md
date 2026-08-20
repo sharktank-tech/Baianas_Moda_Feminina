@@ -78,17 +78,32 @@ Loja de roupas com estilização moderna e limpa com todas as funcionalidades de
         db.create_all()
     ```
 
-6. Execute a aplicação:
+6. Crie o primeiro usuário administrador:
+
+    ```sh
+    flask create-admin --email admin@pollomodas.com.br --password 'senha-forte'
+    ```
+
+7. Execute a aplicação:
 
     ```sh
     python run.py
     ```
 
-7. Acesse a aplicação no seu navegador:
+8. Acesse a aplicação no seu navegador:
 
     ```
     http://127.0.0.1:5001
     ```
+
+## Notas de segurança e estoque
+
+- `SECRET_KEY` e `DATABASE_URL` são obrigatórias e lidas do ambiente.
+- Todos os formulários são protegidos contra CSRF (Flask-WTF); o webhook do
+  Mercado Pago é a única rota isenta.
+- O estoque é **reservado** na criação do pedido e devolvido quando o pagamento
+  é recusado, cancelado, reembolsado ou permanece pendente por mais de 24h
+  (liberação automática no webhook/retorno).
 
 ## Testes
 

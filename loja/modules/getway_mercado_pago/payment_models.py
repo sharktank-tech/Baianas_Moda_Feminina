@@ -1,9 +1,9 @@
 import uuid
-from datetime import datetime
 
 from sqlalchemy.dialects.postgresql import UUID
 
 from loja import db
+from loja.utils import utcnow
 
 
 def generate_order_number():
@@ -21,7 +21,7 @@ def generate_order_number():
     A coluna possui UNIQUE no banco, portanto uma eventual colisão também
     será bloqueada pela constraint de unicidade.
     """
-    date_part = datetime.utcnow().strftime("%y%m%d")
+    date_part = utcnow().strftime("%y%m%d")
     random_part = uuid.uuid4().hex[:8].upper()
     return f"PM-{date_part}-{random_part}"
 
@@ -143,19 +143,28 @@ class Order(db.Model):
     manual_review_reason = db.Column(db.Text)
     paid_at = db.Column(db.DateTime)
 
+    # Estoque já reservado (abatido) na criação do pedido para evitar
+    # overselling enquanto o pagamento está pendente.
+    stock_reserved = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+
     created_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=utcnow,
         server_default=db.func.now(),
     )
 
     updated_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=utcnow,
         server_default=db.func.now(),
-        onupdate=datetime.utcnow,
+        onupdate=utcnow,
     )
 
     user = db.relationship("User", lazy="joined")
@@ -266,7 +275,7 @@ class OrderItem(db.Model):
     created_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=utcnow,
         server_default=db.func.now(),
     )
 
@@ -363,16 +372,16 @@ class Payment(db.Model):
     created_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=utcnow,
         server_default=db.func.now(),
     )
 
     updated_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=utcnow,
         server_default=db.func.now(),
-        onupdate=datetime.utcnow,
+        onupdate=utcnow,
     )
 
     order = db.relationship(

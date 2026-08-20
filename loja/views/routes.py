@@ -1,10 +1,9 @@
 import uuid
 from decimal import Decimal
-from datetime import datetime
 
 from flask import (
     Blueprint, render_template, request, redirect, url_for,
-    flash, jsonify, Response, session
+    flash, jsonify, Response, session, current_app
 )
 from flask_login import login_user, login_required, current_user, logout_user
 from sqlalchemy import asc, desc
@@ -12,18 +11,21 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from loja.modules.newsletter import subscribe_newsletter
+from loja.modules.services import (
+    get_favorited_ids,
+    get_footer_data,
+    get_home_data,
+)
+from loja.utils import utcnow
 
 from loja import db
 from loja.modules.models import (
     User,
     Product,
-    Promotion,
     ContactInfo,
     SocialLink,
     Cart,
     CartItem,
-    HeroSlide,
-    Testimonial,
     NewsletterSubscriber,
     Favorite,
     SiteConfig,
@@ -88,122 +90,10 @@ def inject_categories():
     return {"navbar_categories": [c[0] for c in categorias]}
 
 
-# ── Helpers específicos da Home ───────────────────────────────────────────────
-def _get_favorited_ids():
-    """IDs de produtos favoritados pelo usuário logado. Anônimo = nenhum."""
-    if not current_user.is_authenticated:
-        return set()
-    rows = (
-        db.session.query(Favorite.product_id)
-        .filter(Favorite.user_id == current_user.id)
-        .all()
-    )
-    return {r[0] for r in rows}
-
-
-def _get_home_categories(limit=10):
-    """
-    Monta os cards de categoria da home (cat-strip / categories-grid).
-    Usa uma imagem representativa (o produto mais recente daquela categoria).
-    """
-    rows = (
-        db.session
-        .query(Product.category, Product.image1)
-        .filter(
-            Product.is_active == True,
-            Product.category.isnot(None),
-            Product.category != ''
-        )
-        .order_by(Product.category.asc(), Product.created_at.desc())
-        .all()
-    )
-    vistas, categorias = set(), []
-    for categoria, imagem in rows:
-        if categoria in vistas:
-            continue
-        vistas.add(categoria)
-        categorias.append({
-            "slug": categoria,
-            "label": categoria.replace("-", " ").title(),
-            "image": imagem,
-        })
-        if len(categorias) >= limit:
-            break
-    return categorias
-
-
-def _serialize_product(p, favoritos):
-    p.is_favorited = p.id in favoritos
-    return p
-
-
-def get_home_data():
-    """Dados usados pela home (main/index.html) e reaproveitados no
-    carrinho/checkout para manter o layout base (header/footer) consistente."""
-    favoritos = _get_favorited_ids()
-
-    hero_slides = (
-        HeroSlide.query
-        .filter(HeroSlide.is_active == True)
-        .order_by(HeroSlide.order.asc())
-        .all()
-    )
-
-    # Ofertas do dia: vêm de Promotion (Product não tem sale_price/original_price)
-    now = datetime.utcnow()
-    promotions = (
-        Promotion.query
-        .filter(
-            Promotion.is_active == True,
-            db.or_(Promotion.ends_at.is_(None), Promotion.ends_at > now),
-        )
-        .order_by(Promotion.created_at.desc())
-        .limit(8)
-        .all()
-    )
-    for promo in promotions:
-        promo.is_favorited = bool(promo.product_id) and promo.product_id in favoritos
-
-    products = (
-        Product.query
-        .filter(Product.is_active == True)
-        .order_by(Product.created_at.desc())
-        .limit(8)
-        .all()
-    )
-    products = [_serialize_product(p, favoritos) for p in products]
-
-    testimonials = (
-        Testimonial.query
-        .filter(Testimonial.is_visible == True)
-        .order_by(Testimonial.created_at.desc())
-        .limit(6)
-        .all()
-    )
-
-    ends_ats = [p.ends_at for p in promotions if p.ends_at]
-    deals_end_at = min(ends_ats) if ends_ats else now.replace(
-        hour=23, minute=59, second=59, microsecond=0
-    )
-
-    return {
-        "hero_slides": hero_slides,
-        "categories": _get_home_categories(),
-        "banner": {
-            "quote": "A moda é a armadura para enfrentar a vida cotidiana.",
-            "cta_text": "Ver a coleção completa",
-            "cta_link": url_for("main.produtos"),
-        },
-        "deals_end_at": deals_end_at.isoformat(),
-        "promotions": promotions,
-        "products": products,
-        "testimonials": testimonials,
-        "store_policy": {
-            "exchange_days": 30,
-            "max_installments": 12,
-            "free_shipping_min": 249,
-        },
-    }
+# ── Injeção global do rodapé (base.html) ─────────────────────────────────────
+@main_blueprint.app_context_processor
+def inject_footer():
+    return {"footer": get_footer_data()}
 
 
 # ── Home ──────────────────────────────────────────────────────────────────────
@@ -265,7 +155,7 @@ def produtos():
 @main_blueprint.route("/produtos/<uuid:id>")
 def produto_individual(id):
     product = Product.query.filter_by(id=id, is_active=True).first_or_404()
-    product.is_favorited = product.id in _get_favorited_ids()
+    product.is_favorited = product.id in get_favorited_ids()
 
     related_query = Product.query.filter(
         Product.is_active == True,
@@ -501,7 +391,7 @@ def processar_produto(product_id):
         flash(str(exc), "warning")
     except Exception as exc:
         db.session.rollback()
-        print(f"Erro ao adicionar produto ao carrinho: {exc}")
+        current_app.logger.error("Erro ao adicionar produto ao carrinho: %s", exc)
         flash("Não foi possível adicionar o produto ao carrinho.", "danger")
 
     return redirect(url_for("main.produto_individual", id=product.id))
@@ -542,7 +432,7 @@ def adicionar_carrinho_pendente():
         flash(str(exc), "warning")
     except Exception as exc:
         db.session.rollback()
-        print(f"Erro ao adicionar produto pendente ao carrinho: {exc}")
+        current_app.logger.error("Erro ao adicionar produto pendente ao carrinho: %s", exc)
         flash("Não foi possível adicionar o produto ao carrinho.", "danger")
 
     return redirect(url_for("main.carrinho"))
@@ -883,7 +773,7 @@ def atualizar_quantidade_carrinho(item_id):
         cart = item.cart
 
         if hasattr(cart, "updated_at"):
-            cart.updated_at = datetime.utcnow()
+            cart.updated_at = utcnow()
 
         db.session.commit()
         _invalidate_cart_checkout()
@@ -892,7 +782,7 @@ def atualizar_quantidade_carrinho(item_id):
 
     except Exception as error:
         db.session.rollback()
-        print(f"Erro ao alterar quantidade do carrinho: {error}")
+        current_app.logger.error("Erro ao alterar quantidade do carrinho: %s", error)
         flash(
             "Não foi possível atualizar a quantidade.",
             "danger",
@@ -917,7 +807,7 @@ def remover_item_carrinho(item_id):
         db.session.delete(item)
 
         if hasattr(cart, "updated_at"):
-            cart.updated_at = datetime.utcnow()
+            cart.updated_at = utcnow()
 
         db.session.commit()
         _invalidate_cart_checkout()
@@ -929,7 +819,7 @@ def remover_item_carrinho(item_id):
 
     except Exception as error:
         db.session.rollback()
-        print(f"Erro ao remover item do carrinho: {error}")
+        current_app.logger.error("Erro ao remover item do carrinho: %s", error)
         flash(
             "Não foi possível remover o produto do carrinho.",
             "danger",
@@ -1620,7 +1510,7 @@ def encomendas():
         )
 
     except Exception as error:
-        print(f"Erro ao carregar encomendas: {error}")
+        current_app.logger.error("Erro ao carregar encomendas: %s", error)
         flash("Não foi possível carregar suas compras.", "danger")
         return redirect(url_for("main.conta"))
 
@@ -1681,7 +1571,7 @@ def encomendas_status(status):
         )
 
     except Exception as error:
-        print(f"Erro ao carregar encomendas: {error}")
+        current_app.logger.error("Erro ao carregar encomendas: %s", error)
         flash("Não foi possível carregar suas compras.", "danger")
         return redirect(url_for("main.conta"))
 
@@ -1731,7 +1621,7 @@ def conta():
             "Erro ao acessar os dados da conta. Tente novamente.",
             "danger",
         )
-        print(f"Erro ao acessar os dados da conta: {error}")
+        current_app.logger.error("Erro ao acessar os dados da conta: %s", error)
         return redirect(url_for("main.home"))
 
 
@@ -1769,13 +1659,13 @@ def register():
 
         except IntegrityError as e:
             db.session.rollback()
-            print(f"Erro IntegrityError: {e}")
+            current_app.logger.error("Erro IntegrityError: %s", e)
             flash("Usuário ou e-mail já cadastrado.", "danger")
             return redirect(url_for("main.register"))
 
         except Exception as e:
             db.session.rollback()
-            print(f"❌ ERRO AO CRIAR USUÁRIO: {e}")
+            current_app.logger.error("Erro ao criar usuário: %s", e)
             flash("Erro interno no servidor.", "danger")
             return redirect(url_for("main.register"))
 
@@ -1801,7 +1691,7 @@ def login():
         try:
             user = User.query.filter_by(email=email).first()
         except Exception as e:
-            print(f"Erro ao buscar usuário: {e}")
+            current_app.logger.error("Erro ao buscar usuário: %s", e)
             flash("Erro interno no servidor.", "danger")
             return redirect(url_for("main.login"))
 
@@ -2009,7 +1899,7 @@ def edit_account():
 
         except Exception as error:
             db.session.rollback()
-            print(f'Erro ao atualizar conta/endereço: {error}')
+            current_app.logger.error("Erro ao atualizar conta/endereço: %s", error)
             flash(
                 'Ocorreu um erro ao salvar as alterações. Tente novamente.',
                 'danger',
@@ -2063,7 +1953,7 @@ def delete_account():
 
     except Exception as error:
         db.session.rollback()
-        print(f"Erro ao excluir conta: {error}")
+        current_app.logger.error("Erro ao excluir conta: %s", error)
         flash(
             "Ocorreu um erro ao tentar excluir a conta. Tente novamente.",
             "danger",
