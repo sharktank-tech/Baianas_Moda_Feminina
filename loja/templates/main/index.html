@@ -719,9 +719,9 @@
       <div class="testimonials-grid">
         {% for t in testimonials %}
         <div class="testimonial-card">
-          <div class="star-row" aria-label="{{ t.rating }} de 5 estrelas">
+          <div class="star-row" aria-label="{{ (t.rating or 0) }} de 5 estrelas">
             {% for i in range(5) %}
-            <span class="star{% if i >= t.rating %} star--empty{% endif %}" aria-hidden="true">★</span>
+            <span class="star{% if i >= (t.rating or 0) %} star--empty{% endif %}" aria-hidden="true">★</span>
             {% endfor %}
           </div>
           <p class="testimonial-text">{{ t.text }}</p>
@@ -948,7 +948,10 @@
       if (!id) return;
       fetch("{{ url_for('main.favoritar', id=0) }}".replace('/0', '/' + id), {
         method: 'POST',
-        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-CSRFToken': '{{ csrf_token() }}'
+        }
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {

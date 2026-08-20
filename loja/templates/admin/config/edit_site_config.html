@@ -21,6 +21,8 @@
         class="bg-white rounded-2xl shadow p-8 space-y-8"
     >
 
+        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+
         <!-- Informações básicas -->
         <div class="space-y-6">
 

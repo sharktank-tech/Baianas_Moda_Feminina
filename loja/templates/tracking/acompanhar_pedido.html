@@ -122,6 +122,8 @@ Acompanhe seu pedido na Pollo Modas utilizando o número do pedido e o e-mail da
                 autocomplete="on"
             >
 
+                {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+
                 <!-- Pedido -->
                 <div class="track-field">
 

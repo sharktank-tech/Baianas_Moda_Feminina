@@ -908,6 +908,8 @@
                         onsubmit="return confirm('Excluir {{ p.name }}?')"
                       >
 
+                        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+
                         <button
                           type="submit"
                           class="adm-btn adm-btn-danger adm-btn-sm"
@@ -1136,6 +1138,8 @@
                         action="{{ url_for('admin.delete_promotion', id=promo.id) }}"
                         onsubmit="return confirm('Excluir esta promoção?')"
                       >
+
+                        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
 
                         <button
                           type="submit"
@@ -1648,6 +1652,8 @@
                         onsubmit="return confirm('Excluir {{ s.name }}?')"
                       >
 
+                        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+
                         <button
                           type="submit"
                           class="adm-btn adm-btn-danger adm-btn-sm"
@@ -1807,6 +1813,8 @@
                         action="{{ url_for('admin.delete_user', id=u.id) }}"
                         onsubmit="return confirm('Excluir {{ u.name }}?')"
                       >
+
+                        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
 
                         <button
                           type="submit"
@@ -1979,6 +1987,8 @@
                         onsubmit="return confirm('Excluir este depoimento?')"
                       >
 
+                        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+
                         <button
                           type="submit"
                           class="adm-btn adm-btn-danger adm-btn-sm"
@@ -2120,6 +2130,8 @@
                         action="{{ url_for('admin.delete_hero_slide', id=slide.id) }}"
                         onsubmit="return confirm('Excluir este slide?')"
                       >
+
+                        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
 
                         <button
                           type="submit"
@@ -2396,6 +2408,8 @@
                         action="{{ url_for('admin.delete_social_link', id=sl.id) }}"
                         onsubmit="return confirm('Excluir?')"
                       >
+
+                        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
 
                         <button
                           type="submit"
@@ -2704,6 +2718,8 @@
                         onsubmit="return confirm('Excluir?')"
                       >
 
+                        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+
                         <button
                           type="submit"
                           class="adm-btn adm-btn-danger adm-btn-sm"
@@ -2811,6 +2827,8 @@
                         onsubmit="return confirm('Excluir?')"
                       >
 
+                        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+
                         <button
                           type="submit"
                           class="adm-btn adm-btn-danger adm-btn-sm"
@@ -2917,6 +2935,8 @@
                         action="{{ url_for('admin.delete_legal_link', id=ll.id) }}"
                         onsubmit="return confirm('Excluir?')"
                       >
+
+                        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
 
                         <button
                           type="submit"

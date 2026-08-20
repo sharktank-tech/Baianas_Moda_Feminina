@@ -10,8 +10,11 @@ def env_bool(name, default=False):
 load_dotenv()
 class Config:
     # ============== Flask =================
-    SECRET_KEY = os.getenv("SECRET_KEY", "rjh393sn1958ffn")
+    SECRET_KEY = os.getenv("SECRET_KEY")
     FLASK_APP = os.getenv("FLASK_APP", "run")
+
+    if not SECRET_KEY:
+        raise RuntimeError("SECRET_KEY não configurada.")
 
     # ============== Database =================
     DATABASE_URL = os.getenv("DATABASE_URL")

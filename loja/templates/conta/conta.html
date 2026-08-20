@@ -680,6 +680,8 @@ Minha conta — {% if site and site.name %}{{ site.name }}{% else %}Pollo Modas{
             onsubmit="return confirm('Tem certeza que deseja excluir sua conta? Esta ação não pode ser desfeita.');"
           >
 
+            {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+
             <button
               type="submit"
               class="action-btn action-btn--danger"

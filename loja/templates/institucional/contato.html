@@ -112,6 +112,8 @@
 
             <form method="POST" class="space-y-6">
 
+                {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+
                 <div class="grid md:grid-cols-2 gap-6">
 
                     <div>

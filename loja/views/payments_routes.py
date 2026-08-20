@@ -1,26 +1,37 @@
 import uuid
+from datetime import datetime
 from decimal import Decimal
 
 from flask import (
     Blueprint,
     current_app,
     flash,
+    jsonify,
     redirect,
+    render_template,
     request,
     session,
     url_for,
 )
 from flask_login import current_user, login_required
 
-from loja import db
+from loja import db, csrf
 from loja.modules.models import Cart, Coupon, Product
-from loja.modules.getway_mercado_pago.payment_models import Order, OrderItem
+from loja.modules.getway_mercado_pago.payment_models import (
+    Order,
+    OrderItem,
+    Payment,
+)
 from loja.modules.getway_mercado_pago.payment_service import (
+    InvalidWebhookError,
     PaymentConfigurationError,
     PaymentGatewayError,
     calculate_shipping,
     create_preference,
+    get_payment,
     money,
+    mp_status_to_order_status,
+    validate_webhook_signature,
 )
 
 
@@ -30,6 +41,15 @@ payments_blueprint = Blueprint(
     "payments",
     __name__,
 )
+
+
+def _safe_referrer(value):
+    """Aceita somente caminhos internos, evitando redirecionamento externo."""
+    return bool(
+        value
+        and value.startswith("/")
+        and not value.startswith("//")
+    )
 
 
 def _parse_quantity(value):
@@ -434,7 +454,254 @@ def create_mercado_pago_payment():
             "danger",
         )
 
-    return redirect(
-        request.referrer
-        or url_for("main.home")
+    referrer = request.referrer or ""
+    if _safe_referrer(referrer):
+        return redirect(referrer)
+
+    return redirect(url_for("main.home"))
+
+
+def _sync_payment(payment_id):
+    mp_payment = get_payment(payment_id)
+    external_reference = str(
+        mp_payment.get("external_reference") or ""
+    ).strip()
+
+    try:
+        order_id = uuid.UUID(external_reference)
+    except (ValueError, TypeError):
+        current_app.logger.warning(
+            "Pagamento %s sem external_reference válido.",
+            payment_id,
+        )
+        return None
+
+    order = (
+        Order.query
+        .filter_by(id=order_id)
+        .with_for_update()
+        .first()
+    )
+    if not order:
+        current_app.logger.warning(
+            "Pedido %s do pagamento %s não encontrado.",
+            external_reference,
+            payment_id,
+        )
+        return None
+
+    provider_payment_id = str(mp_payment["id"])
+    payment = Payment.query.filter_by(
+        provider_payment_id=provider_payment_id
+    ).first()
+
+    amount = money(mp_payment.get("transaction_amount"))
+    currency = (mp_payment.get("currency_id") or "").upper()
+    mp_status = (mp_payment.get("status") or "pending").lower()
+    status_detail = mp_payment.get("status_detail")
+
+    if payment is None:
+        payment = Payment(
+            id=uuid.uuid4(),
+            order_id=order.id,
+            provider_payment_id=provider_payment_id,
+            status=mp_status,
+            amount=amount,
+            currency=currency or "BRL",
+            raw_payload=mp_payment,
+        )
+        db.session.add(payment)
+
+    payment.status = mp_status
+    payment.status_detail = status_detail
+    payment.amount = amount
+    payment.currency = currency or "BRL"
+    payment.payment_method_id = mp_payment.get("payment_method_id")
+    payment.payment_type_id = mp_payment.get("payment_type_id")
+    payment.raw_payload = mp_payment
+
+    order.mp_payment_id = provider_payment_id
+    order.mp_status = mp_status
+    order.mp_status_detail = status_detail
+
+    if currency != "BRL" or amount != money(order.total):
+        order.status = "manual_review"
+        order.manual_review_reason = (
+            f"Valor/moeda divergente: recebido {currency} {amount}; "
+            f"esperado BRL {money(order.total)}."
+        )
+        if mp_status == "approved" and order.paid_at is None:
+            order.paid_at = datetime.utcnow()
+        db.session.commit()
+        return order
+
+    mapped_status = mp_status_to_order_status(mp_status)
+
+    if mapped_status == "paid":
+        if order.status not in {"paid", "manual_review"}:
+            locked_products = {}
+            review_reasons = []
+
+            for item in order.items:
+                if item.product_id is None:
+                    review_reasons.append(
+                        f"Produto removido: {item.product_name}."
+                    )
+                    continue
+
+                product = (
+                    Product.query
+                    .filter_by(id=item.product_id)
+                    .with_for_update()
+                    .first()
+                )
+                locked_products[item.id] = product
+
+                if product is None:
+                    review_reasons.append(
+                        f"Produto não encontrado: {item.product_name}."
+                    )
+                elif (
+                    product.stock is not None
+                    and product.stock < item.quantity
+                ):
+                    review_reasons.append(
+                        f"Estoque insuficiente: {item.product_name}."
+                    )
+
+            locked_coupon = None
+            if order.coupon_id and order.coupon_counted_at is None:
+                locked_coupon = (
+                    Coupon.query
+                    .filter_by(id=order.coupon_id)
+                    .with_for_update()
+                    .first()
+                )
+                if (
+                    locked_coupon is not None
+                    and locked_coupon.usage_limit is not None
+                    and locked_coupon.times_used >= locked_coupon.usage_limit
+                ):
+                    review_reasons.append(
+                        f"Limite do cupom {order.coupon_code} atingido."
+                    )
+
+            order.paid_at = order.paid_at or datetime.utcnow()
+
+            if review_reasons:
+                order.status = "manual_review"
+                order.manual_review_reason = " ".join(review_reasons)
+            else:
+                for item in order.items:
+                    product = locked_products.get(item.id)
+                    if product is not None and product.stock is not None:
+                        product.stock -= item.quantity
+
+                if locked_coupon is not None:
+                    locked_coupon.times_used += 1
+                    order.coupon_counted_at = datetime.utcnow()
+
+                order.status = "paid"
+                order.manual_review_reason = None
+
+    elif mapped_status in {"refunded", "charged_back"}:
+        order.status = mapped_status
+    elif order.status not in {"paid", "manual_review", "refunded", "charged_back"}:
+        order.status = mapped_status
+
+    db.session.commit()
+    return order
+
+
+@payments_blueprint.route("/pagamentos/webhook", methods=["POST"])
+@csrf.exempt
+def mercado_pago_webhook():
+    body = request.get_json(silent=True) or {}
+    query_data_id = request.args.get("data.id")
+
+    try:
+        validate_webhook_signature(
+            request.headers.get("x-signature"),
+            request.headers.get("x-request-id"),
+            query_data_id,
+        )
+    except InvalidWebhookError:
+        current_app.logger.warning("Webhook Mercado Pago com assinatura inválida.")
+        return jsonify({"ok": False}), 401
+    except PaymentConfigurationError:
+        current_app.logger.exception("Webhook Mercado Pago sem configuração segura.")
+        return jsonify({"ok": False}), 503
+
+    event_type = body.get("type") or request.args.get("type")
+    payment_id = (
+        query_data_id
+        or (body.get("data") or {}).get("id")
+        or request.args.get("id")
+    )
+
+    if event_type not in {None, "payment"}:
+        return jsonify({"ok": True}), 200
+
+    if not payment_id:
+        return jsonify({"ok": True}), 200
+
+    try:
+        _sync_payment(payment_id)
+    except PaymentGatewayError:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Falha ao consultar pagamento %s.",
+            payment_id,
+        )
+        # 500 faz o provedor tentar novamente.
+        return jsonify({"ok": False}), 500
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Falha inesperada ao processar webhook %s.",
+            payment_id,
+        )
+        return jsonify({"ok": False}), 500
+
+    return jsonify({"ok": True}), 200
+
+
+@payments_blueprint.route("/pagamentos/retorno/<result>")
+@login_required
+def payment_return(result):
+    payment_id = (
+        request.args.get("payment_id")
+        or request.args.get("collection_id")
+    )
+
+    if payment_id:
+        try:
+            _sync_payment(payment_id)
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception(
+                "Não foi possível sincronizar o pagamento no retorno."
+            )
+
+    raw_order_id = (
+        request.args.get("order_id")
+        or request.args.get("external_reference")
+    )
+    order = None
+
+    try:
+        order_uuid = uuid.UUID(str(raw_order_id))
+    except (ValueError, TypeError):
+        order_uuid = None
+
+    if order_uuid:
+        order = Order.query.filter_by(
+            id=order_uuid,
+            user_id=current_user.id,
+        ).first()
+
+    return render_template(
+        "payment/result.html",
+        result=result,
+        order=order,
     )

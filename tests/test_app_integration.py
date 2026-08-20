@@ -23,6 +23,23 @@ def test_blueprints_registered(app):
     assert "tracking.acompanhar_pedido" in rules
 
 
+def test_payment_webhook_and_return_registered(app):
+    """Regressão: o webhook e o retorno precisam existir (fluxo de pagamento)."""
+    rules = {rule.endpoint for rule in app.url_map.iter_rules()}
+    assert "payments.mercado_pago_webhook" in rules
+    assert "payments.payment_return" in rules
+
+
+def test_payment_return_requires_login_and_renders(client, login, make_user):
+    resp = client.get("/pagamentos/retorno/sucesso")
+    assert resp.status_code == 302
+
+    user = make_user()
+    login(user.email)
+    resp = client.get("/pagamentos/retorno/sucesso")
+    assert resp.status_code == 200
+
+
 def test_all_rendered_templates_exist():
     """Regressão: qualquer template referenciado pelas views precisa existir."""
     missing = []
@@ -30,7 +47,6 @@ def test_all_rendered_templates_exist():
         "loja/views/routes.py",
         "loja/views/admin_routes.py",
         "loja/views/payments_routes.py",
-        "loja/modules/getway_mercado_pago/payment_routes.py",
     ):
         src = Path(view_path).read_text()
         for template in re.findall(

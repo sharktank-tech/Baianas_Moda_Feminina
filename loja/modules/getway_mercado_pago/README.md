@@ -19,28 +19,30 @@ Pacote preparado para o projeto Flask/SQLAlchemy atual da PolloModas.
 - Página de retorno que lê o estado interno do pedido; a URL de retorno não é
   usada como prova de pagamento.
 
-## 1. Copiar os arquivos
+## 1. Estrutura atual
 
-Copie:
+Neste projeto as rotas de pagamento foram consolidadas em:
 
 ```text
-loja/modules/payment_models.py
-loja/modules/payment_service.py
-loja/modules/payment_routes.py
+loja/views/payments_routes.py   (checkout, webhook e retorno)
+loja/modules/getway_mercado_pago/payment_models.py
+loja/modules/getway_mercado_pago/payment_service.py
 loja/templates/payment/result.html
 ```
 
-para os mesmos caminhos do projeto.
+O blueprint `payments` é registrado automaticamente em `loja/__init__.py`.
+Este arquivo era o guia original da integração; as rotas de `payment_routes.py`
+foram movidas para `loja/views/payments_routes.py`.
 
 ## 2. Instalar a dependência
 
 O SDK 3.4.0 requer Python 3.10 ou superior.
 
 ```bash
-pip install -r requirements-mercadopago.txt
+pip install -r requirements.txt
 ```
 
-Também adicione `mercadopago==3.4.0` ao `../../../requirements.txt` principal.
+`mercadopago==3.4.0` já está no `requirements.txt` principal.
 
 ## 3. Importar os models
 

@@ -45,6 +45,7 @@
       </div>
 
       <form method="POST" novalidate>
+        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
         <div class="field">
           <label for="username" class="field-label">Nome de usuário</label>
           <input type="text" id="username" name="username" class="field-input"
