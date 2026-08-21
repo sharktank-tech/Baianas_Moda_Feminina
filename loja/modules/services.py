@@ -11,6 +11,7 @@ from flask import url_for
 from flask_login import current_user
 
 from loja import db
+from loja.cache import get_cached, set_cached
 from loja.modules.models import (
     Product,
     HeroSlide,
@@ -241,10 +242,18 @@ def _build_banner(site: "SiteConfig | None") -> dict:
 
 
 def get_footer_data() -> dict:
-    """Dados do rodapé, baseado nas configurações da loja."""
+    """Dados do rodapé, baseado nas configurações da loja.
+
+    Cacheado em memória: é consultado em todas as páginas (context
+    processor global) e raramente muda.
+    """
+    cached = get_cached("footer_data")
+    if cached is not None:
+        return cached
+
     site = SiteConfig.query.first()
     footer_config = FooterConfig.query.first()
-    return {
+    data = {
         "brand_name":        footer_config.brand_name        if footer_config else "",
         "brand_description": footer_config.brand_description if footer_config else "",
         "social_links":      SocialLink.query.all(),
@@ -255,6 +264,8 @@ def get_footer_data() -> dict:
         "copyright_text":    site.copyright_text if site else "",
         "legal_links":       LegalLink.query.all(),
     }
+    set_cached("footer_data", data, ttl=600)
+    return data
 
 
 # ── Produtos ──────────────────────────────────────────────────────────────────

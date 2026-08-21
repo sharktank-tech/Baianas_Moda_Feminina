@@ -105,6 +105,20 @@ Loja de roupas com estilização moderna e limpa com todas as funcionalidades de
   é recusado, cancelado, reembolsado ou permanece pendente por mais de 24h
   (liberação automática no webhook/retorno).
 
+## Mudanças de schema (PostgreSQL)
+
+O projeto não usa Flask-Migrate. Quando o modelo ganha uma coluna nova,
+`db.create_all()` **não** a adiciona a tabelas existentes. Para aplicar:
+
+```sh
+# Opção 1 — executar o SQL de migração (veja migrations/):
+psql "$DATABASE_URL" -f migrations/0002_stock_reserved.sql
+
+# Opção 2 — deixar o app criar no primeiro boot (loja/schema.py)
+```
+
+Sempre rode os scripts em `migrations/` no banco de produção após o deploy.
+
 ## Testes
 
 ```sh

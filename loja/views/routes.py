@@ -16,6 +16,7 @@ from loja.modules.services import (
     get_footer_data,
     get_home_data,
 )
+from loja.cache import get_cached, set_cached
 from loja.utils import utcnow
 
 from loja import db
@@ -62,19 +63,28 @@ main_blueprint = Blueprint("main", __name__)
 # para também atender templates de outros blueprints, como tracking/admin.
 @main_blueprint.app_context_processor
 def inject_site_config():
-    site = SiteConfig.query.first()
+    site = get_cached("site_config")
     if site is None:
-        # Fallback pra não quebrar a aplicação se a tabela ainda estiver vazia
-        class _SiteFallback:
-            name = "Pollo Modas"
-            meta_description = "Moda feminina, masculina e infantil com os melhores preços."
-        site = _SiteFallback()
+        site = SiteConfig.query.first()
+        if site is None:
+            # Fallback pra não quebrar a aplicação se a tabela ainda estiver vazia
+            class _SiteFallback:
+                name = "Pollo Modas"
+                meta_description = "Moda feminina, masculina e infantil com os melhores preços."
+            site = _SiteFallback()
+        else:
+            # Modelo "flat" (sem relacionamentos): seguro cachear entre requests.
+            set_cached("site_config", site, ttl=600)
     return {"site": site}
 
 
 # ── Injeção global de categorias (navbar/menu) ───────────────────────────────
 @main_blueprint.app_context_processor
 def inject_categories():
+    cached = get_cached("navbar_categories")
+    if cached is not None:
+        return {"navbar_categories": cached}
+
     categorias = (
         db.session
         .query(Product.category)
@@ -87,7 +97,9 @@ def inject_categories():
         .order_by(Product.category.asc())
         .all()
     )
-    return {"navbar_categories": [c[0] for c in categorias]}
+    result = [c[0] for c in categorias]
+    set_cached("navbar_categories", result, ttl=600)
+    return {"navbar_categories": result}
 
 
 # ── Injeção global do rodapé (base.html) ─────────────────────────────────────
