@@ -14,6 +14,7 @@ from flask import (
 from flask_login import login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 from loja.utils.decorators import admin_required
 from loja.modules.services import get_layout_data
 
@@ -269,22 +270,39 @@ def admin_dashboard():
         )
     db.session.commit()
 
+    # Reaproveita os dados do context processor (evita re-consultar as
+    # mesmas tabelas) e carrega eageramente os relacionamentos usados no
+    # template, para não gerar N+1 queries por linha da tabela.
+    layout = get_layout_data()
+    footer = layout["footer"]
+
+    products = Product.query.options(selectinload(Product.suppliers)).all()
+    promotions = (
+        Promotion.query
+        .options(selectinload(Promotion.product))
+        .order_by(Promotion.created_at.desc())
+        .all()
+    )
+    suppliers = Supplier.query.options(selectinload(Supplier.products)).all()
+    users = User.query.all()
+    coupons = Coupon.query.order_by(Coupon.created_at.desc()).all()
+
     return render_template(
         "admin/dashboard.html",
-        products     = Product.query.all(),
-        users        = User.query.all(),
-        promotions   = Promotion.query.order_by(Promotion.created_at.desc()).all(),
-        coupons      = Coupon.query.order_by(Coupon.created_at.desc()).all(),
-        suppliers    = Supplier.query.all(),
-        testimonials = Testimonial.query.all(),
-        hero_slides  = HeroSlide.query.all(),
-        config       = SiteConfig.query.first(),
-        social_links = SocialLink.query.all(),
-        footer_config   = FooterConfig.query.first(),
-        contact_info    = ContactInfo.query.first(),
-        nav_links       = NavLink.query.all(),
-        category_links  = CategoryLink.query.all(),
-        legal_links     = LegalLink.query.all(),
+        products=products,
+        users=users,
+        promotions=promotions,
+        coupons=coupons,
+        suppliers=suppliers,
+        testimonials=layout["testimonials"],
+        hero_slides=layout["hero_slides"],
+        config=layout["site"],
+        social_links=footer["social_links"],
+        footer_config=FooterConfig.query.first(),
+        contact_info=footer["contact"],
+        nav_links=footer["nav_links"],
+        category_links=footer["categories"],
+        legal_links=footer["legal_links"],
     )
 
 
