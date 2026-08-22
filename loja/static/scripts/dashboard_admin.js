@@ -12,12 +12,12 @@ const PANEL_TITLES = {
 };
 
 const PANEL_ACTIONS = {
-  products:     `<a href="{{ url_for('admin.add_product') }}"   class="adm-btn adm-btn-primary adm-btn-sm">+ Produto</a>`,
-  promotions:   `<a href="{{ url_for('admin.add_promotion') }}" class="adm-btn adm-btn-primary adm-btn-sm">+ Promoção</a>`,
-  suppliers:    `<a href="{{ url_for('admin.add_supplier') }}"  class="adm-btn adm-btn-primary adm-btn-sm">+ Fornecedor</a>`,
-  users:        `<a href="{{ url_for('admin.add_user') }}"      class="adm-btn adm-btn-dark adm-btn-sm">+ Usuário</a>`,
-  testimonials: `<a href="{{ url_for('admin.add_testimonial') }}" class="adm-btn adm-btn-primary adm-btn-sm">+ Depoimento</a>`,
-  hero:         `<a href="{{ url_for('admin.add_hero_slide') }}" class="adm-btn adm-btn-primary adm-btn-sm">+ Slide</a>`,
+  products:     `<a href="/admin/products/add"    class="adm-btn adm-btn-primary adm-btn-sm">+ Produto</a>`,
+  promotions:   `<a href="/admin/add_promotion"   class="adm-btn adm-btn-primary adm-btn-sm">+ Promoção</a>`,
+  suppliers:    `<a href="/admin/add_supplier"    class="adm-btn adm-btn-primary adm-btn-sm">+ Fornecedor</a>`,
+  users:        `<a href="/admin/users/add"       class="adm-btn adm-btn-dark adm-btn-sm">+ Usuário</a>`,
+  testimonials: `<a href="/admin/add_testimonial" class="adm-btn adm-btn-primary adm-btn-sm">+ Depoimento</a>`,
+  hero:         `<a href="/admin/add_hero_slide"  class="adm-btn adm-btn-primary adm-btn-sm">+ Slide</a>`,
 };
 
 function activatePanel(id) {
@@ -33,7 +33,9 @@ function activatePanel(id) {
 
   /* topbar */
   document.getElementById('adm-current-title').textContent = PANEL_TITLES[id] || id;
-  document.getElementById('adm-topbar-actions').innerHTML  = PANEL_ACTIONS[id] || '';
+  document.getElementById('adm-topbar-actions').innerHTML  =
+    PANEL_ACTIONS[id] ||
+    '<a href="/" class="adm-btn adm-btn-outline adm-btn-sm">Ver loja</a>';
 
   /* URL hash para manter estado ao recarregar */
   history.replaceState(null, '', '#' + id);

@@ -304,11 +304,17 @@
 
     <header class="adm-topbar">
 
-      <div class="adm-topbar-title">
+      <div
+        class="adm-topbar-title"
+        id="adm-current-title"
+      >
         Painel Administrativo
       </div>
 
-      <div class="adm-topbar-actions">
+      <div
+        class="adm-topbar-actions"
+        id="adm-topbar-actions"
+      >
 
         <a
           href="{{ url_for('main.home') }}"
