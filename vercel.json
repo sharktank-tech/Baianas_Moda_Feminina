@@ -9,11 +9,6 @@
       }
     }
   ],
-  "functions": {
-    "run.py": {
-      "maxDuration": 60
-    }
-  },
   "routes": [
     {
       "src": "/(.*)",
