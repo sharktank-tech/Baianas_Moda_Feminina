@@ -424,11 +424,11 @@
 /* Aguardando pagamento */
 
 .order-badge--payment {
-    border-color: #f2dda3;
+    border-color: #e9d5ff;
 
-    background: #fff6db;
+    background: #f3e8ff;
 
-    color: #765600;
+    color: #6b21a6;
 }
 
 
