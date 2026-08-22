@@ -232,21 +232,9 @@
   <script src="{{ url_for('static', filename='scripts/index.js') }}" defer></script>
 
   <!-- Dados estruturados: ajuda o Google a exibir preço/estoque nos resultados -->
-  {% if products %}
+  {% if structured_data %}
   <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "ItemList",
-    "itemListElement": [
-      {% for p in products %}
-      {
-        "@type": "ListItem",
-        "position": {{ loop.index }},
-        "url": "{{ request.url_root.rstrip('/') }}{{ url_for('main.produto_individual', id=p.product_id) }}"
-      }{% if not loop.last %},{% endif %}
-      {% endfor %}
-    ]
-  }
+  {{ structured_data | safe }}
   </script>
   {% endif %}
 {% endblock %}
@@ -645,7 +633,7 @@
       <article class="pcard">
         <a class="pcard-media{% if not p.image1 %} pcard-media--empty{% endif %}" href="{{ url_for('main.produto_individual', id=p.id) }}">
           {% if p.image1 %}<img src="{{ p.image1 }}" alt="{{ p.name }}" loading="lazy" width="400" height="500">{% else %}<span aria-hidden="true">{{ (p.name or '?')[0] }}</span>{% endif %}
-          <button type="button" class="pcard-fav" data-fav data-product-id="{{ p.product_id }}" aria-label="Favoritar {{ p.name }}" aria-pressed="{{ 'true' if p.is_favorited else 'false' }}">
+          <button type="button" class="pcard-fav" data-fav data-product-id="{{ p.id }}" aria-label="Favoritar {{ p.name }}" aria-pressed="{{ 'true' if p.is_favorited else 'false' }}">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 1 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></svg>
           </button>
         </a>
@@ -655,7 +643,7 @@
             <span class="pcard-price-now">R$ {{ '%.2f'|format(p.price) | replace('.', ',') }}</span>
           </div>
           <p class="pcard-installment">em 3x de R$ {{ '%.2f'|format(p.price / 3) | replace('.', ',') }} sem juros</p>
-          <a class="pcard-buy" href="{{ url_for('main.produto_individual', id=p.id) }}" data-product-id="{{ p.product_id }}">Comprar</a>
+          <a class="pcard-buy" href="{{ url_for('main.produto_individual', id=p.id) }}" data-product-id="{{ p.id }}">Comprar</a>
         </div>
       </article>
       {% endfor %}
@@ -755,22 +743,22 @@
 
     // Hero carousel — autoplay, navegação, teclado, swipe e acessibilidade
     (function () {
-      var carousel = document.getElementById('heroCarousel');
+      const carousel = document.getElementById('heroCarousel');
       if (!carousel) return;
 
-      var track = document.getElementById('heroTrack');
-      var viewport = document.getElementById('heroViewport');
-      var prevButton = document.getElementById('heroPrev');
-      var nextButton = document.getElementById('heroNext');
-      var status = document.getElementById('heroStatus');
-      var slides = Array.prototype.slice.call(carousel.querySelectorAll('[data-hero-slide]'));
-      var dots = Array.prototype.slice.call(carousel.querySelectorAll('[data-hero-dot]'));
-      var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      var autoplayDelay = Number(carousel.dataset.autoplay) || 6500;
-      var currentIndex = 0;
-      var autoplayTimer = null;
-      var touchStartX = null;
-      var touchStartY = null;
+      const track = document.getElementById('heroTrack');
+      const viewport = document.getElementById('heroViewport');
+      const prevButton = document.getElementById('heroPrev');
+      const nextButton = document.getElementById('heroNext');
+      const status = document.getElementById('heroStatus');
+      const slides = Array.prototype.slice.call(carousel.querySelectorAll('[data-hero-slide]'));
+      const dots = Array.prototype.slice.call(carousel.querySelectorAll('[data-hero-dot]'));
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const autoplayDelay = Number(carousel.dataset.autoplay) || 6500;
+      let currentIndex = 0;
+      let autoplayTimer = null;
+      let touchStartX = null;
+      let touchStartY = null;
 
       if (!track || !viewport || !slides.length) return;
 
@@ -785,13 +773,13 @@
         track.style.transform = 'translate3d(-' + (currentIndex * 100) + '%, 0, 0)';
 
         slides.forEach(function (slide, slideIndex) {
-          var active = slideIndex === currentIndex;
+          const active = slideIndex === currentIndex;
           slide.classList.toggle('is-active', active);
           slide.setAttribute('aria-hidden', active ? 'false' : 'true');
         });
 
         dots.forEach(function (dot, dotIndex) {
-          var active = dotIndex === currentIndex;
+          const active = dotIndex === currentIndex;
           dot.classList.toggle('is-active', active);
           dot.setAttribute('aria-selected', active ? 'true' : 'false');
           dot.setAttribute('tabindex', active ? '0' : '-1');
@@ -866,8 +854,8 @@
           return;
         }
 
-        var deltaX = event.changedTouches[0].clientX - touchStartX;
-        var deltaY = event.changedTouches[0].clientY - touchStartY;
+        const deltaX = event.changedTouches[0].clientX - touchStartX;
+        const deltaY = event.changedTouches[0].clientY - touchStartY;
         touchStartX = null;
         touchStartY = null;
 
@@ -902,12 +890,12 @@
 
     // Revelação suave ao rolar
     (function () {
-      var els = document.querySelectorAll('[data-reveal]');
+      const els = document.querySelectorAll('[data-reveal]');
       if (!('IntersectionObserver' in window) || !els.length) {
         els.forEach(function (el) { el.classList.add('is-visible'); });
         return;
       }
-      var io = new IntersectionObserver(function (entries) {
+      const io = new IntersectionObserver(function (entries) {
         entries.forEach(function (entry) {
           if (entry.isIntersecting) {
             entry.target.classList.add('is-visible');
@@ -920,31 +908,31 @@
 
     // Cronômetro das ofertas do dia — usa o timestamp real vindo do backend
     (function () {
-      var el = document.getElementById('dealsCountdown');
+      const el = document.getElementById('dealsCountdown');
       if (!el) return;
-      var end = new Date(el.dataset.end).getTime();
+      const end = new Date(el.dataset.end).getTime();
       if (isNaN(end)) return;
-      var h = el.querySelector('[data-h]'), m = el.querySelector('[data-m]'), s = el.querySelector('[data-s]');
+      const h = el.querySelector('[data-h]'), m = el.querySelector('[data-m]'), s = el.querySelector('[data-s]');
 
       function tick() {
-        var diff = end - Date.now();
+        const diff = end - Date.now();
         if (diff <= 0) { h.textContent = m.textContent = s.textContent = '00'; clearInterval(timer); return; }
-        var hh = Math.floor(diff / 3600000);
-        var mm = Math.floor((diff % 3600000) / 60000);
-        var ss = Math.floor((diff % 60000) / 1000);
+        const hh = Math.floor(diff / 3600000);
+        const mm = Math.floor((diff % 3600000) / 60000);
+        const ss = Math.floor((diff % 60000) / 1000);
         h.textContent = String(hh).padStart(2, '0');
         m.textContent = String(mm).padStart(2, '0');
         s.textContent = String(ss).padStart(2, '0');
       }
       tick();
-      var timer = setInterval(tick, 1000);
+      const timer = setInterval(tick, 1000);
     })();
 
     // Favoritar produto — chama o endpoint do backend
     document.addEventListener('click', function (e) {
-      var btn = e.target.closest('[data-fav]');
+      const btn = e.target.closest('[data-fav]');
       if (!btn) return;
-      var id = btn.dataset.productId;
+      const id = btn.dataset.productId;
       if (!id) return;
       fetch("{{ url_for('main.favoritar', id=0) }}".replace('/0', '/' + id), {
         method: 'POST',

@@ -45,4 +45,7 @@ def create_app():
     from loja import cli
     app.cli.add_command(cli.create_admin)
 
+    from loja.schema import ensure_schema
+    ensure_schema(app)
+
     return app

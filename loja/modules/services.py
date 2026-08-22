@@ -7,7 +7,9 @@ Responsabilidade: buscar, montar e retornar dados prontos para as rotas,
 mantendo as views limpas de lógica de negócio e consultas diretas ao banco.
 
 """
-from flask import url_for
+import json
+
+from flask import has_request_context, url_for
 from flask_login import current_user
 
 from loja import db
@@ -131,7 +133,28 @@ def get_home_data() -> dict:
     ]
     deals_end_at = min(ends_today) if ends_today else end_of_day
 
+    structured_data = None
+    if products and has_request_context():
+        item_list = {
+            "@context": "https://schema.org",
+            "@type": "ItemList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": idx + 1,
+                    "url": url_for(
+                        "main.produto_individual",
+                        id=str(p.id),
+                        _external=True,
+                    ),
+                }
+                for idx, p in enumerate(products)
+            ],
+        }
+        structured_data = json.dumps(item_list, ensure_ascii=False)
+
     return {
+        "structured_data": structured_data,
         "hero_slides": hero_slides,
         "categories": _get_home_categories(),
         "banner": {

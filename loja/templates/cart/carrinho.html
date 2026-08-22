@@ -793,12 +793,12 @@
 {% block extra_scripts %}
 <script>
 (function () {
-    var checkoutForm = document.getElementById('cartCheckoutForm');
-    var checkoutButton = document.getElementById('cartCheckoutButton');
+    const checkoutForm = document.getElementById('cartCheckoutForm');
+    const checkoutButton = document.getElementById('cartCheckoutButton');
 
     if (!checkoutForm || !checkoutButton) return;
 
-    var submitting = false;
+    let submitting = false;
 
     checkoutForm.addEventListener('submit', function (event) {
         if (submitting) {

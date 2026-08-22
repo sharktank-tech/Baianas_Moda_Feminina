@@ -792,36 +792,36 @@ body.product-lightbox-open {
        Galeria de imagens
        ===================================================== */
 
-    var gallery = document.getElementById('productGallery');
+    const gallery = document.getElementById('productGallery');
 
     if (gallery) {
-        var thumbs = Array.prototype.slice.call(
+        const thumbs = Array.prototype.slice.call(
             gallery.querySelectorAll('[data-gallery-src]')
         );
 
-        var mainImage = document.getElementById('productGalleryMain');
-        var mainButton = document.getElementById('productGalleryOpen');
-        var mainCounter = document.getElementById('productGalleryCounter');
-        var previousButton = gallery.querySelector('[data-gallery-prev]');
-        var nextButton = gallery.querySelector('[data-gallery-next]');
-        var zoomButton = gallery.querySelector('[data-gallery-zoom]');
+        const mainImage = document.getElementById('productGalleryMain');
+        const mainButton = document.getElementById('productGalleryOpen');
+        const mainCounter = document.getElementById('productGalleryCounter');
+        const previousButton = gallery.querySelector('[data-gallery-prev]');
+        const nextButton = gallery.querySelector('[data-gallery-next]');
+        const zoomButton = gallery.querySelector('[data-gallery-zoom]');
 
-        var lightbox = document.getElementById('productLightbox');
-        var lightboxImage = document.getElementById('productLightboxImage');
-        var lightboxCounter = document.getElementById('productLightboxCounter');
-        var lightboxClose = lightbox
+        const lightbox = document.getElementById('productLightbox');
+        const lightboxImage = document.getElementById('productLightboxImage');
+        const lightboxCounter = document.getElementById('productLightboxCounter');
+        const lightboxClose = lightbox
             ? lightbox.querySelector('[data-lightbox-close]')
             : null;
-        var lightboxPrevious = lightbox
+        const lightboxPrevious = lightbox
             ? lightbox.querySelector('[data-lightbox-prev]')
             : null;
-        var lightboxNext = lightbox
+        const lightboxNext = lightbox
             ? lightbox.querySelector('[data-lightbox-next]')
             : null;
 
-        var currentIndex = 0;
-        var lastFocusedElement = null;
-        var touchStartX = null;
+        let currentIndex = 0;
+        let lastFocusedElement = null;
+        let touchStartX = null;
 
         function normalizeIndex(index) {
             if (!thumbs.length) return 0;
@@ -842,9 +842,9 @@ body.product-lightbox-open {
 
             currentIndex = normalizeIndex(index);
 
-            var selectedThumb = thumbs[currentIndex];
-            var source = selectedThumb.dataset.gallerySrc;
-            var alt = selectedThumb.dataset.galleryAlt || '{{ product.name }}';
+            const selectedThumb = thumbs[currentIndex];
+            const source = selectedThumb.dataset.gallerySrc;
+            const alt = selectedThumb.dataset.galleryAlt || '{{ product.name }}';
 
             mainImage.classList.add('is-changing');
 
@@ -855,7 +855,7 @@ body.product-lightbox-open {
             }, 90);
 
             thumbs.forEach(function (thumb, thumbIndex) {
-                var active = thumbIndex === currentIndex;
+                const active = thumbIndex === currentIndex;
 
                 thumb.classList.toggle('is-active', active);
                 thumb.setAttribute('aria-selected', active ? 'true' : 'false');
@@ -871,7 +871,7 @@ body.product-lightbox-open {
                 behavior: 'smooth'
             });
 
-            var counterText = String(currentIndex + 1) + ' / ' + String(thumbs.length);
+            const counterText = String(currentIndex + 1) + ' / ' + String(thumbs.length);
 
             if (mainCounter) {
                 mainCounter.textContent = counterText;
@@ -982,8 +982,8 @@ body.product-lightbox-open {
             lightbox.addEventListener('touchend', function (event) {
                 if (touchStartX === null) return;
 
-                var touchEndX = event.changedTouches[0].clientX;
-                var distance = touchEndX - touchStartX;
+                const touchEndX = event.changedTouches[0].clientX;
+                const distance = touchEndX - touchStartX;
 
                 if (Math.abs(distance) > 45) {
                     if (distance > 0) {
@@ -1005,8 +1005,8 @@ body.product-lightbox-open {
             mainButton.addEventListener('touchend', function (event) {
                 if (touchStartX === null) return;
 
-                var touchEndX = event.changedTouches[0].clientX;
-                var distance = touchEndX - touchStartX;
+                const touchEndX = event.changedTouches[0].clientX;
+                const distance = touchEndX - touchStartX;
 
                 /*
                  * Movimento curto continua sendo clique e abre o lightbox.
@@ -1027,7 +1027,7 @@ body.product-lightbox-open {
         }
 
         document.addEventListener('keydown', function (event) {
-            var lightboxIsOpen = lightbox && !lightbox.hidden;
+            const lightboxIsOpen = lightbox && !lightbox.hidden;
 
             if (lightboxIsOpen) {
                 if (event.key === 'Escape') {
@@ -1053,22 +1053,22 @@ body.product-lightbox-open {
        Formulário de compra
        ===================================================== */
 
-    var form = document.getElementById('productPurchaseForm');
-    var quantityInput = document.getElementById('productQuantity');
-    var minusButton = document.querySelector('[data-quantity-minus]');
-    var plusButton = document.querySelector('[data-quantity-plus]');
-    var feedback = document.getElementById('purchaseFormFeedback');
-    var actionInput = document.getElementById('purchaseAction');
-    var purchaseButtons = form
+    const form = document.getElementById('productPurchaseForm');
+    const quantityInput = document.getElementById('productQuantity');
+    const minusButton = document.querySelector('[data-quantity-minus]');
+    const plusButton = document.querySelector('[data-quantity-plus]');
+    const feedback = document.getElementById('purchaseFormFeedback');
+    const actionInput = document.getElementById('purchaseAction');
+    const purchaseButtons = form
         ? form.querySelectorAll('[data-purchase-action]')
         : [];
 
     if (!form || !quantityInput || !actionInput) return;
 
     function normalizeQuantity(value) {
-        var min = Number(quantityInput.min || 1);
-        var max = Number(quantityInput.max || 99);
-        var parsed = Number.parseInt(value, 10);
+        const min = Number(quantityInput.min || 1);
+        const max = Number(quantityInput.max || 99);
+        let parsed = Number.parseInt(value, 10);
 
         if (!Number.isFinite(parsed)) {
             parsed = min;
@@ -1107,13 +1107,13 @@ body.product-lightbox-open {
     });
 
     form.addEventListener('submit', function (event) {
-        var selectedSize = form.querySelector('input[name="size"]:checked');
+        const selectedSize = form.querySelector('input[name="size"]:checked');
 
         if (!selectedSize) {
             event.preventDefault();
             feedback.textContent = 'Selecione um tamanho antes de continuar.';
 
-            var firstSize = form.querySelector('input[name="size"]');
+            const firstSize = form.querySelector('input[name="size"]');
 
             if (firstSize) {
                 firstSize.focus();
@@ -1125,7 +1125,7 @@ body.product-lightbox-open {
         quantityInput.value = normalizeQuantity(quantityInput.value);
         feedback.textContent = '';
 
-        var submitButton = event.submitter;
+        const submitButton = event.submitter;
 
         if (submitButton) {
             actionInput.value =
