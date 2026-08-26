@@ -107,35 +107,26 @@
         </div>
 
 
-        <!-- Imagem -->
-        <div>
-            <label class="block font-medium text-gray-700 mb-2">
-                URL da imagem
-            </label>
-
-            <input
-                type="text"
-                name="image"
-                value="{{ product.image or '' }}"
-                class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500"
-            >
+        <!-- Imagens (até 4) -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {% for n in [1, 2, 3, 4] %}
+            {% set img = product|attr('image' ~ n) %}
+            <div>
+                <label class="block font-medium text-gray-700 mb-2">
+                    URL da imagem {{ n }}
+                </label>
+                <input
+                    type="text"
+                    name="image{{ n }}"
+                    value="{{ img or '' }}"
+                    class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500"
+                >
+                {% if img %}
+                <img src="{{ img }}" alt="{{ product.name }}" class="w-24 mt-2 rounded border shadow">
+                {% endif %}
+            </div>
+            {% endfor %}
         </div>
-
-
-        <!-- Preview da imagem -->
-        {% if product.image %}
-        <div>
-            <label class="block font-medium text-gray-700 mb-2">
-                Pré-visualização
-            </label>
-
-            <img
-                src="{{ product.image }}"
-                alt="{{ product.name }}"
-                class="w-48 rounded-xl border shadow"
-            >
-        </div>
-        {% endif %}
 
 
         <!-- Produto ativo -->

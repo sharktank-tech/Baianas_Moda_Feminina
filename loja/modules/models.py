@@ -104,11 +104,45 @@ class Supplier(db.Model):
         default=utcnow
     )
 
+    # Campos genéricos de canal de fornecedor (dropshipping).
+    channel_type = db.Column(
+        db.String(20),
+        nullable=False,
+        default="manual",
+        server_default="manual",
+    )
+    api_key = db.Column(db.Text)
+    api_secret = db.Column(db.Text)
+    access_token = db.Column(db.Text)
+    access_token_expires_at = db.Column(db.DateTime)
+    seller_id = db.Column(db.String(64))
+    default_currency = db.Column(
+        db.String(3),
+        nullable=False,
+        default="BRL",
+        server_default="BRL",
+    )
+    is_sync_enabled = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+        server_default=db.false(),
+    )
+    last_sync_at = db.Column(db.DateTime)
+    sync_status = db.Column(db.String(20))
+    sync_error = db.Column(db.Text)
+
     products = db.relationship(
         "Product",
         secondary=product_supplier,
         back_populates="suppliers",
-        lazy=True
+        lazy=True,
+    )
+    supplier_products = db.relationship(
+        "SupplierProduct",
+        back_populates="supplier",
+        lazy=True,
+        cascade="all, delete-orphan",
     )
 
 
@@ -158,6 +192,32 @@ class Product(db.Model):
         default=utcnow
     )
 
+    # Campos de integração/dropshipping (aditivos; novos, com defaults).
+    external_id = db.Column(db.String(64), index=True)
+    source = db.Column(
+        db.String(20),
+        nullable=False,
+        default="internal",
+        server_default="internal",
+    )
+    is_draft = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+        server_default=db.false(),
+    )
+    cost = db.Column(db.Numeric(10, 2))
+    wholesale_price = db.Column(db.Numeric(10, 2))
+    category_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("categories.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    sync_status = db.Column(db.String(20))
+    last_sync_at = db.Column(db.DateTime)
+    sync_error = db.Column(db.Text)
+
     suppliers = db.relationship(
         "Supplier",
         secondary=product_supplier,
@@ -186,6 +246,33 @@ class Product(db.Model):
         lazy=True,
         cascade="all, delete-orphan",
         passive_deletes=True
+    )
+
+    category_obj = db.relationship(
+        "Category",
+        back_populates="products",
+        lazy=True,
+    )
+    images = db.relationship(
+        "ProductImage",
+        back_populates="product",
+        lazy=True,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    variants = db.relationship(
+        "ProductVariant",
+        back_populates="product",
+        lazy=True,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    supplier_links = db.relationship(
+        "SupplierProduct",
+        back_populates="product",
+        lazy=True,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     def __repr__(self):
@@ -1002,9 +1089,20 @@ class CartItem(db.Model):
         nullable=False
     )
 
+    variant_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("product_variants.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     cart = db.relationship(
         "Cart",
         back_populates="items"
+    )
+    variant = db.relationship(
+        "ProductVariant",
+        back_populates="cart_items",
     )
 
     product = db.relationship(
@@ -1122,6 +1220,10 @@ class Shipment(db.Model):
         onupdate=utcnow,
     )
 
+    # Campos de rastreio de fornecedor (dropshipping).
+    ali_order_id = db.Column(db.String(64), index=True)
+    external_shipment_id = db.Column(db.String(64))
+
     order = db.relationship(
         "Order",
         back_populates="shipments",
@@ -1213,3 +1315,211 @@ from loja.modules.getway_mercado_pago.payment_models import (  # noqa: E402,F401
     OrderItem,
     Payment,
 )
+
+
+# ==========================================================
+# Categorias normalizadas (dropshipping / mapeamento de fornecedor)
+# ==========================================================
+class Category(db.Model):
+    __tablename__ = "categories"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    name = db.Column(db.String(100), nullable=False)
+    slug = db.Column(db.String(120), nullable=False, unique=True)
+    parent_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("categories.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    source = db.Column(
+        db.String(20),
+        nullable=False,
+        default="internal",
+        server_default="internal",
+    )
+    external_id = db.Column(db.String(64), nullable=True)
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+    parent = db.relationship(
+        "Category",
+        remote_side=[id],
+        backref=db.backref("children", lazy=True),
+        lazy=True,
+    )
+    products = db.relationship(
+        "Product",
+        back_populates="category_obj",
+        lazy=True,
+    )
+
+
+# ==========================================================
+# Imagens de produto (galeria, mais de 4)
+# ==========================================================
+class ProductImage(db.Model):
+    __tablename__ = "product_images"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    product_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    url = db.Column(db.Text, nullable=False)
+    alt = db.Column(db.Text)
+    position = db.Column(db.Integer, nullable=False, default=0)
+    is_primary = db.Column(db.Boolean, nullable=False, default=False)
+
+    product = db.relationship("Product", back_populates="images")
+
+
+# ==========================================================
+# Variantes / SKUs de produto (genérico)
+# ==========================================================
+class ProductVariant(db.Model):
+    __tablename__ = "product_variants"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    product_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sku = db.Column(db.String(64))
+    external_sku_id = db.Column(db.String(64), index=True)
+    color = db.Column(db.String(60))
+    size = db.Column(db.String(20))
+    stock = db.Column(db.Integer, nullable=False, default=0)
+    price = db.Column(db.Numeric(10, 2))
+    sale_price = db.Column(db.Numeric(10, 2))
+    image_url = db.Column(db.Text)
+    weight_kg = db.Column(db.Numeric(8, 3))
+    dimensions = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+
+    product = db.relationship("Product", back_populates="variants")
+    cart_items = db.relationship("CartItem", back_populates="variant")
+    order_items = db.relationship("OrderItem", back_populates="variant")
+
+
+# ==========================================================
+# Produto de fornecedor (vínculo enriquecido; substitui product_supplier)
+# ==========================================================
+class SupplierProduct(db.Model):
+    __tablename__ = "supplier_products"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    supplier_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("suppliers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    product_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    external_product_id = db.Column(db.String(64), index=True)
+    external_sku_id = db.Column(db.String(64))
+    cost = db.Column(db.Numeric(10, 2))
+    wholesale_price = db.Column(db.Numeric(10, 2))
+    currency = db.Column(
+        db.String(3),
+        nullable=False,
+        default="BRL",
+        server_default="BRL",
+    )
+    sync_status = db.Column(db.String(20))
+    last_sync_at = db.Column(db.DateTime)
+    sync_error = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+    supplier = db.relationship("Supplier", back_populates="supplier_products")
+    product = db.relationship("Product", back_populates="supplier_links")
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "supplier_id", "product_id", name="uq_supplier_product"
+        ),
+    )
+
+
+# ==========================================================
+# Pedido de fornecedor (dropshipping) — separado de Order
+# ==========================================================
+class AliExpressOrder(db.Model):
+    __tablename__ = "aliexpress_orders"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    order_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("orders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    ali_order_id = db.Column(db.String(64), unique=True)
+    state = db.Column(
+        db.String(30),
+        nullable=False,
+        default="pending",
+        server_default="pending",
+    )
+    idempotency_key = db.Column(db.String(64), unique=True)
+    ali_status = db.Column(db.Text)
+    raw_payload = db.Column(JSONB)
+    last_error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+    order = db.relationship("Order", backref="aliexpress_orders")
+
+
+# ==========================================================
+# Log de sincronização (auditoria)
+# ==========================================================
+class SyncLog(db.Model):
+    __tablename__ = "sync_log"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    entity_type = db.Column(db.String(20), nullable=False)
+    entity_id = db.Column(UUID(as_uuid=True), nullable=False)
+    action = db.Column(db.String(30))
+    status = db.Column(db.String(20))
+    message = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=utcnow)

@@ -45,6 +45,13 @@ def create_app():
     from loja import cli
     app.cli.add_command(cli.create_admin)
 
+    # Cria tabelas novas em produção (idempotente: não altera tabelas existentes).
+    try:
+        with app.app_context():
+            db.create_all()
+    except Exception:
+        app.logger.exception("Não foi possível criar tabelas no boot.")
+
     from loja.schema import ensure_schema
     ensure_schema(app)
 
