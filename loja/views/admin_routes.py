@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from uuid import UUID as PythonUUID
+from uuid import UUID as PythonUUID, uuid4
 
 from flask import (
     Blueprint,
@@ -261,12 +261,12 @@ def admin_dashboard():
     # O dashboard assume que os singletons existem. Em primeiro acesso,
     # cria os registros com valores padrão para não quebrar o template.
     if SiteConfig.query.first() is None:
-        db.session.add(SiteConfig(id=PythonUUID.uuid4(), name="Pollo Modas"))
+        db.session.add(SiteConfig(id=uuid4(), name="Pollo Modas"))
     if FooterConfig.query.first() is None:
-        db.session.add(FooterConfig(id=PythonUUID.uuid4(), brand_name="Pollo Modas"))
+        db.session.add(FooterConfig(id=uuid4(), brand_name="Pollo Modas"))
     if ContactInfo.query.first() is None:
         db.session.add(
-            ContactInfo(id=PythonUUID.uuid4(), email="contato@pollomodas.com.br")
+            ContactInfo(id=uuid4(), email="contato@pollomodas.com.br")
         )
     db.session.commit()
 
