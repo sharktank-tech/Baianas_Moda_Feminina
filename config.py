@@ -33,10 +33,12 @@ class Config:
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # search_path centralizado via startup option do PostgreSQL. É aplicado no
-    # início de cada conexão de backend, então funciona tanto em conexão direta
-    # quanto no Session Pooler (transaction pooling), e NÃO depende de SET de
-    # sessão. Sem fallback para public. Apenas PostgreSQL; SQLite (testes) ignora.
+    # search_path: em PostgreSQL usamos options=-csearch_path=<POLLOMODAS_SCHEMA>
+    # como DICA para conexão direta / pooling de sessão. PORÉM o Session Pooler
+    # do Supabase em transaction pooling IGNORA essa option, por isso o mecanismo
+    # definitivo é o hook de transação (SET LOCAL search_path) instalado em
+    # loja/__init__.py (create_app), que força o schema a cada transação. Nunca
+    # há fallback para public. Apenas PostgreSQL; SQLite (testes) ignora options.
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,
         "pool_recycle": 300,

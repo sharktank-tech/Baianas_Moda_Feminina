@@ -1,6 +1,6 @@
 import os
 
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 
 
 # ---------------------------------------------------------------------------
@@ -30,6 +30,11 @@ DB_SCHEMA = os.getenv("POLLOMODAS_SCHEMA", "pollomodas")
 # pois pertencem ao Supabase/legado e estão fora do domínio da PolloModas.
 RESERVED_DISPOSABLE_SCHEMAS = {"public", "pollomodas", "auth", "storage", "extensions"}
 
+# Schemas que a APLICAÇÃO nunca deve usar como alvo de escrita (create_all /
+# ensure_schema). public é legado intocável; auth/storage/extensions são do
+# Supabase. pollomodas É um alvo válido (produção), por isso não está aqui.
+FORBIDDEN_TARGET_SCHEMAS = {"public", "auth", "storage", "extensions"}
+
 
 def assert_safe_disposable_schema(name):
     """Recusa nomes reservados ou fora do padrão pollo_smoke_.
@@ -45,6 +50,27 @@ def assert_safe_disposable_schema(name):
     if not isinstance(name, str) or not name.startswith("pollo_smoke_"):
         raise AssertionError(
             "schema descartável recusado: %r deve começar com 'pollo_smoke_'" % name
+        )
+
+
+def install_search_path_hook(engine, schema):
+    """Força search_path=<schema> no início de CADA transação.
+
+    O Session Pooler do Supabase em transaction pooling IGNORA
+    options=-csearch_path da URL/conexão, então este hook central no engine
+    garante o schema alvo independente do pooler. Usa a mesma fonte
+    POLLOMODAS_SCHEMA. A qualificação explícita em ensure_schema/inspector é a
+    segunda barreira. Não mexer em models.
+
+    Usa set_config(..., true) parametrizado (não interpola o nome do schema em
+    SQL) e o 3º argumento `true` torna a mudança local à transação, equivalente
+    a SET LOCAL.
+    """
+    @event.listens_for(engine, "begin")
+    def _set_local_search_path(conn):
+        conn.execute(
+            text("SELECT set_config('search_path', :schema, true)"),
+            {"schema": schema},
         )
 
 
@@ -252,6 +278,7 @@ def ensure_schema(app):
                             "FOREIGN KEY (%(c)s) REFERENCES %(rtq)s(%(rc)s) "
                             "ON DELETE %(od)s"
                             % {
+                                "t": t,
                                 "tq": qualify(t), "c": col,
                                 "rtq": qualify(fk["ref_table"]),
                                 "rc": fk["ref_column"], "od": fk["on_delete"],

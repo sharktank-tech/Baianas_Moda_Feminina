@@ -46,30 +46,45 @@ def create_app():
     from loja import cli
     app.cli.add_command(cli.create_admin)
 
-    from loja.schema import ensure_schema, DB_SCHEMA
+    from loja.schema import (
+        ensure_schema,
+        DB_SCHEMA,
+        install_search_path_hook,
+        FORBIDDEN_TARGET_SCHEMAS,
+    )
 
     # Bootstrap do schema dedicado (somente PostgreSQL). Todo o bootstrap e o
     # create_all/ensure_schema ocorrem DENTRO do app context: o acesso a
     # db.engine só acontece após entrar no contexto. Sequência:
-    #   app_context -> (PG) CREATE SCHEMA IF NOT EXISTS + validar current_schema()
+    #   app_context -> (PG) validar DB_SCHEMA não proibido
+    #   -> instalar hook SET LOCAL search_path (por transação)
+    #   -> CREATE SCHEMA IF NOT EXISTS + validar current_schema()
     #   -> db.create_all() -> ensure_schema()
-    # O CREATE SCHEMA nomeia o schema explicitamente, então funciona mesmo
-    # quando o search_path ainda não resolve (schema novo). O assert de
-    # current_schema() falha rápido se o search_path efetivo não for o schema
-    # alvo (ex.: pooler ignorou `options`, ou role com search_path divergente),
-    # sem fallback silencioso para public.
+    # O hook de transação é o mecanismo definitivo de isolamento: o Session
+    # Pooler do Supabase ignora options=-csearch_path, mas o SET LOCAL roda no
+    # início de cada transação e força o schema alvo. Sem fallback para public.
     with app.app_context():
         if db.engine.dialect.name == "postgresql":
+            if DB_SCHEMA in FORBIDDEN_TARGET_SCHEMAS:
+                raise RuntimeError(
+                    "DB_SCHEMA=%r é proibido (não pode ser public/auth/storage/"
+                    "extensions). A PolloModas exige o schema dedicado."
+                    % DB_SCHEMA
+                )
+            install_search_path_hook(db.engine, DB_SCHEMA)
+
             with db.engine.connect() as conn:
                 conn.execute(text("CREATE SCHEMA IF NOT EXISTS %s" % DB_SCHEMA))
                 conn.commit()
             with db.engine.connect() as conn:
                 effective = conn.execute(text("SELECT current_schema()")).scalar()
+                configured = conn.execute(text("SHOW search_path")).scalar()
             if effective != DB_SCHEMA:
                 raise RuntimeError(
-                    "search_path inválido: current_schema()=%r, esperado=%r. "
-                    "A PolloModas exige o schema dedicado e não deve usar public."
-                    % (effective, DB_SCHEMA)
+                    "search_path inválido: current_schema()=%r, "
+                    "search_path configurado=%r, esperado DB_SCHEMA=%r. "
+                    "O hook de transação (SET LOCAL search_path) não está sendo "
+                    "aplicado." % (effective, configured, DB_SCHEMA)
                 )
 
         # create_all(): cria apenas tabelas NOVAS dentro do schema alvo.

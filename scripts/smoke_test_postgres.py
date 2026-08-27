@@ -50,7 +50,11 @@ os.environ["POLLOMODAS_SCHEMA"] = SCHEMA
 os.environ["SECRET_KEY"] = SECRET_KEY
 os.environ["DATABASE_URL"] = DATABASE_URL
 
-from loja.schema import ensure_schema, assert_safe_disposable_schema
+from loja.schema import (
+    ensure_schema,
+    assert_safe_disposable_schema,
+    install_search_path_hook,
+)
 
 # Proteção: recusa nomes reservados (public/pollomodas/auth/storage/extensions)
 # e exige prefixo pollo_smoke_, mesmo que SMOKE_SCHEMA venha mal configurado.
@@ -209,6 +213,10 @@ def validate(app, label):
 def main():
     print("== Smoke isolado no schema: %s (public/pollomodas NÃO são tocados) ==" % SCHEMA)
     engine = create_engine(ENGINE_URL)
+    # Garante que o DDL do próprio smoke (seed_legacy usa nomes sem schema
+    # qualificado) caia no schema isolado, mesmo se o pooler Supabase ignorar
+    # options=-csearch_path. Mesmo mecanismo de create_app().
+    install_search_path_hook(engine, SCHEMA)
     try:
         create_isolated_schema(engine)
 
