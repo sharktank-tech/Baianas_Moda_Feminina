@@ -1401,6 +1401,13 @@ class ProductVariant(db.Model):
     )
     sku = db.Column(db.String(64))
     external_sku_id = db.Column(db.String(64), index=True)
+    supplier_product_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("supplier_products.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    supplier_sku_id = db.Column(db.String(64))
     color = db.Column(db.String(60))
     size = db.Column(db.String(20))
     stock = db.Column(db.Integer, nullable=False, default=0)
@@ -1412,6 +1419,18 @@ class ProductVariant(db.Model):
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime, default=utcnow)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "supplier_product_id", "supplier_sku_id",
+            name="uq_product_variant_supplier",
+        ),
+        db.CheckConstraint("stock >= 0", name="ck_product_variant_stock_nonneg"),
+        db.CheckConstraint("price >= 0", name="ck_product_variant_price_nonneg"),
+        db.CheckConstraint(
+            "sale_price >= 0", name="ck_product_variant_sale_price_nonneg"
+        ),
+    )
 
     product = db.relationship("Product", back_populates="variants")
     cart_items = db.relationship("CartItem", back_populates="variant")
@@ -1441,7 +1460,7 @@ class SupplierProduct(db.Model):
         nullable=False,
         index=True,
     )
-    external_product_id = db.Column(db.String(64), index=True)
+    supplier_product_id = db.Column(db.String(64), index=True)
     external_sku_id = db.Column(db.String(64))
     cost = db.Column(db.Numeric(10, 2))
     wholesale_price = db.Column(db.Numeric(10, 2))
@@ -1467,7 +1486,13 @@ class SupplierProduct(db.Model):
 
     __table_args__ = (
         db.UniqueConstraint(
-            "supplier_id", "product_id", name="uq_supplier_product"
+            "supplier_id", "supplier_product_id",
+            name="uq_supplier_product_external",
+        ),
+        db.CheckConstraint("cost >= 0", name="ck_supplier_product_cost_nonneg"),
+        db.CheckConstraint(
+            "wholesale_price >= 0",
+            name="ck_supplier_product_wholesale_nonneg",
         ),
     )
 
@@ -1514,7 +1539,7 @@ class AliExpressOrder(db.Model):
 # Log de sincronização (auditoria)
 # ==========================================================
 class SyncLog(db.Model):
-    __tablename__ = "sync_log"
+    __tablename__ = "sync_logs"
 
     id = db.Column(db.BigInteger, primary_key=True)
     entity_type = db.Column(db.String(20), nullable=False)
@@ -1523,3 +1548,98 @@ class SyncLog(db.Model):
     status = db.Column(db.String(20))
     message = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=utcnow)
+
+
+# ==========================================================
+# Mapeamento de categoria de fornecedor (dropshipping)
+# ==========================================================
+class SupplierCategoryMapping(db.Model):
+    __tablename__ = "supplier_category_mappings"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    supplier_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("suppliers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    external_category_id = db.Column(db.String(64), nullable=True)
+    external_category_name = db.Column(db.String(255))
+    category_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("categories.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source = db.Column(
+        db.String(20),
+        nullable=False,
+        default="internal",
+        server_default="internal",
+    )
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+    supplier = db.relationship(
+        "Supplier",
+        backref=db.backref("category_mappings", lazy=True),
+    )
+    category = db.relationship("Category")
+
+
+# ==========================================================
+# Sincronização de produto (auditoria de sync)
+# ==========================================================
+class ProductSync(db.Model):
+    __tablename__ = "product_syncs"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    product_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    supplier_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("suppliers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    external_product_id = db.Column(db.String(64), nullable=True)
+    state = db.Column(
+        db.String(30),
+        nullable=False,
+        default="pending",
+        server_default="pending",
+    )
+    last_synced_at = db.Column(db.DateTime)
+    error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+    product = db.relationship(
+        "Product",
+        backref=db.backref("syncs", lazy=True),
+    )
+    supplier = db.relationship(
+        "Supplier",
+        backref=db.backref("product_syncs", lazy=True),
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "product_id", "supplier_id", name="uq_product_sync"
+        ),
+    )
