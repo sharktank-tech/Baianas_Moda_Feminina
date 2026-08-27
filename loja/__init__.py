@@ -48,18 +48,18 @@ def create_app():
 
     from loja.schema import ensure_schema, DB_SCHEMA
 
-    # Bootstrap do schema dedicado (somente PostgreSQL).
-    # Sequência explícita e segura:
-    #   conexão -> CREATE SCHEMA IF NOT EXISTS <schema> -> validar
-    #   current_schema() -> (metadata já registrada) -> db.create_all()
-    #   -> ensure_schema()
+    # Bootstrap do schema dedicado (somente PostgreSQL). Todo o bootstrap e o
+    # create_all/ensure_schema ocorrem DENTRO do app context: o acesso a
+    # db.engine só acontece após entrar no contexto. Sequência:
+    #   app_context -> (PG) CREATE SCHEMA IF NOT EXISTS + validar current_schema()
+    #   -> db.create_all() -> ensure_schema()
     # O CREATE SCHEMA nomeia o schema explicitamente, então funciona mesmo
     # quando o search_path ainda não resolve (schema novo). O assert de
     # current_schema() falha rápido se o search_path efetivo não for o schema
     # alvo (ex.: pooler ignorou `options`, ou role com search_path divergente),
     # sem fallback silencioso para public.
-    if db.engine.dialect.name == "postgresql":
-        with app.app_context():
+    with app.app_context():
+        if db.engine.dialect.name == "postgresql":
             with db.engine.connect() as conn:
                 conn.execute(text("CREATE SCHEMA IF NOT EXISTS %s" % DB_SCHEMA))
                 conn.commit()
@@ -72,11 +72,10 @@ def create_app():
                     % (effective, DB_SCHEMA)
                 )
 
-    # create_all(): cria apenas tabelas NOVAS dentro do schema alvo (search_path).
-    with app.app_context():
+        # create_all(): cria apenas tabelas NOVAS dentro do schema alvo.
         db.create_all()
 
-    # Corrige tabelas EXISTENTES de forma aditiva/idempotente.
-    ensure_schema(app)
+        # Corrige tabelas EXISTENTES de forma aditiva/idempotente.
+        ensure_schema(app)
 
     return app

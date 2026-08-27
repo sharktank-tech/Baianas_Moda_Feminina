@@ -31,10 +31,12 @@ def _fk_problems():
     for table in db.metadata.tables.values():
         for column in table.columns:
             for fk in column.foreign_keys:
-                ref = fk.referred
+                # fk.column é a Column referenciada; column é a local.
+                ref = fk.column
                 if ref is None:
                     problems.append(
-                        (table.name, column.name, "FK sem coluna referenciada")
+                        (table.name, column.name,
+                         "FK sem coluna referenciada (%s)" % fk.target_fullname)
                     )
                     continue
                 if _is_uuid(column) != _is_uuid(ref):
@@ -42,6 +44,7 @@ def _fk_problems():
                         (
                             table.name, column.name, str(column.type),
                             ref.table.name, ref.name, str(ref.type),
+                            fk.target_fullname,
                         )
                     )
     return problems
@@ -53,13 +56,14 @@ def test_fk_type_compatibility():
 
 
 def test_every_fk_resolves_to_a_table():
-    problems = _fk_problems()  # cobre também FK sem referred
-    # checagem extra: toda FK aponta para tabela existente nos metadados
+    # toda FK aponta para tabela existente nos metadados
     missing = []
     tables = set(db.metadata.tables.keys())
     for table in db.metadata.tables.values():
         for column in table.columns:
             for fk in column.foreign_keys:
-                if fk.referred is not None and fk.referred.table.name not in tables:
-                    missing.append((table.name, column.name, fk.referred.table.name))
+                ref = fk.column
+                if ref is not None and ref.table.name not in tables:
+                    missing.append((table.name, column.name,
+                                    getattr(fk, "target_fullname", None)))
     assert not missing, "FK referencia tabela ausente dos metadados: %r" % missing
