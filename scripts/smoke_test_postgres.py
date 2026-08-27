@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
-"""Smoke test de migração Fase 0 em PostgreSQL REAL (staging/dev).
+"""Smoke test PÓS-migration 0003 em PostgreSQL REAL (staging/dev).
 
-Executa exatamente o roteiro:
-  schema legado
-  -> subir app nova (create_app = db.create_all + ensure_schema)
-  -> confirmar tabelas novas
-  -> confirmar products.category_id / cart_items.variant_id / order_items.variant_id
-  -> confirmar FKs
-  -> confirmar índices
-  -> reiniciar app (ensure_schema novamente) -> confirmar idempotência
+Valida o schema-alvo UUID:
+  schema UUID (baseline pós-0003)
+  -> create_app()
+  -> db.create_all()             (cria tabelas novas; product_supplier via FK UUID)
+  -> ensure_schema()             (adiciona colunas/FKs/índices faltantes)
+  -> ensure_schema() novamente   (idempotência)
+  -> confirma FKs
+  -> confirma índices
 
-Dois cenários:
+Baseline de IDs no fixture:
+  VARCHAR(36) = estado legado PRÉ-0003 (drift)        -> NÃO usado aqui
+  UUID        = baseline suportado PÓS-0003 (este script)
+
+Dois cenários (ambos com baseline UUID):
   A) schema legado SEM as novas colunas  -> exercita ADD COLUMN ... REFERENCES
   B) schema legado COM as colunas, SEM FK -> exercita ALTER ADD CONSTRAINT
      (este é o ramo PostgreSQL que não é coberto por SQLite)
 
 ATENÇÃO: aponte DATABASE_URL para um banco PostgreSQL DESCARTÁVEL de
-teste/staging. O script NÃO mexE em tabelas existentes fora do necessário
-(cria/recria apenas as tabelas legadas listadas em LEGACY_TABLES, em CASCADE).
+teste/staging. O script recria apenas as tabelas legadas listadas em
+LEGACY_TABLES (DROP ... CASCADE). Não altera models nem product_supplier.
 
 Uso:
   DATABASE_URL=postgresql://user:pass@host:5432/pollo_smoketest \
@@ -51,38 +55,40 @@ from loja import db, create_app  # noqa: E402
 from loja.schema import ensure_schema  # noqa: E402
 
 
-# Schema "antigo" (produção antes do P0/P1): tabelas existentes, sem as
-# novas colunas/FKs. Tabelas NOVAS ficam ausentes de propósito.
+# Baseline PÓS-0003: IDs legados são UUID (não VARCHAR).
+#   VARCHAR(36) = estado legado PRÉ-0003 (drift)  -- não usado aqui
+#   UUID        = baseline suportado PÓS-0003
+# Tabelas NOVAS ficam ausentes de propósito (criadas por db.create_all).
 LEGACY_TABLES = {
-    "orders": "id VARCHAR(36) PRIMARY KEY, order_number TEXT",
-    "suppliers": "id VARCHAR(36) PRIMARY KEY, name TEXT",
-    "products": "id VARCHAR(36) PRIMARY KEY, name TEXT, price TEXT, "
+    "orders": "id UUID PRIMARY KEY, order_number TEXT",
+    "suppliers": "id UUID PRIMARY KEY, name TEXT",
+    "products": "id UUID PRIMARY KEY, name TEXT, price TEXT, "
                 "stock INTEGER, category TEXT",
-    "cart_items": "id VARCHAR(36) PRIMARY KEY, cart_id VARCHAR(36), "
-                  "product_id VARCHAR(36), selected_size TEXT, "
+    "cart_items": "id UUID PRIMARY KEY, cart_id VARCHAR(36), "
+                  "product_id UUID, selected_size TEXT, "
                   "quantity INTEGER, unit_price TEXT",
-    "order_items": "id VARCHAR(36) PRIMARY KEY, order_id VARCHAR(36), "
-                   "product_id VARCHAR(36), product_name TEXT, "
+    "order_items": "id UUID PRIMARY KEY, order_id VARCHAR(36), "
+                   "product_id UUID, product_name TEXT, "
                    "quantity INTEGER, unit_price TEXT, line_total TEXT",
     "shipments": "id INTEGER PRIMARY KEY, order_id VARCHAR(36), "
                  "tracking_code TEXT",
 }
 
 # Cenário B: colunas novas JÁ presentes, mas SEM as FKs (exercita o ramo
-# PostgreSQL de ALTER ADD CONSTRAINT em coluna existente).
+# PostgreSQL de ALTER ADD CONSTRAINT em coluna existente). Baseline UUID.
 LEGACY_TABLES_B = dict(LEGACY_TABLES)
 LEGACY_TABLES_B["products"] = (
-    "id VARCHAR(36) PRIMARY KEY, name TEXT, price TEXT, stock INTEGER, "
-    "category TEXT, category_id VARCHAR(36)"
+    "id UUID PRIMARY KEY, name TEXT, price TEXT, stock INTEGER, "
+    "category TEXT, category_id UUID"
 )
 LEGACY_TABLES_B["cart_items"] = (
-    "id VARCHAR(36) PRIMARY KEY, cart_id VARCHAR(36), product_id VARCHAR(36), "
-    "selected_size TEXT, quantity INTEGER, unit_price TEXT, variant_id VARCHAR(36)"
+    "id UUID PRIMARY KEY, cart_id VARCHAR(36), product_id UUID, "
+    "selected_size TEXT, quantity INTEGER, unit_price TEXT, variant_id UUID"
 )
 LEGACY_TABLES_B["order_items"] = (
-    "id VARCHAR(36) PRIMARY KEY, order_id VARCHAR(36), product_id VARCHAR(36), "
+    "id UUID PRIMARY KEY, order_id VARCHAR(36), product_id UUID, "
     "product_name TEXT, quantity INTEGER, unit_price TEXT, line_total TEXT, "
-    "variant_id VARCHAR(36)"
+    "variant_id UUID"
 )
 
 NEW_TABLES = {
