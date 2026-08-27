@@ -27,11 +27,13 @@ def create_app():
     from loja.views.admin_routes import admin_blueprint
     from loja.views.routes import tracking_blueprint
     from loja.views.payments_routes import payments_blueprint
+    from loja.integrations.aliexpress.routes import aliexpress_blueprint
 
     app.register_blueprint(tracking_blueprint)
     app.register_blueprint(payments_blueprint)
     app.register_blueprint(main_blueprint)
     app.register_blueprint(admin_blueprint)
+    app.register_blueprint(aliexpress_blueprint)
 
     from loja.modules.models import User             # corrigido: User
 

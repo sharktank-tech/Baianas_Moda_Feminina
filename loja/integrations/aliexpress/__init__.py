@@ -26,6 +26,12 @@ from .errors import (
     AliExpressRateLimitError,
     AliExpressTransportError,
 )
+from .models import AliExpressSearchProduct, AliExpressSearchResult
+from .search import (
+    build_search_params,
+    normalize_search_response,
+    parse_price,
+)
 from .sign import sign_top
 from .transport import RequestsTransport, Transport, TransportError, TransportTimeout
 
@@ -58,6 +64,8 @@ def create_client_from_env(
 __all__: Iterable[str] = [
     "AliExpressClient",
     "AliExpressCredentials",
+    "AliExpressSearchResult",
+    "AliExpressSearchProduct",
     "AliExpressError",
     "AliExpressConfigError",
     "AliExpressAuthError",
@@ -65,6 +73,9 @@ __all__: Iterable[str] = [
     "AliExpressRateLimitError",
     "AliExpressTransportError",
     "sign_top",
+    "build_search_params",
+    "normalize_search_response",
+    "parse_price",
     "create_client_from_env",
     "RequestsTransport",
     "Transport",

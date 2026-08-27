@@ -193,5 +193,43 @@ class AliExpressClient:
             f"sign_method={self.sign_method!r})"
         )
 
+    # ----- busca (Fase 2) -------------------------------------------------
+    def search_products(
+        self,
+        *,
+        keyword: Optional[str] = None,
+        locale: str = "en_US",
+        country_code: str = "BR",
+        currency: str = "BRL",
+        category_id: Optional[str] = None,
+        sort_by: str = "orders,desc",
+        page_index: int = 1,
+        page_size: int = 20,
+        search_extend: Optional[str] = None,
+        selection_name: Optional[str] = None,
+    ) -> "AliExpressSearchResult":
+        """Busca read-only aliexpress.ds.text.search (retorna resultado normalizado).
+
+        Não persiste nada. Em caso de erro TOP/API, levanta a hierarquia existente
+        (AliExpressAuthError / AliExpressRateLimitError / AliExpressAPIError /
+        AliExpressTransportError). Lista vazia significa "busca válida, 0 produtos".
+        """
+        from .search import build_search_params, normalize_search_response
+
+        business = build_search_params(
+            keyword=keyword,
+            locale=locale,
+            country_code=country_code,
+            currency=currency,
+            category_id=category_id,
+            sort_by=sort_by,
+            page_index=page_index,
+            page_size=page_size,
+            search_extend=search_extend,
+            selection_name=selection_name,
+        )
+        payload = self.call("aliexpress.ds.text.search", **business)
+        return normalize_search_response(payload, method="aliexpress.ds.text.search")
+
 
 __all__: Iterable[str] = ["AliExpressClient", "DEFAULT_BASE_URL"]
