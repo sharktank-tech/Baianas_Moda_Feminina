@@ -19,11 +19,23 @@ import uuid
 
 import pytest
 from sqlalchemy import create_engine, text, inspect as sa_inspect
+from sqlalchemy.engine import make_url
 
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
-IS_POSTGRES = DATABASE_URL.startswith(("postgresql://", "postgresql+"))
+# O conftest sobrescreve os.environ["DATABASE_URL"] por SQLite para a suíte
+# unitária. Usamos a URL original capturada pelo conftest para enxergar o
+# PostgreSQL real fornecido no comando, sem exigir uma segunda variável.
+from conftest import ORIGINAL_DATABASE_URL
+
+DATABASE_URL = ORIGINAL_DATABASE_URL
+try:
+    IS_POSTGRES = (
+        bool(DATABASE_URL)
+        and make_url(DATABASE_URL).get_backend_name() == "postgresql"
+    )
+except Exception:
+    IS_POSTGRES = False
 
 pytestmark = pytest.mark.skipif(
     not IS_POSTGRES,
@@ -54,8 +66,6 @@ def env(monkeypatch):
         c.execute(text("CREATE SCHEMA IF NOT EXISTS %s" % app_schema))
         # legacy: users.id BIGINT (simula o sistema legado em public)
         c.execute(text("CREATE TABLE %s.users (id BIGINT PRIMARY KEY)" % leg_schema))
-        # app: users.id UUID
-        c.execute(text("CREATE TABLE %s.users (id UUID PRIMARY KEY)" % app_schema))
         c.commit()
 
     # Redireciona a aplicação para o schema "app" sem mexer na config global.
