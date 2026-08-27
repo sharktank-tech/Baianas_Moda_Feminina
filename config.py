@@ -23,15 +23,30 @@ class Config:
         raise RuntimeError("DATABASE_URL não configurada.")
 
     # ============= SQLAlchemy ==================
-    SQLALCHEMY_DATABASE_URI = (
-        DATABASE_URL
-    )
+    SQLALCHEMY_DATABASE_URI = DATABASE_URL
+
+    # Schema dedicado da PolloModas. Tudo (create_all, ensure_schema, sessões e
+    # queries) ocorre dentro dele; `public` pertence a outro sistema e é
+    # intocável. Em testes isolados (ex.: pollo_smoke_xxx) sobrescreva via env
+    # POLLOMODAS_SCHEMA — mas NUNCA aponte para public/pollomodas em produção.
+    POLLOMODAS_SCHEMA = os.getenv("POLLOMODAS_SCHEMA", "pollomodas")
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # search_path: em PostgreSQL usamos options=-csearch_path=<POLLOMODAS_SCHEMA>
+    # como DICA para conexão direta / pooling de sessão. PORÉM o Session Pooler
+    # do Supabase em transaction pooling IGNORA essa option, por isso o mecanismo
+    # definitivo é o hook de transação (SET LOCAL search_path) instalado em
+    # loja/__init__.py (create_app), que força o schema a cada transação. Nunca
+    # há fallback para public. Apenas PostgreSQL; SQLite (testes) ignora options.
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,
         "pool_recycle": 300,
     }
+    if DATABASE_URL.startswith("postgresql"):
+        SQLALCHEMY_ENGINE_OPTIONS["connect_args"] = {
+            "options": "-csearch_path=%s" % POLLOMODAS_SCHEMA,
+        }
 
     # ============= Email ==================
     EMAIL_DESTINE = os.getenv("EMAIL_DESTINE")

@@ -53,9 +53,10 @@ class Order(db.Model):
         default=generate_order_number,
     )
 
-    # Mantemos "users.id" no metadata do SQLAlchemy porque o model User
-    # ainda não declara schema="public". No PostgreSQL, a constraint
-    # orders_user_id_fkey deve apontar explicitamente para public.users(id).
+    # A FK é declarada como "users.id" (sem schema) e resolve para o schema
+    # dedicado da PolloModas via search_path (pollomodas). O schema `public`
+    # pertence ao sistema legado e é intocável; a constraint orders_user_id_fkey
+    # deve apontar para pollomodas.users(id), nunca para public.users(id).
     user_id = db.Column(
         UUID(as_uuid=True),
         db.ForeignKey(
@@ -268,6 +269,12 @@ class OrderItem(db.Model):
 
     product_name = db.Column(db.String(255), nullable=False)
     selected_size = db.Column(db.String(20))
+    variant_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("product_variants.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     quantity = db.Column(db.Integer, nullable=False)
     unit_price = db.Column(db.Numeric(10, 2), nullable=False)
     line_total = db.Column(db.Numeric(10, 2), nullable=False)
@@ -281,6 +288,7 @@ class OrderItem(db.Model):
 
     order = db.relationship("Order", back_populates="items")
     product = db.relationship("Product", lazy="joined")
+    variant = db.relationship("ProductVariant", back_populates="order_items")
 
     __table_args__ = (
         db.CheckConstraint(

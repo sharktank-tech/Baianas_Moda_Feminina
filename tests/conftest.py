@@ -2,6 +2,12 @@ import os
 import tempfile
 import uuid
 
+# Captura a URL original fornecida pelo usuário ANTES de sobrescrevê-la com
+# SQLite. Os testes de isolamento de schema (tests/test_schema_isolation.py)
+# usam ORIGINAL_DATABASE_URL para enxergar o PostgreSQL real; a suíte comum
+# continua isolada em SQLite.
+ORIGINAL_DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
 # A classe Config do projeto é avaliada no primeiro import e exige DATABASE_URL.
 # Para os testes usamos um SQLite em arquivo temporário (ver compilers abaixo).
 _TMP_DB = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
