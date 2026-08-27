@@ -1,38 +1,35 @@
 #!/usr/bin/env python3
-"""Smoke test PÓS-migration 0003 em PostgreSQL REAL (staging/dev).
+"""Smoke test PÓS-migration 0003 em PostgreSQL REAL (staging/dev), ISOLADO.
 
-Valida o schema-alvo UUID:
-  schema UUID (baseline pós-0003)
-  -> create_app()
-  -> db.create_all()             (cria tabelas novas; product_supplier via FK UUID)
-  -> ensure_schema()             (adiciona colunas/FKs/índices faltantes)
-  -> ensure_schema() novamente   (idempotência)
-  -> confirma FKs
-  -> confirma índices
+Valida o schema-alvo UUID criando um SCHEMA DESCARTÁVEL dedicado
+(`pollo_smoke_<random>`) e rodando tudo lá dentro. O schema `public` NÃO é
+tocado: nenhuma tabela de produção é dropada ou alterada por este script.
+Ao final (sucesso ou erro) o schema isolado é removido com
+`DROP SCHEMA ... CASCADE`.
 
 Baseline de IDs no fixture:
   VARCHAR(36) = estado legado PRÉ-0003 (drift)        -> NÃO usado aqui
   UUID        = baseline suportado PÓS-0003 (este script)
 
-Dois cenários (ambos com baseline UUID):
-  A) schema legado SEM as novas colunas  -> exercita ADD COLUMN ... REFERENCES
-  B) schema legado COM as colunas, SEM FK -> exercita ALTER ADD CONSTRAINT
-     (este é o ramo PostgreSQL que não é coberto por SQLite)
+Roteiro:
+  schema isolado (UUID) -> create_app() -> db.create_all() -> ensure_schema()
+  -> ensure_schema() novamente (idempotência) -> confirma FKs -> confirma índices
 
-ATENÇÃO: aponte DATABASE_URL para um banco PostgreSQL DESCARTÁVEL de
-teste/staging. O script recria apenas as tabelas legadas listadas em
-LEGACY_TABLES (DROP ... CASCADE). Não altera models nem product_supplier.
+O schema `public` só deve ser lido/auditado e alterado por migrations
+explícitas aprovadas; este script NÃO roda nenhuma migration nele.
 
 Uso:
-  DATABASE_URL=postgresql://user:pass@host:5432/pollo_smoketest \
+  DATABASE_URL=postgresql://user:pass@host:5432/db \
   SECRET_KEY=smoke-test \
   python scripts/smoke_test_postgres.py
+
+Use SMOKE_SCHEMA=pollo_smoke_xxxx para fixar o nome (repeatabilidade).
 """
 import os
 import sys
+import secrets
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
-# Garante que o pacote 'loja' (raiz do repo) esteja importável quando o
-# script é executado diretamente (python scripts/smoke_test_postgres.py).
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import sqlalchemy
@@ -40,27 +37,34 @@ from sqlalchemy import create_engine, text, inspect as sa_inspect
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 SECRET_KEY = os.environ.get("SECRET_KEY") or "smoke-test-secret"
+SCHEMA = os.environ.get("SMOKE_SCHEMA") or ("pollo_smoke_" + secrets.token_hex(4))
 
 if not DATABASE_URL or not DATABASE_URL.startswith("postgresql"):
-    print("ERRO: defina DATABASE_URL para um PostgreSQL de teste "
-          "(postgresql://...). Este script NÃO roda em SQLite.")
+    print("ERRO: defina DATABASE_URL para um PostgreSQL (postgresql://...). "
+          "Este script NÃO roda em SQLite e NÃO mexe no schema public.")
     sys.exit(2)
 
-# Garante que o app leia este DATABASE_URL/SECRET_KEY ao importar config.
-os.environ["DATABASE_URL"] = DATABASE_URL
+
+def _with_search_path(url, schema):
+    """Anexa `options=-csearch_path=<schema>` à URL para que TODA conexão
+    (engine local e engine do app) opere dentro do schema isolado."""
+    parts = urlparse(url)
+    q = parse_qs(parts.query)
+    q["options"] = "-csearch_path=%s" % schema
+    return urlunparse(parts._replace(query=urlencode(q, doseq=True)))
+
+
+APP_DATABASE_URL = _with_search_path(DATABASE_URL, SCHEMA)
+os.environ["DATABASE_URL"] = APP_DATABASE_URL
 os.environ["SECRET_KEY"] = SECRET_KEY
 
-# Importa o app APÓS fixar env.
 from loja import db, create_app  # noqa: E402
 from loja.schema import ensure_schema  # noqa: E402
 
 
 # Baseline PÓS-0003: IDs legados são UUID (não VARCHAR).
-#   VARCHAR(36) = estado legado PRÉ-0003 (drift)  -- não usado aqui
-#   UUID        = baseline suportado PÓS-0003
-# users.id também é UUID no model; o fixture recria users com UUID para
-# fechar o drift users.id (BIGINT no legado real) detectado no smoke.
-# Tabelas NOVAS ficam ausentes de propósito (criadas por db.create_all).
+# users.id também é UUID no model; recriado aqui para fechar o drift users.id.
+# shipments.id é BIGINT (model); o resto UUID.
 LEGACY_TABLES = {
     "users": "id UUID PRIMARY KEY",
     "orders": "id UUID PRIMARY KEY, order_number TEXT",
@@ -99,7 +103,6 @@ NEW_TABLES = {
     "supplier_category_mappings", "product_syncs", "aliexpress_orders",
     "sync_logs",
 }
-
 FK_TARGETS = {
     "products": ("category_id", "categories", "id"),
     "cart_items": ("variant_id", "product_variants", "id"),
@@ -114,18 +117,32 @@ INDEX_TARGETS = [
 ]
 
 
-def setup_legacy(engine, tables):
+def create_isolated_schema(engine):
+    """Cria o schema descartável (limpo) onde todo o smoke roda."""
     with engine.connect() as conn:
-        for t in tables:
-            conn.execute(text("DROP TABLE IF EXISTS %s CASCADE" % t))
+        conn.execute(text("DROP SCHEMA IF EXISTS %s CASCADE" % SCHEMA))
+        conn.execute(text("CREATE SCHEMA %s" % SCHEMA))
         conn.commit()
+
+
+def seed_legacy(engine, tables):
+    """Recria apenas as tabelas legadas DENTRO do schema isolado."""
+    with engine.connect() as conn:
         for t, cols in tables.items():
+            conn.execute(text("DROP TABLE IF EXISTS %s CASCADE" % t))
             conn.execute(text("CREATE TABLE %s (%s)" % (t, cols)))
         conn.commit()
 
 
+def cleanup(engine):
+    """Remove o schema isolado. Nunca mexe em `public`."""
+    with engine.connect() as conn:
+        conn.execute(text("DROP SCHEMA IF EXISTS %s CASCADE" % SCHEMA))
+        conn.commit()
+
+
 def get_fk(inspector, table, column, ref_table, ref_column):
-    for fk in inspector.get_foreign_keys(table):
+    for fk in inspector.get_foreign_keys(table, schema=SCHEMA):
         if (fk.get("referred_table") == ref_table
                 and column in (fk.get("constrained_columns") or [])
                 and ref_column in (fk.get("referred_columns") or [])):
@@ -134,7 +151,7 @@ def get_fk(inspector, table, column, ref_table, ref_column):
 
 
 def get_index(inspector, table, column):
-    for idx in inspector.get_indexes(table):
+    for idx in inspector.get_indexes(table, schema=SCHEMA):
         if column in (idx.get("column_names") or []):
             return True
     return False
@@ -143,14 +160,14 @@ def get_index(inspector, table, column):
 def validate(app, label):
     with app.app_context():
         inspector = sa_inspect(db.engine)
-        existing = set(inspector.get_table_names())
+        existing = set(inspector.get_table_names(schema=SCHEMA))
 
         missing = NEW_TABLES - existing
         assert not missing, "tabelas novas ausentes: %s" % missing
         print("[%s] OK tabelas novas: %s" % (label, sorted(NEW_TABLES)))
 
         for table, (col, ref_t, ref_c) in FK_TARGETS.items():
-            cols = {c["name"] for c in inspector.get_columns(table)}
+            cols = {c["name"] for c in inspector.get_columns(table, schema=SCHEMA)}
             assert col in cols, "%s.%s ausente" % (table, col)
             assert get_fk(inspector, table, col, ref_t, ref_c), \
                 "FK %s.%s -> %s.%s ausente" % (table, col, ref_t, ref_c)
@@ -163,52 +180,51 @@ def validate(app, label):
                 "índice %s.%s ausente" % (table, col)
             print("[%s] OK índice %s.%s" % (label, table, col))
 
-        # captura estado para checagem de idempotência
         snapshot = {}
         for t in list(FK_TARGETS) + ["shipments", "products"]:
             if t in existing:
                 snapshot[t] = {
-                    "cols": {c["name"] for c in inspector.get_columns(t)},
+                    "cols": {c["name"] for c in inspector.get_columns(t, schema=SCHEMA)},
                     "fks": [(fk.get("constrained_columns"), fk.get("referred_table"))
-                            for fk in inspector.get_foreign_keys(t)],
+                            for fk in inspector.get_foreign_keys(t, schema=SCHEMA)],
                     "idx": [(ix.get("name"), tuple(ix.get("column_names") or []))
-                            for ix in inspector.get_indexes(t)],
+                            for ix in inspector.get_indexes(t, schema=SCHEMA)],
                 }
         return snapshot
 
 
 def main():
-    engine = create_engine(DATABASE_URL)
+    print("== Smoke isolado no schema: %s (public NÃO é tocado) ==" % SCHEMA)
+    engine = create_engine(APP_DATABASE_URL)
+    try:
+        create_isolated_schema(engine)
 
-    # ---- Cenário A: schema legado SEM novas colunas -----------------------
-    print("== Cenário A: legacy sem novas colunas (ADD COLUMN ... REFERENCES) ==")
-    setup_legacy(engine, LEGACY_TABLES)
-    app = create_app()  # create_all (novas) + ensure_schema
-    snap_a = validate(app, "A")
+        # ---- Cenário A: schema legado SEM novas colunas -------------------
+        print("\n== Cenário A: legacy sem novas colunas (ADD COLUMN ... REFERENCES) ==")
+        seed_legacy(engine, LEGACY_TABLES)
+        app = create_app()  # create_all (novas) + ensure_schema
+        snap_a = validate(app, "A")
+        with app.app_context():
+            ensure_schema(app)
+        snap_a2 = validate(app, "A-rerun")
+        assert snap_a == snap_a2, "estado mudou após rerun (não idempotente?)"
+        print("[A] OK idempotência: estado idêntico após rerun de ensure_schema")
 
-    # reiniciar app: rodar ensure_schema de novo (idempotência)
-    with app.app_context():
-        ensure_schema(app)
-    snap_a2 = validate(app, "A-rerun")
-    assert snap_a == snap_a2, "estado mudou após rerun (não idempotente?)"
-    print("[A] OK idempotência: estado idêntico após rerun de ensure_schema")
+        # ---- Cenário B: colunas presentes, SEM FK (ALTER ADD CONSTRAINT) --
+        print("\n== Cenário B: legacy com colunas, sem FK (ALTER ADD CONSTRAINT) ==")
+        seed_legacy(engine, LEGACY_TABLES_B)
+        app_b = create_app()
+        snap_b = validate(app_b, "B")
+        with app_b.app_context():
+            ensure_schema(app_b)
+        snap_b2 = validate(app_b, "B-rerun")
+        assert snap_b == snap_b2, "estado B mudou após rerun"
+        print("[B] OK FKs adicionadas via ALTER ADD CONSTRAINT + idempotente")
 
-    # ---- Cenário B: colunas presentes, SEM FK (ALTER ADD CONSTRAINT) --------
-    print("\n== Cenário B: legacy com colunas, sem FK (ALTER ADD CONSTRAINT) ==")
-    # recria apenas as tabelas legadas em estado B; tabelas novas permanecem.
-    setup_legacy(engine, LEGACY_TABLES_B)
-    # novo boot: create_all (novas, já existem -> skip) + ensure_schema
-    # (agora os ADD CONSTRAINT em coluna existente são exercitados).
-    app_b = create_app()
-    snap_b = validate(app_b, "B")
-    with app_b.app_context():
-        ensure_schema(app_b)
-    snap_b2 = validate(app_b, "B-rerun")
-    assert snap_b == snap_b2, "estado B mudou após rerun"
-    print("[B] OK FKs adicionadas via ALTER ADD CONSTRAINT + idempotente")
-
-    print("\nSMOKE TEST POSTGRES: PASS")
-    sys.exit(0)
+        print("\nSMOKE TEST POSTGRES: PASS")
+    finally:
+        cleanup(engine)
+        print("schema isolado %s removido (public intocado)" % SCHEMA)
 
 
 if __name__ == "__main__":
