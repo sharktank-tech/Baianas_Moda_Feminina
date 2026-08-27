@@ -23,15 +23,28 @@ class Config:
         raise RuntimeError("DATABASE_URL não configurada.")
 
     # ============= SQLAlchemy ==================
-    SQLALCHEMY_DATABASE_URI = (
-        DATABASE_URL
-    )
+    SQLALCHEMY_DATABASE_URI = DATABASE_URL
+
+    # Schema dedicado da PolloModas. Tudo (create_all, ensure_schema, sessões e
+    # queries) ocorre dentro dele; `public` pertence a outro sistema e é
+    # intocável. Em testes isolados (ex.: pollo_smoke_xxx) sobrescreva via env
+    # POLLOMODAS_SCHEMA — mas NUNCA aponte para public/pollomodas em produção.
+    POLLOMODAS_SCHEMA = os.getenv("POLLOMODAS_SCHEMA", "pollomodas")
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # search_path centralizado via startup option do PostgreSQL. É aplicado no
+    # início de cada conexão de backend, então funciona tanto em conexão direta
+    # quanto no Session Pooler (transaction pooling), e NÃO depende de SET de
+    # sessão. Sem fallback para public. Apenas PostgreSQL; SQLite (testes) ignora.
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,
         "pool_recycle": 300,
     }
+    if DATABASE_URL.startswith("postgresql"):
+        SQLALCHEMY_ENGINE_OPTIONS["connect_args"] = {
+            "options": "-csearch_path=%s" % POLLOMODAS_SCHEMA,
+        }
 
     # ============= Email ==================
     EMAIL_DESTINE = os.getenv("EMAIL_DESTINE")

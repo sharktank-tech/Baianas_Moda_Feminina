@@ -2,6 +2,7 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_wtf.csrf import CSRFProtect
+from sqlalchemy import text
 import uuid
 
 db = SQLAlchemy()
@@ -45,19 +46,37 @@ def create_app():
     from loja import cli
     app.cli.add_command(cli.create_admin)
 
-    # Cria tabelas novas em produção (idempotente: não altera tabelas existentes).
-    try:
-        with app.app_context():
-            db.create_all()
-    except Exception:
-        app.logger.exception("Não foi possível criar tabelas no boot.")
+    from loja.schema import ensure_schema, DB_SCHEMA
 
-    from loja.schema import ensure_schema
-    # Boot de schema: cria tabelas NOVAS (idempotente) e, em seguida, corrige
-    # tabelas EXISTENTES de forma aditiva. Models já foram importados acima
-    # (legacy + P0/P1), então db.create_all() consegue registrar tudo.
+    # Bootstrap do schema dedicado (somente PostgreSQL).
+    # Sequência explícita e segura:
+    #   conexão -> CREATE SCHEMA IF NOT EXISTS <schema> -> validar
+    #   current_schema() -> (metadata já registrada) -> db.create_all()
+    #   -> ensure_schema()
+    # O CREATE SCHEMA nomeia o schema explicitamente, então funciona mesmo
+    # quando o search_path ainda não resolve (schema novo). O assert de
+    # current_schema() falha rápido se o search_path efetivo não for o schema
+    # alvo (ex.: pooler ignorou `options`, ou role com search_path divergente),
+    # sem fallback silencioso para public.
+    if db.engine.dialect.name == "postgresql":
+        with app.app_context():
+            with db.engine.connect() as conn:
+                conn.execute(text("CREATE SCHEMA IF NOT EXISTS %s" % DB_SCHEMA))
+                conn.commit()
+            with db.engine.connect() as conn:
+                effective = conn.execute(text("SELECT current_schema()")).scalar()
+            if effective != DB_SCHEMA:
+                raise RuntimeError(
+                    "search_path inválido: current_schema()=%r, esperado=%r. "
+                    "A PolloModas exige o schema dedicado e não deve usar public."
+                    % (effective, DB_SCHEMA)
+                )
+
+    # create_all(): cria apenas tabelas NOVAS dentro do schema alvo (search_path).
     with app.app_context():
         db.create_all()
+
+    # Corrige tabelas EXISTENTES de forma aditiva/idempotente.
     ensure_schema(app)
 
     return app

@@ -2,10 +2,10 @@
 """Smoke test PÓS-migration 0003 em PostgreSQL REAL (staging/dev), ISOLADO.
 
 Valida o schema-alvo UUID criando um SCHEMA DESCARTÁVEL dedicado
-(`pollo_smoke_<random>`) e rodando tudo lá dentro. O schema `public` NÃO é
-tocado: nenhuma tabela de produção é dropada ou alterada por este script.
-Ao final (sucesso ou erro) o schema isolado é removido com
-`DROP SCHEMA ... CASCADE`.
+(`pollo_smoke_<random>`) e rodando tudo lá dentro. O schema `public` (legado)
+e o schema `pollomodas` (produção da PolloModas) NÃO são tocados: nenhuma
+tabela de produção é dropada ou alterada por este script. Ao final (sucesso ou
+erro) o schema isolado é removido com `DROP SCHEMA ... CASCADE`.
 
 Baseline de IDs no fixture:
   VARCHAR(36) = estado legado PRÉ-0003 (drift)        -> NÃO usado aqui
@@ -15,25 +15,23 @@ Roteiro:
   schema isolado (UUID) -> create_app() -> db.create_all() -> ensure_schema()
   -> ensure_schema() novamente (idempotência) -> confirma FKs -> confirma índices
 
-O schema `public` só deve ser lido/auditado e alterado por migrations
-explícitas aprovadas; este script NÃO roda nenhuma migration nele.
+O schema `public`/`pollomodas` só devem ser lidos/auditados e alterados por
+migrations explícitas aprovadas; este script NÃO roda nenhuma migration neles.
 
 Uso:
   DATABASE_URL=postgresql://user:pass@host:5432/db \
   SECRET_KEY=smoke-test \
   python scripts/smoke_test_postgres.py
-
-Use SMOKE_SCHEMA=pollo_smoke_xxxx para fixar o nome (repeatabilidade).
 """
 import os
 import sys
 import secrets
+import sqlalchemy
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import sqlalchemy
 from sqlalchemy import create_engine, text, inspect as sa_inspect
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 SECRET_KEY = os.environ.get("SECRET_KEY") or "smoke-test-secret"
@@ -41,25 +39,34 @@ SCHEMA = os.environ.get("SMOKE_SCHEMA") or ("pollo_smoke_" + secrets.token_hex(4
 
 if not DATABASE_URL or not DATABASE_URL.startswith("postgresql"):
     print("ERRO: defina DATABASE_URL para um PostgreSQL (postgresql://...). "
-          "Este script NÃO roda em SQLite e NÃO mexe no schema public.")
+          "Este script NÃO roda em SQLite e NÃO mexe nos schemas public/pollomodas.")
     sys.exit(2)
 
+# Configura o ambiente ANTES de importar a aplicação, para que:
+#   - config.SQLALCHEMY_ENGINE_OPTIONS injete options=-csearch_path=<SCHEMA>;
+#   - loja.schema.DB_SCHEMA (usado por ensure_schema) aponte para o schema
+#     descartável. Assim a app e o schema.py miram SOMENTE o schema isolado.
+os.environ["POLLOMODAS_SCHEMA"] = SCHEMA
+os.environ["SECRET_KEY"] = SECRET_KEY
+os.environ["DATABASE_URL"] = DATABASE_URL
 
+from loja.schema import ensure_schema, assert_safe_disposable_schema
+
+# Proteção: recusa nomes reservados (public/pollomodas/auth/storage/extensions)
+# e exige prefixo pollo_smoke_, mesmo que SMOKE_SCHEMA venha mal configurado.
+assert_safe_disposable_schema(SCHEMA)
+
+from loja import db, create_app  # noqa: E402
+
+# Engine bruto do smoke: aplica search_path via startup option na URL.
 def _with_search_path(url, schema):
-    """Anexa `options=-csearch_path=<schema>` à URL para que TODA conexão
-    (engine local e engine do app) opere dentro do schema isolado."""
     parts = urlparse(url)
     q = parse_qs(parts.query)
     q["options"] = "-csearch_path=%s" % schema
     return urlunparse(parts._replace(query=urlencode(q, doseq=True)))
 
 
-APP_DATABASE_URL = _with_search_path(DATABASE_URL, SCHEMA)
-os.environ["DATABASE_URL"] = APP_DATABASE_URL
-os.environ["SECRET_KEY"] = SECRET_KEY
-
-from loja import db, create_app  # noqa: E402
-from loja.schema import ensure_schema  # noqa: E402
+ENGINE_URL = _with_search_path(DATABASE_URL, SCHEMA)
 
 
 # Baseline PÓS-0003: IDs legados são UUID (não VARCHAR).
@@ -119,6 +126,9 @@ INDEX_TARGETS = [
 
 def create_isolated_schema(engine):
     """Cria o schema descartável (limpo) onde todo o smoke roda."""
+    # Proteção antes de qualquer DDL destrutivo.
+    assert_safe_disposable_schema(SCHEMA)
+    assert SCHEMA.startswith("pollo_smoke_")
     with engine.connect() as conn:
         conn.execute(text("DROP SCHEMA IF EXISTS %s CASCADE" % SCHEMA))
         conn.execute(text("CREATE SCHEMA %s" % SCHEMA))
@@ -127,6 +137,7 @@ def create_isolated_schema(engine):
 
 def seed_legacy(engine, tables):
     """Recria apenas as tabelas legadas DENTRO do schema isolado."""
+    assert_safe_disposable_schema(SCHEMA)
     with engine.connect() as conn:
         for t, cols in tables.items():
             conn.execute(text("DROP TABLE IF EXISTS %s CASCADE" % t))
@@ -135,7 +146,9 @@ def seed_legacy(engine, tables):
 
 
 def cleanup(engine):
-    """Remove o schema isolado. Nunca mexe em `public`."""
+    """Remove o schema isolado. Nunca mexe em `public` nem `pollomodas`."""
+    assert_safe_disposable_schema(SCHEMA)
+    assert SCHEMA.startswith("pollo_smoke_")
     with engine.connect() as conn:
         conn.execute(text("DROP SCHEMA IF EXISTS %s CASCADE" % SCHEMA))
         conn.commit()
@@ -194,8 +207,8 @@ def validate(app, label):
 
 
 def main():
-    print("== Smoke isolado no schema: %s (public NÃO é tocado) ==" % SCHEMA)
-    engine = create_engine(APP_DATABASE_URL)
+    print("== Smoke isolado no schema: %s (public/pollomodas NÃO são tocados) ==" % SCHEMA)
+    engine = create_engine(ENGINE_URL)
     try:
         create_isolated_schema(engine)
 
@@ -224,7 +237,7 @@ def main():
         print("\nSMOKE TEST POSTGRES: PASS")
     finally:
         cleanup(engine)
-        print("schema isolado %s removido (public intocado)" % SCHEMA)
+        print("schema isolado %s removido (public/pollomodas intactos)" % SCHEMA)
 
 
 if __name__ == "__main__":

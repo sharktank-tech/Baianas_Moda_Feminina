@@ -1,3 +1,5 @@
+import os
+
 from sqlalchemy import inspect, text
 
 
@@ -13,7 +15,37 @@ from sqlalchemy import inspect, text
 #
 # Política de segurança (Fase 0): NUNCA DROP/RENAME/ALTER destrutivo, NUNCA
 # SET NOT NULL em coluna legada, NUNCA backfill destrutivo, NUNCA delete.
+#
+# Isolamento por schema (PolloModas): todas as inspeções e DDL abaixo são
+# restritas a DB_SCHEMA. O schema `public` é de outro sistema e é intocável.
+# DB_SCHEMA é centralizado e sobrescrevível via env POLLOMODAS_SCHEMA (usado
+# pelos testes/smoke para apontar para um schema descartável), mas NUNCA deve
+# apontar para public/pollomodas em produção por engano.
 # ---------------------------------------------------------------------------
+
+# Schema alvo de toda a aplicação PolloModas. Centralizado em um único ponto.
+DB_SCHEMA = os.getenv("POLLOMODAS_SCHEMA", "pollomodas")
+
+# Nomes que jamais podem ser usados como schema descartável de teste/smoke,
+# pois pertencem ao Supabase/legado e estão fora do domínio da PolloModas.
+RESERVED_DISPOSABLE_SCHEMAS = {"public", "pollomodas", "auth", "storage", "extensions"}
+
+
+def assert_safe_disposable_schema(name):
+    """Recusa nomes reservados ou fora do padrão pollo_smoke_.
+
+    Usado pelo smoke e pelos testes para garantir que nenhum DDL destrutivo
+    atinja public/pollomodas ou outros schemas do Supabase.
+    """
+    if name in RESERVED_DISPOSABLE_SCHEMAS:
+        raise AssertionError(
+            "schema descartável recusado: %r é reservado (public/pollomodas/auth/"
+            "storage/extensions)" % name
+        )
+    if not isinstance(name, str) or not name.startswith("pollo_smoke_"):
+        raise AssertionError(
+            "schema descartável recusado: %r deve começar com 'pollo_smoke_'" % name
+        )
 
 
 # Colunas aditivas em tabelas JÁ EXISTENTES em produção.
@@ -126,17 +158,26 @@ def _run(db, ddl, app, ok_message):
     app.logger.info(ok_message)
 
 
+def _schema_context(dialect_name):
+    """Devolve (schema_arg, qualify) para restringir inspeção/DDL ao DB_SCHEMA.
+
+    Em PostgreSQL, usamos schema=DB_SCHEMA nas inspeções e qualificamos o DDL
+    com 'DB_SCHEMA.'. Em SQLite (testes unitários), não há schemas: ignora.
+    """
+    is_pg = dialect_name == "postgresql"
+    schema_arg = DB_SCHEMA if is_pg else None
+
+    def qualify(name):
+        return "%s.%s" % (DB_SCHEMA, name) if is_pg else name
+
+    return schema_arg, qualify
+
+
 def ensure_schema(app):
     """Corrige o schema de um banco já existente (aditivo e idempotente).
 
-    Responsabilidade clara:
-      1. detectar tabela
-      2. adicionar coluna ausente
-      3. garantir FK ausente
-      4. garantir índice ausente
-
-    Nunca executa DROP/RENAME/ALTER destrutivo. Silencia falhas para não
-    quebrar o boot (serverless/Vercel).
+    Restrito a DB_SCHEMA. Nunca executa DROP/RENAME/ALTER destrutivo. Silencia
+    falhas para não quebrar o boot (serverless/Vercel).
     """
     from loja import db
 
@@ -144,20 +185,24 @@ def ensure_schema(app):
         with app.app_context():
             inspector = inspect(db.engine)
             dialect = db.engine.dialect.name
-            existing_tables = set(inspector.get_table_names())
+            schema_arg, qualify = _schema_context(dialect)
+            existing_tables = set(inspector.get_table_names(schema=schema_arg))
 
             # 1+2: colunas ausentes em tabelas existentes
             for (table, column), spec in REQUIRED_COLUMNS.items():
                 if table not in existing_tables:
                     continue
-                cols = {c["name"] for c in inspector.get_columns(table)}
+                cols = {
+                    c["name"]
+                    for c in inspector.get_columns(table, schema=schema_arg)
+                }
                 if column in cols:
                     continue
                 ddl = _render_column(spec, dialect)
                 _run(
                     db,
-                    "ALTER TABLE %(t)s ADD COLUMN %(c)s %(ddl)s"
-                    % {"t": table, "c": column, "ddl": ddl},
+                    "ALTER TABLE %(tq)s ADD COLUMN %(c)s %(ddl)s"
+                    % {"tq": qualify(table), "c": column, "ddl": ddl},
                     app,
                     "Schema: coluna %s.%s criada." % (table, column),
                 )
@@ -168,7 +213,7 @@ def ensure_schema(app):
                 col = fk["column"]
                 if t not in existing_tables or fk["ref_table"] not in existing_tables:
                     continue
-                existing = inspector.get_foreign_keys(t)
+                existing = inspector.get_foreign_keys(t, schema=schema_arg)
                 already = any(
                     f.get("referred_table") == fk["ref_table"]
                     and col in (f.get("constrained_columns") or [])
@@ -177,18 +222,21 @@ def ensure_schema(app):
                 )
                 if already:
                     continue
-                cols = {c["name"] for c in inspector.get_columns(t)}
+                cols = {
+                    c["name"]
+                    for c in inspector.get_columns(t, schema=schema_arg)
+                }
                 coltype = _sql_type(dialect, fk["coltype"])
                 if col not in cols:
                     # coluna inexistente: cria já com a FK inline (funciona em
                     # PostgreSQL e SQLite).
                     ddl = (
-                        "ALTER TABLE %(t)s ADD COLUMN %(c)s %(ct)s "
-                        "REFERENCES %(rt)s(%(rc)s) ON DELETE %(od)s"
+                        "ALTER TABLE %(tq)s ADD COLUMN %(c)s %(ct)s "
+                        "REFERENCES %(rtq)s(%(rc)s) ON DELETE %(od)s"
                         % {
-                            "t": t, "c": col, "ct": coltype,
-                            "rt": fk["ref_table"], "rc": fk["ref_column"],
-                            "od": fk["on_delete"],
+                            "tq": qualify(t), "c": col, "ct": coltype,
+                            "rtq": qualify(fk["ref_table"]),
+                            "rc": fk["ref_column"], "od": fk["on_delete"],
                         }
                     )
                     _run(
@@ -200,13 +248,13 @@ def ensure_schema(app):
                     # ADD CONSTRAINT; SQLite não permite em coluna existente.
                     if dialect == "postgresql":
                         ddl = (
-                            "ALTER TABLE %(t)s ADD CONSTRAINT fk_%(t)s_%(c)s "
-                            "FOREIGN KEY (%(c)s) REFERENCES %(rt)s(%(rc)s) "
+                            "ALTER TABLE %(tq)s ADD CONSTRAINT fk_%(t)s_%(c)s "
+                            "FOREIGN KEY (%(c)s) REFERENCES %(rtq)s(%(rc)s) "
                             "ON DELETE %(od)s"
                             % {
-                                "t": t, "c": col,
-                                "rt": fk["ref_table"], "rc": fk["ref_column"],
-                                "od": fk["on_delete"],
+                                "tq": qualify(t), "c": col,
+                                "rtq": qualify(fk["ref_table"]),
+                                "rc": fk["ref_column"], "od": fk["on_delete"],
                             }
                         )
                         _run(
@@ -224,12 +272,13 @@ def ensure_schema(app):
             for (table, column) in REQUIRED_INDEXES:
                 if table not in existing_tables:
                     continue
-                indexes = inspector.get_indexes(table)
+                indexes = inspector.get_indexes(table, schema=schema_arg)
                 if any(column in (idx.get("column_names") or []) for idx in indexes):
                     continue
                 ddl = (
                     "CREATE INDEX IF NOT EXISTS ix_%(t)s_%(c)s "
-                    "ON %(t)s (%(c)s)" % {"t": table, "c": column}
+                    "ON %(tq)s (%(c)s)"
+                    % {"t": table, "c": column, "tq": qualify(table)}
                 )
                 _run(
                     db, ddl, app,

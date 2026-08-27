@@ -53,9 +53,10 @@ class Order(db.Model):
         default=generate_order_number,
     )
 
-    # Mantemos "users.id" no metadata do SQLAlchemy porque o model User
-    # ainda não declara schema="public". No PostgreSQL, a constraint
-    # orders_user_id_fkey deve apontar explicitamente para public.users(id).
+    # A FK é declarada como "users.id" (sem schema) e resolve para o schema
+    # dedicado da PolloModas via search_path (pollomodas). O schema `public`
+    # pertence ao sistema legado e é intocável; a constraint orders_user_id_fkey
+    # deve apontar para pollomodas.users(id), nunca para public.users(id).
     user_id = db.Column(
         UUID(as_uuid=True),
         db.ForeignKey(
