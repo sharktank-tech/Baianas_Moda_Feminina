@@ -58,19 +58,22 @@ from loja.schema import ensure_schema  # noqa: E402
 # Baseline PÓS-0003: IDs legados são UUID (não VARCHAR).
 #   VARCHAR(36) = estado legado PRÉ-0003 (drift)  -- não usado aqui
 #   UUID        = baseline suportado PÓS-0003
+# users.id também é UUID no model; o fixture recria users com UUID para
+# fechar o drift users.id (BIGINT no legado real) detectado no smoke.
 # Tabelas NOVAS ficam ausentes de propósito (criadas por db.create_all).
 LEGACY_TABLES = {
+    "users": "id UUID PRIMARY KEY",
     "orders": "id UUID PRIMARY KEY, order_number TEXT",
     "suppliers": "id UUID PRIMARY KEY, name TEXT",
     "products": "id UUID PRIMARY KEY, name TEXT, price TEXT, "
                 "stock INTEGER, category TEXT",
-    "cart_items": "id UUID PRIMARY KEY, cart_id VARCHAR(36), "
+    "cart_items": "id UUID PRIMARY KEY, cart_id UUID, "
                   "product_id UUID, selected_size TEXT, "
                   "quantity INTEGER, unit_price TEXT",
-    "order_items": "id UUID PRIMARY KEY, order_id VARCHAR(36), "
+    "order_items": "id UUID PRIMARY KEY, order_id UUID, "
                    "product_id UUID, product_name TEXT, "
                    "quantity INTEGER, unit_price TEXT, line_total TEXT",
-    "shipments": "id INTEGER PRIMARY KEY, order_id VARCHAR(36), "
+    "shipments": "id BIGINT PRIMARY KEY, order_id UUID, "
                  "tracking_code TEXT",
 }
 
@@ -82,11 +85,11 @@ LEGACY_TABLES_B["products"] = (
     "category TEXT, category_id UUID"
 )
 LEGACY_TABLES_B["cart_items"] = (
-    "id UUID PRIMARY KEY, cart_id VARCHAR(36), product_id UUID, "
+    "id UUID PRIMARY KEY, cart_id UUID, product_id UUID, "
     "selected_size TEXT, quantity INTEGER, unit_price TEXT, variant_id UUID"
 )
 LEGACY_TABLES_B["order_items"] = (
-    "id UUID PRIMARY KEY, order_id VARCHAR(36), product_id UUID, "
+    "id UUID PRIMARY KEY, order_id UUID, product_id UUID, "
     "product_name TEXT, quantity INTEGER, unit_price TEXT, line_total TEXT, "
     "variant_id UUID"
 )
