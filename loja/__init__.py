@@ -53,6 +53,11 @@ def create_app():
         app.logger.exception("Não foi possível criar tabelas no boot.")
 
     from loja.schema import ensure_schema
+    # Boot de schema: cria tabelas NOVAS (idempotente) e, em seguida, corrige
+    # tabelas EXISTENTES de forma aditiva. Models já foram importados acima
+    # (legacy + P0/P1), então db.create_all() consegue registrar tudo.
+    with app.app_context():
+        db.create_all()
     ensure_schema(app)
 
     return app
