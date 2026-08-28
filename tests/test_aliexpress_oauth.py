@@ -72,11 +72,39 @@ def test_authorization_url_contains_params():
         client_id="mykey", redirect_uri="https://x.com/cb", state="st8"
     )
     assert url.startswith(DEFAULT_OAUTH_AUTHORIZE_URL + "?")
+    host = DEFAULT_OAUTH_AUTHORIZE_URL.split("://", 1)[1]
+    assert host == "oauth.aliexpress.com/authorize"
     assert "response_type=code" in url
     assert "client_id=mykey" in url
     assert "state=st8" in url
-    assert "force_auth=true" in url
+    assert "sp=ae" in url
+    assert "view=web" in url
+    assert "force_auth" not in url
     assert "redirect_uri=" in url
+
+
+def test_authorization_url_classic_flow_shape():
+    url = build_authorization_url(
+        client_id="mykey",
+        redirect_uri="https://www.pollomodas.com.br/integrations/aliexpress/callback",
+        state="abc123",
+    )
+    from urllib.parse import urlsplit, parse_qs
+
+    parts = urlsplit(url)
+    assert parts.scheme == "https"
+    assert parts.netloc == "oauth.aliexpress.com"
+    assert parts.path == "/authorize"
+    q = parse_qs(parts.query)
+    assert q.get("response_type") == ["code"]
+    assert q.get("client_id") == ["mykey"]
+    assert q.get("state") == ["abc123"]
+    assert q.get("redirect_uri") == [
+        "https://www.pollomodas.com.br/integrations/aliexpress/callback"
+    ]
+    assert q.get("sp") == ["ae"]
+    assert q.get("view") == ["web"]
+    assert "force_auth" not in q
 
 
 def test_authorization_url_encodes_redirect_uri():
@@ -248,6 +276,16 @@ def test_authorize_admin_redirects_oauth(auth_app, monkeypatch):
     assert loc.startswith(DEFAULT_OAUTH_AUTHORIZE_URL)
     assert "state=" in loc
     assert "client_id=k" in loc
+    from urllib.parse import urlsplit, parse_qs
+
+    q = parse_qs(urlsplit(loc).query)
+    assert q.get("response_type") == ["code"]
+    assert q.get("sp") == ["ae"]
+    assert q.get("view") == ["web"]
+    assert q.get("redirect_uri") == [
+        "https://www.pollomodas.com.br/integrations/aliexpress/callback"
+    ]
+    assert "force_auth" not in q
 
 
 def test_callback_expired_state_rejected(auth_app, monkeypatch):
