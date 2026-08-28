@@ -29,7 +29,7 @@ from .errors import (
 )
 from .transport import TransportError, TransportTimeout
 
-DEFAULT_OAUTH_AUTHORIZE_URL = "https://oauth.aliexpress.com/authorize"
+DEFAULT_OAUTH_AUTHORIZE_URL = "https://api-sg.aliexpress.com/oauth/authorize"
 DEFAULT_OAUTH_API_BASE_URL = "https://api-sg.aliexpress.com/rest"
 DEFAULT_OAUTH_API_PATH = "/auth/token/create"
 
@@ -99,14 +99,14 @@ def build_authorization_url(
     redirect_uri: str,
     state: str,
     authorize_url: str = DEFAULT_OAUTH_AUTHORIZE_URL,
+    force_auth: bool = True,
 ) -> str:
     params = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": redirect_uri,
+        "force_auth": "true" if force_auth else "false",
         "state": state,
-        "sp": "ae",
-        "view": "web",
     }
     return f"{authorize_url}?{urlencode(params)}"
 

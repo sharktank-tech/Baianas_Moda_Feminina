@@ -14,6 +14,7 @@ from loja.integrations.aliexpress import AliExpressSearchResult
 from loja.integrations.aliexpress.errors import AliExpressAPIError, AliExpressAuthError
 from loja.integrations.aliexpress.oauth import (
     DEFAULT_OAUTH_AUTHORIZE_URL,
+    DEFAULT_OAUTH_API_BASE_URL,
     DEFAULT_OAUTH_API_PATH,
     AliExpressOAuthToken,
     build_authorization_url,
@@ -68,22 +69,25 @@ def test_sign_open_platform_distinct_from_top_hmac():
 # Authorization URL
 # --------------------------------------------------------------------------
 def test_authorization_url_contains_params():
+    from urllib.parse import urlsplit, parse_qs
+
     url = build_authorization_url(
         client_id="mykey", redirect_uri="https://x.com/cb", state="st8"
     )
     assert url.startswith(DEFAULT_OAUTH_AUTHORIZE_URL + "?")
     host = DEFAULT_OAUTH_AUTHORIZE_URL.split("://", 1)[1]
-    assert host == "oauth.aliexpress.com/authorize"
-    assert "response_type=code" in url
-    assert "client_id=mykey" in url
-    assert "state=st8" in url
-    assert "sp=ae" in url
-    assert "view=web" in url
-    assert "force_auth" not in url
-    assert "redirect_uri=" in url
+    assert host == "api-sg.aliexpress.com/oauth/authorize"
+    q = parse_qs(urlsplit(url).query)
+    assert q.get("response_type") == ["code"]
+    assert q.get("client_id") == ["mykey"]
+    assert q.get("state") == ["st8"]
+    assert q.get("force_auth") == ["true"]
+    assert "sp" not in q
+    assert "view" not in q
+    assert "redirect_uri" in q
 
 
-def test_authorization_url_classic_flow_shape():
+def test_authorization_url_open_platform_shape():
     url = build_authorization_url(
         client_id="mykey",
         redirect_uri="https://www.pollomodas.com.br/integrations/aliexpress/callback",
@@ -93,8 +97,8 @@ def test_authorization_url_classic_flow_shape():
 
     parts = urlsplit(url)
     assert parts.scheme == "https"
-    assert parts.netloc == "oauth.aliexpress.com"
-    assert parts.path == "/authorize"
+    assert parts.netloc == "api-sg.aliexpress.com"
+    assert parts.path == "/oauth/authorize"
     q = parse_qs(parts.query)
     assert q.get("response_type") == ["code"]
     assert q.get("client_id") == ["mykey"]
@@ -102,9 +106,34 @@ def test_authorization_url_classic_flow_shape():
     assert q.get("redirect_uri") == [
         "https://www.pollomodas.com.br/integrations/aliexpress/callback"
     ]
-    assert q.get("sp") == ["ae"]
-    assert q.get("view") == ["web"]
-    assert "force_auth" not in q
+    assert q.get("force_auth") == ["true"]
+    assert "sp" not in q
+    assert "view" not in q
+
+
+def test_protocol_consistency_no_hybrid_mix():
+    # Impede misturar oauth.aliexpress.com com api-sg.aliexpress.com/rest.
+    # Ambos os endpoints (authorize e token) devem estar no mesmo host Open
+    # Platform: api-sg.aliexpress.com.
+    from urllib.parse import urlsplit
+
+    auth = urlsplit(DEFAULT_OAUTH_AUTHORIZE_URL)
+    token_base = urlsplit(DEFAULT_OAUTH_API_BASE_URL)
+
+    assert auth.scheme == "https"
+    assert auth.netloc == "api-sg.aliexpress.com"
+    assert auth.path == "/oauth/authorize"
+    assert "oauth.aliexpress.com" not in auth.netloc
+
+    assert token_base.scheme == "https"
+    assert token_base.netloc == "api-sg.aliexpress.com"
+    assert "oauth.aliexpress.com" not in token_base.netloc
+
+    # Token exchange usa base + /rest/auth/token/create no mesmo host.
+    token_url = DEFAULT_OAUTH_API_BASE_URL.rstrip("/") + DEFAULT_OAUTH_API_PATH
+    token = urlsplit(token_url)
+    assert token.netloc == "api-sg.aliexpress.com"
+    assert token.path == "/rest/auth/token/create"
 
 
 def test_authorization_url_encodes_redirect_uri():
@@ -278,14 +307,17 @@ def test_authorize_admin_redirects_oauth(auth_app, monkeypatch):
     assert "client_id=k" in loc
     from urllib.parse import urlsplit, parse_qs
 
-    q = parse_qs(urlsplit(loc).query)
+    parts = urlsplit(loc)
+    assert parts.netloc == "api-sg.aliexpress.com"
+    assert parts.path == "/oauth/authorize"
+    q = parse_qs(parts.query)
     assert q.get("response_type") == ["code"]
-    assert q.get("sp") == ["ae"]
-    assert q.get("view") == ["web"]
+    assert q.get("force_auth") == ["true"]
     assert q.get("redirect_uri") == [
         "https://www.pollomodas.com.br/integrations/aliexpress/callback"
     ]
-    assert "force_auth" not in q
+    assert "sp" not in q
+    assert "view" not in q
 
 
 def test_callback_expired_state_rejected(auth_app, monkeypatch):
