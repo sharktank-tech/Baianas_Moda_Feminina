@@ -6,12 +6,20 @@ from sqlalchemy import event, inspect, text
 # ---------------------------------------------------------------------------
 # Bootstrap de schema aditivo e idempotente (sem Flask-Migrate).
 #
-# O projeto não usa migrações versionadas: o schema é corrigido sob demanda
-# no primeiro boot (ambientes serverless como Vercel). A ordem de boot é:
+# O projeto não usa migrações versionadas. O bootstrap (create_all +
+# ensure_schema) ocorre EM AMBIENTE CONTROLADO/local ou quando
+# POLLOMODAS_BOOTSTRAP_ON_STARTUP=1. A ordem de bootstrap é:
 #
 #   1. importar models (legados + P0/P1)
 #   2. db.create_all()            -> cria tabelas NOVAS que ainda não existem
 #   3. ensure_schema(app)         -> corrige tabelas EXISTENTES (colunas/FKs/índices)
+#
+# Ambiente serverless (Vercel): create_app() NÃO executa DDL/bootstrap em cold
+# start. O banco persistente já foi previamente bootstrapped. Apenas o hook de
+# transação SET LOCAL search_path é instalado (configuração do Engine).
+#
+# Bootstrap controlado (local / POLLOMODAS_BOOTSTRAP_ON_STARTUP=1):
+#   db.create_all()  +  ensure_schema(app)
 #
 # Política de segurança (Fase 0): NUNCA DROP/RENAME/ALTER destrutivo, NUNCA
 # SET NOT NULL em coluna legada, NUNCA backfill destrutivo, NUNCA delete.
