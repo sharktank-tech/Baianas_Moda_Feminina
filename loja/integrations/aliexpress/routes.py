@@ -17,7 +17,7 @@ import os
 import time
 from typing import Any, Optional
 
-from flask import Blueprint, redirect, request, session
+from flask import Blueprint, current_app, redirect, request, session
 
 from loja.integrations.aliexpress import AliExpressClient
 from loja.integrations.aliexpress.errors import (
@@ -56,12 +56,17 @@ def _api_base_default() -> str:
 @aliexpress_blueprint.route("/authorize", methods=["GET"])
 @admin_required
 def authorize():
-    app_key = os.environ.get("ALIEXPRESS_APP_KEY")
-    callback_url = os.environ.get("ALIEXPRESS_CALLBACK_URL")
+    app_key = (os.environ.get("ALIEXPRESS_APP_KEY") or "").strip()
+    callback_url = (os.environ.get("ALIEXPRESS_CALLBACK_URL") or "").strip()
     if not app_key:
         return "AliExpress OAuth não configurado (ALIEXPRESS_APP_KEY ausente).", 500
     if not callback_url:
         return "AliExpress OAuth não configurado (ALIEXPRESS_CALLBACK_URL ausente).", 500
+
+    # Validação sanitizada: presença/comprimento apenas. Nunca expõe o valor.
+    current_app.logger.info(
+        "AliExpress OAuth app_key configurado: yes, length=%d", len(app_key)
+    )
 
     state = generate_oauth_state()
     # state: geração criptográfica + uso único + expiração curta + consumo.
