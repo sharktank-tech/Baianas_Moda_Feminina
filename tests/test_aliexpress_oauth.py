@@ -11,7 +11,11 @@ import pytest
 from flask import Blueprint, Flask, request
 
 from loja.integrations.aliexpress import AliExpressSearchResult
-from loja.integrations.aliexpress.errors import AliExpressAPIError, AliExpressAuthError
+from loja.integrations.aliexpress.errors import (
+    AliExpressAPIError,
+    AliExpressAuthError,
+    AliExpressConfigError,
+)
 from loja.integrations.aliexpress.oauth import (
     DEFAULT_OAUTH_AUTHORIZE_URL,
     DEFAULT_OAUTH_API_BASE_URL,
@@ -21,7 +25,11 @@ from loja.integrations.aliexpress.oauth import (
     exchange_authorization_code,
     sign_open_platform_request,
 )
-from loja.integrations.aliexpress.routes import STATE_KEY, aliexpress_blueprint
+from loja.integrations.aliexpress.routes import (
+    STATE_KEY,
+    aliexpress_blueprint,
+    get_aliexpress_callback_url,
+)
 
 
 # --------------------------------------------------------------------------
@@ -134,6 +142,42 @@ def test_protocol_consistency_no_hybrid_mix():
     token = urlsplit(token_url)
     assert token.netloc == "api-sg.aliexpress.com"
     assert token.path == "/rest/auth/token/create"
+
+
+# --------------------------------------------------------------------------
+# Resolução da URL de callback (sem dependência de ALIEXPRESS_CALLBACK_URL)
+# --------------------------------------------------------------------------
+def test_get_callback_url_explicit_override(monkeypatch):
+    monkeypatch.setenv("ALIEXPRESS_CALLBACK_URL", "https://explicit.com/cb")
+    monkeypatch.setenv("VERCEL_BRANCH_URL", "branch.vercel.app")
+    monkeypatch.setenv("VERCEL_PROJECT_PRODUCTION_URL", "prod.vercel.app")
+    assert get_aliexpress_callback_url() == "https://explicit.com/cb"
+
+
+def test_get_callback_url_branch(monkeypatch):
+    monkeypatch.delenv("ALIEXPRESS_CALLBACK_URL", raising=False)
+    monkeypatch.setenv("VERCEL_BRANCH_URL", "branch-xyz.vercel.app")
+    monkeypatch.delenv("VERCEL_PROJECT_PRODUCTION_URL", raising=False)
+    assert get_aliexpress_callback_url() == (
+        "https://branch-xyz.vercel.app/integrations/aliexpress/callback"
+    )
+
+
+def test_get_callback_url_production_fallback(monkeypatch):
+    monkeypatch.delenv("ALIEXPRESS_CALLBACK_URL", raising=False)
+    monkeypatch.delenv("VERCEL_BRANCH_URL", raising=False)
+    monkeypatch.setenv("VERCEL_PROJECT_PRODUCTION_URL", "prod-xyz.vercel.app")
+    assert get_aliexpress_callback_url() == (
+        "https://prod-xyz.vercel.app/integrations/aliexpress/callback"
+    )
+
+
+def test_get_callback_url_missing_raises(monkeypatch):
+    monkeypatch.delenv("ALIEXPRESS_CALLBACK_URL", raising=False)
+    monkeypatch.delenv("VERCEL_BRANCH_URL", raising=False)
+    monkeypatch.delenv("VERCEL_PROJECT_PRODUCTION_URL", raising=False)
+    with pytest.raises(AliExpressConfigError):
+        get_aliexpress_callback_url()
 
 
 def test_authorization_url_encodes_redirect_uri():
@@ -318,6 +362,68 @@ def test_authorize_admin_redirects_oauth(auth_app, monkeypatch):
     ]
     assert "sp" not in q
     assert "view" not in q
+
+
+def test_authorize_canonicalizes_host_before_auth(auth_app, monkeypatch):
+    # Não autenticado, acessando a deployment URL: a canonicalização deve
+    # redirecionar para a branch URL ANTES de acionar admin_required.
+    monkeypatch.setenv("VERCEL_BRANCH_URL", "pollo-git-feature.vercel.app")
+    monkeypatch.setenv("ALIEXPRESS_APP_KEY", "k")
+    monkeypatch.delenv("ALIEXPRESS_CALLBACK_URL", raising=False)
+    client = auth_app.test_client()
+    r = client.get(
+        "/integrations/aliexpress/authorize",
+        headers={"Host": "pollo-random-deploy.vercel.app"},
+    )
+    assert r.status_code == 302
+    assert r.headers["Location"] == (
+        "https://pollo-git-feature.vercel.app/integrations/aliexpress/authorize"
+    )
+    assert r.headers["Location"] != "/login"
+    # Sem state, sem consulta de usuário, sem OAuth no host errado.
+    with client.session_transaction(headers={"Host": "pollo-random-deploy.vercel.app"}) as sess:
+        assert STATE_KEY not in sess
+
+
+def test_authorize_branch_host_unauthenticated_goes_to_login(auth_app, monkeypatch):
+    # No host estável (branch), sem auth -> login (admin_required roda).
+    monkeypatch.setenv("VERCEL_BRANCH_URL", "pollo-git-feature.vercel.app")
+    monkeypatch.setenv("ALIEXPRESS_APP_KEY", "k")
+    monkeypatch.delenv("ALIEXPRESS_CALLBACK_URL", raising=False)
+    client = auth_app.test_client()
+    r = client.get(
+        "/integrations/aliexpress/authorize",
+        headers={"Host": "pollo-git-feature.vercel.app"},
+    )
+    assert r.status_code == 302
+    assert r.headers["Location"].endswith("/login")
+
+
+def test_authorize_on_branch_host_generates_state_and_redirects(auth_app, monkeypatch):
+    monkeypatch.setenv("VERCEL_BRANCH_URL", "pollo-git-feature.vercel.app")
+    monkeypatch.setenv("ALIEXPRESS_APP_KEY", "k")
+    monkeypatch.delenv("ALIEXPRESS_CALLBACK_URL", raising=False)
+    client = auth_app.test_client()
+    client.get(
+        "/_test_login?role=admin",
+        headers={"Host": "pollo-git-feature.vercel.app"},
+    )
+    r = client.get(
+        "/integrations/aliexpress/authorize",
+        headers={"Host": "pollo-git-feature.vercel.app"},
+    )
+    assert r.status_code == 302
+    loc = r.headers["Location"]
+    from urllib.parse import parse_qs, urlsplit
+
+    assert loc.startswith(DEFAULT_OAUTH_AUTHORIZE_URL)
+    q = parse_qs(urlsplit(loc).query)
+    assert q.get("redirect_uri") == [
+        "https://pollo-git-feature.vercel.app/integrations/aliexpress/callback"
+    ]
+    # State foi efetivamente criado neste segundo passo.
+    with client.session_transaction(headers={"Host": "pollo-git-feature.vercel.app"}) as sess:
+        assert STATE_KEY in sess
 
 
 def test_callback_expired_state_rejected(auth_app, monkeypatch):

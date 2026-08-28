@@ -15,7 +15,8 @@ from __future__ import annotations
 import hmac
 import os
 import time
-from typing import Any, Optional
+from functools import wraps
+from typing import Any, Callable, Optional
 
 from flask import Blueprint, current_app, redirect, request, session
 
@@ -23,6 +24,7 @@ from loja.integrations.aliexpress import AliExpressClient
 from loja.integrations.aliexpress.errors import (
     AliExpressAPIError,
     AliExpressAuthError,
+    AliExpressConfigError,
     AliExpressTransportError,
 )
 from loja.integrations.aliexpress.oauth import (
@@ -53,15 +55,67 @@ def _api_base_default() -> str:
     return _env("ALIEXPRESS_OAUTH_API_BASE_URL", DEFAULT_OAUTH_API_BASE_URL)
 
 
+def get_aliexpress_callback_url() -> str:
+    """Resolve a URL de callback OAuth sem depender de ALIEXPRESS_CALLBACK_URL.
+
+    Precedência:
+      1. ALIEXPRESS_CALLBACK_URL (explícito, override)
+      2. VERCEL_BRANCH_URL  (Preview: host estável da branch)
+      3. VERCEL_PROJECT_PRODUCTION_URL (produção)
+      4. erro (AliExpressConfigError)
+
+    VERCEL_BRANCH_URL não inclui o esquema https:// (doc Vercel); nós prefixamos.
+    """
+    explicit = (os.environ.get("ALIEXPRESS_CALLBACK_URL") or "").strip()
+    if explicit:
+        return explicit
+
+    branch_url = (os.environ.get("VERCEL_BRANCH_URL") or "").strip()
+    if branch_url:
+        return f"https://{branch_url}/integrations/aliexpress/callback"
+
+    production_url = (os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or "").strip()
+    if production_url:
+        return f"https://{production_url}/integrations/aliexpress/callback"
+
+    raise AliExpressConfigError(
+        "Callback OAuth AliExpress não configurado."
+    )
+
+
+def canonicalize_vercel_branch(func: Callable) -> Callable:
+    """Redireciona para a branch URL estável ANTES de qualquer autenticação.
+
+    Em Preview Vercel, o cookie de sessão (e o state OAuth) deve pertencer a um
+    hostname estável. Se acessado pela deployment URL (outro host), redireciona
+    para a branch URL antes de acionar admin_required / criar state. Não copia
+    query strings sensíveis.
+    """
+
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        branch_host = (os.environ.get("VERCEL_BRANCH_URL") or "").strip()
+        if branch_host and request.host != branch_host:
+            return redirect(
+                f"https://{branch_host}/integrations/aliexpress/authorize"
+            )
+        return func(*args, **kwargs)
+
+    return wrapped
+
+
 @aliexpress_blueprint.route("/authorize", methods=["GET"])
+@canonicalize_vercel_branch
 @admin_required
 def authorize():
     app_key = (os.environ.get("ALIEXPRESS_APP_KEY") or "").strip()
-    callback_url = (os.environ.get("ALIEXPRESS_CALLBACK_URL") or "").strip()
     if not app_key:
         return "AliExpress OAuth não configurado (ALIEXPRESS_APP_KEY ausente).", 500
-    if not callback_url:
-        return "AliExpress OAuth não configurado (ALIEXPRESS_CALLBACK_URL ausente).", 500
+
+    try:
+        callback_url = get_aliexpress_callback_url()
+    except AliExpressConfigError:
+        return "AliExpress OAuth não configurado (callback ausente).", 500
 
     # Validação sanitizada: presença/comprimento apenas. Nunca expõe o valor.
     current_app.logger.info(
