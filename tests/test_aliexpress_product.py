@@ -17,33 +17,39 @@ from loja.integrations.aliexpress.product import (
 
 
 PRODUCT_JSON = {
-    "aliexpress_ds_product_get_response": {
-        "code": "00",
-        "data": {
-            "productId": "100500123",
-            "title": "Test product",
-            "description": "Nice product",
-            "categoryId": "123",
-            "images": ["https://x/a.jpg", "//x/b.jpg"],
-            "video": "//x/v.mp4",
-            "sku": [
+    "result": {
+        "ae_item_base_info_dto": {
+            "product_id": 32839190109,
+            "category_id": 123456,
+            "subject": "Test product",
+            "currency_code": "BRL",
+            "detail": "<div>description</div>",
+        },
+        "ae_item_sku_info_dtos": {
+            "ae_item_sku_info_d_t_o": [
                 {
-                    "skuId": "1",
-                    "attributes": [{"name": "Color", "value": "Red"}],
-                    "availableStock": 10,
-                    "salePrice": "9.90",
-                    "originalPrice": "19.90",
-                    "currency": "BRL",
+                    "id": "sku-1",
+                    "sku_price": "39.90",
+                    "offer_sale_price": "29.90",
+                    "currency_code": "BRL",
+                    "sku_available_stock": 12,
+                    "ae_sku_property_dtos": {
+                        "ae_sku_property_d_t_o": [
+                            {"sku_property_name": "Color", "sku_property_value": "Black"}
+                        ]
+                    },
                 }
-            ],
-            "salePrice": "9.90",
-            "originalPrice": "19.90",
-            "currency": "BRL",
-            "availableStock": 10,
-            "attributes": [{"name": "Brand", "value": "X"}],
-            "taxes": {"importTax": "1.50"},
-        }
-    }
+            ]
+        },
+        "ae_item_properties": {
+            "ae_item_property": [{"attr_name": "Material", "attr_value": "Cotton"}]
+        },
+        "ae_multimedia_info_dto": {
+            "image_urls": "//example.com/a.jpg;//example.com/b.jpg"
+        },
+    },
+    "rsp_code": "200",
+    "rsp_msg": "success",
 }
 
 
@@ -99,38 +105,39 @@ def test_build_product_detail_params_flags_and_optionals():
 
 # ----- normalização ---------------------------------------------------------
 def test_normalize_product_detail_basic():
-    payload = PRODUCT_JSON["aliexpress_ds_product_get_response"]
-    detail = normalize_product_detail(payload, method="aliexpress.ds.product.get")
+    detail = normalize_product_detail(PRODUCT_JSON, method="aliexpress.ds.product.get")
 
     assert isinstance(detail, AliExpressProductDetail)
-    assert detail.product_id == "100500123"
+    assert detail.product_id == "32839190109"
     assert detail.title == "Test product"
-    assert detail.description == "Nice product"
-    assert detail.category_id == "123"
-    # URLs relativas (//) normalizadas.
-    assert detail.images[0] == "https://x/a.jpg"
-    assert detail.images[1] == "https://x/b.jpg"
-    assert detail.video == "https://x/v.mp4"
+    assert detail.description == "<div>description</div>"
+    assert detail.category_id == "123456"
+    assert detail.currency == "BRL"
+    # URLs relativas (//) normalizadas para https.
+    assert detail.images == ["https://example.com/a.jpg", "https://example.com/b.jpg"]
+    assert detail.video is None  # só preenche se houver URL real
 
     assert len(detail.skus) == 1
     sku = detail.skus[0]
     assert isinstance(sku, AliExpressProductSku)
-    assert sku.sku_id == "1"
-    assert sku.available_stock == 10
-    assert sku.sale_price == Decimal("9.90")
-    assert sku.original_price == Decimal("19.90")
+    assert sku.sku_id == "sku-1"
+    assert sku.available_stock == 12  # estoque 0 seria válido (first_not_none)
+    assert sku.sale_price == Decimal("29.90")
+    assert sku.original_price == Decimal("39.90")
     assert sku.currency == "BRL"
-    assert sku.attributes == [{"name": "Color", "value": "Red"}]
+    assert sku.attributes == [{"name": "Color", "value": "Black"}]
 
-    assert detail.available_stock == 10
-    assert detail.sale_price == Decimal("9.90")
-    assert detail.original_price == Decimal("19.90")
-    assert detail.currency == "BRL"
-    # Impostos preservados sem inventar.
-    assert detail.taxes == {"importTax": "1.50"}
-    assert detail.attributes == [{"name": "Brand", "value": "X"}]
-    # Campos desconhecidos preservados em raw.
-    assert detail.raw.get("productId") == "100500123"
+    # Nível de produto só tem preço/estoque por SKU -> None (sem invenção).
+    assert detail.sale_price is None
+    assert detail.original_price is None
+    assert detail.available_stock is None
+
+    # Atributos gerais.
+    assert detail.attributes == [{"name": "Material", "value": "Cotton"}]
+    # Result inteiro preservado em raw.
+    assert detail.raw.get("ae_item_base_info_dto", {}).get("product_id") == 32839190109
+    assert "ae_item_sku_info_dtos" in detail.raw
+    assert "ae_item_properties" in detail.raw
 
 
 # ----- chamada via cliente (transporte falso) -------------------------------
@@ -140,11 +147,11 @@ def test_get_product_via_client_builds_request_and_normalizes():
     client = AliExpressClient(
         app_key="k", app_secret="s", access_token="tok", transport=transport
     )
-    detail = client.get_product(product_id="100500123", ship_to_country="BR")
+    detail = client.get_product(product_id="32839190109", ship_to_country="BR")
 
     params = transport.last_params
     assert params["method"] == "aliexpress.ds.product.get"
-    assert params["product_id"] == "100500123"
+    assert params["product_id"] == "32839190109"
     assert params["ship_to_country"] == "BR"
     assert params["target_currency"] == "BRL"
     assert params["target_language"] == "pt"
@@ -155,5 +162,5 @@ def test_get_product_via_client_builds_request_and_normalizes():
     # O app_secret NUNCA viaja nos parâmetros.
     assert "app_secret" not in params
 
-    assert detail.product_id == "100500123"
+    assert detail.product_id == "32839190109"
     assert len(detail.skus) == 1

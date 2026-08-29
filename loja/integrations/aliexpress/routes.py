@@ -260,14 +260,25 @@ def _render_success(
     elif product_detail is not None:
         skus = product_detail.skus or []
         imgs = product_detail.images or []
+        has_price = (
+            product_detail.sale_price is not None
+            or product_detail.original_price is not None
+            or any(
+                (sku.sale_price is not None or sku.original_price is not None)
+                for sku in skus
+            )
+        )
+        has_stock = product_detail.available_stock is not None or any(
+            sku.available_stock is not None for sku in skus
+        )
         lines += [
             "",
             "DS product.get: success",
             f"product_id: {'presente' if product_detail.product_id else 'ausente'}",
             f"SKUs recebidos: {len(skus)}",
             f"imagens recebidos: {len(imgs)}",
-            f"preço: {'presente' if (product_detail.sale_price or product_detail.original_price) else 'ausente'}",
-            f"estoque: {'presente' if product_detail.available_stock is not None else 'ausente'}",
+            f"preço: {'presente' if has_price else 'ausente'}",
+            f"estoque: {'presente' if has_stock else 'ausente'}",
         ]
     else:
         lines += ["", "DS product.get: skipped (busca sem produtos)"]
