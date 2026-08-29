@@ -80,11 +80,69 @@ def _extract_result(payload: Mapping[str, Any]) -> Any:
     return payload
 
 
-def _normalize_attributes(container: Any) -> List[dict]:
-    """Atributos gerais: ae_item_properties.ae_item_property[].{attr_name,attr_value}."""
-    if not isinstance(container, Mapping):
+def _extract_sku_items(value: Any) -> List[dict]:
+    """ae_item_sku_info_dtos tolera lista direta (simplify=true) ou wrapper."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, Mapping):
+        items = (
+            value.get("ae_item_sku_info_d_t_o")
+            or value.get("ae_item_sku_info_dto")
+            or value.get("items")
+        )
+        if isinstance(items, list):
+            return items
+        if isinstance(items, tuple):
+            return list(items)
+        if isinstance(items, Mapping):
+            return [items]
+    return []
+
+
+def _extract_property_items(value: Any) -> List[dict]:
+    """ae_item_properties tolera lista direta ou wrapper {ae_item_property:[...]}."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, Mapping):
+        items = value.get("ae_item_property") or value.get("items")
+        if isinstance(items, list):
+            return items
+        if isinstance(items, tuple):
+            return list(items)
+        if isinstance(items, Mapping):
+            return [items]
+    return []
+
+
+def _extract_sku_property_items(value: Any) -> List[dict]:
+    """Propriedades de SKU toleram lista direta ou wrapper {ae_sku_property_d_t_o:[...]}."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, Mapping):
+        items = (
+            value.get("ae_sku_property_d_t_o")
+            or value.get("ae_sku_property_dto")
+            or value.get("items")
+        )
+        if isinstance(items, list):
+            return items
+        if isinstance(items, tuple):
+            return list(items)
+        if isinstance(items, Mapping):
+            return [items]
+    return []
+
+
+def _normalize_attributes(items: Any) -> List[dict]:
+    """Atributos gerais: [{attr_name, attr_value}, ...]."""
+    if not isinstance(items, (list, tuple)):
         return []
-    items = container.get("ae_item_property") or []
     out: List[dict] = []
     for attr in items:
         if not isinstance(attr, Mapping):
@@ -96,9 +154,9 @@ def _normalize_attributes(container: Any) -> List[dict]:
 
 
 def _normalize_sku_attributes(sku: Mapping[str, Any]) -> List[dict]:
-    """Propriedades do SKU (em um de dois containers conhecidos)."""
-    container = sku.get("ae_sku_property_dtos") or sku.get("aeop_s_k_u_propertys") or {}
-    items = container.get("ae_sku_property_d_t_o") or []
+    """Propriedades do SKU (tolera lista direta ou wrapper)."""
+    container = sku.get("ae_sku_property_dtos") or sku.get("aeop_s_k_u_propertys")
+    items = _extract_sku_property_items(container)
     out: List[dict] = []
     for attr in items:
         if not isinstance(attr, Mapping):
@@ -139,18 +197,40 @@ def _normalize_skus(items: Any) -> List[AliExpressProductSku]:
     return out
 
 
-def _normalize_images(multimedia: Mapping[str, Any]) -> List[str]:
-    """image_urls pode vir como string (separada por ';') ou lista."""
-    raw_urls = multimedia.get("image_urls")
-    if raw_urls is None:
+def _normalize_images(multimedia: Any) -> List[str]:
+    """Multimídia tolera: wrapper {image_urls}, string, lista de URLs ou de objetos."""
+    if multimedia is None:
         return []
-    if isinstance(raw_urls, str):
-        parts = [p for p in raw_urls.split(";") if p]
-    elif isinstance(raw_urls, (list, tuple)):
-        parts = [p for p in raw_urls if p]
-    else:
-        return []
-    return [_abs_url(p) for p in parts]
+    if isinstance(multimedia, str):
+        parts = [p for p in multimedia.split(";") if p]
+        return [_abs_url(p) for p in parts]
+    if isinstance(multimedia, (list, tuple)):
+        out: List[str] = []
+        for item in multimedia:
+            if isinstance(item, str):
+                out.append(_abs_url(item))
+            elif isinstance(item, Mapping):
+                url = (
+                    item.get("image_url")
+                    or item.get("url")
+                    or item.get("img_url")
+                    or item.get("abs_url")
+                )
+                if url:
+                    out.append(_abs_url(url))
+        return out
+    if isinstance(multimedia, Mapping):
+        raw_urls = multimedia.get("image_urls")
+        if raw_urls is None:
+            return []
+        if isinstance(raw_urls, str):
+            parts = [p for p in raw_urls.split(";") if p]
+        elif isinstance(raw_urls, (list, tuple)):
+            parts = [p for p in raw_urls if p]
+        else:
+            return []
+        return [_abs_url(p) for p in parts]
+    return []
 
 
 def normalize_product_detail(payload: Mapping[str, Any], *, method: str) -> AliExpressProductDetail:
@@ -167,10 +247,9 @@ def normalize_product_detail(payload: Mapping[str, Any], *, method: str) -> AliE
         raise AliExpressAPIError("resposta de produto sem objeto 'result'", raw=payload)
 
     base = result.get("ae_item_base_info_dto") or {}
-    multimedia = result.get("ae_multimedia_info_dto") or {}
-    sku_container = result.get("ae_item_sku_info_dtos") or {}
-    sku_items = sku_container.get("ae_item_sku_info_d_t_o") or []
-    props = result.get("ae_item_properties") or {}
+    multimedia = result.get("ae_multimedia_info_dto")
+    sku_items = _extract_sku_items(result.get("ae_item_sku_info_dtos"))
+    property_items = _extract_property_items(result.get("ae_item_properties"))
 
     return AliExpressProductDetail(
         product_id=_as_str(base.get("product_id")),
@@ -180,7 +259,7 @@ def normalize_product_detail(payload: Mapping[str, Any], *, method: str) -> AliE
         images=_normalize_images(multimedia),
         video=None,  # só preencher se houver URL real; dados de mídia ficam em raw
         skus=_normalize_skus(sku_items),
-        attributes=_normalize_attributes(props),
+        attributes=_normalize_attributes(property_items),
         available_stock=None,  # a API fornece estoque por SKU
         sale_price=None,  # a API fornece preço por SKU
         original_price=None,
