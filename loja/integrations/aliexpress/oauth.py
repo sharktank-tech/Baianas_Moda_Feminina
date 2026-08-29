@@ -17,8 +17,8 @@ import json
 import logging
 import os
 import secrets
+import time
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
 from typing import Any, Iterable, Mapping, Optional
 from urllib.parse import urlencode, urlparse
 
@@ -35,8 +35,6 @@ from .transport import TransportError, TransportTimeout
 DEFAULT_OAUTH_AUTHORIZE_URL = "https://api-sg.aliexpress.com/oauth/authorize"
 DEFAULT_OAUTH_API_BASE_URL = "https://api-sg.aliexpress.com/rest"
 DEFAULT_OAUTH_API_PATH = "/auth/token/create"
-
-_SHANGHAI_TZ = timezone(timedelta(hours=8))  # GMT+8 (ecossistema Alibaba)
 
 
 # --------------------------------------------------------------------------
@@ -89,8 +87,8 @@ def sign_open_platform_request(path: str, params: Mapping[str, str], secret: str
 
 
 def _now_open_platform_timestamp() -> str:
-    # GMT+8 (ecossistema Alibaba). Ajustar se a doc do app exigir UTC.
-    return datetime.now(_SHANGHAI_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    # Open Platform exige Unix epoch em milissegundos (ex.: 1517820392000).
+    return str(int(time.time() * 1000))
 
 
 # --------------------------------------------------------------------------

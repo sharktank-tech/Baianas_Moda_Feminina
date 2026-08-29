@@ -25,6 +25,7 @@ from loja.integrations.aliexpress.oauth import (
     exchange_authorization_code,
     normalize_oauth_token,
     sign_open_platform_request,
+    _now_open_platform_timestamp,
 )
 from loja.integrations.aliexpress.routes import (
     STATE_KEY,
@@ -241,6 +242,29 @@ def test_exchange_error_raises_auth():
     body = '{"error":{"code":"40010","msg":"invalid code"},"sub_msg":"bad"}'
     with pytest.raises(AliExpressAuthError):
         exchange_authorization_code("k", "s", "CODE", transport=_FakeOAuthTransport(body))
+
+
+def test_open_platform_timestamp_is_epoch_ms(monkeypatch):
+    import time as time_module
+
+    monkeypatch.setattr(time_module, "time", lambda: 1517820392.123)
+    ts = _now_open_platform_timestamp()
+    assert ts == "1517820392123"
+    assert ts.isdigit() is True
+    assert len(ts) == 13
+
+
+def test_exchange_timestamp_enters_signature(monkeypatch):
+    import time as time_module
+
+    monkeypatch.setattr(time_module, "time", lambda: 1517820392.123)
+    body = '{"access_token":"AT","expires_in":604800}'
+    transport = _FakeOAuthTransport(body)
+    exchange_authorization_code("k", "s", "CODE", transport=transport)
+    # timestamp em epoch ms entra nos params antes da assinatura.
+    assert transport.last_params["timestamp"] == "1517820392123"
+    assert "sign" in transport.last_params
+    assert transport.last_params["sign"]
 
 
 ERROR_RESPONSE_FIXTURE = {
