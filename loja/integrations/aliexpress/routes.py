@@ -17,6 +17,7 @@ import os
 import time
 from functools import wraps
 from typing import Any, Callable, Optional
+from urllib.parse import parse_qs, urlparse
 
 from flask import Blueprint, current_app, redirect, request, session
 
@@ -59,24 +60,35 @@ def get_aliexpress_callback_url() -> str:
     """Resolve a URL de callback OAuth sem depender de ALIEXPRESS_CALLBACK_URL.
 
     Precedência:
-      1. ALIEXPRESS_CALLBACK_URL (explícito, override)
-      2. VERCEL_BRANCH_URL  (Preview: host estável da branch)
-      3. VERCEL_PROJECT_PRODUCTION_URL (produção)
-      4. erro (AliExpressConfigError)
+      1. ALIEXPRESS_CALLBACK_URL (explícito, sempre vence)
+      2. VERCEL_ENV == "preview"  -> VERCEL_BRANCH_URL (host estável da branch)
+      3. VERCEL_ENV == "production" -> VERCEL_PROJECT_PRODUCTION_URL
+      4. fallback local/controlado -> VERCEL_PROJECT_PRODUCTION_URL (se houver)
+      5. erro (AliExpressConfigError)
 
-    VERCEL_BRANCH_URL não inclui o esquema https:// (doc Vercel); nós prefixamos.
+    Em produção NUNCA usamos uma URL de branch. VERCEL_BRANCH_URL não inclui o
+    esquema https:// (doc Vercel); nós prefixamos.
     """
     explicit = (os.environ.get("ALIEXPRESS_CALLBACK_URL") or "").strip()
     if explicit:
         return explicit
 
+    vercel_env = (
+        os.environ.get("VERCEL_ENV") or os.environ.get("VERCEL_TARGET_ENV") or ""
+    ).strip().lower()
     branch_url = (os.environ.get("VERCEL_BRANCH_URL") or "").strip()
-    if branch_url:
-        return f"https://{branch_url}/integrations/aliexpress/callback"
-
     production_url = (os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or "").strip()
-    if production_url:
-        return f"https://{production_url}/integrations/aliexpress/callback"
+
+    if vercel_env == "preview":
+        if branch_url:
+            return f"https://{branch_url}/integrations/aliexpress/callback"
+    elif vercel_env == "production":
+        if production_url:
+            return f"https://{production_url}/integrations/aliexpress/callback"
+    else:
+        # Ambiente local/controlado: usa a URL de produção se disponível.
+        if production_url:
+            return f"https://{production_url}/integrations/aliexpress/callback"
 
     raise AliExpressConfigError(
         "Callback OAuth AliExpress não configurado."
@@ -95,7 +107,11 @@ def canonicalize_vercel_branch(func: Callable) -> Callable:
     @wraps(func)
     def wrapped(*args, **kwargs):
         branch_host = (os.environ.get("VERCEL_BRANCH_URL") or "").strip()
-        if branch_host and request.host != branch_host:
+        if (
+            os.environ.get("VERCEL_ENV") == "preview"
+            and branch_host
+            and request.host != branch_host
+        ):
             return redirect(
                 f"https://{branch_host}/integrations/aliexpress/authorize"
             )
@@ -131,6 +147,26 @@ def authorize():
         state=state,
         authorize_url=_authorize_url_default(),
     )
+
+    # Diagnóstico temporário e sanitizado (não altera o protocolo). NÃO loga
+    # app_key, app_secret, state, URL completa, query string, code, token ou sign.
+    _parsed_auth = urlparse(url)
+    _parsed_cb = urlparse(callback_url)
+    _param_names = sorted(parse_qs(_parsed_auth.query).keys())
+    current_app.logger.info(
+        "AliExpress OAuth redirect diagnostic: "
+        "authorize_host=%s authorize_path=%s "
+        "callback_scheme=%s callback_host=%s callback_path=%s "
+        "app_key_length=%d params=%s",
+        _parsed_auth.hostname,
+        _parsed_auth.path,
+        _parsed_cb.scheme,
+        _parsed_cb.hostname,
+        _parsed_cb.path,
+        len(app_key),
+        _param_names,
+    )
+
     return redirect(url)
 
 

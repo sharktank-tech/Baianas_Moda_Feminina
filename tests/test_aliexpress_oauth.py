@@ -156,10 +156,22 @@ def test_get_callback_url_explicit_override(monkeypatch):
 
 def test_get_callback_url_branch(monkeypatch):
     monkeypatch.delenv("ALIEXPRESS_CALLBACK_URL", raising=False)
+    monkeypatch.setenv("VERCEL_ENV", "preview")
     monkeypatch.setenv("VERCEL_BRANCH_URL", "branch-xyz.vercel.app")
     monkeypatch.delenv("VERCEL_PROJECT_PRODUCTION_URL", raising=False)
     assert get_aliexpress_callback_url() == (
         "https://branch-xyz.vercel.app/integrations/aliexpress/callback"
+    )
+
+
+def test_get_callback_url_production_env_uses_production(monkeypatch):
+    monkeypatch.delenv("ALIEXPRESS_CALLBACK_URL", raising=False)
+    monkeypatch.setenv("VERCEL_ENV", "production")
+    monkeypatch.setenv("VERCEL_BRANCH_URL", "branch-xyz.vercel.app")
+    monkeypatch.setenv("VERCEL_PROJECT_PRODUCTION_URL", "prod-xyz.vercel.app")
+    # Em produção a branch URL NUNCA deve vencer.
+    assert get_aliexpress_callback_url() == (
+        "https://prod-xyz.vercel.app/integrations/aliexpress/callback"
     )
 
 
@@ -365,8 +377,9 @@ def test_authorize_admin_redirects_oauth(auth_app, monkeypatch):
 
 
 def test_authorize_canonicalizes_host_before_auth(auth_app, monkeypatch):
-    # Não autenticado, acessando a deployment URL: a canonicalização deve
-    # redirecionar para a branch URL ANTES de acionar admin_required.
+    # Não autenticado, acessando a deployment URL em Preview: a canonicalização
+    # deve redirecionar para a branch URL ANTES de acionar admin_required.
+    monkeypatch.setenv("VERCEL_ENV", "preview")
     monkeypatch.setenv("VERCEL_BRANCH_URL", "pollo-git-feature.vercel.app")
     monkeypatch.setenv("ALIEXPRESS_APP_KEY", "k")
     monkeypatch.delenv("ALIEXPRESS_CALLBACK_URL", raising=False)
@@ -385,8 +398,28 @@ def test_authorize_canonicalizes_host_before_auth(auth_app, monkeypatch):
         assert STATE_KEY not in sess
 
 
+def test_authorize_production_does_not_canonicalize(auth_app, monkeypatch):
+    # Produção: pollomodas.com.br NUNCA deve ser redirecionado para *-git-*.
+    monkeypatch.setenv("VERCEL_ENV", "production")
+    monkeypatch.setenv("VERCEL_BRANCH_URL", "pollo-git-feature.vercel.app")
+    monkeypatch.setenv("ALIEXPRESS_APP_KEY", "k")
+    monkeypatch.delenv("ALIEXPRESS_CALLBACK_URL", raising=False)
+    client = auth_app.test_client()
+    r = client.get(
+        "/integrations/aliexpress/authorize",
+        headers={"Host": "pollomodas.com.br"},
+    )
+    assert r.status_code == 302
+    assert r.headers["Location"] != (
+        "https://pollo-git-feature.vercel.app/integrations/aliexpress/authorize"
+    )
+    # Sem auth no host estável -> login (admin_required roda).
+    assert r.headers["Location"].endswith("/login")
+
+
 def test_authorize_branch_host_unauthenticated_goes_to_login(auth_app, monkeypatch):
     # No host estável (branch), sem auth -> login (admin_required roda).
+    monkeypatch.setenv("VERCEL_ENV", "preview")
     monkeypatch.setenv("VERCEL_BRANCH_URL", "pollo-git-feature.vercel.app")
     monkeypatch.setenv("ALIEXPRESS_APP_KEY", "k")
     monkeypatch.delenv("ALIEXPRESS_CALLBACK_URL", raising=False)
@@ -400,6 +433,7 @@ def test_authorize_branch_host_unauthenticated_goes_to_login(auth_app, monkeypat
 
 
 def test_authorize_on_branch_host_generates_state_and_redirects(auth_app, monkeypatch):
+    monkeypatch.setenv("VERCEL_ENV", "preview")
     monkeypatch.setenv("VERCEL_BRANCH_URL", "pollo-git-feature.vercel.app")
     monkeypatch.setenv("ALIEXPRESS_APP_KEY", "k")
     monkeypatch.delenv("ALIEXPRESS_CALLBACK_URL", raising=False)
@@ -424,6 +458,46 @@ def test_authorize_on_branch_host_generates_state_and_redirects(auth_app, monkey
     # State foi efetivamente criado neste segundo passo.
     with client.session_transaction(headers={"Host": "pollo-git-feature.vercel.app"}) as sess:
         assert STATE_KEY in sess
+
+
+def test_authorize_diagnostic_logs_no_secrets(auth_app, monkeypatch, caplog):
+    import logging
+
+    from urllib.parse import parse_qs, urlsplit
+
+    branch = "pollo-modas-git-feature-aliexp-34cbfb-danilos-projects-dc14d397.vercel.app"
+    app_key_value = "supersecretappkey123"
+    app_secret_value = "supersecretappsecret456"
+    monkeypatch.setenv("VERCEL_ENV", "preview")
+    monkeypatch.setenv("VERCEL_BRANCH_URL", branch)
+    monkeypatch.setenv("ALIEXPRESS_APP_KEY", app_key_value)
+    monkeypatch.setenv("ALIEXPRESS_APP_SECRET", app_secret_value)
+    monkeypatch.delenv("ALIEXPRESS_CALLBACK_URL", raising=False)
+
+    client = auth_app.test_client()
+    client.get("/_test_login?role=admin", headers={"Host": branch})
+    with caplog.at_level(logging.INFO):
+        r = client.get(
+            "/integrations/aliexpress/authorize",
+            headers={"Host": branch},
+        )
+    assert r.status_code == 302
+
+    # Captura o state real da URL de redirecionamento para provar que não vaza.
+    state_value = parse_qs(urlsplit(r.headers["Location"]).query)["state"][0]
+
+    log_text = caplog.text
+    # Campos esperados presentes (sanitizados).
+    assert "authorize_host=api-sg.aliexpress.com" in log_text
+    assert "authorize_path=/oauth/authorize" in log_text
+    assert ("callback_host=%s" % branch) in log_text
+    assert "callback_path=/integrations/aliexpress/callback" in log_text
+    assert "params=['client_id', 'force_auth', 'redirect_uri', 'response_type', 'state']" in log_text
+
+    # Nenhum dado sensível deve aparecer nos logs.
+    assert app_key_value not in log_text
+    assert app_secret_value not in log_text
+    assert state_value not in log_text
 
 
 def test_callback_expired_state_rejected(auth_app, monkeypatch):
