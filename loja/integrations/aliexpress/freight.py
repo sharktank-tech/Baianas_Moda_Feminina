@@ -17,8 +17,6 @@ Não dividimos valores automaticamente só por causa do nome (ex.: shipping_fee_
 from __future__ import annotations
 
 import json
-import logging
-import os
 from decimal import Decimal
 from typing import Any, List, Mapping, Optional
 
@@ -26,13 +24,29 @@ from .errors import AliExpressAPIError
 from .models import AliExpressFreightOption, AliExpressFreightResult
 from .search import _as_int, _as_str, parse_price
 
-_LOG = logging.getLogger(__name__)
-
 
 def _first_not_none(*values: Any) -> Any:
     for v in values:
         if v is not None:
             return v
+    return None
+
+
+def _is_success_value(value: Any) -> Optional[bool]:
+    """Interpreta success como bool, aceitando strings ('true'/'false'/'0'/'1').
+
+    Retorna None se não conseguir determinar (para cair no fallback de code).
+    """
+    if value is True:
+        return True
+    if value is False:
+        return False
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in {"true", "1", "yes"}:
+            return True
+        if v in {"false", "0", "no"}:
+            return False
     return None
 
 
@@ -204,53 +218,48 @@ def _normalize_freight_option(option: Mapping[str, Any]) -> AliExpressFreightOpt
     )
 
 
-def describe_shape(obj: Any, indent: int = 0) -> List[str]:
-    """Descreve a estrutura (chaves/tipos/tamanhos) SEM registrar valores.
-
-    Usado só para diagnóstico de shape quando vêm 0 opções, em ambiente
-    deployado (Preview/smoke). Nunca inclui valores sensíveis.
-    """
-    pad = "  " * indent
-    lines: List[str] = []
-    if isinstance(obj, Mapping):
-        lines.append(f"{pad}keys={list(obj.keys())}")
-        for k, v in obj.items():
-            if isinstance(v, list):
-                lines.append(f"{pad}{k}=list[{len(v)}]")
-                if v and isinstance(v[0], Mapping):
-                    lines.append(f"{pad}{k}[0].keys={list(v[0].keys())}")
-            elif isinstance(v, Mapping):
-                lines.append(f"{pad}{k}.keys={list(v.keys())}")
-                lines.extend(describe_shape(v, indent + 1))
-            else:
-                lines.append(f"{pad}{k}=<{type(v).__name__}>")
-    elif isinstance(obj, list):
-        lines.append(f"{pad}list[{len(obj)}]")
-        if obj and isinstance(obj[0], Mapping):
-            lines.append(f"{pad}[0].keys={list(obj[0].keys())}")
-    return lines
-
-
 def normalize_freight_response(
     payload: Mapping[str, Any], *, method: str
 ) -> AliExpressFreightResult:
     """Converte o payload (já decodificado) em AliExpressFreightResult.
 
     Tolerante a wrappers/formatos live; preserva `raw`. Não inventa valores.
-    Se vier 0 opções em ambiente deployado, registra shape (sem valores).
+    Levanta AliExpressAPIError em erro de negócio explícito (success=false ou
+    code != 0), para que o callback exiba 'DS freight.query: failure'.
     """
     if not isinstance(payload, Mapping):
         raise AliExpressAPIError("resposta de frete inesperada (não é objeto)", raw=payload)
+
+    # Erro de negócio explícito antes de extrair opções (shape live:
+    # {"result": {"msg":..., "code":..., "success":...}, "request_id":...}).
+    result = payload.get("result")
+    if isinstance(result, Mapping):
+        parsed_success = _is_success_value(result.get("success"))
+        if parsed_success is False:
+            code = result.get("code")
+            msg = result.get("msg")
+            raise AliExpressAPIError(
+                str(msg or "AliExpress freight query failed"),
+                code=code,
+                raw=payload,
+            )
+        if parsed_success is None:
+            # Fallback: code != 0 indica erro (mas success=True tem prioridade).
+            code = result.get("code")
+            if code is not None:
+                s = str(code).strip()
+                if s and not (s.isdigit() and int(s) == 0):
+                    msg = result.get("msg")
+                    raise AliExpressAPIError(
+                        str(msg or "AliExpress freight query failed"),
+                        code=code,
+                        raw=payload,
+                    )
 
     options_raw = _extract_freight_options(payload)
     options = [
         _normalize_freight_option(o) for o in options_raw if isinstance(o, Mapping)
     ]
-
-    if not options and os.environ.get("VERCEL"):
-        # Diagnóstico seguro: apenas nomes de chaves/tipos/tamanhos, sem valores.
-        shape = describe_shape(payload)
-        _LOG.info("AliExpress freight.query retornou 0 opções. shape:\n%s", "\n".join(shape))
 
     currency = None
     for o in options:

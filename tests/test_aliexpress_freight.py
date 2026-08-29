@@ -8,9 +8,9 @@ from decimal import Decimal
 import pytest
 
 from loja.integrations.aliexpress import AliExpressClient
+from loja.integrations.aliexpress.errors import AliExpressAPIError
 from loja.integrations.aliexpress.freight import (
     build_freight_params,
-    describe_shape,
     normalize_freight_response,
 )
 from loja.integrations.aliexpress.sign import sign_sync
@@ -233,12 +233,36 @@ def test_normalize_freight_live_shape_data_freight():
     _assert_live_option(res)
 
 
-def test_describe_shape_omits_values():
-    shape = describe_shape({"code": "00", "data": {"delivery_options": [{"company": "X"}]}})
-    text = "\n".join(shape)
-    # Apenas chaves/tipos/tamanhos; NUNCA valores.
-    assert "code" in text
-    assert "delivery_options" in text
-    assert "company" in text
-    assert "00" not in text  # valor não vaza
-    assert "X" not in text
+def test_normalize_freight_success_true_ignores_nonzero_code():
+    # success=True tem prioridade sobre code != 0 em formatos live alternativos.
+    payload = {"result": {"success": True, "code": 200}, "freight": [_freight_item()]}
+    res = normalize_freight_response(payload, method="aliexpress.ds.freight.query")
+    _assert_live_option(res)
+
+
+def test_normalize_freight_business_error_505():
+    payload = {
+        "result": {
+            "msg": "DELIVERY_NOT_AVAILABLE_TO_YOUR_ADDRESS",
+            "code": 505,
+            "success": False,
+        },
+        "request_id": "request-1",
+    }
+    with pytest.raises(AliExpressAPIError) as excinfo:
+        normalize_freight_response(payload, method="aliexpress.ds.freight.query")
+    exc = excinfo.value
+    assert exc.code == 505
+    assert exc.message == "DELIVERY_NOT_AVAILABLE_TO_YOUR_ADDRESS"
+
+
+def test_normalize_freight_business_error_507_string_false():
+    payload = {
+        "result": {"code": 507, "success": "false", "msg": "SelectSkuId is Required"},
+        "request_id": "request-2",
+    }
+    with pytest.raises(AliExpressAPIError) as excinfo:
+        normalize_freight_response(payload, method="aliexpress.ds.freight.query")
+    exc = excinfo.value
+    assert exc.code == 507
+    assert exc.message == "SelectSkuId is Required"

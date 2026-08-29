@@ -325,10 +325,11 @@ def _render_success(
         sub_code = getattr(freight_error, "sub_code", None)
         raw = getattr(freight_error, "raw", None)
         request_id = _find_request_id(raw)
+        msg = getattr(freight_error, "message", str(freight_error))
         current_app.logger.error(
             "AliExpress DS freight.query falhou: type=%s message=%s code=%s sub_code=%s request_id=%s",
             type(freight_error).__name__,
-            getattr(freight_error, "message", str(freight_error)),
+            msg,
             code,
             sub_code,
             request_id,
@@ -339,6 +340,7 @@ def _render_success(
             f"code: {code}",
             f"sub_code: {sub_code}",
             f"request_id: {request_id}",
+            f"mensagem: {msg}",
         ]
     elif freight_result is not None:
         options = freight_result.options or []

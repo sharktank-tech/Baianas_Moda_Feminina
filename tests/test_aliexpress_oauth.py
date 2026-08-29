@@ -704,6 +704,41 @@ def test_callback_ds_smoke_error_sanitized(app_client, monkeypatch):
     assert "REAL_AT" not in body  # token nunca exibido
 
 
+def test_callback_freight_failure_shows_sanitized(app_client, monkeypatch):
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes.exchange_authorization_code", lambda *a, **k: _fake_token()
+    )
+
+    class _FailFreightClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def search_products(self, **kw):
+            return _fake_result(3)
+
+        def get_product(self, **kw):
+            return _fake_product_detail()
+
+        def query_freight(self, **kw):
+            raise AliExpressAPIError(
+                "SelectSkuId is Required", code=507, raw={"request_id": "RIDF"}
+            )
+
+    monkeypatch.setattr("loja.integrations.aliexpress.routes.AliExpressClient", _FailFreightClient)
+    state = "ST_FREIGHT"
+    with app_client.session_transaction() as sess:
+        sess[STATE_KEY] = {"state": state, "ts": time.time()}
+    r = app_client.get(f"/integrations/aliexpress/callback?code=ABC&state={state}")
+    body = r.data.decode()
+    assert r.status_code == 200
+    assert "DS product.get: success" in body
+    assert "DS freight.query: failure" in body
+    assert "code: 507" in body
+    assert "SelectSkuId is Required" in body  # mensagem sanitizada é exibida
+    assert "RIDF" in body  # request_id pode ser exibido (não é secreto)
+    assert "REAL_AT" not in body  # token nunca exibido
+
+
 def test_callback_oauth_failure_shows_sanitized(app_client, monkeypatch, caplog):
     import logging
 
