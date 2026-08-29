@@ -1,12 +1,13 @@
-"""Fluxo OAuth AliExpress Open Platform (protocolo SEPARADO do TOP/DS).
+"""Fluxo OAuth AliExpress Open Platform (protocolo SEPARADO do DS migrado).
 
 Dois protocolos distintos (não misturar):
   - Open Platform (OAuth): https://api-sg.aliexpress.com/rest
       assinatura: HMAC-SHA256, material = API path + params ordenados
-  - TOP/DS (já implementado): https://api.aliexpress.com/router/rest
-      assinatura: HMAC-MD5 (sign_method=hmac), material = params TOP ordenados
+  - DS (migrado /sync): https://api-sg.aliexpress.com/sync
+      assinatura: HMAC-SHA256 (sem prefixo de path), material = params ordenados
 
-Aqui NÃO usamos sign_top() do TOP. O signer deste módulo é independente.
+Aqui NÃO usamos sign_top() do TOP nem sign_sync() do DS. O signer deste
+módulo é independente (sign_open_platform_request).
 """
 
 from __future__ import annotations

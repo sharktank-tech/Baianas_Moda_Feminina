@@ -58,4 +58,24 @@ def redact_params(params: Mapping[str, Any]) -> dict[str, Any]:
     return redact(dict(params))
 
 
-__all__: Iterable[str] = ["sign_top", "redact_params", "SignMethod"]
+def sign_sync(params: Mapping[str, str], secret: str) -> str:
+    """Assina uma requisição migrada da AliExpress Open Platform (endpoint `/sync`).
+
+    Material = parâmetros ordenados por nome (ASCII) concatenando nome+valor.
+    O próprio `sign` é excluído do material. HMAC-SHA256 com app_secret ->
+    hex uppercase. NÃO há prefixo de API path (diferente do OAuth Open Platform).
+
+    Exemplo conceitual (doc AliExpress Open Platform /sync):
+
+        ordered = "".join(f"{key}{params[key]}" for key in sorted(params) if key != "sign")
+        sign = hmac.new(secret, ordered, sha256).hexdigest().upper()
+    """
+    if not secret:
+        raise AliExpressConfigError("app_secret ausente para assinatura sync")
+    ordered = "".join(f"{k}{params[k]}" for k in sorted(params) if k != "sign")
+    return hmac.new(
+        secret.encode("utf-8"), ordered.encode("utf-8"), hashlib.sha256
+    ).hexdigest().upper()
+
+
+__all__: Iterable[str] = ["sign_top", "sign_sync", "redact_params", "SignMethod"]

@@ -1,12 +1,12 @@
-"""Integração AliExpress Open Platform (protocolo TOP router/rest).
+"""Integração AliExpress Open Platform (gateway migrado `/sync`).
 
-Uso mínimo (Fase 1 - apenas client/auth HTTP):
+Uso mínimo:
 
     from loja.integrations.aliexpress import AliExpressClient, create_client_from_env
 
     client = create_client_from_env()            # lê ALIEXPRESS_APP_KEY/SECRET[/TOKEN]
     client = client.with_token(access_token)     # injeta token OAuth manualmente
-    data = client.call("aliexpress.ds.text.search", keywords="...")  # Fase 2+
+    data = client.call("aliexpress.ds.text.search", keyWord="...")  # Fase 2+
 
 O transporte é injetável para testes (veja tests/test_aliexpress_client.py).
 """
@@ -32,7 +32,7 @@ from .search import (
     normalize_search_response,
     parse_price,
 )
-from .sign import sign_top
+from .sign import sign_sync, sign_top
 from .transport import RequestsTransport, Transport, TransportError, TransportTimeout
 
 
@@ -73,6 +73,7 @@ __all__: Iterable[str] = [
     "AliExpressRateLimitError",
     "AliExpressTransportError",
     "sign_top",
+    "sign_sync",
     "build_search_params",
     "normalize_search_response",
     "parse_price",

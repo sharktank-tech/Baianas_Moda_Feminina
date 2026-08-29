@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, urlparse
 
 from flask import Blueprint, current_app, redirect, request, session
 
-from loja.integrations.aliexpress import AliExpressClient
+from loja.integrations.aliexpress import AliExpressClient, DEFAULT_BASE_URL
 from loja.integrations.aliexpress.errors import (
     AliExpressAPIError,
     AliExpressAuthError,
@@ -231,7 +231,7 @@ def _render_success(token: Any, result: Any) -> str:
         "DS smoke: success",
         f"gateway: {_ds_gateway()}",
         "method: aliexpress.ds.text.search",
-        "sign_method: hmac",
+        "sign_method: sha256",
         f"produtos recebidos: {len(result.products)}",
     ]
     return "<br>\n".join(lines)
@@ -288,7 +288,7 @@ def _render_ds_failure(token: Any, exc: Exception) -> str:
 
 
 def _ds_gateway() -> str:
-    return "https://api.aliexpress.com/router/rest"
+    return DEFAULT_BASE_URL
 
 
 def _find_request_id(obj: object) -> Optional[str]:

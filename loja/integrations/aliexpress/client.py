@@ -1,14 +1,22 @@
-"""Cliente HTTP da AliExpress Open Platform (protocolo TOP router/rest).
+"""Cliente HTTP da AliExpress Open Platform (gateway migrado `/sync`).
 
 O cliente é puro (sem Flask/SQLAlchemy). O transporte é injetável para testes.
 As credenciais NUNCA são logadas; o `sign` é computado localmente.
+
+Protocolo migrado (endpoint `/sync`):
+  - URL: https://api-sg.aliexpress.com/sync
+  - Parâmetros públicos: method, app_key, session, timestamp, format, v,
+    simplify, sign_method, sign
+  - timestamp: Unix epoch em milissegundos (13 dígitos)
+  - assinatura: HMAC-SHA256 (uppercase), material = params ordenados (sem
+    prefixo de path), excluindo apenas `sign`
 """
 
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import replace
-from datetime import datetime, timezone, timedelta
 from typing import Any, Iterable, Mapping, Optional
 
 from .auth import AliExpressCredentials
@@ -20,26 +28,25 @@ from .errors import (
     AliExpressTransportError,
     redact,
 )
-from .sign import sign_top
+from .sign import sign_sync
 from .transport import RequestsTransport, Transport, TransportError, TransportTimeout
 
-DEFAULT_BASE_URL = "https://api.aliexpress.com/router/rest"
+DEFAULT_BASE_URL = "https://api-sg.aliexpress.com/sync"
 DEFAULT_TIMEOUT = 10.0
-DEFAULT_SIGN_METHOD = "hmac"
+DEFAULT_SIGN_METHOD = "sha256"
 DEFAULT_SESSION_PARAM = "session"
-SHANGHAI_TZ = timezone(timedelta(hours=8))
 
 _RATE_LIMIT_CODES = {"555"}
 _RATE_LIMIT_SUBSTRINGS = ("rate limit", "too many requests", "request limit")
 
 
 class AliExpressClient:
-    """Cliente mínimo para o gateway TOP router/rest da AliExpress.
+    """Cliente mínimo para o gateway migrado `/sync` da AliExpress Open Platform.
 
     Parâmetros
     ----------
     app_key, app_secret: obrigatórios.
-    access_token: opcional; enviado como parâmetro `session` (padrão TOP).
+    access_token: opcional; enviado como parâmetro `session`.
     base_url, timeout, sign_method, session_param: configuráveis/testáveis.
     transport: injetável; padrão `RequestsTransport`. Nunca nulo em runtime.
     """
@@ -89,7 +96,8 @@ class AliExpressClient:
         return new
 
     def _now_timestamp(self) -> str:
-        return datetime.now(SHANGHAI_TZ).strftime("%Y-%m-%d %H:%M:%S")
+        # Open Platform (gateway /sync) exige Unix epoch em milissegundos (13 dígitos).
+        return str(int(time.time() * 1000))
 
     @staticmethod
     def _coerce(value: Any) -> str:
@@ -108,6 +116,7 @@ class AliExpressClient:
             "timestamp": self._now_timestamp(),
             "format": "json",
             "v": "2.0",
+            "simplify": "true",
             "sign_method": self.sign_method,
         }
         if self._creds.access_token:
@@ -118,10 +127,11 @@ class AliExpressClient:
                 continue
             params[key] = self._coerce(val)
 
-        params["sign"] = sign_top(
+        # Assinatura /sync: HMAC-SHA256 (uppercase) sobre todos os parâmetros
+        # (públicos + negócio), excluindo apenas `sign`. Não há prefixo de path.
+        params["sign"] = sign_sync(
             {k: v for k, v in params.items() if k != "sign"},
             self._creds.app_secret,
-            method=self.sign_method,
         )
         return params
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Iterable, Protocol
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import requests
 
@@ -36,8 +36,30 @@ def _response_length(resp: "requests.Response") -> int:
         return len(resp.text or "")
 
 
+# Parâmetros públicos enviados na QUERY STRING do endpoint /sync. Os parâmetros
+# de negócio (ex.: keyWord, local, countryCode, ...) vão no BODY. A assinatura
+# (calculada no cliente) cobre ambos, independentemente de onde cada um viaja.
+ALIEXPRESS_SYSTEM_PARAMS = frozenset(
+    {
+        "method",
+        "app_key",
+        "session",
+        "timestamp",
+        "format",
+        "v",
+        "simplify",
+        "sign_method",
+        "sign",
+    }
+)
+
+
 class RequestsTransport:
     """Transporte real baseado em `requests`. Timeout explícito e obrigatório.
+
+    Protocolo /sync: parâmetros públicos (system) na QUERY STRING, parâmetros de
+    negócio no BODY (application/x-www-form-urlencoded). A assinatura é calculada
+    pelo cliente sobre a união de ambos, antes do transporte.
 
     Erros de transporte carregam apenas metadados sanitizados (host, path,
     http_status, content_type, response_length). Nunca incluem app_key,
@@ -49,10 +71,18 @@ class RequestsTransport:
         self.timeout = timeout
 
     def post(self, params: dict[str, str]) -> str:
+        system = {k: v for k, v in params.items() if k in ALIEXPRESS_SYSTEM_PARAMS}
+        business = {k: v for k, v in params.items() if k not in ALIEXPRESS_SYSTEM_PARAMS}
+
+        url = self.base_url
+        if system:
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}{urlencode(system)}"
+
         try:
             resp = requests.post(
-                self.base_url,
-                data=params,
+                url,
+                data=business,
                 timeout=self.timeout,
                 headers={"Content-Type": "application/x-www-form-urlencoded;charset=utf-8"},
             )
@@ -85,4 +115,10 @@ class RequestsTransport:
         return resp.text
 
 
-__all__: Iterable[str] = ["Transport", "TransportError", "TransportTimeout", "RequestsTransport"]
+__all__: Iterable[str] = [
+    "Transport",
+    "TransportError",
+    "TransportTimeout",
+    "RequestsTransport",
+    "ALIEXPRESS_SYSTEM_PARAMS",
+]

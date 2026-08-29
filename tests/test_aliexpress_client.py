@@ -224,7 +224,7 @@ def test_no_session_param_without_token():
     params = client._build_params("dummy.method")
     assert "session" not in params
     assert params["method"] == "dummy.method"
-    assert params["sign_method"] == "hmac"
+    assert params["sign_method"] == "sha256"
 
 
 def test_with_token_returns_copy_without_mutating():
@@ -232,6 +232,147 @@ def test_with_token_returns_copy_without_mutating():
     other = client.with_token("NEW")
     assert client.credentials.access_token is None
     assert other.credentials.access_token == "NEW"
+
+
+# --------------------------------------------------------------------------
+# Migração do gateway DS para o endpoint /sync (Open Platform)
+# --------------------------------------------------------------------------
+def test_default_base_url_is_sync_gateway():
+    from loja.integrations.aliexpress import DEFAULT_BASE_URL
+
+    assert DEFAULT_BASE_URL == "https://api-sg.aliexpress.com/sync"
+
+
+def test_default_sign_method_is_sha256():
+    from loja.integrations.aliexpress.client import DEFAULT_SIGN_METHOD
+
+    assert DEFAULT_SIGN_METHOD == "sha256"
+
+
+def test_build_params_sync_public_params():
+    client = AliExpressClient(app_key="k", app_secret="s", access_token="tok")
+    params = client._build_params("aliexpress.ds.text.search", foo="bar")
+    assert params["method"] == "aliexpress.ds.text.search"
+    assert params["app_key"] == "k"
+    assert params["session"] == "tok"
+    assert params["format"] == "json"
+    assert params["v"] == "2.0"
+    assert params["simplify"] == "true"
+    assert params["sign_method"] == "sha256"
+    ts = params["timestamp"]
+    assert ts.isdigit() and len(ts) == 13  # epoch ms
+
+
+def test_build_params_timestamp_is_epoch_ms():
+    client = AliExpressClient(app_key="k", app_secret="s")
+    ts = client._build_params("m")["timestamp"]
+    assert ts.isdigit() and len(ts) == 13
+
+
+def test_build_params_no_session_without_token():
+    client = AliExpressClient(app_key="k", app_secret="s")
+    params = client._build_params("m")
+    assert "session" not in params
+
+
+def test_build_params_sign_is_sha256_uppercase():
+    from loja.integrations.aliexpress.sign import sign_sync
+
+    client = AliExpressClient(app_key="k", app_secret="s", access_token="tok")
+    params = client._build_params("m", biz="x")
+    sign = params["sign"]
+    assert sign == sign.upper()
+    assert len(sign) == 64  # SHA-256 hex digest
+    expected = sign_sync({k: v for k, v in params.items() if k != "sign"}, "s")
+    assert sign == expected
+
+
+def test_build_params_sign_excludes_itself():
+    from loja.integrations.aliexpress.sign import sign_sync
+
+    base = {
+        "method": "m",
+        "app_key": "k",
+        "timestamp": "1234567890123",
+        "format": "json",
+        "v": "2.0",
+        "simplify": "true",
+        "sign_method": "sha256",
+    }
+    s1 = sign_sync(base, "s")
+    s2 = sign_sync({**base, "sign": "INJECTED"}, "s")
+    assert s1 == s2
+
+
+def test_business_params_participate_in_signature():
+    from loja.integrations.aliexpress.sign import sign_sync
+
+    client = AliExpressClient(app_key="k", app_secret="s")
+    p1 = client._build_params("m", foo="a")
+    p2 = client._build_params("m", foo="b")
+    assert p1["sign"] != p2["sign"]
+    assert p1["foo"] == "a"
+    assert p1["sign"] == sign_sync({k: v for k, v in p1.items() if k != "sign"}, "s")
+
+
+def test_transport_sends_system_in_query_and_business_in_body(monkeypatch):
+    import requests as req
+    from urllib.parse import parse_qs, urlparse
+
+    captured = {}
+
+    def _fake_post(url, data=None, timeout=None, headers=None):
+        captured["url"] = url
+        captured["data"] = dict(data or {})
+        resp = req.models.Response()
+        resp.status_code = 200
+        resp.headers["Content-Type"] = "application/json"
+        resp._content = b'{"aliexpress.ds.text.search_response": {"code": 0, "result": {}}}'
+        return resp
+
+    monkeypatch.setattr(req, "post", _fake_post)
+    client = AliExpressClient(
+        app_key="k",
+        app_secret="s",
+        access_token="tok",
+        base_url="https://api-sg.aliexpress.com/sync",
+    )
+    client.call("aliexpress.ds.text.search", keyWord="camiseta", local="en_US")
+
+    q = parse_qs(urlparse(captured["url"]).query)
+    # Parâmetros públicos na query string.
+    assert q.get("method") == ["aliexpress.ds.text.search"]
+    assert q.get("app_key") == ["k"]
+    assert q.get("session") == ["tok"]
+    assert q.get("sign_method") == ["sha256"]
+    assert q.get("simplify") == ["true"]
+    assert "sign" in q
+    # Parâmetros de negócio no body, ausentes na query.
+    assert "keyWord" not in q
+    assert captured["data"].get("keyWord") == "camiseta"
+    assert captured["data"].get("local") == "en_US"
+
+
+def test_client_call_network_failure_masks_secrets(monkeypatch):
+    import requests as req
+
+    def _boom(*a, **k):
+        raise req.ConnectionError("connection refused")
+
+    monkeypatch.setattr(req, "post", _boom)
+    client = AliExpressClient(
+        app_key="k",
+        app_secret="s3cr3t",
+        access_token="t0k3n",
+        base_url="https://api-sg.aliexpress.com/sync",
+    )
+    with pytest.raises(AliExpressTransportError) as exc:
+        client.call("aliexpress.ds.text.search", keyWord="x")
+    msg = str(exc.value)
+    assert "s3cr3t" not in msg
+    assert "t0k3n" not in msg
+    assert "app_key=k" not in msg
+    assert "session=t0k3n" not in msg
 
 
 # --------------------------------------------------------------------------
