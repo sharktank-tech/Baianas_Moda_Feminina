@@ -37,3 +37,39 @@ class AliExpressSearchResult:
     total: Optional[int] = None
     wrapper: Optional[str] = None
     raw: Optional[dict] = None
+
+
+@dataclass
+class AliExpressProductSku:
+    """SKU normalizado de um produto AliExpress (Fase 3, read-only)."""
+
+    sku_id: Optional[str] = None
+    attributes: List[dict] = field(default_factory=list)
+    available_stock: Optional[int] = None
+    sale_price: Optional[Decimal] = None
+    original_price: Optional[Decimal] = None
+    currency: Optional[str] = None
+    raw: Optional[dict] = None
+
+
+@dataclass
+class AliExpressProductDetail:
+    """Detalhe de produto AliExpress normalizado (Fase 3, read-only).
+
+    Campos desconhecidos da resposta são preservados em `raw`.
+    """
+
+    product_id: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    category_id: Optional[str] = None
+    images: List[str] = field(default_factory=list)
+    video: Optional[str] = None
+    skus: List[AliExpressProductSku] = field(default_factory=list)
+    attributes: List[dict] = field(default_factory=list)
+    available_stock: Optional[int] = None
+    sale_price: Optional[Decimal] = None
+    original_price: Optional[Decimal] = None
+    currency: Optional[str] = None
+    taxes: Optional[Any] = None
+    raw: Optional[dict] = None

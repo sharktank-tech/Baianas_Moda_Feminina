@@ -26,7 +26,16 @@ from .errors import (
     AliExpressRateLimitError,
     AliExpressTransportError,
 )
-from .models import AliExpressSearchProduct, AliExpressSearchResult
+from .models import (
+    AliExpressSearchProduct,
+    AliExpressSearchResult,
+    AliExpressProductDetail,
+    AliExpressProductSku,
+)
+from .product import (
+    build_product_detail_params,
+    normalize_product_detail,
+)
 from .search import (
     build_search_params,
     normalize_search_response,
@@ -66,6 +75,8 @@ __all__: Iterable[str] = [
     "AliExpressCredentials",
     "AliExpressSearchResult",
     "AliExpressSearchProduct",
+    "AliExpressProductDetail",
+    "AliExpressProductSku",
     "AliExpressError",
     "AliExpressConfigError",
     "AliExpressAuthError",
@@ -77,6 +88,8 @@ __all__: Iterable[str] = [
     "build_search_params",
     "normalize_search_response",
     "parse_price",
+    "build_product_detail_params",
+    "normalize_product_detail",
     "create_client_from_env",
     "RequestsTransport",
     "Transport",

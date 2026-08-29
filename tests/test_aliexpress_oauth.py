@@ -5,12 +5,17 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
 from flask import Blueprint, Flask, request
 
-from loja.integrations.aliexpress import AliExpressSearchResult
+from loja.integrations.aliexpress import (
+    AliExpressProductDetail,
+    AliExpressProductSku,
+    AliExpressSearchResult,
+)
 from loja.integrations.aliexpress.errors import (
     AliExpressAPIError,
     AliExpressAuthError,
@@ -329,6 +334,44 @@ def _fake_result(n=3):
     )
 
 
+def _fake_product_detail():
+    return AliExpressProductDetail(
+        product_id="100500123",
+        title="Test product",
+        description="desc",
+        category_id="123",
+        images=["https://x/a.jpg"],
+        video="https://x/v.mp4",
+        skus=[
+            AliExpressProductSku(
+                sku_id="1",
+                available_stock=5,
+                sale_price=Decimal("9.90"),
+                original_price=Decimal("19.90"),
+                currency="BRL",
+            )
+        ],
+        attributes=[],
+        available_stock=5,
+        sale_price=Decimal("9.90"),
+        original_price=Decimal("19.90"),
+        currency="BRL",
+    )
+
+
+class _SearchProductClient:
+    """Cliente falso que responde busca E detalhe de produto (smoke Fase 3)."""
+
+    def __init__(self, *a, **k):
+        pass
+
+    def search_products(self, **kw):
+        return _fake_result(3)
+
+    def get_product(self, **kw):
+        return _fake_product_detail()
+
+
 @pytest.fixture
 def auth_app():
     from flask_login import LoginManager, login_user
@@ -561,8 +604,7 @@ def test_callback_success_shows_no_token(app_client, monkeypatch):
         "loja.integrations.aliexpress.routes.exchange_authorization_code", lambda *a, **k: _fake_token()
     )
     monkeypatch.setattr(
-        "loja.integrations.aliexpress.routes.AliExpressClient",
-        lambda *a, **k: SimpleNamespace(search_products=lambda **kw: _fake_result(3)),
+        "loja.integrations.aliexpress.routes.AliExpressClient", _SearchProductClient
     )
     state = "ST1"
     with app_client.session_transaction() as sess:
@@ -570,8 +612,11 @@ def test_callback_success_shows_no_token(app_client, monkeypatch):
     r = app_client.get(f"/integrations/aliexpress/callback?code=ABC123&state={state}")
     body = r.data.decode()
     assert r.status_code == 200
-    assert "DS smoke: success" in body
+    assert "DS search: success" in body
     assert "produtos recebidos: 3" in body
+    assert "DS product.get: success" in body
+    assert "SKUs recebidos: 1" in body
+    assert "imagens recebidos: 1" in body
     assert "REAL_AT" not in body  # token nunca exibido
     assert "REAL_RT" not in body
     assert "ABC123" not in body  # code nunca exibido
@@ -594,8 +639,7 @@ def test_callback_state_replay_rejected(app_client, monkeypatch):
         "loja.integrations.aliexpress.routes.exchange_authorization_code", lambda *a, **k: _fake_token()
     )
     monkeypatch.setattr(
-        "loja.integrations.aliexpress.routes.AliExpressClient",
-        lambda *a, **k: SimpleNamespace(search_products=lambda **kw: _fake_result(1)),
+        "loja.integrations.aliexpress.routes.AliExpressClient", _SearchProductClient
     )
     state = "ST_REPLAY"
     with app_client.session_transaction() as sess:

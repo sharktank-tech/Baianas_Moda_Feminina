@@ -194,13 +194,34 @@ def callback():
     except (AliExpressAPIError, AliExpressTransportError) as exc:
         return _render_ds_failure(token, exc)
 
-    return _render_success(token, result)
+    # 3) Product detail read-only (Fase 3) com o MESMO token em memória.
+    #    Usa o primeiro product_id retornado pela busca.
+    first_id = None
+    if result.products:
+        first_id = result.products[0].item_id or result.products[0].external_id
+    product_detail = None
+    product_error = None
+    if first_id:
+        try:
+            product_detail = client.get_product(product_id=first_id)
+        except (AliExpressAPIError, AliExpressTransportError) as exc:
+            product_error = exc
+
+    return _render_success(
+        token, result, product_detail=product_detail, product_error=product_error
+    )
 
 
 # --------------------------------------------------------------------------
 # Renderização sanitizada (nunca tokens/code/sign)
 # --------------------------------------------------------------------------
-def _render_success(token: Any, result: Any) -> str:
+def _render_success(
+    token: Any,
+    result: Any,
+    *,
+    product_detail: Any = None,
+    product_error: Any = None,
+) -> str:
     lines = [
         "AliExpress autorizado com sucesso",
         f"seller_id: {token.seller_id}",
@@ -208,12 +229,49 @@ def _render_success(token: Any, result: Any) -> str:
         f"expires_in: {token.expires_in}",
         "",
         "OAuth: success",
-        "DS smoke: success",
+        "DS search: success",
         f"gateway: {_ds_gateway()}",
         "method: aliexpress.ds.text.search",
         "sign_method: sha256",
         f"produtos recebidos: {len(result.products)}",
     ]
+
+    # Seção product.get (Fase 3) — sanitizada (sem token/code/sign).
+    if product_error is not None:
+        code = getattr(product_error, "code", None)
+        sub_code = getattr(product_error, "sub_code", None)
+        raw = getattr(product_error, "raw", None)
+        request_id = _find_request_id(raw)
+        current_app.logger.error(
+            "AliExpress DS product.get falhou: type=%s message=%s code=%s sub_code=%s request_id=%s",
+            type(product_error).__name__,
+            getattr(product_error, "message", str(product_error)),
+            code,
+            sub_code,
+            request_id,
+        )
+        lines += [
+            "",
+            "DS product.get: failure",
+            f"code: {code}",
+            f"sub_code: {sub_code}",
+            f"request_id: {request_id}",
+        ]
+    elif product_detail is not None:
+        skus = product_detail.skus or []
+        imgs = product_detail.images or []
+        lines += [
+            "",
+            "DS product.get: success",
+            f"product_id: {'presente' if product_detail.product_id else 'ausente'}",
+            f"SKUs recebidos: {len(skus)}",
+            f"imagens recebidos: {len(imgs)}",
+            f"preço: {'presente' if (product_detail.sale_price or product_detail.original_price) else 'ausente'}",
+            f"estoque: {'presente' if product_detail.available_stock is not None else 'ausente'}",
+        ]
+    else:
+        lines += ["", "DS product.get: skipped (busca sem produtos)"]
+
     return "<br>\n".join(lines)
 
 

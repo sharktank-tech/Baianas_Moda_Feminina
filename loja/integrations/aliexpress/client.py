@@ -254,5 +254,39 @@ class AliExpressClient:
         payload = self.call("aliexpress.ds.text.search", **business)
         return normalize_search_response(payload, method="aliexpress.ds.text.search")
 
+    # ----- detalhe do produto (Fase 3, read-only) ---------------------------
+    def get_product(
+        self,
+        *,
+        product_id: str,
+        ship_to_country: str = "BR",
+        target_currency: str = "BRL",
+        target_language: str = "pt",
+        remove_personal_benefit: bool = True,
+        biz_model: Optional[str] = None,
+        province: Optional[str] = None,
+        city: Optional[str] = None,
+    ) -> "AliExpressProductDetail":
+        """Busca read-only aliexpress.ds.product.get (retorna detalhe normalizado).
+
+        Não persiste nada. Usa o mesmo gateway /sync, sign_method=sha256 e o
+        access_token como `session`. Lista de SKUs/atributos vazia significa
+        "produto válido, 0 SKUs/atributos". Toll/impostos preservados em `raw`.
+        """
+        from .product import build_product_detail_params, normalize_product_detail
+
+        business = build_product_detail_params(
+            product_id=product_id,
+            ship_to_country=ship_to_country,
+            target_currency=target_currency,
+            target_language=target_language,
+            remove_personal_benefit=remove_personal_benefit,
+            biz_model=biz_model,
+            province=province,
+            city=city,
+        )
+        payload = self.call("aliexpress.ds.product.get", **business)
+        return normalize_product_detail(payload, method="aliexpress.ds.product.get")
+
 
 __all__: Iterable[str] = ["AliExpressClient", "DEFAULT_BASE_URL"]
