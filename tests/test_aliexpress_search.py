@@ -229,3 +229,51 @@ def test_secrets_redacted_in_error():
         client.search_products()
     assert "SECRETTOKEN" not in repr(exc.value)
     assert "SECRETTOKEN" not in str(exc.value)
+
+
+# ----- resposta live (gateway /sync, code "00", envelope "data") -----
+LIVE = (
+    '{'
+    '  "aliexpress_ds_text_search_response": {'
+    '    "code": "00",'
+    '    "data": {'
+    '      "pageIndex": 1,'
+    '      "pageSize": 5,'
+    '      "totalCount": 1,'
+    '      "products": {'
+    '        "selection_search_product": ['
+    '          {'
+    '            "itemId": "100500123",'
+    '            "title": "Test product",'
+    '            "itemMainPic": "//example.com/a.jpg",'
+    '            "itemUrl": "//www.aliexpress.com/item/100500123.html",'
+    '            "targetSalePrice": "19.90",'
+    '            "targetOriginalPrice": "29.90",'
+    '            "orders": "10,000+",'
+    '            "score": "4.8",'
+    '            "evaluateRate": "97.5"'
+    '          }'
+    '        ]'
+    '      }'
+    '    }'
+    '  }'
+    '}'
+)
+
+
+def test_live_ds_text_search_response():
+    client, _ = _client(LIVE)
+    res = client.search_products(keyword="shirt")
+    # code "00" não deve gerar exception.
+    assert isinstance(res, AliExpressSearchResult)
+    assert res.total == 1
+    assert len(res.products) == 1
+    prod = res.products[0]
+    assert prod.external_id == "100500123"
+    assert prod.item_id == "100500123"
+    assert prod.sale_price == Decimal("19.90")
+    assert prod.original_price == Decimal("29.90")
+    assert prod.orders == 10000
+    # URLs com "//" viram "https://".
+    assert prod.product_url.startswith("https://")
+    assert prod.images and prod.images[0].startswith("https://")

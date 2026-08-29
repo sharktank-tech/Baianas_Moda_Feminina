@@ -171,18 +171,31 @@ class AliExpressClient:
             msg = err.get("msg") or err.get("sub_msg") or "erro desconhecido"
             return AliExpressClient._raise_for_error(msg, code=code, sub_code=sub_code, raw=data)
 
-        # Resposta por método: chave "<method>_response"
+        # Resposta por método: chave "<method>_response" (ou a variante live com
+        # underscores, ex.: "aliexpress_ds_text_search_response").
         resp_key = f"{method}_response"
-        payload = data.get(resp_key, data)
+        alt_key = method.replace(".", "_") + "_response"
+        payload = data.get(resp_key, data.get(alt_key, data))
         if isinstance(payload, dict):
             code = payload.get("code")
-            if code is not None and str(code) != "0":
+            if code is not None and not AliExpressClient._is_success_code(code):
                 sub_code = payload.get("sub_code")
                 msg = payload.get("msg") or "erro de API"
                 return AliExpressClient._raise_for_error(
                     msg, code=code, sub_code=sub_code, raw=data
                 )
         return payload
+
+    @staticmethod
+    def _is_success_code(code: Any) -> bool:
+        """Códigos zero-like (0, "0", "00", "000", None) são sucesso.
+
+        Códigos realmente não-zero (ex.: 20020, "400") continuam sendo erro.
+        """
+        if code is None:
+            return True
+        value = str(code).strip()
+        return bool(value) and value.isdigit() and int(value) == 0
 
     @staticmethod
     def _raise_for_error(msg: str, *, code: Any, sub_code: Any, raw: Any) -> Any:

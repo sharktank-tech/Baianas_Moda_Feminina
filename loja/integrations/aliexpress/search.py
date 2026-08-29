@@ -115,10 +115,19 @@ def parse_price(value: Any) -> Optional[Decimal]:
 def _as_int(value: Any) -> Optional[int]:
     if value is None or value == "":
         return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+    if isinstance(value, (int, float)):
+        try:
+            return int(value)
+        except (ValueError, OverflowError):
+            return None
+    if isinstance(value, str):
+        # Aceita contagens no formato "10,000+" (live AliExpress).
+        s = value.strip().rstrip("+").replace(",", "")
+        try:
+            return int(float(s))
+        except (ValueError, TypeError):
+            return None
+    return None
 
 
 def _as_str(value: Any) -> Optional[str]:
@@ -127,13 +136,22 @@ def _as_str(value: Any) -> Optional[str]:
     return str(value)
 
 
+def _abs_url(value: Any) -> Optional[str]:
+    """Normaliza URLs relativas ao protocolo (//host/...) para https://..."""
+    if not isinstance(value, str):
+        return None
+    if value.startswith("//"):
+        return "https:" + value
+    return value
+
+
 def _as_images(value: Any) -> List[str]:
     if value is None:
         return []
     if isinstance(value, str):
-        return [value]
+        value = [value]
     if isinstance(value, (list, tuple)):
-        return [str(v) for v in value if v]
+        return [_abs_url(v) for v in value if v]
     return []
 
 
@@ -143,22 +161,34 @@ def normalize_product(raw: Mapping[str, Any]) -> AliExpressSearchProduct:
         external_id=_as_str(raw.get("itemId") or raw.get("productId")),
         item_id=_as_str(raw.get("itemId")),
         title=_as_str(raw.get("title") or raw.get("subject")),
-        product_url=_as_str(raw.get("productUrl") or raw.get("product_url")),
-        images=_as_images(raw.get("imageUrl") or raw.get("images")),
-        original_price=parse_price(raw.get("originalPrice") or raw.get("original_price")),
-        sale_price=parse_price(raw.get("salePrice") or raw.get("sale_price")),
+        product_url=_abs_url(raw.get("itemUrl") or raw.get("productUrl") or raw.get("product_url")),
+        images=_as_images(raw.get("itemMainPic") or raw.get("imageUrl")),
+        original_price=parse_price(
+            raw.get("targetOriginalPrice") or raw.get("originalPrice") or raw.get("original_price")
+        ),
+        sale_price=parse_price(
+            raw.get("targetSalePrice") or raw.get("salePrice") or raw.get("sale_price")
+        ),
         discount=_as_str(raw.get("discount")),
         orders=_as_int(raw.get("orders") or raw.get("volume")),
         score=(parse_price(raw.get("score")) if raw.get("score") is not None else None),
         evaluate_rate=_as_str(raw.get("evaluateRate") or raw.get("evaluate_rate")),
         category_id=_as_str(raw.get("categoryId") or raw.get("category_id")),
-        video_url=_as_str(raw.get("videoUrl") or raw.get("video_url")),
+        video_url=_abs_url(raw.get("videoUrl") or raw.get("video_url")),
         raw=dict(raw),
     )
 
 
 def _extract_product_list(payload: Mapping[str, Any]) -> List[Any]:
-    for cand in ("products", "itemList", "items", "productList"):
+    products = payload.get("products")
+    if isinstance(products, list):
+        return products
+    # Formato live: {"products": {"selection_search_product": [...]}}
+    if isinstance(products, dict):
+        items = products.get("selection_search_product")
+        if isinstance(items, list):
+            return items
+    for cand in ("itemList", "items", "productList"):
         v = payload.get(cand)
         if isinstance(v, list):
             return v
@@ -172,6 +202,8 @@ def _extract_product_list(payload: Mapping[str, Any]) -> List[Any]:
 
 
 def _extract_total(payload: Mapping[str, Any]) -> Optional[int]:
+    if "totalCount" in payload and payload["totalCount"] is not None:
+        return _as_int(payload["totalCount"])
     if "total" in payload and payload["total"] is not None:
         return _as_int(payload["total"])
     result = payload.get("result")
@@ -183,13 +215,19 @@ def _extract_total(payload: Mapping[str, Any]) -> Optional[int]:
 def normalize_search_response(
     payload: Mapping[str, Any], *, method: str
 ) -> AliExpressSearchResult:
-    """Converte o payload de resposta (já decodificado) em AliExpressSearchResult."""
+    """Converte o payload de resposta (já decodificado) em AliExpressSearchResult.
+
+    Suporta o formato live em que os resultados vêm dentro de `data`
+    (ex.: {"code": "00", "data": {"totalCount": N, "products": {...}}}).
+    """
     if not isinstance(payload, Mapping):
         raise AliExpressAPIError("resposta de busca inesperada (não é objeto)", raw=payload)
 
-    raw_items = _extract_product_list(payload)
+    effective = payload.get("data") if isinstance(payload.get("data"), Mapping) else payload
+
+    raw_items = _extract_product_list(effective)
     products = [normalize_product(it) for it in raw_items if isinstance(it, Mapping)]
-    total = _extract_total(payload)
+    total = _extract_total(effective)
 
     if total is None:
         total = len(products)
