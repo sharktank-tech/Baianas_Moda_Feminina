@@ -783,6 +783,7 @@ class _ProbeClient:
         self._freight = freight_map
         self.calls = call_log
         self.get_calls = []
+        self.freight_kwargs = []
 
     def search_products(self, **kw):
         return self._search
@@ -793,6 +794,7 @@ class _ProbeClient:
 
     def query_freight(self, *, product_id, selected_sku_id, **kw):
         self.calls.append((product_id, selected_sku_id))
+        self.freight_kwargs.append(kw)
         outcome = self._freight.get((product_id, selected_sku_id))
         if isinstance(outcome, Exception):
             raise outcome
@@ -947,6 +949,50 @@ def test_freight_probe_no_sleep_in_callback(app_client, monkeypatch):
     _run_probe(app_client, monkeypatch, client)
     # Nenhum sleep no callback (mantém dentro do timeout).
     assert sleeps == []
+
+
+def test_freight_probe_passes_destination_from_env(app_client, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_PROVINCE_CODE", "SP")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_CITY_CODE", "SAO_PAULO")
+    calls = []
+    get_map = {"p1": _probe_product_detail("p1", ["s1", "s2"])}
+    freight = {("p1", "s1"): _probe_freight_success()}
+    client = _ProbeClient(_probe_search_result(["p1"]), get_map, freight, calls)
+    with caplog.at_level(logging.INFO):
+        body = _run_probe(app_client, monkeypatch, client)
+    assert "DS freight.query: success" in body
+    # Valores de destino chegaram ao query_freight.
+    assert client.freight_kwargs[0]["province_code"] == "SP"
+    assert client.freight_kwargs[0]["city_code"] == "SAO_PAULO"
+    # Valores NÃO vazam em body nem em logs.
+    assert "SP" not in body
+    assert "SAO_PAULO" not in body
+    assert "SP" not in caplog.text
+    assert "SAO_PAULO" not in caplog.text
+
+
+def test_freight_probe_summary_shows_provided_flags(app_client, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_PROVINCE_CODE", "SP")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_CITY_CODE", "SAO_PAULO")
+    calls = []
+    get_map = {"p1": _probe_product_detail("p1", ["s1", "s2"])}
+    freight = {
+        ("p1", "s1"): AliExpressAPIError("DELIVERY_INFO_EMPTY", code=501),
+        ("p1", "s2"): AliExpressAPIError("DELIVERY_INFO_EMPTY", code=501),
+    }
+    client = _ProbeClient(_probe_search_result(["p1"]), get_map, freight, calls)
+    with caplog.at_level(logging.INFO):
+        body = _run_probe(app_client, monkeypatch, client)
+    assert "DS freight.query: unavailable" in body
+    assert "province_provided=yes" in caplog.text
+    assert "city_provided=yes" in caplog.text
+    # Valores ainda não vazam.
+    assert "SP" not in caplog.text
+    assert "SAO_PAULO" not in caplog.text
 
 
 def test_callback_oauth_failure_shows_sanitized(app_client, monkeypatch, caplog):

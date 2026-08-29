@@ -220,6 +220,11 @@ def callback():
     freight_candidates = 0
     unavail = {"attempted": 0, "code_501": 0, "code_505": 0, "other": 0}
 
+    # Destino BR detalhado (province/city) somente para o smoke, via env.
+    # Nunca hard-coded; os valores NÃO são registrados (apenas flags yes/no).
+    province_code = os.environ.get("ALIEXPRESS_SMOKE_PROVINCE_CODE") or None
+    city_code = os.environ.get("ALIEXPRESS_SMOKE_CITY_CODE") or None
+
     if product_detail is not None:
         eligible_skus = [
             sku
@@ -243,6 +248,8 @@ def callback():
                     ship_to_country="BR",
                     currency="BRL",
                     quantity=1,
+                    province_code=province_code,
+                    city_code=city_code,
                 )
             except (AliExpressAPIError, AliExpressTransportError) as exc:
                 freight_candidates += 1
@@ -272,14 +279,16 @@ def callback():
     if freight_result is None and freight_error is None:
         unavail["attempted"] = freight_candidates
         freight_unavailable = unavail
-        # Diagnóstico seguro (sem IDs/token/sign/request body) quando tudo 501/505.
+        # Diagnóstico seguro (sem IDs/token/sign/request body/valores de destino).
         current_app.logger.info(
             "freight candidate summary: attempted=%d code_501=%d code_505=%d other=%d "
-            "province_provided=no city_provided=no",
+            "province_provided=%s city_provided=%s",
             unavail["attempted"],
             unavail["code_501"],
             unavail["code_505"],
             unavail["other"],
+            "yes" if province_code else "no",
+            "yes" if city_code else "no",
         )
 
     return _render_success(
