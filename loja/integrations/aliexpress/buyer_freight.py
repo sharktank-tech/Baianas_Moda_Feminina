@@ -8,12 +8,26 @@ sanitizado pela camada de transporte (client.call -> _parse_response).
 """
 
 import json
+import logging
 from decimal import Decimal
 from typing import Any, Iterable, List, Mapping, Optional
 
 from .errors import AliExpressAPIError
 from .models import AliExpressFreightOption, AliExpressFreightResult
 from .search import _as_int, _as_str, parse_price
+
+logger = logging.getLogger(__name__)
+
+# Chaves cujos valores NUNCA devem aparecer nos logs de diagnóstico.
+_SENSITIVE_KEYS = {
+    "request_id",
+    "requestid",
+    "sign",
+    "session",
+    "access_token",
+    "app_secret",
+    "token",
+}
 
 
 def build_buyer_freight_params(
@@ -61,13 +75,94 @@ def build_buyer_freight_params(
     return {"param_aeop_freight_calculate_for_buyer_d_t_o": business_param}
 
 
+def _parse_bool(value: Any) -> Optional[bool]:
+    """Interpreta sucesso/erro como bool de forma robusta.
+
+    false / "false" / 0 / "0" -> False
+    true  / "true"  / 1 / "1" -> True
+    Outros -> None (não confundir string "false" com truthy).
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+        return None
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("true", "1", "yes", "y"):
+            return True
+        if v in ("false", "0", "no", "n"):
+            return False
+    return None
+
+
+def _safe_keys(obj: Any) -> Any:
+    """Lista apenas nomes de chaves (tipos/tamanhos), nunca valores sensíveis."""
+    if not isinstance(obj, Mapping):
+        return type(obj).__name__
+    return sorted(k for k in obj.keys() if k.lower() not in _SENSITIVE_KEYS)
+
+
+def _find_result_obj(value: Any) -> Optional[Mapping[str, Any]]:
+    """Localiza o objeto de resultado de negócio (success/error_desc/lista)."""
+    if not isinstance(value, Mapping):
+        return None
+    if any(
+        k in value
+        for k in (
+            "success",
+            "error_desc",
+            "aeop_freight_calculate_result_for_buyer_d_t_o_list",
+            "aeop_freight_calculate_result_for_buyer_dto",
+        )
+    ):
+        return value
+    for key in ("result", "data"):
+        item = value.get(key)
+        if isinstance(item, Mapping):
+            found = _find_result_obj(item)
+            if found is not None:
+                return found
+    return None
+
+
+def _find_list_wrapper(value: Any) -> Optional[Mapping[str, Any]]:
+    """Localiza o wrapper que contém a lista de opções (para log de diagnóstico)."""
+    if isinstance(value, Mapping):
+        if "aeop_freight_calculate_result_for_buyer_dto" in value:
+            return value
+        for key in (
+            "result",
+            "data",
+            "aeop_freight_calculate_result_for_buyer_d_t_o_list",
+        ):
+            item = value.get(key)
+            if isinstance(item, Mapping):
+                found = _find_list_wrapper(item)
+                if found is not None:
+                    return found
+    return None
+
+
 def _extract_buyer_options(value: Any) -> List[Mapping[str, Any]]:
-    """Navega pelos possíveis wrappers até a lista de opções de frete."""
+    """Navega pelos wrappers oficiais até a lista de opções de frete.
+
+    Suporta:
+      - lista direta
+      - result[data] -> aeop_freight_calculate_result_for_buyer_d_t_o_list
+        (que pode ser a própria lista ou um dict com
+         aeop_freight_calculate_result_for_buyer_dto)
+      - opção única (dict) diretamente no payload
+    """
     if isinstance(value, list):
         return [v for v in value if isinstance(v, Mapping)]
     if isinstance(value, Mapping):
         for key in (
             "aeop_freight_calculate_result_for_buyer_d_t_o_list",
+            "aeop_freight_calculate_result_for_buyer_dto",
             "result",
             "data",
         ):
@@ -79,6 +174,17 @@ def _extract_buyer_options(value: Any) -> List[Mapping[str, Any]]:
         if any(k in value for k in ("service_name", "freight", "error_code")):
             return [value]
     return []
+
+
+def _is_valid_buyer_option(option: Mapping[str, Any]) -> bool:
+    """error_code == 0 => válida; não-zero => inválida (erro no candidato)."""
+    ec = option.get("error_code")
+    if ec is None:
+        return True
+    try:
+        return int(ec) == 0
+    except (TypeError, ValueError):
+        return False
 
 
 def _normalize_buyer_option(option: Mapping[str, Any]) -> AliExpressFreightOption:
@@ -114,16 +220,58 @@ def normalize_buyer_freight_response(
     """Normaliza a resposta oficial para AliExpressFreightResult.
 
     Wrapper esperado: aliexpress_logistics_buyer_freight_calculate_response ->
-    result[...list]. Lança AliExpressAPIError se `payload` não for objeto.
+    result[...]. Valida `success` explícito (False => erro de negócio) e filtra
+    opções com error_code != 0. Lança AliExpressAPIError se `payload` não for
+    objeto ou se todas as opções retornarem erro.
     """
-    if not isinstance(payload, Mapping):
+    if not isinstance(payload, (Mapping, list)):
         raise AliExpressAPIError(
             "resposta de buyer.freight.calculate inesperada (não é objeto)",
             raw=payload,
         )
 
+    result_obj = None
+    list_wrapper = None
+    if isinstance(payload, Mapping):
+        result_obj = _find_result_obj(payload)
+        list_wrapper = _find_list_wrapper(payload)
+
+        # Erro de negócio explícito antes de extrair opções.
+        if result_obj is not None:
+            success = _parse_bool(result_obj.get("success"))
+            if success is False:
+                error_desc = (
+                    result_obj.get("error_desc")
+                    or result_obj.get("msg")
+                    or result_obj.get("error_message")
+                )
+                code = result_obj.get("error_code") or result_obj.get("code")
+                raise AliExpressAPIError(
+                    str(error_desc or "buyer freight calculation failed"),
+                    code=code,
+                    raw=payload,
+                )
+
     options_raw = _extract_buyer_options(payload)
-    options = [_normalize_buyer_option(o) for o in options_raw]
+    filtered = [
+        o for o in options_raw if isinstance(o, Mapping) and _is_valid_buyer_option(o)
+    ]
+    # Opções vieram, mas todas com erro => indisponibilidade coerente (não sucesso).
+    if options_raw and not filtered:
+        raise AliExpressAPIError(
+            "todas as opções de frete retornaram erro", raw=payload
+        )
+
+    options = [_normalize_buyer_option(o) for o in filtered]
+
+    # Diagnóstico temporário: 0 opções após correção. Só estrutura, sem valores.
+    if not options:
+        logger.info(
+            "buyer freight returned 0 options. shape: keys=%s result.keys=%s list_wrapper.keys=%s",
+            _safe_keys(payload),
+            _safe_keys(result_obj),
+            _safe_keys(list_wrapper),
+        )
 
     currency: Optional[str] = None
     for o in options:
@@ -141,7 +289,7 @@ def normalize_buyer_freight_response(
         currency=currency,
         min_fee=min_fee,
         min_delivery_days=min_days,
-        raw=dict(payload),
+        raw=dict(payload) if isinstance(payload, Mapping) else payload,
     )
 
 

@@ -222,6 +222,138 @@ def test_buyer_freight_business_error_raises():
     assert "method not found" in exc.message
 
 
+# ----- wrapper oficial aninhado (dict -> lista) ------------------------------
+def test_normalize_buyer_official_nested_wrapper():
+    payload = {
+        "aliexpress_logistics_buyer_freight_calculate_response": {
+            "result": {
+                "aeop_freight_calculate_result_for_buyer_d_t_o_list": {
+                    "aeop_freight_calculate_result_for_buyer_dto": [
+                        {
+                            "error_code": 0,
+                            "estimated_delivery_time": "5-8day",
+                            "freight": {
+                                "amount": "1.0",
+                                "cent": 1000,
+                                "currency_code": "USD",
+                            },
+                            "service_name": "CAINIAO_STANDARD",
+                        }
+                    ]
+                },
+                "success": True,
+            }
+        }
+    }
+    res = normalize_buyer_freight_response(
+        payload["aliexpress_logistics_buyer_freight_calculate_response"],
+        method="aliexpress.logistics.buyer.freight.calculate",
+    )
+    assert len(res.options) == 1
+    opt = res.options[0]
+    assert opt.service_name == "CAINIAO_STANDARD"
+    assert opt.shipping_fee == Decimal("1.0")
+    assert opt.currency == "USD"
+    assert opt.estimated_delivery == "5-8day"
+
+
+def test_normalize_buyer_direct_list():
+    payload = [
+        {
+            "error_code": 0,
+            "service_name": "EMS",
+            "freight": {"amount": "9.90", "currency_code": "USD"},
+            "estimated_delivery_time": "10-15day",
+        }
+    ]
+    res = normalize_buyer_freight_response(
+        payload, method="aliexpress.logistics.buyer.freight.calculate"
+    )
+    assert len(res.options) == 1
+    assert res.options[0].service_name == "EMS"
+    assert res.options[0].shipping_fee == Decimal("9.90")
+
+
+def test_normalize_buyer_success_false_with_error_desc():
+    payload = {
+        "result": {
+            "success": False,
+            "error_desc": "DELIVERY_NOT_AVAILABLE",
+            "error_code": 505,
+        }
+    }
+    with pytest.raises(AliExpressAPIError) as excinfo:
+        normalize_buyer_freight_response(
+            payload, method="aliexpress.logistics.buyer.freight.calculate"
+        )
+    exc = excinfo.value
+    assert exc.code == 505
+    assert "DELIVERY_NOT_AVAILABLE" in exc.message
+
+
+def test_normalize_buyer_success_string_false():
+    payload = {
+        "result": {
+            "success": "false",
+            "error_desc": "INVALID_ADDRESS",
+            "error_code": 501,
+        }
+    }
+    with pytest.raises(AliExpressAPIError) as excinfo:
+        normalize_buyer_freight_response(
+            payload, method="aliexpress.logistics.buyer.freight.calculate"
+        )
+    exc = excinfo.value
+    assert exc.code == 501
+    assert "INVALID_ADDRESS" in exc.message
+
+
+def test_normalize_buyer_error_code_zero_accepted():
+    payload = {
+        "result": {
+            "aeop_freight_calculate_result_for_buyer_d_t_o_list": [
+                {
+                    "error_code": 0,
+                    "service_name": "Cainiao",
+                    "freight": {"amount": "5.00", "currency_code": "BRL"},
+                    "estimated_delivery_time": 12,
+                }
+            ],
+            "success": True,
+        }
+    }
+    res = normalize_buyer_freight_response(
+        payload, method="aliexpress.logistics.buyer.freight.calculate"
+    )
+    assert len(res.options) == 1
+    assert res.options[0].shipping_fee == Decimal("5.00")
+
+
+def test_normalize_buyer_all_options_errored_raises():
+    payload = {
+        "result": {
+            "aeop_freight_calculate_result_for_buyer_d_t_o_list": [
+                {
+                    "error_code": 505,
+                    "service_name": "Cainiao",
+                    "freight": {"amount": "5.00", "currency_code": "BRL"},
+                },
+                {
+                    "error_code": 501,
+                    "service_name": "EMS",
+                    "freight": {"amount": "9.00", "currency_code": "BRL"},
+                },
+            ],
+            "success": True,
+        }
+    }
+    with pytest.raises(AliExpressAPIError) as excinfo:
+        normalize_buyer_freight_response(
+            payload, method="aliexpress.logistics.buyer.freight.calculate"
+        )
+    assert "erro" in excinfo.value.message.lower()
+
+
 # ----- nenhum segredo em logs -----------------------------------------------
 def test_buyer_freight_no_secret_in_logs(caplog):
     transport = _FakeTransport(
