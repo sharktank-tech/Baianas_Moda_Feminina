@@ -19,6 +19,7 @@ from loja.integrations.aliexpress import (
     sign_top,
 )
 from loja.integrations.aliexpress.transport import (
+    RequestsTransport,
     Transport,
     TransportError,
     TransportTimeout,
@@ -345,3 +346,69 @@ def test_create_client_from_env(monkeypatch):
     client = create_client_from_env()
     assert client.credentials.app_key == "k"
     assert client.credentials.access_token == "t"
+
+
+# --------------------------------------------------------------------------
+# Diagnóstico sanitizado do transporte DS (RequestsTransport)
+# --------------------------------------------------------------------------
+def _fake_response(status: int, content_type: str, body: str):
+    import requests
+
+    resp = requests.models.Response()
+    resp.status_code = status
+    resp.headers["Content-Type"] = content_type
+    resp._content = body.encode("utf-8")
+    return resp
+
+
+def test_transport_http_error_sanitized(monkeypatch):
+    import requests as req
+
+    base = "https://api.aliexpress.com/router/rest"
+    secret = "SUPERSECRET_APPSECRET"
+    monkeypatch.setattr(req, "post", lambda *a, **k: _fake_response(403, "application/json", "{}"))
+    with pytest.raises(TransportError) as excinfo:
+        RequestsTransport(base).post({"app_key": "k", "session": secret})
+    msg = str(excinfo.value)
+    assert "403" in msg
+    assert "host=api.aliexpress.com" in msg
+    assert "path=/router/rest" in msg
+    assert "content_type=" in msg
+    assert "response_length=" in msg
+    # Nenhum segredo/parâmetro vaza no erro.
+    assert secret not in msg
+    assert "app_key" not in msg
+    assert "session" not in msg
+
+
+def test_transport_404_and_500_sanitized(monkeypatch):
+    import requests as req
+
+    base = "https://api.aliexpress.com/router/rest"
+    for status in (404, 500):
+        monkeypatch.setattr(req, "post", lambda *a, **k: _fake_response(status, "application/json", "{}"))
+        with pytest.raises(TransportError) as excinfo:
+            RequestsTransport(base).post({})
+        assert str(status) in str(excinfo.value)
+
+
+def test_transport_200_non_json_sanitized(monkeypatch):
+    import requests as req
+
+    base = "https://api.aliexpress.com/router/rest"
+    token = "ATOKEN_SHOULD_NOT_LEAK"
+    monkeypatch.setattr(req, "post", lambda *a, **k: _fake_response(200, "text/html", "<html>blocked</html>"))
+    with pytest.raises(TransportError) as excinfo:
+        RequestsTransport(base).post({"session": token})
+    msg = str(excinfo.value)
+    assert "não-JSON" in msg
+    assert token not in msg
+
+
+def test_transport_200_json_body_accepted(monkeypatch):
+    import requests as req
+
+    base = "https://api.aliexpress.com/router/rest"
+    # Content-Type atípico, mas corpo é JSON válido -> aceito.
+    monkeypatch.setattr(req, "post", lambda *a, **k: _fake_response(200, "text/plain", '{"ok": 1}'))
+    assert RequestsTransport(base).post({}) == '{"ok": 1}'

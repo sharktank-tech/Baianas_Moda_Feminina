@@ -62,9 +62,29 @@ class RequestsOAuthTransport:
         except requests.Timeout as exc:
             raise TransportTimeout(f"timeout após {self.timeout}s") from exc
         except requests.RequestException as exc:
-            raise TransportError(f"falha de rede: {type(exc).__name__}") from exc
+            _p = urlparse(url)
+            raise TransportError(
+                f"falha de rede: {type(exc).__name__} host={_p.hostname} path={_p.path or '/'}"
+            ) from exc
+
+        _p = urlparse(url)
+        content_type = resp.headers.get("Content-Type", "")
+        try:
+            _len = len(resp.content)
+        except Exception:
+            _len = len(resp.text or "")
         if resp.status_code != 200:
-            raise TransportError(f"HTTP {resp.status_code}")
+            raise TransportError(
+                f"HTTP {resp.status_code} host={_p.hostname} path={_p.path or '/'} "
+                f"content_type={content_type} response_length={_len}"
+            )
+        _body = resp.text or ""
+        _looks_json = "json" in content_type.lower() or _body.lstrip().startswith("{")
+        if not _looks_json:
+            raise TransportError(
+                f"HTTP 200 inesperado (não-JSON) host={_p.hostname} path={_p.path or '/'} "
+                f"content_type={content_type} response_length={_len}"
+            )
         return resp.text
 
 

@@ -16,6 +16,7 @@ from loja.integrations.aliexpress.errors import (
     AliExpressAuthError,
     AliExpressConfigError,
 )
+from loja.integrations.aliexpress.transport import TransportError
 from loja.integrations.aliexpress.oauth import (
     DEFAULT_OAUTH_AUTHORIZE_URL,
     DEFAULT_OAUTH_API_BASE_URL,
@@ -26,6 +27,7 @@ from loja.integrations.aliexpress.oauth import (
     normalize_oauth_token,
     sign_open_platform_request,
     _now_open_platform_timestamp,
+    RequestsOAuthTransport,
 )
 from loja.integrations.aliexpress.routes import (
     STATE_KEY,
@@ -683,3 +685,32 @@ def test_create_app_lowers_werkzeug_level_on_vercel(monkeypatch):
 
     create_app()
     assert lg.level == logging.WARNING
+
+
+def _fake_http_response(status: int, content_type: str, body: str):
+    import requests
+
+    resp = requests.models.Response()
+    resp.status_code = status
+    resp.headers["Content-Type"] = content_type
+    resp._content = body.encode("utf-8")
+    return resp
+
+
+def test_oauth_transport_http_error_sanitized(monkeypatch):
+    import requests as req
+
+    url = "https://api-sg.aliexpress.com/rest/auth/token/create"
+    secret = "APPSECRET_LEAK"
+    monkeypatch.setattr(
+        req, "post", lambda *a, **k: _fake_http_response(500, "application/json", "{}")
+    )
+    with pytest.raises(TransportError) as excinfo:
+        RequestsOAuthTransport().post(url, {"app_key": "k", "code": "C", "sign": secret})
+    msg = str(excinfo.value)
+    assert "500" in msg
+    assert "host=api-sg.aliexpress.com" in msg
+    assert "path=/rest/auth/token/create" in msg
+    # Nenhum segredo/parâmetro vaza no erro.
+    assert secret not in msg
+    assert "sign" not in msg

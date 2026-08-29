@@ -262,6 +262,16 @@ def _render_ds_failure(token: Any, exc: Exception) -> str:
     sub_code = getattr(exc, "sub_code", None)
     raw = getattr(exc, "raw", None)
     request_id = _find_request_id(raw)
+    # Log sanitizado: apenas tipo/mensagem/code/sub_code/request_id. Nunca
+    # token, sign, secret, params ou body.
+    current_app.logger.error(
+        "AliExpress DS smoke falhou: type=%s message=%s code=%s sub_code=%s request_id=%s",
+        type(exc).__name__,
+        getattr(exc, "message", str(exc)),
+        code,
+        sub_code,
+        request_id,
+    )
     lines = [
         "AliExpress autorizado, mas o smoke DS falhou",
         "OAuth: success",
