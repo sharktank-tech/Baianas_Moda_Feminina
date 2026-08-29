@@ -12,6 +12,8 @@ import pytest
 from flask import Blueprint, Flask, request
 
 from loja.integrations.aliexpress import (
+    AliExpressFreightOption,
+    AliExpressFreightResult,
     AliExpressProductDetail,
     AliExpressProductSku,
     AliExpressSearchResult,
@@ -359,8 +361,26 @@ def _fake_product_detail():
     )
 
 
+def _fake_freight_result():
+    return AliExpressFreightResult(
+        options=[
+            AliExpressFreightOption(
+                service_name="Cainiao",
+                company="AliExpress Standard Shipping",
+                shipping_fee=Decimal("12.50"),
+                currency="BRL",
+                delivery_days=15,
+                tracking=True,
+            )
+        ],
+        currency="BRL",
+        min_fee=Decimal("12.50"),
+        min_delivery_days=15,
+    )
+
+
 class _SearchProductClient:
-    """Cliente falso que responde busca E detalhe de produto (smoke Fase 3)."""
+    """Cliente falso que responde busca, detalhe e frete (smoke Fase 4)."""
 
     def __init__(self, *a, **k):
         pass
@@ -370,6 +390,9 @@ class _SearchProductClient:
 
     def get_product(self, **kw):
         return _fake_product_detail()
+
+    def query_freight(self, **kw):
+        return _fake_freight_result()
 
 
 @pytest.fixture
@@ -617,6 +640,11 @@ def test_callback_success_shows_no_token(app_client, monkeypatch):
     assert "DS product.get: success" in body
     assert "SKUs recebidos: 1" in body
     assert "imagens recebidos: 1" in body
+    assert "DS freight.query: success" in body
+    assert "opções de frete: 1" in body
+    assert "frete mínimo: presente" in body
+    assert "moeda: presente" in body
+    assert "prazo: presente" in body
     assert "REAL_AT" not in body  # token nunca exibido
     assert "REAL_RT" not in body
     assert "ABC123" not in body  # code nunca exibido

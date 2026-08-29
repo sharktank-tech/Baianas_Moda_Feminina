@@ -73,3 +73,34 @@ class AliExpressProductDetail:
     currency: Optional[str] = None
     taxes: Optional[Any] = None
     raw: Optional[dict] = None
+
+
+@dataclass
+class AliExpressFreightOption:
+    """Opção de frete normalizada de aliexpress.ds.freight.query (Fase 4, read-only)."""
+
+    service_name: Optional[str] = None
+    company: Optional[str] = None
+    shipping_fee: Optional[Decimal] = None
+    currency: Optional[str] = None
+    delivery_days: Optional[int] = None
+    estimated_delivery: Optional[str] = None
+    tracking: Optional[bool] = None
+    warehouse: Optional[str] = None
+    country: Optional[str] = None
+    raw: Optional[dict] = None
+
+
+@dataclass
+class AliExpressFreightResult:
+    """Resultado normalizado de aliexpress.ds.freight.query (Fase 4, read-only).
+
+    `options` preserva todas as opções devolvidas; `min_fee`/`min_delivery_days`
+    são derivados (não inventados). Campos desconhecidos ficam em `raw`.
+    """
+
+    options: List[AliExpressFreightOption] = field(default_factory=list)
+    currency: Optional[str] = None
+    min_fee: Optional[Decimal] = None
+    min_delivery_days: Optional[int] = None
+    raw: Optional[dict] = None

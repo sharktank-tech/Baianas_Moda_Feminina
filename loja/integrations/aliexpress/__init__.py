@@ -31,6 +31,8 @@ from .models import (
     AliExpressSearchResult,
     AliExpressProductDetail,
     AliExpressProductSku,
+    AliExpressFreightResult,
+    AliExpressFreightOption,
 )
 from .product import (
     build_product_detail_params,
@@ -40,6 +42,10 @@ from .search import (
     build_search_params,
     normalize_search_response,
     parse_price,
+)
+from .freight import (
+    build_freight_params,
+    normalize_freight_response,
 )
 from .sign import sign_sync, sign_top
 from .transport import RequestsTransport, Transport, TransportError, TransportTimeout
@@ -77,6 +83,8 @@ __all__: Iterable[str] = [
     "AliExpressSearchProduct",
     "AliExpressProductDetail",
     "AliExpressProductSku",
+    "AliExpressFreightResult",
+    "AliExpressFreightOption",
     "AliExpressError",
     "AliExpressConfigError",
     "AliExpressAuthError",
@@ -90,6 +98,8 @@ __all__: Iterable[str] = [
     "parse_price",
     "build_product_detail_params",
     "normalize_product_detail",
+    "build_freight_params",
+    "normalize_freight_response",
     "create_client_from_env",
     "RequestsTransport",
     "Transport",

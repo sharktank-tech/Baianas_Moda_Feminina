@@ -288,5 +288,42 @@ class AliExpressClient:
         payload = self.call("aliexpress.ds.product.get", **business)
         return normalize_product_detail(payload, method="aliexpress.ds.product.get")
 
+    # ----- frete (Fase 4, read-only) ----------------------------------------
+    def query_freight(
+        self,
+        *,
+        product_id: str,
+        selected_sku_id: str,
+        ship_to_country: str = "BR",
+        currency: str = "BRL",
+        quantity: int = 1,
+        province_code: Optional[str] = None,
+        city_code: Optional[str] = None,
+        language: str = "en_US",
+        locale: Optional[str] = None,
+    ) -> "AliExpressFreightResult":
+        """Busca read-only aliexpress.ds.freight.query (retorna frete normalizado).
+
+        Não persiste nada. Usa o mesmo gateway /sync, sign_method=sha256 e o
+        access_token como `session`. O parâmetro de negócio `queryDeliveryReq`
+        é um JSON compacto e participa da assinatura.
+        """
+        from .freight import build_freight_params, normalize_freight_response
+
+        business = build_freight_params(
+            product_id=product_id,
+            selected_sku_id=selected_sku_id,
+            ship_to_country=ship_to_country,
+            currency=currency,
+            quantity=quantity,
+            province_code=province_code,
+            city_code=city_code,
+            language=language,
+            locale=locale,
+        )
+        payload = self.call("aliexpress.ds.freight.query", **business)
+        return normalize_freight_response(payload, method="aliexpress.ds.freight.query")
+
+
 
 __all__: Iterable[str] = ["AliExpressClient", "DEFAULT_BASE_URL"]

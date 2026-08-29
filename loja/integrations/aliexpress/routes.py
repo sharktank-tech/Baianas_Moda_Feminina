@@ -207,9 +207,45 @@ def callback():
         except (AliExpressAPIError, AliExpressTransportError) as exc:
             product_error = exc
 
+    # 4) Freight query read-only (Fase 4) com o MESMO token em memória.
+    #    Escolhe o primeiro SKU elegível (com sku_id e estoque não-zero/vazio).
+    freight_result = None
+    freight_error = None
+    selected_sku_id = _choose_freight_sku(product_detail.skus if product_detail else None)
+    if first_id and selected_sku_id:
+        try:
+            freight_result = client.query_freight(
+                product_id=first_id,
+                selected_sku_id=selected_sku_id,
+                ship_to_country="BR",
+                currency="BRL",
+                quantity=1,
+            )
+        except (AliExpressAPIError, AliExpressTransportError) as exc:
+            freight_error = exc
+
     return _render_success(
-        token, result, product_detail=product_detail, product_error=product_error
+        token,
+        result,
+        product_detail=product_detail,
+        product_error=product_error,
+        freight_result=freight_result,
+        freight_error=freight_error,
     )
+
+
+def _choose_freight_sku(skus: Any) -> Optional[str]:
+    """Retorna o sku_id do primeiro SKU elegível para cotação de frete."""
+    if not isinstance(skus, (list, tuple)):
+        return None
+    for sku in skus:
+        sku_id = getattr(sku, "sku_id", None)
+        if not sku_id:
+            continue
+        stock = getattr(sku, "available_stock", None)
+        if stock is None or stock > 0:
+            return sku_id
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -221,6 +257,8 @@ def _render_success(
     *,
     product_detail: Any = None,
     product_error: Any = None,
+    freight_result: Any = None,
+    freight_error: Any = None,
 ) -> str:
     lines = [
         "AliExpress autorizado com sucesso",
@@ -280,8 +318,43 @@ def _render_success(
             f"preço: {'presente' if has_price else 'ausente'}",
             f"estoque: {'presente' if has_stock else 'ausente'}",
         ]
+
+    # Seção freight.query (Fase 4) — sanitizada (sem token/code/sign).
+    if freight_error is not None:
+        code = getattr(freight_error, "code", None)
+        sub_code = getattr(freight_error, "sub_code", None)
+        raw = getattr(freight_error, "raw", None)
+        request_id = _find_request_id(raw)
+        current_app.logger.error(
+            "AliExpress DS freight.query falhou: type=%s message=%s code=%s sub_code=%s request_id=%s",
+            type(freight_error).__name__,
+            getattr(freight_error, "message", str(freight_error)),
+            code,
+            sub_code,
+            request_id,
+        )
+        lines += [
+            "",
+            "DS freight.query: failure",
+            f"code: {code}",
+            f"sub_code: {sub_code}",
+            f"request_id: {request_id}",
+        ]
+    elif freight_result is not None:
+        options = freight_result.options or []
+        has_fee = freight_result.min_fee is not None
+        has_currency = freight_result.currency is not None
+        has_days = freight_result.min_delivery_days is not None
+        lines += [
+            "",
+            "DS freight.query: success",
+            f"opções de frete: {len(options)}",
+            f"frete mínimo: {'presente' if has_fee else 'ausente'}",
+            f"moeda: {'presente' if has_currency else 'ausente'}",
+            f"prazo: {'presente' if has_days else 'ausente'}",
+        ]
     else:
-        lines += ["", "DS product.get: skipped (busca sem produtos)"]
+        lines += ["", "DS freight.query: skipped (sem SKU elegível)"]
 
     return "<br>\n".join(lines)
 
