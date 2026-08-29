@@ -239,13 +239,20 @@ def _render_success(token: Any, result: Any) -> str:
 
 def _render_oauth_failure(exc: Exception) -> str:
     code = getattr(exc, "code", None)
+    sub_code = getattr(exc, "sub_code", None)
+    raw = getattr(exc, "raw", None)
+    request_id = raw.get("request_id") if isinstance(raw, dict) else None
+    # Log sanitizado: apenas a mensagem (sem code OAuth/state/token/sign).
+    current_app.logger.error("AliExpress OAuth token exchange falhou: %s", getattr(exc, "message", str(exc)))
     lines = [
         "AliExpress OAuth falhou",
         "OAuth: failure",
         f"code: {code}",
+        f"sub_code: {sub_code}",
+        f"request_id: {request_id}",
         "DS smoke: skipped",
         "",
-        "Detalhe sanitizado: verifique code/msg no console da aplicação.",
+        "Detalhe sanitizado: verifique code/sub_code/request_id no log da aplicação.",
     ]
     return "<br>\n".join(lines), 200
 

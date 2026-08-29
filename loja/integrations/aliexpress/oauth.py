@@ -14,12 +14,15 @@ from __future__ import annotations
 import hashlib
 import hmac as _hmac
 import json
+import logging
 import os
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Any, Iterable, Mapping, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
+
+_logger = logging.getLogger(__name__)
 
 from .errors import (
     AliExpressAPIError,
@@ -151,6 +154,27 @@ def exchange_authorization_code(
     except json.JSONDecodeError as exc:
         raise AliExpressAuthError("resposta de token não é JSON válido", raw=body[:500]) from exc
 
+    # Diagnóstico temporário e sanitizado do token exchange. NÃO registra
+    # authorization code, AppKey, AppSecret, sign ou token.
+    _tp = urlparse(base_url.rstrip("/") + DEFAULT_OAUTH_API_PATH)
+    _top_keys = sorted(data.keys()) if isinstance(data, dict) else []
+    _err_resp = data.get("error_response") if isinstance(data.get("error_response"), dict) else {}
+    _src = (
+        _err_resp
+        or (data.get("error") if isinstance(data.get("error"), dict) else {})
+        or (data if isinstance(data, dict) else {})
+    )
+    _logger.info(
+        "AliExpress token exchange diagnostic: host=%s path=%s http_status=200 "
+        "top_level_keys=%s error_code=%s error_sub_code=%s request_id=%s",
+        _tp.hostname,
+        _tp.path,
+        _top_keys,
+        _src.get("code"),
+        _src.get("sub_code"),
+        _src.get("request_id") or data.get("request_id"),
+    )
+
     return normalize_oauth_token(data)
 
 
@@ -166,20 +190,51 @@ def _as_int(value: Any) -> Optional[int]:
 def normalize_oauth_token(data: Mapping[str, Any]) -> "AliExpressOAuthToken":
     if not isinstance(data, dict):
         raise AliExpressAuthError("resposta de token inesperada (não é objeto)", raw=data)
-    if "access_token" not in data:
-        err = data.get("error") if isinstance(data.get("error"), dict) else {}
-        code = data.get("code") or err.get("code")
-        msg = data.get("msg") or err.get("msg") or data.get("error_description") or "falha OAuth"
-        sub_msg = data.get("sub_msg") or err.get("sub_msg")
-        raise AliExpressAuthError(f"{msg} (code={code}, sub_msg={sub_msg})", code=code)
-    return AliExpressOAuthToken(
-        access_token=str(data["access_token"]),
-        refresh_token=data.get("refresh_token"),
-        expires_in=_as_int(data.get("expires_in")),
-        refresh_expires_in=_as_int(data.get("refresh_expires_in")),
-        seller_id=data.get("seller_id") or data.get("ali_id"),
-        user_id=data.get("user_id"),
-        account_platform=data.get("account_platform"),
+
+    if "access_token" in data:
+        return AliExpressOAuthToken(
+            access_token=str(data["access_token"]),
+            refresh_token=data.get("refresh_token"),
+            expires_in=_as_int(data.get("expires_in")),
+            refresh_expires_in=_as_int(data.get("refresh_expires_in")),
+            seller_id=data.get("seller_id") or data.get("ali_id"),
+            user_id=data.get("user_id"),
+            account_platform=data.get("account_platform"),
+        )
+
+    error_response = (
+        data.get("error_response")
+        if isinstance(data.get("error_response"), dict)
+        else {}
+    )
+    error = (
+        data.get("error")
+        if isinstance(data.get("error"), dict)
+        else {}
+    )
+    source = error_response or error or data
+
+    code = source.get("code")
+    msg = (
+        source.get("msg")
+        or source.get("message")
+        or data.get("error_description")
+        or "falha OAuth"
+    )
+    sub_code = source.get("sub_code")
+    sub_msg = source.get("sub_msg")
+    request_id = source.get("request_id") or data.get("request_id")
+
+    raise AliExpressAuthError(
+        f"{msg} (code={code}, sub_code={sub_code})",
+        code=code,
+        sub_code=sub_code,
+        raw={
+            "code": code,
+            "sub_code": sub_code,
+            "sub_msg": sub_msg,
+            "request_id": request_id,
+        },
     )
 
 

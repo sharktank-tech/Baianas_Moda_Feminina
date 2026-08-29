@@ -1,11 +1,20 @@
 import os
 
+import logging
+
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import text
 import uuid
+
+# Em ambientes serverless (Vercel) o logger de acesso do Werkzeug registra a
+# query string completa (incluindo code/state do callback OAuth). Reduzimos para
+# WARNING para evitar vazamento de dados sensíveis em log. Logs de erro da
+# aplicação permanecem intactos.
+if os.environ.get("VERCEL"):
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 db = SQLAlchemy()
 login_manager = LoginManager()

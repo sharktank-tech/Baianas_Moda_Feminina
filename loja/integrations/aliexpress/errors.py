@@ -18,6 +18,8 @@ _SECRET_KEYS = (
     "password",
     "token",
     "authorization",
+    "authorization_code",
+    "state",
     "database_url",
     "database",
 )

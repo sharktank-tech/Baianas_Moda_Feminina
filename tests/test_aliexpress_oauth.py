@@ -23,6 +23,7 @@ from loja.integrations.aliexpress.oauth import (
     AliExpressOAuthToken,
     build_authorization_url,
     exchange_authorization_code,
+    normalize_oauth_token,
     sign_open_platform_request,
 )
 from loja.integrations.aliexpress.routes import (
@@ -240,6 +241,31 @@ def test_exchange_error_raises_auth():
     body = '{"error":{"code":"40010","msg":"invalid code"},"sub_msg":"bad"}'
     with pytest.raises(AliExpressAuthError):
         exchange_authorization_code("k", "s", "CODE", transport=_FakeOAuthTransport(body))
+
+
+ERROR_RESPONSE_FIXTURE = {
+    "error_response": {
+        "code": 123,
+        "msg": "Invalid signature",
+        "sub_code": "isp.invalid-signature",
+        "sub_msg": "signature invalid",
+        "request_id": "req-test",
+    }
+}
+
+
+def test_normalize_oauth_token_error_response_shape():
+    with pytest.raises(AliExpressAuthError) as excinfo:
+        normalize_oauth_token(ERROR_RESPONSE_FIXTURE)
+    exc = excinfo.value
+    assert exc.code == 123
+    assert exc.sub_code == "isp.invalid-signature"
+    assert isinstance(exc.raw, dict)
+    assert exc.raw.get("request_id") == "req-test"
+    assert exc.raw.get("sub_code") == "isp.invalid-signature"
+    # Mensagem sanitizada (sem code OAuth/state/token).
+    assert "Invalid signature" in exc.message
+    assert exc.raw.get("sub_msg") == "signature invalid"
 
 
 def test_token_repr_redacts_secrets():
@@ -585,3 +611,51 @@ def test_callback_ds_smoke_error_sanitized(app_client, monkeypatch):
     assert "code: 20020" in body
     assert "RID1" in body  # request_id pode ser exibido (não é secreto)
     assert "REAL_AT" not in body  # token nunca exibido
+
+
+def test_callback_oauth_failure_shows_sanitized(app_client, monkeypatch, caplog):
+    import logging
+
+    real_code = "REAL_OAUTH_CODE_secret123"
+    real_state = "REAL_STATE_secret456"
+    # Simula o comportamento Vercel: reduz o log de acesso do Werkzeug.
+    monkeypatch.setattr(
+        logging.getLogger("werkzeug"), "level", logging.WARNING
+    )
+    monkeypatch.setenv("ALIEXPRESS_APP_KEY", "k")
+    monkeypatch.setenv("ALIEXPRESS_APP_SECRET", "s")
+    monkeypatch.setenv("ALIEXPRESS_CALLBACK_URL", "https://x.com/cb")
+
+    def _raise(*a, **k):
+        return normalize_oauth_token(ERROR_RESPONSE_FIXTURE)
+
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes.exchange_authorization_code", _raise
+    )
+    with app_client.session_transaction() as sess:
+        sess[STATE_KEY] = {"state": real_state, "ts": time.time()}
+    with caplog.at_level(logging.INFO):
+        r = app_client.get(
+            f"/integrations/aliexpress/callback?code={real_code}&state={real_state}"
+        )
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert "code: 123" in body
+    assert "sub_code: isp.invalid-signature" in body
+    assert "request_id: req-test" in body
+    # Nenhum dado sensível (code OAuth/state/token) deve aparecer nos logs.
+    log_text = caplog.text
+    assert real_code not in log_text
+    assert real_state not in log_text
+
+
+def test_create_app_lowers_werkzeug_level_on_vercel(monkeypatch):
+    import logging
+
+    lg = logging.getLogger("werkzeug")
+    monkeypatch.setattr(lg, "level", logging.WARNING)
+    monkeypatch.setenv("VERCEL", "1")
+    from loja import create_app
+
+    create_app()
+    assert lg.level == logging.WARNING
