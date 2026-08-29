@@ -93,6 +93,18 @@ def test_buyer_freight_price_included_when_both_present():
     assert '"price_currency":"USD"' in dto
 
 
+def test_buyer_freight_sku_id_present_in_json():
+    p = build_buyer_freight_params(product_id="P1", sku_id="12345")
+    dto = p["param_aeop_freight_calculate_for_buyer_d_t_o"]
+    assert '"sku_id":"12345"' in dto
+
+
+def test_buyer_freight_sku_id_omitted_when_absent():
+    p = build_buyer_freight_params(product_id="P1")
+    dto = p["param_aeop_freight_calculate_for_buyer_d_t_o"]
+    assert "sku_id" not in dto
+
+
 # ----- assinatura inclui o business param -----------------------------------
 def test_buyer_param_participates_in_signature():
     transport = _FakeTransport(

@@ -38,6 +38,7 @@ def build_buyer_freight_params(
     send_goods_country_code: str = "CN",
     province_code: Optional[str] = None,
     city_code: Optional[str] = None,
+    sku_id: Optional[str] = None,
     price: Optional[Decimal] = None,
     price_currency: Optional[str] = None,
 ) -> Mapping[str, str]:
@@ -67,6 +68,8 @@ def build_buyer_freight_params(
         "province_code": province_code or "",
         "city_code": city_code or "",
     }
+    if sku_id:
+        dto["sku_id"] = sku_id
     if price is not None and price_currency is not None:
         dto["price"] = str(price)
         dto["price_currency"] = price_currency

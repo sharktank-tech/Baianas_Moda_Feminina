@@ -761,6 +761,16 @@ def _probe_product_detail(pid, sku_ids):
     )
 
 
+def _probe_product_detail_skus(pid, skus):
+    # skus: list of (sku_id, available_stock)
+    return AliExpressProductDetail(
+        product_id=pid,
+        title="p",
+        images=["https://x/a.jpg"],
+        skus=[AliExpressProductSku(sku_id=s, available_stock=stock) for s, stock in skus],
+    )
+
+
 def _probe_freight_success():
     return AliExpressFreightResult(
         options=[
@@ -1043,6 +1053,8 @@ def test_callback_buyer_freight_success(app_client, monkeypatch, caplog):
     # Origem de envio enviada ao método.
     _, kw = client.buyer_calls[0]
     assert kw["send_goods_country_code"] == "CN"
+    # SKU elegível enviado à API (snake_case).
+    assert kw["sku_id"] == "s1"
     # Nenhum segredo/ID em logs.
     assert "REAL_AT" not in caplog.text
 
@@ -1066,11 +1078,56 @@ def test_callback_buyer_freight_passes_destination_from_env(app_client, monkeypa
     _, kw = client.buyer_calls[0]
     assert kw["province_code"] == "SP"
     assert kw["city_code"] == "SAO_PAULO"
+    assert kw["sku_id"] == "s1"
     # Valores NÃO vazam em body nem em logs.
     assert "SP" not in body
     assert "SAO_PAULO" not in body
     assert "SP" not in caplog.text
     assert "SAO_PAULO" not in caplog.text
+
+
+def test_callback_buyer_freight_skips_out_of_stock_and_uses_first_eligible(app_client, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
+    calls = []
+    get_map = {"p1": _probe_product_detail_skus("p1", [("s0", 0), ("s1", 5), ("s2", 3)])}
+    buyer = {"p1": _probe_buyer_success()}
+    client = _ProbeClient(
+        _probe_search_result(["p1"]), get_map, {}, calls, buyer_map=buyer
+    )
+    with caplog.at_level(logging.INFO):
+        body = _run_probe(app_client, monkeypatch, client)
+    assert "Buyer freight.calculate: success" in body
+    # Chamada única, usando o primeiro SKU com estoque (s1, ignora s0=0).
+    assert len(client.buyer_calls) == 1
+    _, kw = client.buyer_calls[0]
+    assert kw["sku_id"] == "s1"
+    assert "s0" not in caplog.text
+
+
+def test_callback_buyer_freight_no_eligible_sku_unavailable(app_client, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
+    calls = []
+    get_map = {"p1": _probe_product_detail_skus("p1", [("s0", 0), ("s1", 0)])}
+    client = _ProbeClient(
+        _probe_search_result(["p1"]), get_map, {}, calls, buyer_map={}
+    )
+    with caplog.at_level(logging.INFO):
+        body = _run_probe(app_client, monkeypatch, client)
+    assert "Buyer freight.calculate: unavailable" in body
+    assert "motivo: nenhum SKU elegível" in body
+    # Não deve chamar a API quando não há SKU elegível.
+    assert client.buyer_calls == []
+    # IDs/valores não vazam em body nem em logs.
+    assert "s0" not in body
+    assert "s1" not in body
+    assert "s0" not in caplog.text
+    assert "s1" not in caplog.text
 
 
 def test_callback_buyer_freight_failure_sanitized(app_client, monkeypatch, caplog):

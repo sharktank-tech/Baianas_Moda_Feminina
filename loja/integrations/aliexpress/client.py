@@ -335,6 +335,7 @@ class AliExpressClient:
         send_goods_country_code: str = "CN",
         province_code: Optional[str] = None,
         city_code: Optional[str] = None,
+        sku_id: Optional[str] = None,
         price: Optional[Decimal] = None,
         price_currency: Optional[str] = None,
     ) -> "AliExpressFreightResult":
@@ -358,6 +359,7 @@ class AliExpressClient:
             send_goods_country_code=send_goods_country_code,
             province_code=province_code,
             city_code=city_code,
+            sku_id=sku_id,
             price=price,
             price_currency=price_currency,
         )

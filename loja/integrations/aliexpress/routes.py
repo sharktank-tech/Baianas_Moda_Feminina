@@ -289,13 +289,26 @@ def callback():
 
     elif product_detail is not None and use_buyer:
         # ---- logistics.buyer.freight.calculate (Fase 4b) ----
-        #    Chamada única por product_id (não recebe selectedSkuId). Reutiliza
-        #    o mesmo product_detail da Fase 3.
+        #    Chamada única por product_id + primeiro SKU elegível (a API exige
+        #    skuId). Reutiliza o mesmo product_detail da Fase 3; sem loop/sleep.
         product_id = product_detail.product_id
-        if product_id is not None:
+        eligible_sku = next(
+            (
+                sku
+                for sku in (product_detail.skus or [])
+                if getattr(sku, "sku_id", None)
+                and (
+                    getattr(sku, "available_stock", None) is None
+                    or getattr(sku, "available_stock", None) > 0
+                )
+            ),
+            None,
+        )
+        if product_id is not None and eligible_sku is not None:
             try:
                 fret = client.calculate_buyer_freight(
                     product_id=product_id,
+                    sku_id=eligible_sku.sku_id,
                     country_code="BR",
                     product_num=1,
                     send_goods_country_code=send_goods_country_code,
@@ -307,6 +320,16 @@ def callback():
             except (AliExpressAPIError, AliExpressTransportError) as exc:
                 freight_error = exc
                 freight_candidates = 1
+        elif product_id is not None:
+            # Sem SKU elegível: não chamar a API; diagnóstico sanitizado.
+            freight_unavailable = {
+                "attempted": 0,
+                "code_501": 0,
+                "code_505": 0,
+                "other": 0,
+                "reason": "nenhum SKU elegível",
+            }
+            current_app.logger.info("buyer freight: nenhum SKU elegível")
 
     if not use_buyer and freight_result is None and freight_error is None:
         unavail["attempted"] = freight_candidates
@@ -453,6 +476,8 @@ def _render_success(
             f"code 505: {s['code_505']}",
             f"outros erros: {s['other']}",
         ]
+        if s.get("reason"):
+            lines.append(f"motivo: {s['reason']}")
     elif freight_result is not None:
         options = freight_result.options or []
         has_fee = freight_result.min_fee is not None
