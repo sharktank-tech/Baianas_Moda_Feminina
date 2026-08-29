@@ -10,6 +10,7 @@ import pytest
 from loja.integrations.aliexpress import AliExpressClient
 from loja.integrations.aliexpress.freight import (
     build_freight_params,
+    describe_shape,
     normalize_freight_response,
 )
 from loja.integrations.aliexpress.sign import sign_sync
@@ -175,3 +176,69 @@ def test_query_freight_no_secret_in_logs(caplog):
     log_text = caplog.text
     assert "SUPERSECRET" not in log_text
     assert "TOKEN123" not in log_text
+
+
+# ----- shape live (aliases) ------------------------------------------------
+def _freight_item():
+    return {
+        "code": "CAINIAO_STANDARD",
+        "shipping_fee_currency": "USD",
+        "free_shipping": False,
+        "guaranteed_delivery_days": 60,
+        "max_delivery_days": 19,
+        "tracking": True,
+        "shipping_fee_format": "US $1.82",
+        "delivery_date_desc": "May 05 - 14",
+        "company": "AliExpress standard shipping",
+        "ship_from_country": "CN",
+        "min_delivery_days": 10,
+        "shipping_fee_cent": "1.82",
+    }
+
+
+def _assert_live_option(res):
+    assert len(res.options) == 1
+    opt = res.options[0]
+    assert opt.shipping_fee == Decimal("1.82")
+    assert opt.currency == "USD"
+    assert opt.delivery_days == 10  # prefere min_delivery_days
+    assert opt.estimated_delivery == "May 05 - 14"
+    assert opt.tracking is True
+    assert opt.country == "CN"
+    assert res.min_fee == Decimal("1.82")
+    assert res.min_delivery_days == 10
+    # Campos extras preservados em raw (não inventados).
+    assert opt.raw.get("max_delivery_days") == 19
+    assert opt.raw.get("guaranteed_delivery_days") == 60
+    assert opt.raw.get("free_shipping") is False
+    assert "shipping_fee_cent" in opt.raw
+
+
+def test_normalize_freight_live_shape_freight_list():
+    # Forma live: {"freight": [ {...} ]}
+    payload = {"freight": [_freight_item()]}
+    res = normalize_freight_response(payload, method="aliexpress.ds.freight.query")
+    _assert_live_option(res)
+
+
+def test_normalize_freight_live_shape_result_delivery_options():
+    payload = {"result": {"delivery_options": [_freight_item()]}}
+    res = normalize_freight_response(payload, method="aliexpress.ds.freight.query")
+    _assert_live_option(res)
+
+
+def test_normalize_freight_live_shape_data_freight():
+    payload = {"data": {"freight": [_freight_item()]}}
+    res = normalize_freight_response(payload, method="aliexpress.ds.freight.query")
+    _assert_live_option(res)
+
+
+def test_describe_shape_omits_values():
+    shape = describe_shape({"code": "00", "data": {"delivery_options": [{"company": "X"}]}})
+    text = "\n".join(shape)
+    # Apenas chaves/tipos/tamanhos; NUNCA valores.
+    assert "code" in text
+    assert "delivery_options" in text
+    assert "company" in text
+    assert "00" not in text  # valor não vaza
+    assert "X" not in text

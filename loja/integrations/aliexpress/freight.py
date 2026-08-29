@@ -17,12 +17,23 @@ Não dividimos valores automaticamente só por causa do nome (ex.: shipping_fee_
 from __future__ import annotations
 
 import json
+import logging
+import os
 from decimal import Decimal
 from typing import Any, List, Mapping, Optional
 
 from .errors import AliExpressAPIError
 from .models import AliExpressFreightOption, AliExpressFreightResult
 from .search import _as_int, _as_str, parse_price
+
+_LOG = logging.getLogger(__name__)
+
+
+def _first_not_none(*values: Any) -> Any:
+    for v in values:
+        if v is not None:
+            return v
+    return None
 
 
 def build_freight_params(
@@ -86,79 +97,138 @@ def _as_bool(value: Any) -> Optional[bool]:
 
 
 def _extract_freight_options(value: Any) -> List[dict]:
-    """Localiza a lista de opções de frete em formatos variados (tolerante)."""
+    """Localiza a lista de opções de frete em formatos variados (tolerante).
+
+    Desce por wrappers conhecidos (result/data/freight/delivery/opções) sem
+    interpretar qualquer dict arbitrário como opção. Um dict folha só é tratado
+    como opção única se contiver campos típicos de frete.
+    """
+    _WRAPPER_KEYS = (
+        "freight_list",
+        "freightList",
+        "freightOptions",
+        "shipping_options",
+        "options",
+        "list",
+        "result",
+        "data",
+        "freight",
+        "delivery",
+        "delivery_options",
+        "deliveryOptions",
+        "delivery_option_list",
+        "deliveryOptionList",
+        "shipping_methods",
+        "shippingMethods",
+    )
+    _OPTION_FIELD_KEYS = (
+        "service_name",
+        "serviceName",
+        "shipping_fee",
+        "shipping_fee_cent",
+        "shippingFee",
+        "shippingFeeCent",
+        "freight_fee",
+        "freightFee",
+        "company",
+        "delivery_days",
+        "min_delivery_days",
+        "max_delivery_days",
+        "deliveryDays",
+        "delivery_date_desc",
+    )
     if isinstance(value, list):
         return value
     if isinstance(value, Mapping):
-        for key in (
-            "freight_list",
-            "freightList",
-            "freightOptions",
-            "shipping_options",
-            "options",
-            "list",
-            "result",
-            "data",
-            "freight",
-        ):
+        for key in _WRAPPER_KEYS:
             item = value.get(key)
             if isinstance(item, (list, Mapping)):
                 found = _extract_freight_options(item)
                 if found:
                     return found
-        # Dict único que parece uma opção de frete.
-        if any(
-            k in value
-            for k in (
-                "serviceName",
-                "freightFee",
-                "shippingFee",
-                "company",
-                "deliveryDays",
-                "freight_list",
-            )
-        ):
+        # Dict folha que parece uma opção de frete.
+        if any(k in value for k in _OPTION_FIELD_KEYS):
             return [value]
     return []
 
 
 def _normalize_freight_option(option: Mapping[str, Any]) -> AliExpressFreightOption:
+    # Prazo: prefere min_delivery_days; cai para max/guaranteed/deliveryDays/delivery_days.
+    delivery_days = _as_int(
+        _first_not_none(
+            option.get("min_delivery_days"),
+            option.get("max_delivery_days"),
+            option.get("guaranteed_delivery_days"),
+            option.get("deliveryDays"),
+            option.get("delivery_days"),
+        )
+    )
     return AliExpressFreightOption(
-        service_name=_as_str(_opt(option, "serviceName", "service_name", "service")),
+        service_name=_as_str(
+            _opt(option, "serviceName", "service_name", "code")
+        ),
         company=_as_str(
             _opt(option, "company", "companyName", "company_name", "logisticsCompany")
         ),
+        # Não dividimos valores_cent por 100; parseamos como estão.
         shipping_fee=parse_price(
             _opt(
                 option,
-                "shippingFee",
-                "freightFee",
+                "shipping_fee_cent",
+                "shippingFeeCent",
                 "shipping_fee",
+                "shippingFee",
                 "freight_fee",
-                "fee",
+                "freightFee",
             )
         ),
-        currency=_as_str(_opt(option, "currency", "currencyCode", "currency_code")),
-        delivery_days=_as_int(
+        currency=_as_str(
+            _opt(option, "shipping_fee_currency", "currency", "currency_code", "currencyCode")
+        ),
+        delivery_days=delivery_days,
+        estimated_delivery=_as_str(
             _opt(
                 option,
-                "deliveryDays",
-                "deliveryTime",
-                "delivery_days",
-                "estimatedDeliveryTime",
-                "deliveryTimeRange",
+                "delivery_date_desc",
+                "delivery_date",
+                "estimatedDelivery",
+                "estimatedDeliveryDate",
             )
         ),
-        estimated_delivery=_as_str(
-            _opt(option, "estimatedDelivery", "estimated_delivery", "estimatedDeliveryDate")
-        ),
-        tracking=_as_bool(_opt(option, "tracking", "trackingFlag", "trackable")),
+        tracking=_as_bool(_opt(option, "tracking", "tracking_code", "trackingFlag", "trackable")),
         warehouse=_as_str(_opt(option, "warehouse", "warehouseName", "warehouse_name")),
         country=_as_str(
-            _opt(option, "country", "countryCode", "dispatchCountry", "shipFromCountry")
+            _opt(option, "ship_from_country", "dispatchCountry", "country", "countryCode")
         ),
         raw=dict(option),
     )
+
+
+def describe_shape(obj: Any, indent: int = 0) -> List[str]:
+    """Descreve a estrutura (chaves/tipos/tamanhos) SEM registrar valores.
+
+    Usado só para diagnóstico de shape quando vêm 0 opções, em ambiente
+    deployado (Preview/smoke). Nunca inclui valores sensíveis.
+    """
+    pad = "  " * indent
+    lines: List[str] = []
+    if isinstance(obj, Mapping):
+        lines.append(f"{pad}keys={list(obj.keys())}")
+        for k, v in obj.items():
+            if isinstance(v, list):
+                lines.append(f"{pad}{k}=list[{len(v)}]")
+                if v and isinstance(v[0], Mapping):
+                    lines.append(f"{pad}{k}[0].keys={list(v[0].keys())}")
+            elif isinstance(v, Mapping):
+                lines.append(f"{pad}{k}.keys={list(v.keys())}")
+                lines.extend(describe_shape(v, indent + 1))
+            else:
+                lines.append(f"{pad}{k}=<{type(v).__name__}>")
+    elif isinstance(obj, list):
+        lines.append(f"{pad}list[{len(obj)}]")
+        if obj and isinstance(obj[0], Mapping):
+            lines.append(f"{pad}[0].keys={list(obj[0].keys())}")
+    return lines
 
 
 def normalize_freight_response(
@@ -167,6 +237,7 @@ def normalize_freight_response(
     """Converte o payload (já decodificado) em AliExpressFreightResult.
 
     Tolerante a wrappers/formatos live; preserva `raw`. Não inventa valores.
+    Se vier 0 opções em ambiente deployado, registra shape (sem valores).
     """
     if not isinstance(payload, Mapping):
         raise AliExpressAPIError("resposta de frete inesperada (não é objeto)", raw=payload)
@@ -175,6 +246,11 @@ def normalize_freight_response(
     options = [
         _normalize_freight_option(o) for o in options_raw if isinstance(o, Mapping)
     ]
+
+    if not options and os.environ.get("VERCEL"):
+        # Diagnóstico seguro: apenas nomes de chaves/tipos/tamanhos, sem valores.
+        shape = describe_shape(payload)
+        _LOG.info("AliExpress freight.query retornou 0 opções. shape:\n%s", "\n".join(shape))
 
     currency = None
     for o in options:
