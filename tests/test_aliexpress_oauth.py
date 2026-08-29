@@ -1036,10 +1036,10 @@ def test_callback_buyer_freight_success(app_client, monkeypatch, caplog):
     monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
     monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
     calls = []
-    get_map = {"p1": _probe_product_detail("p1", ["s1"])}
-    buyer = {"p1": _probe_buyer_success()}
+    get_map = {"100500123": _probe_product_detail("100500123", ["s1"])}
+    buyer = {"100500123": _probe_buyer_success()}
     client = _ProbeClient(
-        _probe_search_result(["p1"]), get_map, {}, calls, buyer_map=buyer
+        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
     )
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)
@@ -1067,10 +1067,10 @@ def test_callback_buyer_freight_passes_destination_from_env(app_client, monkeypa
     monkeypatch.setenv("ALIEXPRESS_SMOKE_PROVINCE_CODE", "SP")
     monkeypatch.setenv("ALIEXPRESS_SMOKE_CITY_CODE", "SAO_PAULO")
     calls = []
-    get_map = {"p1": _probe_product_detail("p1", ["s1"])}
-    buyer = {"p1": _probe_buyer_success()}
+    get_map = {"100500123": _probe_product_detail("100500123", ["s1"])}
+    buyer = {"100500123": _probe_buyer_success()}
     client = _ProbeClient(
-        _probe_search_result(["p1"]), get_map, {}, calls, buyer_map=buyer
+        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
     )
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)
@@ -1092,10 +1092,10 @@ def test_callback_buyer_freight_skips_out_of_stock_and_uses_first_eligible(app_c
     monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
     monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
     calls = []
-    get_map = {"p1": _probe_product_detail_skus("p1", [("s0", 0), ("s1", 5), ("s2", 3)])}
-    buyer = {"p1": _probe_buyer_success()}
+    get_map = {"100500123": _probe_product_detail_skus("100500123", [("s0", 0), ("s1", 5), ("s2", 3)])}
+    buyer = {"100500123": _probe_buyer_success()}
     client = _ProbeClient(
-        _probe_search_result(["p1"]), get_map, {}, calls, buyer_map=buyer
+        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
     )
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)
@@ -1113,9 +1113,9 @@ def test_callback_buyer_freight_no_eligible_sku_unavailable(app_client, monkeypa
     monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
     monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
     calls = []
-    get_map = {"p1": _probe_product_detail_skus("p1", [("s0", 0), ("s1", 0)])}
+    get_map = {"100500123": _probe_product_detail_skus("100500123", [("s0", 0), ("s1", 0)])}
     client = _ProbeClient(
-        _probe_search_result(["p1"]), get_map, {}, calls, buyer_map={}
+        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map={}
     )
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)
@@ -1136,10 +1136,10 @@ def test_callback_buyer_freight_failure_sanitized(app_client, monkeypatch, caplo
     monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
     monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
     calls = []
-    get_map = {"p1": _probe_product_detail("p1", ["s1"])}
-    buyer = {"p1": AliExpressAPIError("method not found", code=27, sub_code="isp.x")}
+    get_map = {"100500123": _probe_product_detail("100500123", ["s1"])}
+    buyer = {"100500123": AliExpressAPIError("method not found", code=27, sub_code="isp.x")}
     client = _ProbeClient(
-        _probe_search_result(["p1"]), get_map, {}, calls, buyer_map=buyer
+        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
     )
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)

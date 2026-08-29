@@ -57,19 +57,25 @@ def build_buyer_freight_params(
         raise ValueError(
             "send_goods_country_code é obrigatório para buyer.freight.calculate"
         )
+    try:
+        product_id_num = int(product_id)
+    except (TypeError, ValueError):
+        raise ValueError("product_id deve ser numérico para buyer.freight.calculate")
     if not isinstance(product_num, int) or product_num < 1:
         raise ValueError("product_num deve ser um inteiro >= 1")
 
     dto: dict = {
         "country_code": country_code,
-        "product_id": product_id,
-        "product_num": product_num,
+        "product_id": product_id_num,
+        "product_num": int(product_num),
         "send_goods_country_code": send_goods_country_code,
-        "province_code": province_code or "",
-        "city_code": city_code or "",
     }
+    if province_code:
+        dto["province_code"] = province_code
+    if city_code:
+        dto["city_code"] = city_code
     if sku_id:
-        dto["sku_id"] = sku_id
+        dto["sku_id"] = str(sku_id)
     if price is not None and price_currency is not None:
         dto["price"] = str(price)
         dto["price_currency"] = price_currency

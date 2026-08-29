@@ -36,22 +36,22 @@ def test_buyer_freight_requires_product_id():
 
 def test_buyer_freight_requires_country_and_origin():
     with pytest.raises(ValueError):
-        build_buyer_freight_params(product_id="P1", country_code="")
+        build_buyer_freight_params(product_id=123456, country_code="")
     with pytest.raises(ValueError):
-        build_buyer_freight_params(product_id="P1", send_goods_country_code="")
+        build_buyer_freight_params(product_id=123456, send_goods_country_code="")
 
 
 def test_buyer_freight_product_num_minimum():
     with pytest.raises(ValueError):
-        build_buyer_freight_params(product_id="P1", product_num=0)
-    p = build_buyer_freight_params(product_id="P1", product_num=1)
+        build_buyer_freight_params(product_id=123456, product_num=0)
+    p = build_buyer_freight_params(product_id=123456, product_num=1)
     assert '"product_num":1' in p["param_aeop_freight_calculate_for_buyer_d_t_o"]
 
 
 # ----- JSON compacto determinístico ----------------------------------------
 def test_buyer_freight_params_json_deterministic():
     p = build_buyer_freight_params(
-        product_id="P1",
+        product_id=123456789,
         country_code="BR",
         product_num=1,
         send_goods_country_code="CN",
@@ -59,14 +59,54 @@ def test_buyer_freight_params_json_deterministic():
         city_code=None,
     )
     assert p["param_aeop_freight_calculate_for_buyer_d_t_o"] == (
-        '{"country_code":"BR","product_id":"P1","product_num":1,'
-        '"send_goods_country_code":"CN","province_code":"","city_code":""}'
+        '{"country_code":"BR","product_id":123456789,"product_num":1,'
+        '"send_goods_country_code":"CN"}'
     )
+
+
+def test_buyer_freight_product_id_string_becomes_number():
+    p = build_buyer_freight_params(product_id="123")
+    dto = p["param_aeop_freight_calculate_for_buyer_d_t_o"]
+    assert '"product_id":123' in dto
+    assert '"product_id":"123"' not in dto
+
+
+def test_buyer_freight_product_id_int_stays_number():
+    p = build_buyer_freight_params(product_id=123)
+    dto = p["param_aeop_freight_calculate_for_buyer_d_t_o"]
+    assert '"product_id":123' in dto
+
+
+def test_buyer_freight_product_id_non_numeric_raises():
+    with pytest.raises(ValueError):
+        build_buyer_freight_params(product_id="ABC")
+    with pytest.raises(ValueError):
+        build_buyer_freight_params(product_id=None)
+
+
+def test_buyer_freight_product_num_is_number():
+    p = build_buyer_freight_params(product_id=123, product_num=2)
+    dto = p["param_aeop_freight_calculate_for_buyer_d_t_o"]
+    assert '"product_num":2' in dto
+    assert '"product_num":"2"' not in dto
+
+
+def test_buyer_freight_sku_id_is_string():
+    p = build_buyer_freight_params(product_id=123, sku_id=12345)
+    dto = p["param_aeop_freight_calculate_for_buyer_d_t_o"]
+    assert '"sku_id":"12345"' in dto
+
+
+def test_buyer_freight_province_city_omitted_when_absent():
+    p = build_buyer_freight_params(product_id=123, province_code=None, city_code=None)
+    dto = p["param_aeop_freight_calculate_for_buyer_d_t_o"]
+    assert "province_code" not in dto
+    assert "city_code" not in dto
 
 
 def test_buyer_freight_province_city_optional_present():
     p = build_buyer_freight_params(
-        product_id="P1",
+        product_id=123456,
         country_code="BR",
         send_goods_country_code="CN",
         province_code="SP",
@@ -78,7 +118,7 @@ def test_buyer_freight_province_city_optional_present():
 
 
 def test_buyer_freight_price_omitted_when_absent():
-    p = build_buyer_freight_params(product_id="P1")
+    p = build_buyer_freight_params(product_id=123456)
     dto = p["param_aeop_freight_calculate_for_buyer_d_t_o"]
     assert "price" not in dto
     assert "price_currency" not in dto
@@ -86,7 +126,7 @@ def test_buyer_freight_price_omitted_when_absent():
 
 def test_buyer_freight_price_included_when_both_present():
     p = build_buyer_freight_params(
-        product_id="P1", price=Decimal("9.99"), price_currency="USD"
+        product_id=123456, price=Decimal("9.99"), price_currency="USD"
     )
     dto = p["param_aeop_freight_calculate_for_buyer_d_t_o"]
     assert '"price":"9.99"' in dto
@@ -94,13 +134,13 @@ def test_buyer_freight_price_included_when_both_present():
 
 
 def test_buyer_freight_sku_id_present_in_json():
-    p = build_buyer_freight_params(product_id="P1", sku_id="12345")
+    p = build_buyer_freight_params(product_id=123456, sku_id="12345")
     dto = p["param_aeop_freight_calculate_for_buyer_d_t_o"]
     assert '"sku_id":"12345"' in dto
 
 
 def test_buyer_freight_sku_id_omitted_when_absent():
-    p = build_buyer_freight_params(product_id="P1")
+    p = build_buyer_freight_params(product_id=123456)
     dto = p["param_aeop_freight_calculate_for_buyer_d_t_o"]
     assert "sku_id" not in dto
 
@@ -113,7 +153,7 @@ def test_buyer_param_participates_in_signature():
     client = AliExpressClient(
         app_key="k", app_secret="s", access_token="tok", transport=transport
     )
-    client.calculate_buyer_freight(product_id="P1")
+    client.calculate_buyer_freight(product_id=123456)
     params = transport.last_params
     assert "param_aeop_freight_calculate_for_buyer_d_t_o" in params
     expected = sign_sync({k: v for k, v in params.items() if k != "sign"}, "s")
@@ -127,7 +167,7 @@ def test_buyer_freight_via_client_builds_request():
     client = AliExpressClient(
         app_key="k", app_secret="s", access_token="tok", transport=transport
     )
-    res = client.calculate_buyer_freight(product_id="P1", country_code="BR")
+    res = client.calculate_buyer_freight(product_id=123456, country_code="BR")
     params = transport.last_params
     assert params["method"] == "aliexpress.logistics.buyer.freight.calculate"
     assert params["session"] == "tok"
@@ -228,7 +268,7 @@ def test_buyer_freight_business_error_raises():
         app_key="k", app_secret="s", access_token="tok", transport=transport
     )
     with pytest.raises(AliExpressAPIError) as excinfo:
-        client.calculate_buyer_freight(product_id="P1")
+        client.calculate_buyer_freight(product_id=123456)
     exc = excinfo.value
     assert exc.code == 27
     assert "method not found" in exc.message
@@ -378,7 +418,7 @@ def test_buyer_freight_no_secret_in_logs(caplog):
         transport=transport,
     )
     with caplog.at_level(logging.INFO):
-        client.calculate_buyer_freight(product_id="P1")
+        client.calculate_buyer_freight(product_id=123456)
     log_text = caplog.text
     assert "SUPERSECRET" not in log_text
     assert "TOKEN123" not in log_text
