@@ -25,6 +25,7 @@ from loja.integrations.aliexpress.errors import (
     AliExpressAPIError,
     AliExpressAuthError,
     AliExpressConfigError,
+    AliExpressRateLimitError,
     AliExpressTransportError,
 )
 from loja.integrations.aliexpress.oauth import (
@@ -207,22 +208,71 @@ def callback():
         except (AliExpressAPIError, AliExpressTransportError) as exc:
             product_error = exc
 
-    # 4) Freight query read-only (Fase 4) com o MESMO token em memória.
-    #    Escolhe o primeiro SKU elegível (com sku_id e estoque não-zero/vazio).
+    # 4) Freight query (Fase 4) read-only com o MESMO token em memória.
+    #    Sonda candidatos (produtos da busca x SKUs válidos) e para no primeiro
+    #    com opções. 501/505 = indisponibilidade do candidato (tenta o próximo);
+    #    demais erros (507, auth, assinatura, MissingParameter, ApiCallLimit,
+    #    transporte) abortam o smoke normalmente.
     freight_result = None
     freight_error = None
-    selected_sku_id = _choose_freight_sku(product_detail.skus if product_detail else None)
-    if first_id and selected_sku_id:
+    freight_unavailable = None
+    freight_candidates = 0
+    unavail = {"attempted": 0, "code_501": 0, "code_505": 0, "other": 0}
+
+    candidates = _iter_freight_candidates(
+        client, result.products or [], max_products=5, max_skus_per_product=3
+    )
+    for product_id, sku_id in candidates:
+        if freight_candidates >= MAX_FREIGHT_CALLS:
+            break
         try:
-            freight_result = client.query_freight(
-                product_id=first_id,
-                selected_sku_id=selected_sku_id,
+            fret = client.query_freight(
+                product_id=product_id,
+                selected_sku_id=sku_id,
                 ship_to_country="BR",
                 currency="BRL",
                 quantity=1,
             )
         except (AliExpressAPIError, AliExpressTransportError) as exc:
+            freight_candidates += 1
+            if isinstance(
+                exc, (AliExpressAuthError, AliExpressRateLimitError, AliExpressTransportError)
+            ):
+                # Erro estrutural: aborta (não é "tentar próximo").
+                freight_error = exc
+                break
+            code = getattr(exc, "code", None)
+            if _is_unavailable_code(code):
+                if code in (501, "501"):
+                    unavail["code_501"] += 1
+                elif code in (505, "505"):
+                    unavail["code_505"] += 1
+                else:
+                    unavail["other"] += 1
+                _freight_backoff()
+                continue
+            unavail["other"] += 1
             freight_error = exc
+            break
+        freight_candidates += 1
+        if fret.options:
+            freight_result = fret
+            break
+        # Sucesso sem opções: tenta o próximo candidato.
+        _freight_backoff()
+
+    if freight_result is None and freight_error is None:
+        unavail["attempted"] = freight_candidates
+        freight_unavailable = unavail
+        # Diagnóstico seguro (sem IDs/token/sign/request body) quando tudo 501/505.
+        current_app.logger.info(
+            "freight candidate summary: attempted=%d code_501=%d code_505=%d other=%d "
+            "province_provided=no city_provided=no",
+            unavail["attempted"],
+            unavail["code_501"],
+            unavail["code_505"],
+            unavail["other"],
+        )
 
     return _render_success(
         token,
@@ -231,21 +281,67 @@ def callback():
         product_error=product_error,
         freight_result=freight_result,
         freight_error=freight_error,
+        freight_unavailable=freight_unavailable,
+        freight_candidates=freight_candidates,
     )
 
 
-def _choose_freight_sku(skus: Any) -> Optional[str]:
-    """Retorna o sku_id do primeiro SKU elegível para cotação de frete."""
-    if not isinstance(skus, (list, tuple)):
-        return None
-    for sku in skus:
-        sku_id = getattr(sku, "sku_id", None)
-        if not sku_id:
+# Limite de chamadas de frete no smoke (evita rate limit no endpoint).
+MAX_FREIGHT_CALLS = 8
+
+
+def _is_unavailable_code(code: Any) -> bool:
+    """501/505 = indisponibilidade do candidato (tentar próximo), não erro fatal."""
+    return code in (501, 505, "501", "505")
+
+
+def _freight_backoff() -> None:
+    """Backoff simples entre chamadas adicionais (somente no Preview Vercel)."""
+    if os.environ.get("VERCEL_ENV") == "preview":
+        time.sleep(1.1)
+
+
+def _iter_freight_candidates(
+    client: Any,
+    products: Any,
+    *,
+    max_products: int = 5,
+    max_skus_per_product: int = 3,
+) -> Any:
+    """Gera candidatos (product_id, sku_id) elegíveis, com limites.
+
+    Para cada produto da busca (até max_products), busca o detalhe e emite até
+    max_skus_per_product SKUs válidos (sku_id presente e estoque não-zero/vazio).
+    Falhas de get_product pulam para o próximo produto.
+    """
+    if not isinstance(products, (list, tuple)):
+        return
+    count_p = 0
+    for prod in products:
+        if count_p >= max_products:
+            return
+        product_id = getattr(prod, "item_id", None) or getattr(prod, "external_id", None)
+        if not product_id:
             continue
-        stock = getattr(sku, "available_stock", None)
-        if stock is None or stock > 0:
-            return sku_id
-    return None
+        try:
+            detail = client.get_product(product_id=product_id)
+        except (AliExpressAPIError, AliExpressTransportError):
+            count_p += 1
+            continue
+        count_p += 1
+        skus = getattr(detail, "skus", None) or []
+        valid = 0
+        for sku in skus:
+            if valid >= max_skus_per_product:
+                break
+            sku_id = getattr(sku, "sku_id", None)
+            if not sku_id:
+                continue
+            stock = getattr(sku, "available_stock", None)
+            if stock is not None and stock <= 0:
+                continue
+            yield product_id, sku_id
+            valid += 1
 
 
 # --------------------------------------------------------------------------
@@ -259,6 +355,8 @@ def _render_success(
     product_error: Any = None,
     freight_result: Any = None,
     freight_error: Any = None,
+    freight_unavailable: Any = None,
+    freight_candidates: int = 0,
 ) -> str:
     lines = [
         "AliExpress autorizado com sucesso",
@@ -342,6 +440,16 @@ def _render_success(
             f"request_id: {request_id}",
             f"mensagem: {msg}",
         ]
+    elif freight_unavailable is not None:
+        s = freight_unavailable
+        lines += [
+            "",
+            "DS freight.query: unavailable",
+            f"candidatos testados: {s['attempted']}",
+            f"code 501: {s['code_501']}",
+            f"code 505: {s['code_505']}",
+            f"outros erros: {s['other']}",
+        ]
     elif freight_result is not None:
         options = freight_result.options or []
         has_fee = freight_result.min_fee is not None
@@ -350,6 +458,7 @@ def _render_success(
         lines += [
             "",
             "DS freight.query: success",
+            f"candidatos testados: {freight_candidates}",
             f"opções de frete: {len(options)}",
             f"frete mínimo: {'presente' if has_fee else 'ausente'}",
             f"moeda: {'presente' if has_currency else 'ausente'}",

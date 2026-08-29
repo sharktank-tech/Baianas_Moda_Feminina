@@ -22,6 +22,7 @@ from loja.integrations.aliexpress.errors import (
     AliExpressAPIError,
     AliExpressAuthError,
     AliExpressConfigError,
+    AliExpressRateLimitError,
 )
 from loja.integrations.aliexpress.transport import TransportError
 from loja.integrations.aliexpress.oauth import (
@@ -641,6 +642,7 @@ def test_callback_success_shows_no_token(app_client, monkeypatch):
     assert "SKUs recebidos: 1" in body
     assert "imagens recebidos: 1" in body
     assert "DS freight.query: success" in body
+    assert "candidatos testados: 1" in body
     assert "opções de frete: 1" in body
     assert "frete mínimo: presente" in body
     assert "moeda: presente" in body
@@ -737,6 +739,213 @@ def test_callback_freight_failure_shows_sanitized(app_client, monkeypatch):
     assert "SelectSkuId is Required" in body  # mensagem sanitizada é exibida
     assert "RIDF" in body  # request_id pode ser exibido (não é secreto)
     assert "REAL_AT" not in body  # token nunca exibido
+
+
+# --------------------------------------------------------------------------
+# Smoke de frete (Fase 4): sondagem de candidatos (produto x SKU)
+# --------------------------------------------------------------------------
+def _probe_search_result(product_ids):
+    return AliExpressSearchResult(
+        products=[SimpleNamespace(item_id=pid) for pid in product_ids],
+        total=len(product_ids),
+        wrapper="aliexpress.ds.text.search_response",
+    )
+
+
+def _probe_product_detail(pid, sku_ids):
+    return AliExpressProductDetail(
+        product_id=pid,
+        title="p",
+        images=["https://x/a.jpg"],
+        skus=[AliExpressProductSku(sku_id=s, available_stock=5) for s in sku_ids],
+    )
+
+
+def _probe_freight_success():
+    return AliExpressFreightResult(
+        options=[
+            AliExpressFreightOption(
+                shipping_fee=Decimal("5.00"), currency="BRL", delivery_days=10
+            )
+        ],
+        currency="BRL",
+        min_fee=Decimal("5.00"),
+        min_delivery_days=10,
+    )
+
+
+class _ProbeClient:
+    """Cliente falso configurável para exercitar a sondagem de frete."""
+
+    def __init__(self, search_result, get_map, freight_map, call_log):
+        self._search = search_result
+        self._get = get_map
+        self._freight = freight_map
+        self.calls = call_log
+
+    def search_products(self, **kw):
+        return self._search
+
+    def get_product(self, *, product_id, **kw):
+        return self._get[product_id]
+
+    def query_freight(self, *, product_id, selected_sku_id, **kw):
+        self.calls.append((product_id, selected_sku_id))
+        outcome = self._freight.get((product_id, selected_sku_id))
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def _run_probe(app_client, monkeypatch, probe_client):
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes.exchange_authorization_code",
+        lambda *a, **k: _fake_token(),
+    )
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes.AliExpressClient",
+        lambda *a, **k: probe_client,
+    )
+    state = "ST_PROBE"
+    with app_client.session_transaction() as sess:
+        sess[STATE_KEY] = {"state": state, "ts": time.time()}
+    r = app_client.get(f"/integrations/aliexpress/callback?code=ABC&state={state}")
+    return r.data.decode()
+
+
+def test_freight_probe_first_sku_501_then_success(app_client, monkeypatch):
+    calls = []
+    get_map = {"p1": _probe_product_detail("p1", ["s1", "s2"])}
+    freight = {
+        ("p1", "s1"): AliExpressAPIError("DELIVERY_INFO_EMPTY", code=501),
+        ("p1", "s2"): _probe_freight_success(),
+    }
+    client = _ProbeClient(_probe_search_result(["p1"]), get_map, freight, calls)
+    body = _run_probe(app_client, monkeypatch, client)
+    assert "DS freight.query: success" in body
+    assert "candidatos testados: 2" in body
+    assert "opções de frete: 1" in body
+    assert calls == [("p1", "s1"), ("p1", "s2")]
+
+
+def test_freight_probe_first_product_501_then_next(app_client, monkeypatch):
+    calls = []
+    get_map = {
+        "p1": _probe_product_detail("p1", ["s1"]),
+        "p2": _probe_product_detail("p2", ["s2"]),
+    }
+    freight = {
+        ("p1", "s1"): AliExpressAPIError("DELIVERY_INFO_EMPTY", code=501),
+        ("p2", "s2"): _probe_freight_success(),
+    }
+    client = _ProbeClient(_probe_search_result(["p1", "p2"]), get_map, freight, calls)
+    body = _run_probe(app_client, monkeypatch, client)
+    assert "DS freight.query: success" in body
+    assert calls == [("p1", "s1"), ("p2", "s2")]
+
+
+def test_freight_probe_505_then_success(app_client, monkeypatch):
+    calls = []
+    get_map = {"p1": _probe_product_detail("p1", ["s1", "s2"])}
+    freight = {
+        ("p1", "s1"): AliExpressAPIError(
+            "DELIVERY_NOT_AVAILABLE_TO_YOUR_ADDRESS", code=505
+        ),
+        ("p1", "s2"): _probe_freight_success(),
+    }
+    client = _ProbeClient(_probe_search_result(["p1"]), get_map, freight, calls)
+    body = _run_probe(app_client, monkeypatch, client)
+    assert "DS freight.query: success" in body
+    assert "candidatos testados: 2" in body
+
+
+def test_freight_probe_507_aborts(app_client, monkeypatch):
+    calls = []
+    get_map = {"p1": _probe_product_detail("p1", ["s1", "s2"])}
+    freight = {
+        ("p1", "s1"): AliExpressAPIError("SelectSkuId is Required", code=507),
+    }
+    client = _ProbeClient(_probe_search_result(["p1"]), get_map, freight, calls)
+    body = _run_probe(app_client, monkeypatch, client)
+    assert "DS freight.query: failure" in body
+    assert "code: 507" in body
+    assert "SelectSkuId is Required" in body
+    assert calls == [("p1", "s1")]  # não tentou o próximo SKU
+
+
+def test_freight_probe_apicalllimit_aborts(app_client, monkeypatch):
+    calls = []
+    get_map = {"p1": _probe_product_detail("p1", ["s1", "s2"])}
+    freight = {
+        ("p1", "s1"): AliExpressRateLimitError("too many requests", code=555),
+    }
+    client = _ProbeClient(_probe_search_result(["p1"]), get_map, freight, calls)
+    body = _run_probe(app_client, monkeypatch, client)
+    assert "DS freight.query: failure" in body
+    assert calls == [("p1", "s1")]
+
+
+def test_freight_probe_respects_max_calls(app_client, monkeypatch):
+    calls = []
+    product_ids = [f"p{i}" for i in range(5)]
+    get_map = {pid: _probe_product_detail(pid, ["s1", "s2", "s3"]) for pid in product_ids}
+    freight = {
+        (pid, f"s{j}"): AliExpressAPIError("DELIVERY_INFO_EMPTY", code=501)
+        for pid in product_ids
+        for j in range(1, 4)
+    }
+    client = _ProbeClient(_probe_search_result(product_ids), get_map, freight, calls)
+    body = _run_probe(app_client, monkeypatch, client)
+    assert "DS freight.query: unavailable" in body
+    assert "code 501: 8" in body
+    assert len(calls) == 8  # limite de 8 chamadas respeitado
+
+
+def test_freight_probe_success_stops_immediately(app_client, monkeypatch):
+    calls = []
+    get_map = {"p1": _probe_product_detail("p1", ["s1", "s2"])}
+    freight = {("p1", "s1"): _probe_freight_success()}
+    client = _ProbeClient(_probe_search_result(["p1"]), get_map, freight, calls)
+    body = _run_probe(app_client, monkeypatch, client)
+    assert "DS freight.query: success" in body
+    assert "candidatos testados: 1" in body
+    assert calls == [("p1", "s1")]
+
+
+def test_freight_probe_no_secrets_in_logs(app_client, monkeypatch, caplog):
+    import logging
+
+    calls = []
+    get_map = {"p1": _probe_product_detail("p1", ["s1", "s2"])}
+    freight = {
+        ("p1", "s1"): AliExpressAPIError("DELIVERY_INFO_EMPTY", code=501),
+        ("p1", "s2"): _probe_freight_success(),
+    }
+    client = _ProbeClient(_probe_search_result(["p1"]), get_map, freight, calls)
+    with caplog.at_level(logging.INFO):
+        body = _run_probe(app_client, monkeypatch, client)
+    log_text = caplog.text
+    # Nenhum ID de produto/SKU, token, code OAuth ou state nos logs.
+    assert "p1" not in log_text
+    assert "s1" not in log_text
+    assert "REAL_AT" not in body
+
+
+def test_freight_probe_backoff_in_preview(app_client, monkeypatch):
+    import time as time_module
+
+    sleeps = []
+    monkeypatch.setattr(time_module, "sleep", lambda s: sleeps.append(s))
+    monkeypatch.setenv("VERCEL_ENV", "preview")
+    calls = []
+    get_map = {"p1": _probe_product_detail("p1", ["s1", "s2"])}
+    freight = {
+        ("p1", "s1"): AliExpressAPIError("DELIVERY_INFO_EMPTY", code=501),
+        ("p1", "s2"): _probe_freight_success(),
+    }
+    client = _ProbeClient(_probe_search_result(["p1"]), get_map, freight, calls)
+    _run_probe(app_client, monkeypatch, client)
+    assert sleeps == [1.1]  # backoff entre as chamadas no Preview
 
 
 def test_callback_oauth_failure_shows_sanitized(app_client, monkeypatch, caplog):
