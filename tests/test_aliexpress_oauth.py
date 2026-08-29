@@ -782,11 +782,13 @@ class _ProbeClient:
         self._get = get_map
         self._freight = freight_map
         self.calls = call_log
+        self.get_calls = []
 
     def search_products(self, **kw):
         return self._search
 
     def get_product(self, *, product_id, **kw):
+        self.get_calls.append(product_id)
         return self._get[product_id]
 
     def query_freight(self, *, product_id, selected_sku_id, **kw):
@@ -826,22 +828,6 @@ def test_freight_probe_first_sku_501_then_success(app_client, monkeypatch):
     assert "candidatos testados: 2" in body
     assert "opções de frete: 1" in body
     assert calls == [("p1", "s1"), ("p1", "s2")]
-
-
-def test_freight_probe_first_product_501_then_next(app_client, monkeypatch):
-    calls = []
-    get_map = {
-        "p1": _probe_product_detail("p1", ["s1"]),
-        "p2": _probe_product_detail("p2", ["s2"]),
-    }
-    freight = {
-        ("p1", "s1"): AliExpressAPIError("DELIVERY_INFO_EMPTY", code=501),
-        ("p2", "s2"): _probe_freight_success(),
-    }
-    client = _ProbeClient(_probe_search_result(["p1", "p2"]), get_map, freight, calls)
-    body = _run_probe(app_client, monkeypatch, client)
-    assert "DS freight.query: success" in body
-    assert calls == [("p1", "s1"), ("p2", "s2")]
 
 
 def test_freight_probe_505_then_success(app_client, monkeypatch):
@@ -885,20 +871,21 @@ def test_freight_probe_apicalllimit_aborts(app_client, monkeypatch):
     assert calls == [("p1", "s1")]
 
 
-def test_freight_probe_respects_max_calls(app_client, monkeypatch):
+def test_freight_probe_limits_to_two_skus(app_client, monkeypatch):
     calls = []
-    product_ids = [f"p{i}" for i in range(5)]
-    get_map = {pid: _probe_product_detail(pid, ["s1", "s2", "s3"]) for pid in product_ids}
+    # 3 SKUs no detalhe, mas o smoke só sonda os 2 primeiros.
+    get_map = {"p1": _probe_product_detail("p1", ["s1", "s2", "s3"])}
     freight = {
-        (pid, f"s{j}"): AliExpressAPIError("DELIVERY_INFO_EMPTY", code=501)
-        for pid in product_ids
-        for j in range(1, 4)
+        ("p1", "s1"): AliExpressAPIError("DELIVERY_INFO_EMPTY", code=501),
+        ("p1", "s2"): AliExpressAPIError("DELIVERY_INFO_EMPTY", code=501),
+        ("p1", "s3"): _probe_freight_success(),  # nunca deve ser chamado
     }
-    client = _ProbeClient(_probe_search_result(product_ids), get_map, freight, calls)
+    client = _ProbeClient(_probe_search_result(["p1"]), get_map, freight, calls)
     body = _run_probe(app_client, monkeypatch, client)
     assert "DS freight.query: unavailable" in body
-    assert "code 501: 8" in body
-    assert len(calls) == 8  # limite de 8 chamadas respeitado
+    assert "code 501: 2" in body
+    assert len(calls) == 2
+    assert ("p1", "s3") not in calls
 
 
 def test_freight_probe_success_stops_immediately(app_client, monkeypatch):
@@ -931,12 +918,7 @@ def test_freight_probe_no_secrets_in_logs(app_client, monkeypatch, caplog):
     assert "REAL_AT" not in body
 
 
-def test_freight_probe_backoff_in_preview(app_client, monkeypatch):
-    import time as time_module
-
-    sleeps = []
-    monkeypatch.setattr(time_module, "sleep", lambda s: sleeps.append(s))
-    monkeypatch.setenv("VERCEL_ENV", "preview")
+def test_freight_probe_reuses_single_get_product(app_client, monkeypatch):
     calls = []
     get_map = {"p1": _probe_product_detail("p1", ["s1", "s2"])}
     freight = {
@@ -945,7 +927,26 @@ def test_freight_probe_backoff_in_preview(app_client, monkeypatch):
     }
     client = _ProbeClient(_probe_search_result(["p1"]), get_map, freight, calls)
     _run_probe(app_client, monkeypatch, client)
-    assert sleeps == [1.1]  # backoff entre as chamadas no Preview
+    # Phase 3 faz 1 get_product; o smoke de frete NÃO chama get_product de novo
+    # e NÃO percorre outros produtos.
+    assert client.get_calls == ["p1"]
+
+
+def test_freight_probe_no_sleep_in_callback(app_client, monkeypatch):
+    import time as time_module
+
+    sleeps = []
+    monkeypatch.setattr(time_module, "sleep", lambda s: sleeps.append(s))
+    calls = []
+    get_map = {"p1": _probe_product_detail("p1", ["s1", "s2"])}
+    freight = {
+        ("p1", "s1"): AliExpressAPIError("DELIVERY_INFO_EMPTY", code=501),
+        ("p1", "s2"): _probe_freight_success(),
+    }
+    client = _ProbeClient(_probe_search_result(["p1"]), get_map, freight, calls)
+    _run_probe(app_client, monkeypatch, client)
+    # Nenhum sleep no callback (mantém dentro do timeout).
+    assert sleeps == []
 
 
 def test_callback_oauth_failure_shows_sanitized(app_client, monkeypatch, caplog):
