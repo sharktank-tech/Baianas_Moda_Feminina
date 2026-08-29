@@ -15,15 +15,12 @@ from __future__ import annotations
 import hashlib
 import hmac as _hmac
 import json
-import logging
 import os
 import secrets
 import time
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Optional
 from urllib.parse import urlencode, urlparse
-
-_logger = logging.getLogger(__name__)
 
 from .errors import (
     AliExpressAPIError,
@@ -172,27 +169,6 @@ def exchange_authorization_code(
         data = json.loads(body)
     except json.JSONDecodeError as exc:
         raise AliExpressAuthError("resposta de token não é JSON válido", raw=body[:500]) from exc
-
-    # Diagnóstico temporário e sanitizado do token exchange. NÃO registra
-    # authorization code, AppKey, AppSecret, sign ou token.
-    _tp = urlparse(base_url.rstrip("/") + DEFAULT_OAUTH_API_PATH)
-    _top_keys = sorted(data.keys()) if isinstance(data, dict) else []
-    _err_resp = data.get("error_response") if isinstance(data.get("error_response"), dict) else {}
-    _src = (
-        _err_resp
-        or (data.get("error") if isinstance(data.get("error"), dict) else {})
-        or (data if isinstance(data, dict) else {})
-    )
-    _logger.info(
-        "AliExpress token exchange diagnostic: host=%s path=%s http_status=200 "
-        "top_level_keys=%s error_code=%s error_sub_code=%s request_id=%s",
-        _tp.hostname,
-        _tp.path,
-        _top_keys,
-        _src.get("code"),
-        _src.get("sub_code"),
-        _src.get("request_id") or data.get("request_id"),
-    )
 
     return normalize_oauth_token(data)
 

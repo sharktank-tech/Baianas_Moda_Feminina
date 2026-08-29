@@ -512,7 +512,7 @@ def test_authorize_on_branch_host_generates_state_and_redirects(auth_app, monkey
         assert STATE_KEY in sess
 
 
-def test_authorize_diagnostic_logs_no_secrets(auth_app, monkeypatch, caplog):
+def test_authorize_logs_no_secrets(auth_app, monkeypatch, caplog):
     import logging
 
     from urllib.parse import parse_qs, urlsplit
@@ -539,14 +539,7 @@ def test_authorize_diagnostic_logs_no_secrets(auth_app, monkeypatch, caplog):
     state_value = parse_qs(urlsplit(r.headers["Location"]).query)["state"][0]
 
     log_text = caplog.text
-    # Campos esperados presentes (sanitizados).
-    assert "authorize_host=api-sg.aliexpress.com" in log_text
-    assert "authorize_path=/oauth/authorize" in log_text
-    assert ("callback_host=%s" % branch) in log_text
-    assert "callback_path=/integrations/aliexpress/callback" in log_text
-    assert "params=['client_id', 'force_auth', 'redirect_uri', 'response_type', 'state']" in log_text
-
-    # Nenhum dado sensível deve aparecer nos logs.
+    # Nenhum dado sensível (app_key, app_secret, state) deve aparecer nos logs.
     assert app_key_value not in log_text
     assert app_secret_value not in log_text
     assert state_value not in log_text

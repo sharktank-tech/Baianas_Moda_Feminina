@@ -17,7 +17,6 @@ import os
 import time
 from functools import wraps
 from typing import Any, Callable, Optional
-from urllib.parse import parse_qs, urlparse
 
 from flask import Blueprint, current_app, redirect, request, session
 
@@ -146,25 +145,6 @@ def authorize():
         redirect_uri=callback_url,
         state=state,
         authorize_url=_authorize_url_default(),
-    )
-
-    # Diagnóstico temporário e sanitizado (não altera o protocolo). NÃO loga
-    # app_key, app_secret, state, URL completa, query string, code, token ou sign.
-    _parsed_auth = urlparse(url)
-    _parsed_cb = urlparse(callback_url)
-    _param_names = sorted(parse_qs(_parsed_auth.query).keys())
-    current_app.logger.info(
-        "AliExpress OAuth redirect diagnostic: "
-        "authorize_host=%s authorize_path=%s "
-        "callback_scheme=%s callback_host=%s callback_path=%s "
-        "app_key_length=%d params=%s",
-        _parsed_auth.hostname,
-        _parsed_auth.path,
-        _parsed_cb.scheme,
-        _parsed_cb.hostname,
-        _parsed_cb.path,
-        len(app_key),
-        _param_names,
     )
 
     return redirect(url)
