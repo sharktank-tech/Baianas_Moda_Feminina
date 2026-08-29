@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import replace
+from decimal import Decimal
 from typing import Any, Iterable, Mapping, Optional
 
 from .auth import AliExpressCredentials
@@ -324,6 +325,48 @@ class AliExpressClient:
         payload = self.call("aliexpress.ds.freight.query", **business)
         return normalize_freight_response(payload, method="aliexpress.ds.freight.query")
 
+    # ----- frete oficial buyer (Fase 4b, read-only) --------------------------
+    def calculate_buyer_freight(
+        self,
+        *,
+        product_id: str,
+        country_code: str = "BR",
+        product_num: int = 1,
+        send_goods_country_code: str = "CN",
+        province_code: Optional[str] = None,
+        city_code: Optional[str] = None,
+        price: Optional[Decimal] = None,
+        price_currency: Optional[str] = None,
+    ) -> "AliExpressFreightResult":
+        """Busca read-only aliexpress.logistics.buyer.freight.calculate.
+
+        Não persiste nada. Usa o mesmo gateway /sync, sign_method=sha256 e o
+        access_token como `session` (ainda não migramos para eco.taobao.com).
+        O parâmetro de negócio `param_aeop_freight_calculate_for_buyer_d_t_o`
+        é um JSON compacto e participa da assinatura. price/price_currency
+        são opcionais e omitidos no primeiro smoke.
+        """
+        from .buyer_freight import (
+            build_buyer_freight_params,
+            normalize_buyer_freight_response,
+        )
+
+        business = build_buyer_freight_params(
+            product_id=product_id,
+            country_code=country_code,
+            product_num=product_num,
+            send_goods_country_code=send_goods_country_code,
+            province_code=province_code,
+            city_code=city_code,
+            price=price,
+            price_currency=price_currency,
+        )
+        payload = self.call(
+            "aliexpress.logistics.buyer.freight.calculate", **business
+        )
+        return normalize_buyer_freight_response(
+            payload, method="aliexpress.logistics.buyer.freight.calculate"
+        )
 
 
 __all__: Iterable[str] = ["AliExpressClient", "DEFAULT_BASE_URL"]

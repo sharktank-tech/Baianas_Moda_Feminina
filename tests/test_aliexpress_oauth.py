@@ -774,16 +774,34 @@ def _probe_freight_success():
     )
 
 
+def _probe_buyer_success():
+    return AliExpressFreightResult(
+        options=[
+            AliExpressFreightOption(
+                service_name="Cainiao",
+                shipping_fee=Decimal("7.50"),
+                currency="BRL",
+                delivery_days=12,
+            )
+        ],
+        currency="BRL",
+        min_fee=Decimal("7.50"),
+        min_delivery_days=12,
+    )
+
+
 class _ProbeClient:
     """Cliente falso configurável para exercitar a sondagem de frete."""
 
-    def __init__(self, search_result, get_map, freight_map, call_log):
+    def __init__(self, search_result, get_map, freight_map, call_log, buyer_map=None):
         self._search = search_result
         self._get = get_map
         self._freight = freight_map
         self.calls = call_log
         self.get_calls = []
         self.freight_kwargs = []
+        self._buyer = buyer_map or {}
+        self.buyer_calls = []
 
     def search_products(self, **kw):
         return self._search
@@ -796,6 +814,13 @@ class _ProbeClient:
         self.calls.append((product_id, selected_sku_id))
         self.freight_kwargs.append(kw)
         outcome = self._freight.get((product_id, selected_sku_id))
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    def calculate_buyer_freight(self, *, product_id, **kw):
+        self.buyer_calls.append((product_id, kw))
+        outcome = self._buyer.get(product_id)
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
@@ -993,6 +1018,79 @@ def test_freight_probe_summary_shows_provided_flags(app_client, monkeypatch, cap
     # Valores ainda não vazam.
     assert "SP" not in caplog.text
     assert "SAO_PAULO" not in caplog.text
+
+
+def test_callback_buyer_freight_success(app_client, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
+    calls = []
+    get_map = {"p1": _probe_product_detail("p1", ["s1"])}
+    buyer = {"p1": _probe_buyer_success()}
+    client = _ProbeClient(
+        _probe_search_result(["p1"]), get_map, {}, calls, buyer_map=buyer
+    )
+    with caplog.at_level(logging.INFO):
+        body = _run_probe(app_client, monkeypatch, client)
+    assert "Buyer freight.calculate: success" in body
+    assert "opções de frete: 1" in body
+    assert "frete mínimo: presente" in body
+    # Chamada única por product_id.
+    assert len(client.buyer_calls) == 1
+    # ds.freight.query NÃO é chamado quando o caminho buyer está ativo.
+    assert client.calls == []
+    # Origem de envio enviada ao método.
+    _, kw = client.buyer_calls[0]
+    assert kw["send_goods_country_code"] == "CN"
+    # Nenhum segredo/ID em logs.
+    assert "REAL_AT" not in caplog.text
+
+
+def test_callback_buyer_freight_passes_destination_from_env(app_client, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_PROVINCE_CODE", "SP")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_CITY_CODE", "SAO_PAULO")
+    calls = []
+    get_map = {"p1": _probe_product_detail("p1", ["s1"])}
+    buyer = {"p1": _probe_buyer_success()}
+    client = _ProbeClient(
+        _probe_search_result(["p1"]), get_map, {}, calls, buyer_map=buyer
+    )
+    with caplog.at_level(logging.INFO):
+        body = _run_probe(app_client, monkeypatch, client)
+    assert "Buyer freight.calculate: success" in body
+    _, kw = client.buyer_calls[0]
+    assert kw["province_code"] == "SP"
+    assert kw["city_code"] == "SAO_PAULO"
+    # Valores NÃO vazam em body nem em logs.
+    assert "SP" not in body
+    assert "SAO_PAULO" not in body
+    assert "SP" not in caplog.text
+    assert "SAO_PAULO" not in caplog.text
+
+
+def test_callback_buyer_freight_failure_sanitized(app_client, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
+    calls = []
+    get_map = {"p1": _probe_product_detail("p1", ["s1"])}
+    buyer = {"p1": AliExpressAPIError("method not found", code=27, sub_code="isp.x")}
+    client = _ProbeClient(
+        _probe_search_result(["p1"]), get_map, {}, calls, buyer_map=buyer
+    )
+    with caplog.at_level(logging.INFO):
+        body = _run_probe(app_client, monkeypatch, client)
+    assert "Buyer freight.calculate: failure" in body
+    assert "code: 27" in body
+    assert "sub_code: isp.x" in body
+    assert client.calls == []
+    assert "REAL_AT" not in caplog.text
 
 
 def test_callback_oauth_failure_shows_sanitized(app_client, monkeypatch, caplog):

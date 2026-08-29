@@ -47,6 +47,10 @@ from .freight import (
     build_freight_params,
     normalize_freight_response,
 )
+from .buyer_freight import (
+    build_buyer_freight_params,
+    normalize_buyer_freight_response,
+)
 from .sign import sign_sync, sign_top
 from .transport import RequestsTransport, Transport, TransportError, TransportTimeout
 
@@ -100,6 +104,8 @@ __all__: Iterable[str] = [
     "normalize_product_detail",
     "build_freight_params",
     "normalize_freight_response",
+    "build_buyer_freight_params",
+    "normalize_buyer_freight_response",
     "create_client_from_env",
     "RequestsTransport",
     "Transport",

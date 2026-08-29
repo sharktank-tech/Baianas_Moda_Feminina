@@ -208,24 +208,35 @@ def callback():
         except (AliExpressAPIError, AliExpressTransportError) as exc:
             product_error = exc
 
-    # 4) Freight query (Fase 4) read-only com o MESMO token em memória.
-    #    Reutiliza o product_detail da Fase 3 (sem novo get_product e sem percorrer
-    #    outros produtos) e sonda no máximo 2 SKUs elegíveis. 501/505 =
-    #    indisponibilidade do candidato (tenta o próximo); demais erros (507,
-    #    auth, assinatura, MissingParameter, ApiCallLimit, transporte) abortam o
-    #    smoke normalmente. Sem sleep: o objetivo é terminar bem abaixo do timeout.
+    # 4) Freight read-only com o MESMO token em memória.
+    #    Dois caminhos mutuamente exclusivos (para respeitar o timeout de 10s da
+    #    Vercel, nunca os dois no mesmo callback):
+    #      - ds.freight.query (Fase 4): baseado em SKU, sonda até 2 candidatos.
+    #      - logistics.buyer.freight.calculate (Fase 4b): baseado em product_id,
+    #        chamada única. Selecionado por ALIEXPRESS_SMOKE_BUYER_FREIGHT.
+    use_buyer = bool(os.environ.get("ALIEXPRESS_SMOKE_BUYER_FREIGHT"))
+    freight_label = "Buyer freight.calculate" if use_buyer else "DS freight.query"
     freight_result = None
     freight_error = None
     freight_unavailable = None
     freight_candidates = 0
     unavail = {"attempted": 0, "code_501": 0, "code_505": 0, "other": 0}
 
-    # Destino BR detalhado (province/city) somente para o smoke, via env.
-    # Nunca hard-coded; os valores NÃO são registrados (apenas flags yes/no).
+    # Destino BR detalhado (province/city) e origem de envio somente para o smoke,
+    # via env. Nunca hard-coded; os valores NÃO são registrados (apenas flags).
     province_code = os.environ.get("ALIEXPRESS_SMOKE_PROVINCE_CODE") or None
     city_code = os.environ.get("ALIEXPRESS_SMOKE_CITY_CODE") or None
+    send_goods_country_code = (
+        os.environ.get("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE") or "CN"
+    )
 
-    if product_detail is not None:
+    if product_detail is not None and not use_buyer:
+        # ---- ds.freight.query (Fase 4) ----
+        #    Reutiliza o product_detail da Fase 3 (sem novo get_product e sem
+        #    percorrer outros produtos) e sonda no máximo 2 SKUs elegíveis.
+        #    501/505 = indisponibilidade do candidato (tenta o próximo); demais
+        #    erros (507, auth, assinatura, MissingParameter, ApiCallLimit,
+        #    transporte) abortam o smoke normalmente. Sem sleep.
         eligible_skus = [
             sku
             for sku in (product_detail.skus or [])
@@ -276,7 +287,28 @@ def callback():
                 freight_result = fret
                 break
 
-    if freight_result is None and freight_error is None:
+    elif product_detail is not None and use_buyer:
+        # ---- logistics.buyer.freight.calculate (Fase 4b) ----
+        #    Chamada única por product_id (não recebe selectedSkuId). Reutiliza
+        #    o mesmo product_detail da Fase 3.
+        product_id = product_detail.product_id
+        if product_id is not None:
+            try:
+                fret = client.calculate_buyer_freight(
+                    product_id=product_id,
+                    country_code="BR",
+                    product_num=1,
+                    send_goods_country_code=send_goods_country_code,
+                    province_code=province_code,
+                    city_code=city_code,
+                )
+                freight_result = fret
+                freight_candidates = 1
+            except (AliExpressAPIError, AliExpressTransportError) as exc:
+                freight_error = exc
+                freight_candidates = 1
+
+    if not use_buyer and freight_result is None and freight_error is None:
         unavail["attempted"] = freight_candidates
         freight_unavailable = unavail
         # Diagnóstico seguro (sem IDs/token/sign/request body/valores de destino).
@@ -300,6 +332,7 @@ def callback():
         freight_error=freight_error,
         freight_unavailable=freight_unavailable,
         freight_candidates=freight_candidates,
+        freight_label=freight_label,
     )
 
 
@@ -325,6 +358,7 @@ def _render_success(
     freight_error: Any = None,
     freight_unavailable: Any = None,
     freight_candidates: int = 0,
+    freight_label: str = "DS freight.query",
 ) -> str:
     lines = [
         "AliExpress autorizado com sucesso",
@@ -385,7 +419,7 @@ def _render_success(
             f"estoque: {'presente' if has_stock else 'ausente'}",
         ]
 
-    # Seção freight.query (Fase 4) — sanitizada (sem token/code/sign).
+    # Seção freight (Fase 4 / 4b) — sanitizada (sem token/code/sign/request body).
     if freight_error is not None:
         code = getattr(freight_error, "code", None)
         sub_code = getattr(freight_error, "sub_code", None)
@@ -393,7 +427,8 @@ def _render_success(
         request_id = _find_request_id(raw)
         msg = getattr(freight_error, "message", str(freight_error))
         current_app.logger.error(
-            "AliExpress DS freight.query falhou: type=%s message=%s code=%s sub_code=%s request_id=%s",
+            "AliExpress %s falhou: type=%s message=%s code=%s sub_code=%s request_id=%s",
+            freight_label,
             type(freight_error).__name__,
             msg,
             code,
@@ -402,7 +437,7 @@ def _render_success(
         )
         lines += [
             "",
-            "DS freight.query: failure",
+            f"{freight_label}: failure",
             f"code: {code}",
             f"sub_code: {sub_code}",
             f"request_id: {request_id}",
@@ -412,7 +447,7 @@ def _render_success(
         s = freight_unavailable
         lines += [
             "",
-            "DS freight.query: unavailable",
+            f"{freight_label}: unavailable",
             f"candidatos testados: {s['attempted']}",
             f"code 501: {s['code_501']}",
             f"code 505: {s['code_505']}",
@@ -425,7 +460,7 @@ def _render_success(
         has_days = freight_result.min_delivery_days is not None
         lines += [
             "",
-            "DS freight.query: success",
+            f"{freight_label}: success",
             f"candidatos testados: {freight_candidates}",
             f"opções de frete: {len(options)}",
             f"frete mínimo: {'presente' if has_fee else 'ausente'}",
@@ -433,7 +468,7 @@ def _render_success(
             f"prazo: {'presente' if has_days else 'ausente'}",
         ]
     else:
-        lines += ["", "DS freight.query: skipped (sem SKU elegível)"]
+        lines += ["", f"{freight_label}: skipped (sem SKU elegível)"]
 
     return "<br>\n".join(lines)
 
