@@ -157,6 +157,60 @@ def test_freight_unavailable_blocks_publication(db):
     _assert_not_published(product, ["freight_unavailable"])
 
 
+def test_landed_stale_blocks_publication(db):
+    # cost(100) + shipping(10) = 110; landed guardado como 111 -> inconsistência
+    # de banco/edição manual jamais publica com landed desatualizado.
+    product, _ = _prepared(db, landed="111.00")
+    _assert_not_published(product, ["landed_cost_stale"])
+
+
+def test_negative_shipping_blocks_publication(db):
+    # objetos em memória (nunca persistidos): a avaliação de publicação rejeita
+    # shipping < 0 no serviço, sem depender do CHECK de banco.
+    product = Product(
+        id=uuid.uuid4(), name="NegPG", description="t", price=Decimal("150.00"),
+        stock=5, is_active=False, is_draft=True, source=SOURCE_ALIEXPRESS,
+        external_id="1005" + uuid.uuid4().hex[:12], currency="BRL",
+        pricing_status=pricing.PRICED, target_margin_percent=Decimal("20"),
+    )
+    supplier_product = SupplierProduct(
+        id=uuid.uuid4(), supplier_id=uuid.uuid4(),
+        product_id=product.id, supplier_product_id="SP_NEGPUB",
+        cost=Decimal("100.00"), currency="BRL",
+        freight_status="available", shipping_cost=Decimal("-0.01"),
+        landed_cost=Decimal("110.00"), freight_currency="BRL",
+        is_active=True,
+    )
+    supplier_product.product = product
+    variant = ProductVariant(
+        id=uuid.uuid4(), product_id=product.id,
+        supplier_product_id=supplier_product.id, stock=5, is_active=True,
+    )
+    variant.product = product
+    _assert_not_published(product, ["shipping_cost_invalid"])
+
+
+def test_variant_only_from_inactive_supplier_gives_no_sellable(db):
+    product, sp = _prepared(db, variant_stock=0)
+    product.variants[0].is_active = False
+    inactive_supplier = SupplierProduct(
+        id=uuid.uuid4(), supplier_id=sp.supplier_id, product_id=product.id,
+        supplier_product_id="SP_INACTIVE", cost=Decimal("100.00"),
+        currency="BRL", freight_status="available",
+        shipping_cost=Decimal("10.00"), landed_cost=Decimal("110.00"),
+        freight_currency="BRL", is_active=False,
+    )
+    db.session.add(inactive_supplier)
+    db.session.flush()
+    # A variante ativa pertence ao vínculo de fornecedor INATIVO: não conta.
+    db.session.add(ProductVariant(
+        id=uuid.uuid4(), product_id=product.id,
+        supplier_product_id=inactive_supplier.id, stock=5, is_active=True,
+    ))
+    db.session.flush()
+    _assert_not_published(product, ["no_sellable_variant"])
+
+
 def test_currency_mismatch_blocks_publication(db):
     product, _ = _prepared(db, freight_currency="USD", landed=None)
     _assert_not_published(product, ["currency_mismatch"])

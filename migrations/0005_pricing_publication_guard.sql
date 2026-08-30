@@ -16,6 +16,10 @@
 -- Estados permitidos de products.pricing_status (string):
 --   unpriced | blocked | ready | priced | stale
 --
+-- CHECK ck_product_pricing_status:
+--   pricing_status restrito aos cinco estados canônicos
+--   (unpriced | blocked | ready | priced | stale).
+--
 -- CHECK ck_product_target_margin_range:
 --   target_margin_percent NÃO pode ser 0, 100, negativo nem >= 100. NULL é
 --   permitido e significa "produto ainda não precificável/publicável".
@@ -87,6 +91,24 @@ BEGIN
                 OR (
                     is_draft = false
                     AND pricing_status = 'priced'
+                )
+            );
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'ck_product_pricing_status'
+          AND conrelid = 'pollomodas.products'::regclass
+    ) THEN
+        ALTER TABLE products
+            ADD CONSTRAINT ck_product_pricing_status
+            CHECK (
+                pricing_status IN (
+                    'unpriced',
+                    'blocked',
+                    'ready',
+                    'priced',
+                    'stale'
                 )
             );
     END IF;

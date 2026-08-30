@@ -253,6 +253,13 @@ class Product(db.Model):
             "OR (is_draft = false AND pricing_status = 'priced')",
             name="ck_product_aliexpress_publication_guard",
         ),
+        # Estados canônicos de pricing (unpriced | blocked | ready | priced |
+        # stale). Reforça o contrato no banco.
+        db.CheckConstraint(
+            "pricing_status IN "
+            "('unpriced', 'blocked', 'ready', 'priced', 'stale')",
+            name="ck_product_pricing_status",
+        ),
     )
 
     suppliers = db.relationship(

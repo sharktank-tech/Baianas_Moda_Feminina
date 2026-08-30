@@ -144,6 +144,7 @@ def test_migration_idempotent_and_checks_bound_to_products(env):
     # (pg_constraint.conrelid = to_regclass('<schema>.products')).
     assert "ck_product_target_margin_range" in names
     assert "ck_product_aliexpress_publication_guard" in names
+    assert "ck_product_pricing_status" in names
 
     assert _public_columns_snapshot(eng) == before, "public foi alterado!"
 
@@ -224,6 +225,34 @@ def test_db_guard_target_margin_range(env):
     _insert_product(
         se, id=str(uuid.uuid4()), name="m99", price="10.00",
         target_margin_percent="99.99",
+    )
+
+    assert _public_columns_snapshot(eng) == _public_columns_snapshot(eng)
+
+
+def test_db_guard_pricing_status_whitelist(env):
+    schema, eng = env
+    se = create_engine(_url_with_search_path(DATABASE_URL, schema))
+    with se.begin() as c:
+        c.execute(text(_LEGACY_PRODUCTS))
+    _apply_migration(se, schema)
+
+    _expect_rejected(
+        se, id=str(uuid.uuid4()), name="bogus", price="10.00",
+        pricing_status="reservado",
+    )
+    _expect_rejected(
+        se, id=str(uuid.uuid4()), name="empty", price="10.00",
+        pricing_status="",
+    )
+
+    _insert_product(
+        se, id=str(uuid.uuid4()), name="stale", price="10.00",
+        pricing_status="stale",
+    )
+    _insert_product(
+        se, id=str(uuid.uuid4()), name="blocked", price="10.00",
+        pricing_status="blocked",
     )
 
     assert _public_columns_snapshot(eng) == _public_columns_snapshot(eng)

@@ -86,22 +86,32 @@ def _ratio_percent(numerator: Decimal, denominator: Decimal) -> Decimal:
     return (numerator / denominator * Decimal("100")).quantize(Decimal("0.01"))
 
 
-def compute_margin(sale_price, landed_cost: Decimal) -> Decimal:
-    """margem (%) = (preço_venda - landed_cost) / preço_venda * 100"""
+def compute_margin(sale_price, landed_cost) -> Decimal:
+    """margem (%) = (preço_venda - landed_cost) / preço_venda * 100
+
+    Ambos os operandos são normalizados via to_decimal() (contrato Fase 6).
+    """
     sale = to_decimal(sale_price)
     if sale is None or sale <= 0:
         raise ValueError("sale_price inválido para margem")
-    return _ratio_percent(sale - landed_cost, sale)
+    landed = to_decimal(landed_cost)
+    if landed is None:
+        raise ValueError("landed_cost inválido para margem")
+    return _ratio_percent(sale - landed, sale)
 
 
-def compute_markup(sale_price, landed_cost: Decimal) -> Decimal:
-    """markup (%) = (preço_venda - landed_cost) / landed_cost * 100"""
+def compute_markup(sale_price, landed_cost) -> Decimal:
+    """markup (%) = (preço_venda - landed_cost) / landed_cost * 100
+
+    Ambos os operandos são normalizados via to_decimal() (contrato Fase 6).
+    """
     sale = to_decimal(sale_price)
-    if landed_cost is None or landed_cost <= 0:
-        raise ValueError("landed_cost inválido para markup")
     if sale is None:
         raise ValueError("sale_price inválido para markup")
-    return _ratio_percent(sale - landed_cost, landed_cost)
+    landed = to_decimal(landed_cost)
+    if landed is None or landed <= 0:
+        raise ValueError("landed_cost inválido para markup")
+    return _ratio_percent(sale - landed, landed)
 
 
 def sale_price_for_margin(landed_cost, margin_percent) -> Decimal:
@@ -136,8 +146,10 @@ def calculate_landed_cost(supplier_product: SupplierProduct) -> Decimal:
     Requisitos (todos):
       cost != NULL e cost > 0
       freight_status == 'available'
-      shipping_cost != NULL   (0.00 é válido somente com frete real confirmado,
-                               o que exige freight_status == 'available')
+      shipping_cost != NULL e >= 0   (0.00 é válido somente com frete real
+                                      confirmado, o que exige freight_status
+                                      == 'available'; negativo é inválido e é
+                                      rejeitado aqui, sem depender do CHECK)
       currency e freight_currency presentes e iguais
 
     Falha de qualquer requisito: exige supplier_product.landed_cost = None
@@ -156,6 +168,9 @@ def calculate_landed_cost(supplier_product: SupplierProduct) -> Decimal:
     if shipping is None:
         supplier_product.landed_cost = None
         raise PricingBlocked("shipping_cost_missing")
+    if shipping < 0:
+        supplier_product.landed_cost = None
+        raise PricingBlocked("shipping_cost_invalid")
 
     supplier_currency = normalize_currency(supplier_product.currency)
     freight_currency = normalize_currency(supplier_product.freight_currency)
@@ -181,9 +196,11 @@ def price_dropshipping_product(
 ) -> PricingResult:
     """Precifica um draft AliExpress SEM publicar (pricing != publication).
 
-    Exige exatamente UM SupplierProduct ativo para o produto. Primeiro calcula
-    o landed cost; depois valida a margem alvo (>0 e <100); persiste no modelo
-    (o caller decide quando commitar).
+    Exige exatamente UM SupplierProduct ativo para o produto. Exige também
+    coerência total de moeda: Product.currency == SupplierProduct.currency ==
+    SupplierProduct.freight_currency (não existe camada FX). Primeiro valida
+    fronteiras; depois calcula o landed cost; depois valida a margem alvo
+    (>0 e <100); persiste no modelo (o caller decide quando commitar).
     """
     if product.source != SOURCE_ALIEXPRESS:
         raise PricingError("only_aliexpress")
@@ -198,6 +215,20 @@ def price_dropshipping_product(
         logger.info("pricing: blocked reason=supplier_ambiguous")
         raise PricingConflict("supplier_ambiguous")
     supplier_product = active_links[0]
+
+    selling_currency = normalize_currency(product.currency)
+    supplier_currency = normalize_currency(supplier_product.currency)
+    freight_currency = normalize_currency(supplier_product.freight_currency)
+    if (
+        not selling_currency
+        or selling_currency != supplier_currency
+        or not freight_currency
+        or supplier_currency != freight_currency
+    ):
+        # Moeda de VENDA precisa igualar fornecedor×frete; sem isso o preço de
+        # venda não passa a valer (nunca marca pricing_status='priced').
+        logger.info("pricing: blocked reason=currency_mismatch")
+        raise PricingBlocked("currency_mismatch")
 
     try:
         landed_cost = calculate_landed_cost(supplier_product)

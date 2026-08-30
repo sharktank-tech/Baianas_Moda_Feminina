@@ -17,6 +17,9 @@ Regras invariantes desta fase:
   * Fase 6: todo novo draft nasce `blocked` com pricing_error
     'freight_unavailable' e product.currency = moeda resolvida. Produto já
     `priced` NÃO é rebaixado nem tem o preço de venda sobrescrito.
+  * Reimport com mudança MATERIAL de custo/moeda do fornecedor invalida
+    `priced` -> `stale` (supplier_cost_changed ou currency_changed) e NUNCA
+    reprecifica automaticamente; preço/margem preservados para auditoria.
   * Price/cost do rascunho = menor preço observado (provisório, não publicável).
   * Moeda única entre os SKUs com preço; divergência aborta (sem conversão).
   * Idempotente: reimport não duplica Supplier/Product/Variante/Imagem/Sync.
@@ -45,7 +48,7 @@ from loja.modules.models import (
     SupplierCategoryMapping,
     SupplierProduct,
 )
-from loja.services.pricing import BLOCKED, PRICED
+from loja.services.pricing import BLOCKED, PRICED, STALE, to_decimal
 from loja.utils import utcnow
 
 from .models import AliExpressProductDetail, AliExpressProductSku
@@ -259,7 +262,7 @@ def _resolve_product_and_link(
         # rascunho (decisões comerciais não são sobrescritas nesta fase).
         if not product.is_draft or product.is_active:
             raise DraftImportConflict("already_published")
-        _apply_supplier_product(existing_sp, catalog_price, currency, now)
+        _apply_supplier_product(existing_sp, product, catalog_price, currency, now)
         return product, existing_sp, False
 
     matches = Product.query.filter_by(
@@ -295,14 +298,21 @@ def _resolve_product_and_link(
         supplier_product_id=external_id,
     )
     db.session.add(supplier_product)
-    _apply_supplier_product(supplier_product, catalog_price, currency, now)
+    _apply_supplier_product(supplier_product, product, catalog_price, currency, now)
     db.session.flush()
     return product, supplier_product, created
 
 
 def _apply_supplier_product(
-    supplier_product: SupplierProduct, catalog_price, currency: str, now
+    supplier_product: SupplierProduct,
+    product: Product,
+    catalog_price,
+    currency: str,
+    now,
 ) -> None:
+    previous_cost = supplier_product.cost
+    previous_currency = supplier_product.currency
+
     supplier_product.cost = catalog_price
     supplier_product.wholesale_price = None
     supplier_product.currency = currency
@@ -310,17 +320,79 @@ def _apply_supplier_product(
     supplier_product.last_sync_at = now
     supplier_product.sync_error = None
     supplier_product.is_active = True
+
     if not (
         supplier_product.freight_status == FREIGHT_AVAILABLE
-        and supplier_product.landed_cost is not None
+        and to_decimal(supplier_product.shipping_cost) is not None
     ):
         # Sem frete: provider_unavailable -> custos de frete indefinidos
         # (NULL), NUNCA zero. Um reimport NÃO sobrescreve uma confirmação de
-        # frete/landed existente: pricing é decisão comercial preservada.
+        # frete existente; a reconciliação abaixo recalcula o landed apenas
+        # quando há mudança material de custo.
         supplier_product.freight_status = FREIGHT_PROVIDER_UNAVAILABLE
         supplier_product.shipping_cost = None
         supplier_product.landed_cost = None
         supplier_product.freight_currency = None
+
+    _reconcile_pricing_on_supplier_change(
+        product=product,
+        supplier_product=supplier_product,
+        previous_cost=previous_cost,
+        previous_currency=previous_currency,
+    )
+
+
+def _reconcile_pricing_on_supplier_change(
+    *,
+    product: Product,
+    supplier_product: SupplierProduct,
+    previous_cost,
+    previous_currency,
+) -> None:
+    """Reconciliação de pricing após atualização de custo/moeda (Fase 6).
+
+    Só age em produtos `priced` (mais nova decisão comercial válida):
+      * custo E moeda inalterados     -> preserva `priced` (reimport benigno).
+      * moeda do fornecedor mudou     -> `stale`/currency_changed + landed
+        cost NULL (moeda é moeda; não existe conversão/FX).
+      * custo mudou (moeda igual)     -> `stale`/supplier_cost_changed com
+        landed recalculado = custo_novo + frete (quando o frete continua
+        válido). NUNCA reprecifica: Product.price e target_margin_percent
+        ficam preservados para auditoria; `stale` impede publicação até uma
+        nova chamada explícita de price_dropshipping_product().
+    """
+    if product.pricing_status != PRICED:
+        return
+
+    cost_before = to_decimal(previous_cost)
+    cost_after = to_decimal(supplier_product.cost)
+    currency_before = _norm_currency(previous_currency)
+    currency_after = _norm_currency(supplier_product.currency)
+
+    if cost_before == cost_after and currency_before == currency_after:
+        return
+
+    if currency_before != currency_after:
+        product.pricing_status = STALE
+        product.pricing_error = "currency_changed"
+        supplier_product.landed_cost = None
+        logger.info("pricing: stale reason=currency_changed")
+        return
+
+    shipping = to_decimal(supplier_product.shipping_cost)
+    freight_valid = (
+        supplier_product.freight_status == FREIGHT_AVAILABLE
+        and shipping is not None
+    )
+    if freight_valid:
+        supplier_product.landed_cost = (
+            cost_after + shipping
+        ).quantize(Decimal("0.01"))
+    else:
+        supplier_product.landed_cost = None
+    product.pricing_status = STALE
+    product.pricing_error = "supplier_cost_changed"
+    logger.info("pricing: stale reason=supplier_cost_changed")
 
 
 def _apply_category(
@@ -362,10 +434,12 @@ def _apply_product(
     product.sync_error = None
     # Fase 6: moeda de VENDA = moeda resolvida do fornecedor (sem camada FX;
     # Product.currency/SupplierProduct.currency devem ser iguais para pricing).
-    # Para produtos já PRECIFICADOS o reimport não rebaixa o pricing_status
-    # ('priced' é decisão comercial) nem sobrescreve o preço de venda calculado.
+    # Para produtos já PRECIFICADOS (priced) ou INVALIDADOS (stale) o reimport
+    # não rebaixa o pricing_status, nem sobrescreve o preço de venda calculado
+    # nem a margem alvo (decisões comerciais/auditoria). Drafts que nunca foram
+    # precificados nascem `blocked`/freight_unavailable.
     product.currency = currency
-    if product.pricing_status != PRICED:
+    if product.pricing_status not in (PRICED, STALE):
         product.price = catalog_price
         product.pricing_status = BLOCKED
         product.pricing_error = "freight_unavailable"

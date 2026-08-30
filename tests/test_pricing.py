@@ -119,6 +119,14 @@ def test_sale_price_for_margin_formula():
     assert sale_price_for_margin(Decimal("100.00"), Decimal("20")) == Decimal("125.00")
 
 
+def test_compute_margin_and_markup_normalize_string_inputs():
+    # Contrato Fase 6: ambos os operandos são normalizados (str é aceito).
+    assert compute_margin("125.00", "100.00") == Decimal("20.00")
+    assert compute_markup("125.00", "100.00") == Decimal("25.00")
+    with pytest.raises(ValueError):
+        compute_markup("125.00", None)  # landed inválido, não exploda com None
+
+
 # --------------------------------------------------------------------------
 # landed = 100 + margem 20% => preço 125.00, margem 20%, markup 25%
 # --------------------------------------------------------------------------
@@ -218,6 +226,42 @@ def test_currency_mismatch_blocks(db):
         price_dropshipping_product(product=product, target_margin_percent="20")
     assert excinfo.value.args[0] == "currency_mismatch"
     assert supplier_product.landed_cost is None
+
+
+def test_product_currency_divergent_from_supplier_never_prices(db):
+    # product.currency (BRL) != SupplierProduct.currency/frete (USD): mesmo com
+    # fornecedor×frete coerentes, a moeda de VENDA diverge -> nunca `priced`.
+    product, supplier_product = _ready(db, currency="USD", freight_currency="USD")
+    with pytest.raises(PricingBlocked) as excinfo:
+        price_dropshipping_product(product=product, target_margin_percent="20")
+    assert excinfo.value.args[0] == "currency_mismatch"
+    assert product.pricing_status == "unpriced"
+    assert product.price == Decimal("1.00")
+    assert supplier_product.landed_cost is None
+
+
+def test_negative_shipping_blocks_at_service_level(db):
+    # shipping < 0 é rejeitado pelo SERVIÇO (calculate_landed_cost), sem
+    # depender apenas do CHECK de banco. Vínculo em memória: o CHECK nem roda.
+    product = _product(db)
+    supplier_product = SupplierProduct(
+        id=uuid.uuid4(),
+        supplier_id=uuid.uuid4(),
+        product_id=product.id,
+        supplier_product_id="SP_NEG",
+        cost=Decimal("100.00"),
+        currency="BRL",
+        freight_status="available",
+        shipping_cost=Decimal("-0.01"),
+        freight_currency="BRL",
+        is_active=True,
+    )
+    product.supplier_links = [supplier_product]
+    with pytest.raises(PricingBlocked) as excinfo:
+        price_dropshipping_product(product=product, target_margin_percent="20")
+    assert excinfo.value.args[0] == "shipping_cost_invalid"
+    assert supplier_product.landed_cost is None
+    assert product.pricing_status == "unpriced"
 
 
 def test_multiple_active_suppliers_ambiguous(db):

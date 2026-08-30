@@ -11,13 +11,15 @@ Códigos estáveis de bloqueio (NUNCA usar mensagens livres como lógica):
     supplier_cost_missing   -> SupplierProduct.cost NULL ou <= 0
     freight_unavailable     -> freight_status != 'available'
     shipping_cost_missing   -> shipping_cost NULL
+    shipping_cost_invalid   -> shipping_cost < 0
     landed_cost_missing     -> landed_cost NULL ou <= 0
+    landed_cost_stale       -> landed_cost != (cost + shipping) quantizado
     currency_mismatch       -> moeda de venda/fornecedor/frete divergente
     margin_missing          -> target_margin_percent NULL ou inválida
     pricing_not_ready       -> pricing_status != 'priced'
     sale_price_invalid      -> Product.price NULL ou <= 0
     margin_below_target     -> preço abaixo do mínimo para a margem alvo
-    no_sellable_variant     -> nenhuma variante ativa com stock > 0
+    no_sellable_variant     -> nenhuma variante do fornecedor ATIVO com estoque
 """
 
 from __future__ import annotations
@@ -72,6 +74,7 @@ def evaluate_publication(product: Product) -> PublicationDecision:
     reasons: List[str] = []
     active_links = [sp for sp in (product.supplier_links or []) if sp.is_active]
     landed: Decimal | None = None
+    selected_supplier = None
 
     if len(active_links) == 0:
         reasons.append("supplier_missing")
@@ -79,16 +82,20 @@ def evaluate_publication(product: Product) -> PublicationDecision:
         reasons.append("supplier_ambiguous")
     else:
         supplier_product = active_links[0]
+        selected_supplier = supplier_product.id
 
         cost = to_decimal(supplier_product.cost)
         if cost is None or cost <= 0:
             reasons.append("supplier_cost_missing")
 
+        shipping = to_decimal(supplier_product.shipping_cost)
         if supplier_product.freight_status != FREIGHT_AVAILABLE:
             reasons.append("freight_unavailable")
-
-        if to_decimal(supplier_product.shipping_cost) is None:
-            reasons.append("shipping_cost_missing")
+        else:
+            if shipping is None:
+                reasons.append("shipping_cost_missing")
+            elif shipping < 0:
+                reasons.append("shipping_cost_invalid")
 
         landed = to_decimal(supplier_product.landed_cost)
         if landed is None or landed <= 0:
@@ -97,15 +104,27 @@ def evaluate_publication(product: Product) -> PublicationDecision:
         selling_currency = normalize_currency(product.currency)
         supplier_currency = normalize_currency(supplier_product.currency)
         freight_currency = normalize_currency(supplier_product.freight_currency)
-        # Sem camada FX: venda/fornecedor/frete precisam ser iguais.
-        if (
-            not selling_currency
-            or not supplier_currency
-            or selling_currency != supplier_currency
-            or not freight_currency
-            or supplier_currency != freight_currency
-        ):
+        currencies_ok = bool(
+            selling_currency
+            and supplier_currency == selling_currency
+            and freight_currency == supplier_currency
+        )
+        if not currencies_ok:
             reasons.append("currency_mismatch")
+
+        # Defesa contra landed guardado/inconsistente: qualquer divergência de
+        # banco/edição manual entre landed_cost e (cost + shipping) bloqueia.
+        # Só avalia quando o estado do fornecedor está íntegro (cost > 0,
+        # shipping >= 0, frete disponível e moedas coerentes).
+        if (
+            cost is not None and cost > 0
+            and shipping is not None and shipping >= 0
+            and supplier_product.freight_status == FREIGHT_AVAILABLE
+            and currencies_ok
+        ):
+            expected_landed = (cost + shipping).quantize(Decimal("0.01"))
+            if landed != expected_landed:
+                reasons.append("landed_cost_stale")
 
     margin = to_decimal(product.target_margin_percent)
     if not _margin_valid(margin):
@@ -123,10 +142,16 @@ def evaluate_publication(product: Product) -> PublicationDecision:
         if sale < required:
             reasons.append("margin_below_target")
 
-    has_sellable = any(
-        getattr(variant, "is_active", False) and int(variant.stock or 0) > 0
-        for variant in (product.variants or [])
-    )
+    # O estoque publicável pertence EXCLUSIVAMENTE ao SupplierProduct ativo
+    # selecionado: variante ativa de um vínculo de fornecedor inativo não conta.
+    has_sellable = False
+    if selected_supplier is not None:
+        has_sellable = any(
+            v.supplier_product_id == selected_supplier
+            and getattr(v, "is_active", False)
+            and int(v.stock or 0) > 0
+            for v in (product.variants or [])
+        )
     if not has_sellable:
         reasons.append("no_sellable_variant")
 
