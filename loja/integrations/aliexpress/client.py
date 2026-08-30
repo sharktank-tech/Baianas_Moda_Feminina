@@ -374,19 +374,19 @@ class AliExpressClient:
         self,
         *,
         product_id: str,
-        sku_id: str,
         country_code: str = "BR",
         product_num: int = 1,
         send_goods_country_code: str = "CN",
         province_code: Optional[str] = None,
         city_code: Optional[str] = None,
+        sku_id: Optional[str] = None,
     ) -> "AliExpressFreightResult":
         """Busca read-only aliexpress.logistics.buyer.freight.get (isolado).
 
         Diferente do freight.calculate: o parâmetro externo é
         `aeopFreightCalculateForBuyerDTO` (JSON compacto que participa da
-        assinatura). Mesmo gateway /sync, sign_method=sha256 e session=token.
-        Não persiste nada.
+        assinatura) e o DTO NÃO envia sku_id. Mesmo gateway /sync,
+        sign_method=sha256 e session=token. Não persiste nada.
         """
         from .buyer_freight_get import (
             build_buyer_freight_get_params,
@@ -395,12 +395,12 @@ class AliExpressClient:
 
         business = build_buyer_freight_get_params(
             product_id=product_id,
-            sku_id=sku_id,
             country_code=country_code,
             product_num=product_num,
             send_goods_country_code=send_goods_country_code,
             province_code=province_code,
             city_code=city_code,
+            sku_id=sku_id,
         )
         payload = self.call(
             "aliexpress.logistics.buyer.freight.get", **business

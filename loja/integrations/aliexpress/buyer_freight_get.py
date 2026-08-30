@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 def build_buyer_freight_get_params(
     *,
     product_id: str,
-    sku_id: str,
+    sku_id: Optional[str] = None,
     country_code: str = "BR",
     product_num: int = 1,
     send_goods_country_code: str = "CN",
@@ -37,15 +37,14 @@ def build_buyer_freight_get_params(
 ) -> Mapping[str, str]:
     """Monta o business param para aliexpress.logistics.buyer.freight.get.
 
-    O DTO JSON usa tipos corretos (product_id/product_num como number, sku_id
-    como string) e province_code/city_code só quando preenchidos. O parâmetro
-    externo é `aeopFreightCalculateForBuyerDTO` (JSON compacto que participa
-    da assinatura), NÃO o `param_...d_t_o` do freight.calculate.
+    O DTO JSON usa tipos corretos (product_id/product_num como number) e
+    province_code/city_code só quando preenchidos. NÃO envia sku_id (o live do
+    freight.get não exige e aceita melhor sem). O parâmetro externo é
+    `aeopFreightCalculateForBuyerDTO` (JSON compacto que participa da
+    assinatura), NÃO o `param_...d_t_o` do freight.calculate.
     """
     if not product_id:
         raise ValueError("product_id é obrigatório para buyer.freight.get")
-    if not sku_id:
-        raise ValueError("sku_id é obrigatório para buyer.freight.get")
     if not country_code:
         raise ValueError("country_code é obrigatório para buyer.freight.get")
     if not send_goods_country_code:
@@ -62,7 +61,6 @@ def build_buyer_freight_get_params(
     dto: dict = {
         "product_id": product_id_num,
         "product_num": int(product_num),
-        "sku_id": str(sku_id),
         "country_code": country_code,
         "send_goods_country_code": send_goods_country_code,
     }

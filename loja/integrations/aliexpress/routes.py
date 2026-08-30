@@ -291,26 +291,13 @@ def callback():
 
     elif product_detail is not None and use_buyer:
         # ---- logistics.buyer.freight.get (Fase 4b isolada) ----
-        #    Chamada única por product_id + primeiro SKU elegível (a API exige
-        #    sku_id). Reutiliza o mesmo product_detail da Fase 3; sem loop/sleep.
+        #    Chamada única por product_id (sem sku_id no request). Não exige SKU
+        #    elegível. Reutiliza o mesmo product_detail da Fase 3; sem loop/sleep.
         product_id = product_detail.product_id
-        eligible_sku = next(
-            (
-                sku
-                for sku in (product_detail.skus or [])
-                if getattr(sku, "sku_id", None)
-                and (
-                    getattr(sku, "available_stock", None) is None
-                    or getattr(sku, "available_stock", None) > 0
-                )
-            ),
-            None,
-        )
-        if product_id is not None and eligible_sku is not None:
+        if product_id is not None:
             try:
                 fret = client.get_buyer_freight(
                     product_id=product_id,
-                    sku_id=eligible_sku.sku_id,
                     country_code="BR",
                     product_num=1,
                     send_goods_country_code=send_goods_country_code,
@@ -322,16 +309,6 @@ def callback():
             except (AliExpressAPIError, AliExpressTransportError) as exc:
                 freight_error = exc
                 freight_candidates = 1
-        elif product_id is not None:
-            # Sem SKU elegível: não chamar a API; diagnóstico sanitizado.
-            freight_unavailable = {
-                "attempted": 0,
-                "code_501": 0,
-                "code_505": 0,
-                "other": 0,
-                "reason": "nenhum SKU elegível",
-            }
-            current_app.logger.info("buyer freight: nenhum SKU elegível")
 
     if not use_buyer and freight_result is None and freight_error is None:
         unavail["attempted"] = freight_candidates

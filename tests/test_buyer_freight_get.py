@@ -28,11 +28,15 @@ class _FakeTransport:
 
 
 # ----- parâmetros obrigatórios ---------------------------------------------
-def test_get_requires_product_id_and_sku():
+def test_get_requires_product_id():
     with pytest.raises(ValueError):
-        build_buyer_freight_get_params(product_id="", sku_id="s1")
-    with pytest.raises(ValueError):
-        build_buyer_freight_get_params(product_id=123, sku_id="")
+        build_buyer_freight_get_params(product_id="")
+
+
+def test_get_sku_is_optional_and_not_required():
+    # sku_id não é exigido nem enviado no DTO do freight.get.
+    p = build_buyer_freight_get_params(product_id=123)
+    assert "sku_id" not in p["aeopFreightCalculateForBuyerDTO"]
 
 
 def test_get_requires_country_and_origin():
@@ -53,34 +57,38 @@ def test_get_product_num_minimum():
 
 
 # ----- tipos JSON e omitidos quando vazios ----------------------------------
-def test_get_dto_json_types():
+def test_get_dto_json_types_no_sku():
     p = build_buyer_freight_get_params(product_id=123, sku_id="s1")
     dto = json.loads(p["aeopFreightCalculateForBuyerDTO"])
     assert dto["product_id"] == 123
     assert isinstance(dto["product_id"], int)
     assert dto["product_num"] == 1
     assert isinstance(dto["product_num"], int)
-    assert dto["sku_id"] == "s1"
-    assert isinstance(dto["sku_id"], str)
+    assert "sku_id" not in dto
     assert dto["country_code"] == "BR"
     assert dto["send_goods_country_code"] == "CN"
 
 
 def test_get_product_id_string_becomes_number():
-    p = build_buyer_freight_get_params(product_id="123", sku_id="s1")
+    p = build_buyer_freight_get_params(product_id="123")
     dto = p["aeopFreightCalculateForBuyerDTO"]
     assert '"product_id":123' in dto
 
 
-def test_get_province_city_omitted_when_empty():
+def test_get_sku_id_not_in_json_even_when_passed():
     p = build_buyer_freight_get_params(product_id=123, sku_id="s1")
+    assert "sku_id" not in p["aeopFreightCalculateForBuyerDTO"]
+
+
+def test_get_province_city_omitted_when_empty():
+    p = build_buyer_freight_get_params(product_id=123)
     assert "province_code" not in p["aeopFreightCalculateForBuyerDTO"]
     assert "city_code" not in p["aeopFreightCalculateForBuyerDTO"]
 
 
 def test_get_province_city_included_when_set():
     p = build_buyer_freight_get_params(
-        product_id=123, sku_id="s1", province_code="SP", city_code="SAO_PAULO"
+        product_id=123, province_code="SP", city_code="SAO_PAULO"
     )
     dto = p["aeopFreightCalculateForBuyerDTO"]
     assert '"province_code":"SP"' in dto
