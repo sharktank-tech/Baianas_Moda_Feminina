@@ -26,6 +26,7 @@ from loja.modules.models import (
     SiteConfig, HeroSlide, Testimonial,
     Supplier, Promotion, Coupon,
 )
+from loja.services.publication import PublicationBlocked, publish_product
 
 admin_blueprint = Blueprint(
     "admin",
@@ -372,12 +373,30 @@ def edit_product(id):
         product.image4      = request.form.get("image4") or None
         product.category    = request.form.get("category") or None
         product.stock       = int(request.form.get("stock"))
-        product.is_active   = request.form.get("is_active") == "on"
+        desired_active      = request.form.get("is_active") == "on"
 
         try:
+            if product.source == "aliexpress":
+                # Todo caminho de PUBLICAÇÃO de AliExpress passa por
+                # publish_product(). Ativar bloqueado => flash amigável com
+                # códigos sanitizados e NENHUMA alteração dos flags (rollback).
+                if desired_active:
+                    publish_product(product)
+                else:
+                    product.is_active = False
+            else:
+                product.is_active = desired_active
             db.session.commit()
             flash("Produto atualizado com sucesso!", "success")
             return redirect(url_for("admin.admin_dashboard", _anchor="products"))
+
+        except PublicationBlocked as exc:
+            db.session.rollback()
+            flash(
+                "Não foi possível publicar o produto AliExpress (motivos: "
+                + ", ".join(exc.reasons) + ").",
+                "danger",
+            )
 
         except Exception as e:
             db.session.rollback()

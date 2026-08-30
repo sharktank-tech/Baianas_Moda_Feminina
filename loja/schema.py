@@ -132,6 +132,17 @@ REQUIRED_COLUMNS = {
     ("products", "sync_status"): {"type": "string", "length": 20, "nullable": True},
     ("products", "last_sync_at"): {"type": "datetime", "nullable": True},
     ("products", "sync_error"): {"type": "text", "nullable": True},
+    # products (precificação dropshipping / Fase 6). Sem margem padrão: a margem
+    # alvo precisa ser fornecida; ausência mantém o produto não publicável.
+    ("products", "currency"): {
+        "type": "string", "length": 3, "nullable": False, "default": "'BRL'",
+    },
+    ("products", "target_margin_percent"): {"type": "numeric5", "nullable": True},
+    ("products", "pricing_status"): {
+        "type": "string", "length": 20, "nullable": False, "default": "'unpriced'",
+    },
+    ("products", "pricing_error"): {"type": "text", "nullable": True},
+    ("products", "pricing_updated_at"): {"type": "datetime", "nullable": True},
     # shipments (rastreio de fornecedor)
     ("shipments", "ali_order_id"): {"type": "string", "length": 64, "nullable": True},
     ("shipments", "external_shipment_id"): {
@@ -176,6 +187,8 @@ def _sql_type(dialect, generic):
         return "TEXT"
     if generic == "numeric":
         return "NUMERIC(10,2)"
+    if generic == "numeric5":
+        return "NUMERIC(5,2)"
     if generic == "jsonb":
         return "JSONB" if dialect == "postgresql" else "JSON"
     if generic == "datetime":

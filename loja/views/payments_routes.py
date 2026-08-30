@@ -169,9 +169,10 @@ def _get_direct_product_items():
 
     product = (
         Product.query
-        .filter_by(
-            id=product_id,
-            is_active=True,
+        .filter(
+            Product.id == product_id,
+            Product.is_active.is_(True),
+            Product.is_draft.is_(False),
         )
         .with_for_update()
         .first()
@@ -230,7 +231,7 @@ def _get_cart_items():
     for cart_item in cart.items:
         product = cart_item.product
 
-        if not product or not product.is_active:
+        if not product or not product.is_active or product.is_draft:
             raise ValueError(
                 "Um produto do carrinho não está mais disponível."
             )
@@ -326,7 +327,7 @@ def _reserve_stock(item_data):
             .first()
         )
 
-        if product is None or not product.is_active:
+        if product is None or not product.is_active or product.is_draft:
             raise ValueError(
                 f"Produto {item['product_name']} não está mais disponível."
             )

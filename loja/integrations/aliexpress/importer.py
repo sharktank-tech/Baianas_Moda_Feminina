@@ -13,6 +13,10 @@ genérica da PolloModas, SEMPRE como draft:
 Regras invariantes desta fase:
   * Nunca calcula margem/FX/frete. Frete fica `provider_unavailable` com
     shipping_cost/landed_cost/freight_currency = NULL (ausência NUNCA é zero).
+    Um reimport NÃO sobrescreve uma confirmação de frete/landed existente.
+  * Fase 6: todo novo draft nasce `blocked` com pricing_error
+    'freight_unavailable' e product.currency = moeda resolvida. Produto já
+    `priced` NÃO é rebaixado nem tem o preço de venda sobrescrito.
   * Price/cost do rascunho = menor preço observado (provisório, não publicável).
   * Moeda única entre os SKUs com preço; divergência aborta (sem conversão).
   * Idempotente: reimport não duplica Supplier/Product/Variante/Imagem/Sync.
@@ -41,6 +45,7 @@ from loja.modules.models import (
     SupplierCategoryMapping,
     SupplierProduct,
 )
+from loja.services.pricing import BLOCKED, PRICED
 from loja.utils import utcnow
 
 from .models import AliExpressProductDetail, AliExpressProductSku
@@ -50,6 +55,7 @@ logger = logging.getLogger(__name__)
 SOURCE_ALIEXPRESS = "aliexpress"
 DRAFT_STATE = "draft"
 FREIGHT_PROVIDER_UNAVAILABLE = "provider_unavailable"
+FREIGHT_AVAILABLE = "available"
 
 COLOR_NAMES = {"color", "colour", "cor"}
 SIZE_NAMES = {"size", "tamanho"}
@@ -119,7 +125,7 @@ def import_product_draft(
         )
 
         _apply_category(product, supplier, detail, created)
-        _apply_product(product, detail, catalog_price, now)
+        _apply_product(product, detail, catalog_price, currency, now)
         variant_counts, images = _apply_variants_and_images(
             product, supplier_product, detail, now
         )
@@ -304,12 +310,17 @@ def _apply_supplier_product(
     supplier_product.last_sync_at = now
     supplier_product.sync_error = None
     supplier_product.is_active = True
-    # Sem frete nesta fase: provider_unavailable -> custos de frete indefinidos
-    # (NULL), NUNCA zero.
-    supplier_product.freight_status = FREIGHT_PROVIDER_UNAVAILABLE
-    supplier_product.shipping_cost = None
-    supplier_product.landed_cost = None
-    supplier_product.freight_currency = None
+    if not (
+        supplier_product.freight_status == FREIGHT_AVAILABLE
+        and supplier_product.landed_cost is not None
+    ):
+        # Sem frete: provider_unavailable -> custos de frete indefinidos
+        # (NULL), NUNCA zero. Um reimport NÃO sobrescreve uma confirmação de
+        # frete/landed existente: pricing é decisão comercial preservada.
+        supplier_product.freight_status = FREIGHT_PROVIDER_UNAVAILABLE
+        supplier_product.shipping_cost = None
+        supplier_product.landed_cost = None
+        supplier_product.freight_currency = None
 
 
 def _apply_category(
@@ -332,13 +343,16 @@ def _apply_category(
 
 
 def _apply_product(
-    product: Product, detail: AliExpressProductDetail, catalog_price, now
+    product: Product,
+    detail: AliExpressProductDetail,
+    catalog_price,
+    currency: str,
+    now,
 ) -> None:
     product.name = (detail.title or "").strip() or "Produto AliExpress"
     product.description = detail.description
     product.source = SOURCE_ALIEXPRESS
     product.external_id = str(detail.product_id)
-    product.price = catalog_price
     product.cost = catalog_price
     product.wholesale_price = None
     product.is_draft = True
@@ -346,6 +360,15 @@ def _apply_product(
     product.sync_status = "synced"
     product.last_sync_at = now
     product.sync_error = None
+    # Fase 6: moeda de VENDA = moeda resolvida do fornecedor (sem camada FX;
+    # Product.currency/SupplierProduct.currency devem ser iguais para pricing).
+    # Para produtos já PRECIFICADOS o reimport não rebaixa o pricing_status
+    # ('priced' é decisão comercial) nem sobrescreve o preço de venda calculado.
+    product.currency = currency
+    if product.pricing_status != PRICED:
+        product.price = catalog_price
+        product.pricing_status = BLOCKED
+        product.pricing_error = "freight_unavailable"
 
 
 # --------------------------------------------------------------------------
@@ -528,6 +551,7 @@ __all__ = [
     "SOURCE_ALIEXPRESS",
     "DRAFT_STATE",
     "FREIGHT_PROVIDER_UNAVAILABLE",
+    "FREIGHT_AVAILABLE",
     "COLOR_NAMES",
     "SIZE_NAMES",
 ]

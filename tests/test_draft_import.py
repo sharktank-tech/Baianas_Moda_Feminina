@@ -601,6 +601,7 @@ def test_published_aliexpress_product_is_conflict_not_silent_draft(db):
         is_draft=False,
         source="aliexpress",
         external_id=external_id,
+        pricing_status="priced",
     )
     db.session.add(published)
     db.session.commit()
@@ -631,6 +632,7 @@ def test_published_with_link_conflict_not_silent_draft(db):
 
     product.is_draft = False
     product.is_active = True
+    product.pricing_status = "priced"
     product.name = "Publicado depois"
     db.session.commit()
 
@@ -878,6 +880,12 @@ def test_ensure_schema_adds_new_columns_to_old_tables():
             "CREATE TABLE product_variants "
             "(id VARCHAR(36) PRIMARY KEY, supplier_sku_id VARCHAR(64))"
         ))
+        c.execute(text(
+            "CREATE TABLE products "
+            "(id VARCHAR(36) PRIMARY KEY, name TEXT NOT NULL, price NUMERIC(10,2) "
+            "NOT NULL, is_active BOOLEAN NOT NULL DEFAULT 1, source VARCHAR(20) "
+            "NOT NULL DEFAULT 'internal', is_draft BOOLEAN NOT NULL DEFAULT 0)"
+        ))
         c.commit()
 
     try:
@@ -887,10 +895,15 @@ def test_ensure_schema_adds_new_columns_to_old_tables():
             inspector = sa_inspect(db.engine)
             sp_cols = {c["name"] for c in inspector.get_columns("supplier_products")}
             pv_cols = {c["name"] for c in inspector.get_columns("product_variants")}
+            p_cols = {c["name"] for c in inspector.get_columns("products")}
             assert {
                 "freight_status", "shipping_cost", "landed_cost", "freight_currency",
             }.issubset(sp_cols)
             assert "attributes" in pv_cols
+            assert {
+                "currency", "target_margin_percent", "pricing_status",
+                "pricing_error", "pricing_updated_at",
+            }.issubset(p_cols)
             # idempotente: segunda execução não duplica
             ensure_schema(app)
             sp_cols2 = {c["name"] for c in sa_inspect(db.engine).get_columns("supplier_products")}
@@ -904,5 +917,76 @@ def test_new_columns_created_by_create_all(db):
     inspector = sa_inspect(db.engine)
     sp_cols = {c["name"] for c in inspector.get_columns("supplier_products")}
     pv_cols = {c["name"] for c in inspector.get_columns("product_variants")}
+    p_cols = {c["name"] for c in inspector.get_columns("products")}
     assert {"freight_status", "shipping_cost", "landed_cost", "freight_currency"}.issubset(sp_cols)
     assert "attributes" in pv_cols
+    assert {
+        "currency", "target_margin_percent", "pricing_status",
+        "pricing_error", "pricing_updated_at",
+    }.issubset(p_cols)
+
+
+# --------------------------------------------------------------------------
+# Fase 6: estado de pricing no import de rascunho
+# --------------------------------------------------------------------------
+
+def test_new_draft_starts_blocked_with_currency(db):
+    external_id = "1005000000000042"
+    detail = _detail(
+        product_id=external_id,
+        currency="USD",
+        skus=[_sku(sku_id="1", sale_price="10.00", stock=5, currency="USD")],
+    )
+    result = import_product_draft(detail=detail, seller_id="SELLER_F6")
+    assert result.created is True
+
+    product = _fetch_product(external_id)
+    assert product.currency == "USD"
+    assert product.pricing_status == "blocked"
+    assert product.pricing_error == "freight_unavailable"
+    assert product.target_margin_percent is None
+    assert product.is_draft is True
+    assert product.is_active is False
+
+    supplier_product = SupplierProduct.query.filter_by(
+        supplier_product_id=external_id
+    ).one()
+    assert supplier_product.freight_status == "provider_unavailable"
+    assert supplier_product.shipping_cost is None
+    assert supplier_product.landed_cost is None
+
+
+def test_reimport_preserves_priced_decisions(db):
+    external_id = "1005000000000043"
+    detail = _detail(
+        product_id=external_id,
+        currency="USD",
+        skus=[_sku(sku_id="1", sale_price="10.00", stock=5, currency="USD")],
+    )
+    import_product_draft(detail=detail, seller_id="SELLER_F6P")
+    product = _fetch_product(external_id)
+
+    # Cenário comercial futuro: frete confirmado + precificado (ainda draft).
+    sp = supplier_product = SupplierProduct.query.filter_by(
+        supplier_product_id=external_id
+    ).one()
+    sp.freight_status = "available"
+    sp.shipping_cost = Decimal("2.00")
+    sp.freight_currency = "USD"
+    sp.landed_cost = Decimal("12.00")
+    product.price = Decimal("15.00")
+    product.pricing_status = "priced"
+    product.target_margin_percent = Decimal("20.00")
+    product.pricing_updated_at = None
+    db.session.commit()
+
+    reimport = import_product_draft(detail=detail, seller_id="SELLER_F6P")
+    assert reimport.created is False
+
+    db.session.refresh(product)
+    db.session.refresh(sp)
+    assert product.pricing_status == "priced"
+    assert product.price == Decimal("15.00")
+    assert sp.freight_status == "available"
+    assert sp.shipping_cost == Decimal("2.00")
+    assert sp.landed_cost == Decimal("12.00")

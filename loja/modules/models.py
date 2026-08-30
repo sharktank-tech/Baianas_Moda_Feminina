@@ -217,6 +217,43 @@ class Product(db.Model):
     sync_status = db.Column(db.String(20))
     last_sync_at = db.Column(db.DateTime)
     sync_error = db.Column(db.Text)
+    # Precificação dropshipping (Fase 6). Moeda de VENDA: no import AliExpress
+    # preenche a moeda resolvida; produtos internos/legados permanecem BRL.
+    currency = db.Column(
+        db.String(3),
+        nullable=False,
+        default="BRL",
+        server_default="BRL",
+    )
+    # Margem alvo EXPLÍCITA. Sem margem padrão: NULL = não precificável nem
+    # publicável. Regra de negócio (0, 100) reforçada no banco.
+    target_margin_percent = db.Column(db.Numeric(5, 2))
+    # Estados: unpriced | blocked | ready | priced | stale.
+    pricing_status = db.Column(
+        db.String(20),
+        nullable=False,
+        default="unpriced",
+        server_default="unpriced",
+    )
+    pricing_error = db.Column(db.Text)
+    pricing_updated_at = db.Column(db.DateTime)
+
+    # Defesa de banco: AliExpress só pode ficar ATIVO se NÃO for rascunho E
+    # estiver priced. O resto da validação (landed cost, moeda, margem alvo,
+    # variantes) é responsabilidade de publication.evaluate_publication().
+    __table_args__ = (
+        db.CheckConstraint(
+            "target_margin_percent IS NULL "
+            "OR (target_margin_percent > 0 AND target_margin_percent < 100)",
+            name="ck_product_target_margin_range",
+        ),
+        db.CheckConstraint(
+            "source != 'aliexpress' "
+            "OR is_active = false "
+            "OR (is_draft = false AND pricing_status = 'priced')",
+            name="ck_product_aliexpress_publication_guard",
+        ),
+    )
 
     suppliers = db.relationship(
         "Supplier",
