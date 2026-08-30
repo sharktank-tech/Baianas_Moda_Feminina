@@ -18,7 +18,14 @@ import time
 from functools import wraps
 from typing import Any, Callable, Optional
 
-from flask import Blueprint, current_app, redirect, request, session
+from flask import (
+    Blueprint,
+    after_this_request,
+    current_app,
+    redirect,
+    request,
+    session,
+)
 
 from loja.integrations.aliexpress import (
     AliExpressClient,
@@ -43,6 +50,13 @@ from loja.utils.decorators import admin_required
 
 STATE_KEY = "aliexpress_oauth_state"
 STATE_MAX_AGE = 600  # 10 minutos
+
+# Fallback de callback OAuth via cookie (interceptado pelo middleware da Vercel
+# antes do runtime Python). Local/dev continua funcionando direto por query
+# string; os cookies são o caminho principal no Vercel.
+OAUTH_CODE_COOKIE = "ae_oauth_code"
+OAUTH_STATE_COOKIE = "ae_oauth_state"
+OAUTH_CALLBACK_COOKIE_PATH = "/integrations/aliexpress/callback"
 _url_prefix = "/integrations/aliexpress"
 
 aliexpress_blueprint = Blueprint("aliexpress", __name__, url_prefix=_url_prefix)
@@ -157,8 +171,18 @@ def authorize():
 
 @aliexpress_blueprint.route("/callback", methods=["GET"])
 def callback():
-    code = request.args.get("code")
-    state = request.args.get("state")
+    # Depois de processar o callback, apaga imediatamente os cookies do
+    # fallback (path restrito ao callback). Vale para qualquer desfecho.
+    @after_this_request
+    def _clear_oauth_callback_cookies(response):
+        response.delete_cookie(OAUTH_CODE_COOKIE, path=OAUTH_CALLBACK_COOKIE_PATH)
+        response.delete_cookie(OAUTH_STATE_COOKIE, path=OAUTH_CALLBACK_COOKIE_PATH)
+        return response
+
+    # Fonte do code/state: query string (local/dev) OU cookie gravado pelo
+    # middleware da Vercel (fluxo principal). Nunca registra o valor.
+    code = request.args.get("code") or request.cookies.get(OAUTH_CODE_COOKIE)
+    state = request.args.get("state") or request.cookies.get(OAUTH_STATE_COOKIE)
     # Consome imediatamente (uso único); qualquer falha abaixo rejeita.
     stored = session.pop(STATE_KEY, None)
 

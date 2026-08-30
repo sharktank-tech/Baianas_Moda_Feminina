@@ -38,6 +38,9 @@ from loja.integrations.aliexpress.oauth import (
     RequestsOAuthTransport,
 )
 from loja.integrations.aliexpress.routes import (
+    OAUTH_CALLBACK_COOKIE_PATH,
+    OAUTH_CODE_COOKIE,
+    OAUTH_STATE_COOKIE,
     STATE_KEY,
     aliexpress_blueprint,
     get_aliexpress_callback_url,
@@ -1459,6 +1462,115 @@ def test_vercel_callback_still_receives_code_and_state(app_client, monkeypatch, 
     assert "Buyer freight.calculate: success" in body
     assert len(client.buyer_calls) == 1
     assert "14:771" not in caplog.text
+
+
+# --------------------------------------------------------------------------
+# Fallback de callback OAuth via cookie (middleware da Vercel)
+# --------------------------------------------------------------------------
+def _cookie_names(client):
+    cookies = getattr(client, "_cookies", None)
+    if cookies is None:
+        return []
+    return [storage_key[2] for storage_key in cookies]
+
+
+def _run_probe_via_cookies(app_client, monkeypatch, probe_client, code, state):
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes.exchange_authorization_code",
+        lambda *a, **k: _fake_token(),
+    )
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes.AliExpressClient",
+        lambda *a, **k: probe_client,
+    )
+    with app_client.session_transaction() as sess:
+        sess[STATE_KEY] = {"state": state, "ts": time.time()}
+    app_client.set_cookie(OAUTH_CODE_COOKIE, code, path=OAUTH_CALLBACK_COOKIE_PATH)
+    app_client.set_cookie(OAUTH_STATE_COOKIE, state, path=OAUTH_CALLBACK_COOKIE_PATH)
+    return app_client.get("/integrations/aliexpress/callback")
+
+
+def test_callback_recovers_code_and_state_from_cookies(app_client, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
+    calls = []
+    get_map = {"100500123": _probe_product_raw_skus("100500123", [("14:771", 5)])}
+    buyer = {"100500123": _probe_buyer_success()}
+    client = _ProbeClient(
+        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
+    )
+    code = "PH_CODE"
+    state = "PH_STATE"
+    with caplog.at_level(logging.INFO):
+        r = _run_probe_via_cookies(app_client, monkeypatch, client, code, state)
+    body = r.data.decode()
+    assert r.status_code == 200
+    assert "Buyer freight.calculate: success" in body
+    # Cookies apagados após processar o callback.
+    assert OAUTH_CODE_COOKIE not in _cookie_names(app_client)
+    assert OAUTH_STATE_COOKIE not in _cookie_names(app_client)
+    # Nenhuma saída de log contém a query, o code ou o state (placeholders).
+    assert "?code=" not in caplog.text
+    assert "&state=" not in caplog.text
+    assert code not in caplog.text
+    assert state not in caplog.text
+    assert "14:771" not in caplog.text
+
+
+def test_callback_clean_reaches_flask_without_query_or_cookies(app_client):
+    r = app_client.get("/integrations/aliexpress/callback")
+    assert r.status_code == 400
+    assert "Falha de validação de estado OAuth" in r.data.decode()
+
+
+def test_callback_cookie_state_is_single_use(app_client, monkeypatch):
+    calls = []
+    get_map = {"100500123": _probe_product_detail("100500123", [])}
+    client = _ProbeClient(_probe_search_result(["100500123"]), get_map, {}, calls)
+    code = "PH_CODE"
+    state = "PH_STATE"
+    r1 = _run_probe_via_cookies(app_client, monkeypatch, client, code, state)
+    assert r1.status_code == 200
+    # O mesmo state re-apresentado pelos cookies é rejeitado (já consumido).
+    app_client.set_cookie(OAUTH_CODE_COOKIE, code, path=OAUTH_CALLBACK_COOKIE_PATH)
+    app_client.set_cookie(OAUTH_STATE_COOKIE, state, path=OAUTH_CALLBACK_COOKIE_PATH)
+    r2 = app_client.get("/integrations/aliexpress/callback")
+    assert r2.status_code == 400
+    assert "Falha de validação de estado OAuth" in r2.data.decode()
+
+
+def test_callback_cookies_cleared_after_processing(app_client, monkeypatch):
+    calls = []
+    get_map = {"100500123": _probe_product_detail("100500123", [])}
+    client = _ProbeClient(_probe_search_result(["100500123"]), get_map, {}, calls)
+    r = _run_probe_via_cookies(app_client, monkeypatch, client, "PH_CODE", "PH_STATE")
+    assert r.status_code == 200
+    cookies_after = _cookie_names(app_client)
+    assert OAUTH_CODE_COOKIE not in cookies_after
+    assert OAUTH_STATE_COOKIE not in cookies_after
+
+
+def test_callback_cookie_path_preview_skips_freight(app_client, monkeypatch):
+    monkeypatch.setenv("VERCEL_ENV", "preview")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
+    calls = []
+    get_map = {"100500123": _probe_product_raw_skus("100500123", [("14:771", 5)])}
+    client = _ProbeClient(
+        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map={}
+    )
+    r = _run_probe_via_cookies(app_client, monkeypatch, client, "PH_CODE", "PH_STATE")
+    body = r.data.decode()
+    assert r.status_code == 200
+    assert "Smoke de frete: desativado (investigação encerrada)" in body
+    assert client.buyer_calls == []
+    assert client.buyer_get_calls == []
+    assert client.calls == []
+    assert "PH_CODE" not in body
+    assert "PH_STATE" not in body
+    assert OAUTH_CODE_COOKIE not in _cookie_names(app_client)
+    assert OAUTH_STATE_COOKIE not in _cookie_names(app_client)
 
 
 def _fake_http_response(status: int, content_type: str, body: str):
