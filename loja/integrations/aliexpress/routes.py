@@ -23,7 +23,6 @@ from flask import Blueprint, current_app, redirect, request, session
 from loja.integrations.aliexpress import (
     AliExpressClient,
     DEFAULT_BASE_URL,
-    call_top_freight_calculate,
     raw_canonical_sku_id,
 )
 from loja.integrations.aliexpress.errors import (
@@ -213,18 +212,28 @@ def callback():
         except (AliExpressAPIError, AliExpressTransportError) as exc:
             product_error = exc
 
-    # 4) Freight read-only com o MESMO token em memória.
-    #    Dois caminhos mutuamente exclusivos (para respeitar o timeout de 10s da
-    #    Vercel, nunca os dois no mesmo callback):
-    #      - ds.freight.query (Fase 4): baseado em SKU, sonda até 2 candidatos.
-    #      - logistics.buyer.freight.calculate via TOP legado (Fase 4b): chamada
-    #        única com DTO mínimo usando skuId (camelCase) e o sku.id bruto do
-    #        ds.product.get (só quando canônico). Somente o frete usa o router
-    #        https://eco.taobao.com/router/rest (sign_top/md5); search/product.get
-    #        continuam no /sync. Selecionado por ALIEXPRESS_SMOKE_BUYER_FREIGHT.
-    #        freight.get é diagnóstico histórico (não é chamado mais no smoke).
-    use_buyer = bool(os.environ.get("ALIEXPRESS_SMOKE_BUYER_FREIGHT"))
-    freight_label = "Buyer freight.calculate TOP" if use_buyer else "DS freight.query"
+    # 4) Freight smoke.
+    #    INVESTIGAÇÃO LIVE DE FRETE ENCERRADA: o provider bloqueou o frete (ver
+    #    FREIGHT_PROBE.md). Estado registrado como bloqueado pelo provider — NÃO
+    #    fazer novos experimentos de endpoint/parâmetro. Em Preview o smoke de
+    #    frete fica DESATIVADO (sem chamadas desnecessárias).
+    #
+    #    Implementação experimental canônica (única mantida):
+    #      aliexpress.logistics.buyer.freight.calculate
+    #      gateway /sync (sha256, session=token), SKU key live = skuId.
+    #    O transporte TOP (eco.taobao.com) permanece apenas como módulo/teste
+    #    histórico isolado — nunca é escolhido em runtime para este App Key.
+    #    freight.get também é diagnóstico histórico (não é chamado no smoke).
+    #
+    #    Dois caminhos mutuamente exclusivos (timeout 10s da Vercel):
+    #      - ds.freight.query (Fase 4)   : baseado em SKU, sonda até 2 candidatos.
+    #      - buyer.freight.calculate     : chamada única via /sync com skuId.
+    use_freight_smoke = _freight_smoke_enabled()
+    use_buyer = use_freight_smoke and bool(
+        os.environ.get("ALIEXPRESS_SMOKE_BUYER_FREIGHT")
+    )
+    freight_label = "Buyer freight.calculate" if use_buyer else "DS freight.query"
+    freight_disabled = not use_freight_smoke
     freight_result = None
     freight_error = None
     freight_unavailable = None
@@ -239,7 +248,7 @@ def callback():
         os.environ.get("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE") or "CN"
     )
 
-    if product_detail is not None and not use_buyer:
+    if product_detail is not None and use_freight_smoke and not use_buyer:
         # ---- ds.freight.query (Fase 4) ----
         #    Reutiliza o product_detail da Fase 3 (sem novo get_product e sem
         #    percorrer outros produtos) e sonda no máximo 2 SKUs elegíveis.
@@ -296,14 +305,13 @@ def callback():
                 freight_result = fret
                 break
 
-    elif product_detail is not None and use_buyer:
-        # ---- logistics.buyer.freight.calculate via TOP legado (Fase 4b) ----
-        #    Chamada única e isolada no router https://eco.taobao.com/router/rest
-        #    (sign_top/md5, timestamp GMT+8, POST form-urlencoded) com DTO mínimo:
-        #    skuId (camelCase) + o sku.id bruto do ds.product.get (só quando
-        #    canônico). Sem province/city/price mesmo que as envs existam —
-        #    eliminar variáveis para testar apenas o campo SKU. freight.get e
-        #    ds.freight.query não são chamados. Sem retries, loop ou sleep.
+    elif product_detail is not None and use_freight_smoke and use_buyer:
+        # ---- logistics.buyer.freight.calculate via /sync (canônico experimental) ----
+        #    Chamada única com DTO mínimo: skuId (camelCase) + o sku.id bruto do
+        #    ds.product.get (só quando canônico), gateway /sync, sign_method=sha256,
+        #    session=token. Sem province/city/price mesmo que as envs existam —
+        #    trocamos uma variável por vez. freight.get e ds.freight.query não são
+        #    chamados neste caminho. Sem retries, loop de candidatos ou sleep.
         product_id = product_detail.product_id
         selected_sku = None
         raw_sku_id = None
@@ -329,24 +337,39 @@ def callback():
         if product_id is not None and selected_sku is not None:
             # Forma NÃO sensível do request (nunca expõe SKU/IDs/payload).
             current_app.logger.info(
-                "buyer freight TOP request shape: transport=top sign_method=md5 "
-                "sku_present=%s sku_key=camel raw_sku_canonical=%s "
-                "product_id_numeric=%s province_sent=no city_sent=no",
+                "buyer freight.calculate request shape: sku_present=%s sku_key=camel "
+                "raw_sku_canonical=%s product_id_numeric=%s province_sent=no city_sent=no",
                 "yes" if raw_sku_id else "no",
                 "yes" if raw_sku_id else "no",
                 product_id_numeric,
             )
             try:
-                fret = call_top_freight_calculate(
-                    app_key=app_key,
-                    app_secret=app_secret,
-                    access_token=token.access_token,
+                fret = client.calculate_buyer_freight(
                     product_id=product_id,
-                    raw_sku_id=raw_sku_id,
+                    sku_id=raw_sku_id,
+                    sku_key="skuId",
+                    country_code="BR",
+                    product_num=1,
                     send_goods_country_code=send_goods_country_code,
                 )
-                freight_result = fret
                 freight_candidates = 1
+                if fret.options:
+                    freight_result = fret
+                else:
+                    # queryShippingOptionForItem(forBuyer...) retornou null: estado
+                    # de domínio provider_unavailable (options=[], shipping_cost=None).
+                    # NUNCA vira frete zero; landed_cost/margin permanecem indefinidos.
+                    freight_unavailable = {
+                        "attempted": 0,
+                        "code_501": 0,
+                        "code_505": 0,
+                        "other": 0,
+                        "reason": (
+                            "provider_unavailable: provedor retornou null "
+                            "(queryShippingOptionForItem forBuyer); "
+                            "shipping_cost = None (nunca frete zero)"
+                        ),
+                    }
             except (AliExpressAPIError, AliExpressTransportError) as exc:
                 freight_error = exc
                 freight_candidates = 1
@@ -359,7 +382,7 @@ def callback():
                 "reason": "nenhum SKU elegível com SKU canônico válido",
             }
 
-    if not use_buyer and freight_result is None and freight_error is None:
+    if use_freight_smoke and not use_buyer and freight_result is None and freight_error is None:
         unavail["attempted"] = freight_candidates
         freight_unavailable = unavail
         # Diagnóstico seguro (sem IDs/token/sign/request body/valores de destino).
@@ -384,6 +407,7 @@ def callback():
         freight_unavailable=freight_unavailable,
         freight_candidates=freight_candidates,
         freight_label=freight_label,
+        freight_disabled=freight_disabled,
     )
 
 
@@ -394,6 +418,13 @@ MAX_FREIGHT_CALLS = 2
 def _is_unavailable_code(code: Any) -> bool:
     """501/505 = indisponibilidade do candidato (tentar próximo), não erro fatal."""
     return code in (501, 505, "501", "505")
+
+
+def _freight_smoke_enabled() -> bool:
+    """Investigação live de frete encerrada (provider bloqueou): nunca roda no Preview."""
+    if os.environ.get("VERCEL_ENV") == "preview":
+        return False
+    return True
 
 
 # --------------------------------------------------------------------------
@@ -410,6 +441,7 @@ def _render_success(
     freight_unavailable: Any = None,
     freight_candidates: int = 0,
     freight_label: str = "DS freight.query",
+    freight_disabled: bool = False,
 ) -> str:
     lines = [
         "AliExpress autorizado com sucesso",
@@ -471,7 +503,9 @@ def _render_success(
         ]
 
     # Seção freight (Fase 4 / 4b) — sanitizada (sem token/code/sign/request body).
-    if freight_error is not None:
+    if freight_disabled:
+        lines += ["", "Smoke de frete: desativado (investigação encerrada)"]
+    elif freight_error is not None:
         code = getattr(freight_error, "code", None)
         sub_code = getattr(freight_error, "sub_code", None)
         raw = getattr(freight_error, "raw", None)

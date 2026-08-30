@@ -9,12 +9,13 @@ from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import text
 import uuid
 
-# Em ambientes serverless (Vercel) o logger de acesso do Werkzeug registra a
-# query string completa (incluindo code/state do callback OAuth). Reduzimos para
-# WARNING para evitar vazamento de dados sensíveis em log. Logs de erro da
-# aplicação permanecem intactos.
-if os.environ.get("VERCEL"):
-    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+# Em ambientes serverless (Vercel) o logger de acesso do Werkzeug registraria a
+# query string completa do callback OAuth (code/state) em cada request. Em vez
+# de reduzir o nível, desligamos o access log do Werkzeug ANTES de servir
+# requests. Logs próprios da aplicação (OAuth/API, já sanitizados) permanecem.
+def _harden_werkzeug_access_log() -> None:
+    if os.environ.get("VERCEL"):
+        logging.getLogger("werkzeug").disabled = True
 
 db = SQLAlchemy()
 login_manager = LoginManager()
@@ -117,6 +118,10 @@ def _setup_database(app):
 
 
 def create_app():
+    # Antes de começar a servir requests: em Vercel, desliga o access log do
+    # Werkzeug (nunca registra ?code=/&state= do callback OAuth em log).
+    _harden_werkzeug_access_log()
+
     app = Flask(__name__)
 
     app.config.from_object('config.Config')
