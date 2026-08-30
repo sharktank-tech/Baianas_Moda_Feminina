@@ -23,6 +23,7 @@ from flask import Blueprint, current_app, redirect, request, session
 from loja.integrations.aliexpress import (
     AliExpressClient,
     DEFAULT_BASE_URL,
+    call_top_freight_calculate,
     raw_canonical_sku_id,
 )
 from loja.integrations.aliexpress.errors import (
@@ -216,13 +217,14 @@ def callback():
     #    Dois caminhos mutuamente exclusivos (para respeitar o timeout de 10s da
     #    Vercel, nunca os dois no mesmo callback):
     #      - ds.freight.query (Fase 4): baseado em SKU, sonda até 2 candidatos.
-    #      - logistics.buyer.freight.calculate (Fase 4b): chamada única com DTO
-    #        mínimo usando skuId (camelCase) e o sku.id bruto do ds.product.get —
-    #        teste de compatibilidade do campo SKU. Selecionado por
-    #        ALIEXPRESS_SMOKE_BUYER_FREIGHT. freight.get é diagnóstico histórico
-    #        (não é chamado mais no smoke ativo).
+    #      - logistics.buyer.freight.calculate via TOP legado (Fase 4b): chamada
+    #        única com DTO mínimo usando skuId (camelCase) e o sku.id bruto do
+    #        ds.product.get (só quando canônico). Somente o frete usa o router
+    #        https://eco.taobao.com/router/rest (sign_top/md5); search/product.get
+    #        continuam no /sync. Selecionado por ALIEXPRESS_SMOKE_BUYER_FREIGHT.
+    #        freight.get é diagnóstico histórico (não é chamado mais no smoke).
     use_buyer = bool(os.environ.get("ALIEXPRESS_SMOKE_BUYER_FREIGHT"))
-    freight_label = "Buyer freight.calculate" if use_buyer else "DS freight.query"
+    freight_label = "Buyer freight.calculate TOP" if use_buyer else "DS freight.query"
     freight_result = None
     freight_error = None
     freight_unavailable = None
@@ -295,12 +297,13 @@ def callback():
                 break
 
     elif product_detail is not None and use_buyer:
-        # ---- logistics.buyer.freight.calculate (Fase 4b, teste skuId) ----
-        #    Chamada única com DTO mínimo: skuId (camelCase) + o sku.id bruto
-        #    do ds.product.get (só quando canônico). Sem province/city/price
-        #    mesmo que as envs existam — eliminar variáveis para testar apenas
-        #    a compatibilidade do campo SKU. freight.get/ds.freight.query não
-        #    são chamados. Sem retries, loop de candidatos ou sleep.
+        # ---- logistics.buyer.freight.calculate via TOP legado (Fase 4b) ----
+        #    Chamada única e isolada no router https://eco.taobao.com/router/rest
+        #    (sign_top/md5, timestamp GMT+8, POST form-urlencoded) com DTO mínimo:
+        #    skuId (camelCase) + o sku.id bruto do ds.product.get (só quando
+        #    canônico). Sem province/city/price mesmo que as envs existam —
+        #    eliminar variáveis para testar apenas o campo SKU. freight.get e
+        #    ds.freight.query não são chamados. Sem retries, loop ou sleep.
         product_id = product_detail.product_id
         selected_sku = None
         raw_sku_id = None
@@ -326,19 +329,20 @@ def callback():
         if product_id is not None and selected_sku is not None:
             # Forma NÃO sensível do request (nunca expõe SKU/IDs/payload).
             current_app.logger.info(
-                "buyer freight.calculate request shape: sku_present=%s sku_key=camel "
-                "raw_sku_canonical=%s product_id_numeric=%s province_sent=no city_sent=no",
+                "buyer freight TOP request shape: transport=top sign_method=md5 "
+                "sku_present=%s sku_key=camel raw_sku_canonical=%s "
+                "product_id_numeric=%s province_sent=no city_sent=no",
                 "yes" if raw_sku_id else "no",
                 "yes" if raw_sku_id else "no",
                 product_id_numeric,
             )
             try:
-                fret = client.calculate_buyer_freight(
+                fret = call_top_freight_calculate(
+                    app_key=app_key,
+                    app_secret=app_secret,
+                    access_token=token.access_token,
                     product_id=product_id,
-                    sku_id=raw_sku_id,
-                    sku_key="skuId",
-                    country_code="BR",
-                    product_num=1,
+                    raw_sku_id=raw_sku_id,
                     send_goods_country_code=send_goods_country_code,
                 )
                 freight_result = fret

@@ -872,6 +872,23 @@ def _run_probe(app_client, monkeypatch, probe_client):
     return r.data.decode()
 
 
+def _probe_top_call(monkeypatch, outcome_map):
+    """Grava as chamadas isoladas do freight.calculate TOP feitas pela rota."""
+    calls = []
+
+    def _top(**kw):
+        calls.append(kw)
+        outcome = outcome_map.get(kw["product_id"])
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes.call_top_freight_calculate", _top
+    )
+    return calls
+
+
 def test_freight_probe_first_sku_501_then_success(app_client, monkeypatch):
     calls = []
     get_map = {"p1": _probe_product_detail("p1", ["s1", "s2"])}
@@ -1057,34 +1074,43 @@ def test_callback_buyer_calculate_success_camel_sku(app_client, monkeypatch, cap
     monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
     calls = []
     get_map = {"100500123": _probe_product_raw_skus("100500123", [("14:771", 5)])}
-    buyer = {"100500123": _probe_buyer_success()}
-    client = _ProbeClient(
-        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
-    )
+    top_calls = _probe_top_call(monkeypatch, {"100500123": _probe_buyer_success()})
+    client = _ProbeClient(_probe_search_result(["100500123"]), get_map, {}, calls)
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)
-    assert "Buyer freight.calculate: success" in body
+    assert "Buyer freight.calculate TOP: success" in body
     assert "candidatos testados: 1" in body
     assert "opções de frete: 1" in body
     assert "frete mínimo: presente" in body
     assert "moeda: presente" in body
     assert "prazo: presente" in body
-    # Uma única freight.calculate; freight.get e ds.freight.query NÃO chamados.
-    assert len(client.buyer_calls) == 1
+    # Uma única chamada de frete (TOP); freight.get e ds.freight.query NÃO chamados.
+    assert len(top_calls) == 1
     assert client.buyer_get_calls == []
     assert client.calls == []
-    # sku.id bruto canônico + sku_key camelCase no request; sem province/city.
-    pid, kw = client.buyer_calls[0]
-    assert pid == "100500123"
-    assert kw["sku_id"] == "14:771"
-    assert kw["sku_key"] == "skuId"
-    assert kw["country_code"] == "BR"
-    assert kw["product_num"] == 1
+    # search/product.get continuam pelo cliente /sync (probe client).
+    assert client.get_calls == ["100500123"]
+    # A chamada TOP recebe credenciais publicas + o sku.id bruto canônico.
+    kw = top_calls[0]
+    assert kw["app_key"] == "k"
+    assert kw["app_secret"] == "s"
+    assert kw["access_token"] == "REAL_AT"  # session recebe o access token
+    assert kw["product_id"] == "100500123"
+    assert kw["raw_sku_id"] == "14:771"
     assert kw["send_goods_country_code"] == "CN"
-    assert "province_code" not in kw
-    assert "city_code" not in kw
+    # country_code/product_num usam os defaults TOP (BR/1) e chegam no DTO.
+    from loja.integrations.aliexpress.top_freight import build_top_freight_params
+
+    params = build_top_freight_params(
+        **{k: v for k, v in kw.items() if k != "app_secret"}
+    )
+    dto = params["param_aeop_freight_calculate_for_buyer_d_t_o"]
+    assert '"country_code":"BR"' in dto
+    assert '"product_num":1' in dto
     # Diagnóstico seguro da forma: flags somente, sem IDs/SKU/payload.
-    assert "buyer freight.calculate request shape:" in caplog.text
+    assert "buyer freight TOP request shape:" in caplog.text
+    assert "transport=top" in caplog.text
+    assert "sign_method=md5" in caplog.text
     assert "sku_present=yes" in caplog.text
     assert "sku_key=camel" in caplog.text
     assert "raw_sku_canonical=yes" in caplog.text
@@ -1108,15 +1134,13 @@ def test_callback_buyer_calculate_omits_province_city_even_when_env_set(
     monkeypatch.setenv("ALIEXPRESS_SMOKE_CITY_CODE", "SAO_PAULO")
     calls = []
     get_map = {"100500123": _probe_product_raw_skus("100500123", [("14:771", 5)])}
-    buyer = {"100500123": _probe_buyer_success()}
-    client = _ProbeClient(
-        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
-    )
+    top_calls = _probe_top_call(monkeypatch, {"100500123": _probe_buyer_success()})
+    client = _ProbeClient(_probe_search_result(["100500123"]), get_map, {}, calls)
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)
-    assert "Buyer freight.calculate: success" in body
+    assert "Buyer freight.calculate TOP: success" in body
     # Mesmo com as envs definidas, province/city NÃO são enviados no smoke.
-    _, kw = client.buyer_calls[0]
+    kw = top_calls[0]
     assert "province_code" not in kw
     assert "city_code" not in kw
     assert "province_sent=no" in caplog.text
@@ -1136,18 +1160,16 @@ def test_callback_buyer_calculate_skips_to_raw_canonical_sku(app_client, monkeyp
     calls = []
     # Primeiro sem estoque (ignorado); segundo elegível com sku.id canônico.
     get_map = {"100500123": _probe_product_raw_skus("100500123", [("1:1", 0), ("14:771", 5)])}
-    buyer = {"100500123": _probe_buyer_success()}
+    top_calls = _probe_top_call(monkeypatch, {"100500123": _probe_buyer_success()})
     client = _ProbeClient(
-        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
+        _probe_search_result(["100500123"]), get_map, {}, calls
     )
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)
-    assert "Buyer freight.calculate: success" in body
-    # Somente UMA freight.calculate no callback, com o sku.id bruto do elegível.
-    assert len(client.buyer_calls) == 1
-    _, kw = client.buyer_calls[0]
-    assert kw["sku_id"] == "14:771"
-    assert kw["sku_key"] == "skuId"
+    assert "Buyer freight.calculate TOP: success" in body
+    # Somente UMA chamada de frete TOP, com o sku.id bruto do elegível.
+    assert len(top_calls) == 1
+    assert top_calls[0]["raw_sku_id"] == "14:771"
     # IDs/valores não vazam em body nem em logs.
     assert "1:1" not in body
     assert "1:1" not in caplog.text
@@ -1165,15 +1187,16 @@ def test_callback_buyer_calculate_unavailable_without_canonical_sku(
     calls = []
     # sku.id local (não canônico) -> nenhum SKU canônico válido.
     get_map = {"100500123": _probe_product_detail("100500123", ["s1"])}
+    top_calls = _probe_top_call(monkeypatch, {})
     client = _ProbeClient(
-        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map={}
+        _probe_search_result(["100500123"]), get_map, {}, calls
     )
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)
-    assert "Buyer freight.calculate: unavailable" in body
+    assert "Buyer freight.calculate TOP: unavailable" in body
     assert "motivo: nenhum SKU elegível com SKU canônico válido" in body
     # Quando não há SKU canônico, NÃO chama a API.
-    assert client.buyer_calls == []
+    assert top_calls == []
     assert client.buyer_get_calls == []
     # IDs/valores não vazam em body nem em logs.
     assert "s0" not in body
@@ -1189,15 +1212,19 @@ def test_callback_buyer_calculate_failure_sanitized(app_client, monkeypatch, cap
     monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
     calls = []
     get_map = {"100500123": _probe_product_raw_skus("100500123", [("14:771", 5)])}
-    buyer = {"100500123": AliExpressAPIError("method not found", code=27, sub_code="isp.x")}
+    top_calls = _probe_top_call(
+        monkeypatch,
+        {"100500123": AliExpressAPIError("method not found", code=27, sub_code="isp.x")},
+    )
     client = _ProbeClient(
-        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
+        _probe_search_result(["100500123"]), get_map, {}, calls
     )
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)
-    assert "Buyer freight.calculate: failure" in body
+    assert "Buyer freight.calculate TOP: failure" in body
     assert "code: 27" in body
     assert "sub_code: isp.x" in body
+    assert len(top_calls) == 1
     assert client.buyer_get_calls == []
     assert "14:771" not in caplog.text
     assert "REAL_AT" not in caplog.text
