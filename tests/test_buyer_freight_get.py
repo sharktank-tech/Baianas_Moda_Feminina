@@ -11,10 +11,27 @@ import pytest
 from loja.integrations.aliexpress import (
     AliExpressClient,
     build_buyer_freight_get_params,
+    canonical_freight_sku_id,
+    freight_sku_shape,
     normalize_buyer_freight_get_response,
 )
 from loja.integrations.aliexpress.errors import AliExpressAPIError
+from loja.integrations.aliexpress.models import AliExpressProductSku
 from loja.integrations.aliexpress.sign import sign_sync
+
+
+def _mksku(
+    sku_id: str = "s1", stock: int = 5, properties=None, **raw_extra
+) -> AliExpressProductSku:
+    raw = dict(raw_extra)
+    if properties is not None:
+        raw["aeop_s_k_u_propertys"] = properties
+    return AliExpressProductSku(
+        sku_id=sku_id,
+        available_stock=stock,
+        attributes=[],
+        raw=raw,
+    )
 
 
 class _FakeTransport:
@@ -30,13 +47,15 @@ class _FakeTransport:
 # ----- parâmetros obrigatórios ---------------------------------------------
 def test_get_requires_product_id():
     with pytest.raises(ValueError):
-        build_buyer_freight_get_params(product_id="")
+        build_buyer_freight_get_params(product_id="", sku_id="14:771")
 
 
-def test_get_sku_is_optional_and_not_required():
-    # sku_id não é exigido nem enviado no DTO do freight.get.
-    p = build_buyer_freight_get_params(product_id=123)
-    assert "sku_id" not in p["aeopFreightCalculateForBuyerDTO"]
+def test_get_requires_sku_id():
+    # sku_id é obrigatório e vai no DTO do freight.get.
+    with pytest.raises(ValueError):
+        build_buyer_freight_get_params(product_id=123, sku_id="")
+    with pytest.raises(ValueError):
+        build_buyer_freight_get_params(product_id=123, sku_id=None)
 
 
 def test_get_requires_country_and_origin():
@@ -57,42 +76,146 @@ def test_get_product_num_minimum():
 
 
 # ----- tipos JSON e omitidos quando vazios ----------------------------------
-def test_get_dto_json_types_no_sku():
-    p = build_buyer_freight_get_params(product_id=123, sku_id="s1")
+def test_get_dto_json_types_with_sku():
+    p = build_buyer_freight_get_params(product_id=123, sku_id="14:771")
     dto = json.loads(p["aeopFreightCalculateForBuyerDTO"])
     assert dto["product_id"] == 123
     assert isinstance(dto["product_id"], int)
     assert dto["product_num"] == 1
     assert isinstance(dto["product_num"], int)
-    assert "sku_id" not in dto
+    assert dto["sku_id"] == "14:771"
     assert dto["country_code"] == "BR"
     assert dto["send_goods_country_code"] == "CN"
 
 
 def test_get_product_id_string_becomes_number():
-    p = build_buyer_freight_get_params(product_id="123")
+    p = build_buyer_freight_get_params(product_id="123", sku_id="14:771")
     dto = p["aeopFreightCalculateForBuyerDTO"]
     assert '"product_id":123' in dto
 
 
-def test_get_sku_id_not_in_json_even_when_passed():
-    p = build_buyer_freight_get_params(product_id=123, sku_id="s1")
-    assert "sku_id" not in p["aeopFreightCalculateForBuyerDTO"]
+def test_get_sku_id_in_json_snake_case():
+    p = build_buyer_freight_get_params(product_id=123, sku_id="14:771;5:100014064")
+    dto = p["aeopFreightCalculateForBuyerDTO"]
+    assert '"sku_id":"14:771;5:100014064"' in dto
 
 
 def test_get_province_city_omitted_when_empty():
-    p = build_buyer_freight_get_params(product_id=123)
+    p = build_buyer_freight_get_params(product_id=123, sku_id="14:771")
     assert "province_code" not in p["aeopFreightCalculateForBuyerDTO"]
     assert "city_code" not in p["aeopFreightCalculateForBuyerDTO"]
 
 
 def test_get_province_city_included_when_set():
     p = build_buyer_freight_get_params(
-        product_id=123, province_code="SP", city_code="SAO_PAULO"
+        product_id=123, sku_id="14:771", province_code="SP", city_code="SAO_PAULO"
     )
     dto = p["aeopFreightCalculateForBuyerDTO"]
     assert '"province_code":"SP"' in dto
     assert '"city_code":"SAO_PAULO"' in dto
+
+
+# ----- SKU canônico AliExpress ----------------------------------------------
+def test_canonical_single_property():
+    sku = _mksku(properties=[{"sku_property_id": "14", "property_value_id": "771"}])
+    assert canonical_freight_sku_id(sku) == "14:771"
+
+
+def test_canonical_two_properties():
+    sku = _mksku(
+        properties=[
+            {"sku_property_id": "14", "property_value_id": "771"},
+            {"sku_property_id": "5", "property_value_id": "100014064"},
+        ]
+    )
+    assert canonical_freight_sku_id(sku) == "14:771;5:100014064"
+
+
+def test_canonical_property_value_id_long_preferred():
+    sku = _mksku(
+        properties=[
+            {
+                "sku_property_id": "14",
+                "property_value_id": "777",
+                "property_value_id_long": "771",
+            }
+        ]
+    )
+    assert canonical_freight_sku_id(sku) == "14:771"
+
+
+def test_canonical_property_value_id_fallback():
+    sku = _mksku(properties=[{"sku_property_id": "14", "property_value_id": "771"}])
+    assert canonical_freight_sku_id(sku) == "14:771"
+
+
+def test_canonical_wrapper_ae_sku_property_dtos():
+    sku = _mksku()
+    sku.raw["ae_sku_property_dtos"] = {
+        "ae_sku_property_d_t_o": [
+            {"sku_property_id": "5", "property_value_id": "9"},
+            {"sku_property_id": "6", "property_value_id": "10"},
+        ]
+    }
+    assert canonical_freight_sku_id(sku) == "5:9;6:10"
+
+
+def test_canonical_raw_id_when_no_properties():
+    sku = _mksku(sku_id="200000182:193;200007763:201336100")
+    assert canonical_freight_sku_id(sku) == "200000182:193;200007763:201336100"
+
+
+def test_canonical_raw_id_trimmed_and_unquoted():
+    sku = _mksku(sku_id='  "14:771"  ')
+    assert canonical_freight_sku_id(sku) == "14:771"
+
+
+def test_canonical_raw_id_invalid_rejected():
+    assert canonical_freight_sku_id(_mksku(sku_id="s1")) is None
+    assert canonical_freight_sku_id(_mksku(sku_id="14:771:extra")) is None
+    assert canonical_freight_sku_id(_mksku(sku_id="abc:def")) is None
+
+
+def test_canonical_never_uses_sku_code_or_barcode():
+    sku = _mksku(sku_id="s1", sku_code="987654321", barcode="999")
+    assert canonical_freight_sku_id(sku) is None
+
+
+def test_canonical_no_names_after_hash():
+    sku = _mksku(
+        properties=[
+            {
+                "sku_property_id": "14",
+                "property_value_id": "771",
+                "sku_property_name": "Cor",
+                "property_value_definition_name": "Azul",
+            }
+        ]
+    )
+    assert canonical_freight_sku_id(sku) == "14:771"
+    assert "#" not in canonical_freight_sku_id(sku)
+
+
+def test_canonical_none_and_empty_skus():
+    assert canonical_freight_sku_id(None) is None
+    assert canonical_freight_sku_id(_mksku(sku_id="")) is None
+
+
+def test_freight_sku_shape_sensitive_fields_only():
+    sku = _mksku(
+        sku_id="s1",
+        properties=[{"sku_property_id": "14", "property_value_id": "771"}],
+    )
+    shape = freight_sku_shape(sku, canonical_freight_sku_id(sku))
+    assert shape["raw_id_present"] == "yes"
+    assert shape["raw_id_canonical"] == "no"
+    assert shape["properties_present"] == "yes"
+    assert shape["property_count"] == 1
+    assert shape["derived_sku"] == "yes"
+    assert shape["derived_equals_raw"] == "no"
+    # A forma NÃO expõe IDs/valores do SKU.
+    assert "14" not in str(shape)
+    assert "771" not in str(shape)
 
 
 # ----- method/top-level param/assinatura ------------------------------------

@@ -53,6 +53,8 @@ from .buyer_freight import (
 )
 from .buyer_freight_get import (
     build_buyer_freight_get_params,
+    canonical_freight_sku_id,
+    freight_sku_shape,
     normalize_buyer_freight_get_response,
 )
 from .sign import sign_sync, sign_top
@@ -111,6 +113,8 @@ __all__: Iterable[str] = [
     "build_buyer_freight_params",
     "normalize_buyer_freight_response",
     "build_buyer_freight_get_params",
+    "canonical_freight_sku_id",
+    "freight_sku_shape",
     "normalize_buyer_freight_get_response",
     "create_client_from_env",
     "RequestsTransport",

@@ -771,6 +771,31 @@ def _probe_product_detail_skus(pid, skus):
     )
 
 
+def _probe_product_canonical_skus(pid, skus):
+    # skus: list of (sku_id, available_stock, canonical). O canonical é levado
+    # às propriedades em raw (aeop_s_k_u_propertys) para o freight.get derivar.
+    built = []
+    for raw_id, stock, canonical in skus:
+        props = [
+            {
+                "sku_property_id": pair.split(":")[0],
+                "property_value_id": pair.split(":")[1],
+            }
+            for pair in canonical.split(";")
+        ]
+        built.append(
+            AliExpressProductSku(
+                sku_id=raw_id,
+                available_stock=stock,
+                attributes=[],
+                raw={"aeop_s_k_u_propertys": props},
+            )
+        )
+    return AliExpressProductDetail(
+        product_id=pid, title="p", images=["https://x/a.jpg"], skus=built
+    )
+
+
 def _probe_freight_success():
     return AliExpressFreightResult(
         options=[
@@ -1044,7 +1069,7 @@ def test_callback_buyer_freight_success(app_client, monkeypatch, caplog):
     monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
     monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
     calls = []
-    get_map = {"100500123": _probe_product_detail("100500123", ["s1"])}
+    get_map = {"100500123": _probe_product_canonical_skus("100500123", [("s1", 5, "14:771")])}
     buyer = {"100500123": _probe_buyer_success()}
     client = _ProbeClient(
         _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
@@ -1063,10 +1088,20 @@ def test_callback_buyer_freight_success(app_client, monkeypatch, caplog):
     # Sem ds.freight.query e sem buyer.freight.calculate no mesmo callback.
     assert client.calls == []
     assert client.buyer_calls == []
-    # Origem de envio enviada ao método; sem SKU no request do freight.get.
+    # Origem de envio + SKU canônico (derivado via propriedades) no request.
     pid, sku, kw = client.buyer_get_calls[0]
     assert kw["send_goods_country_code"] == "CN"
-    assert sku is None
+    assert sku == "14:771"
+    # Diagnóstico seguro da forma: flags somente, sem o valor do SKU.
+    assert "buyer freight SKU shape:" in caplog.text
+    assert "raw_id_present=yes" in caplog.text
+    assert "raw_id_canonical=no" in caplog.text
+    assert "properties_present=yes" in caplog.text
+    assert "property_count=1" in caplog.text
+    assert "derived_sku=yes" in caplog.text
+    assert "derived_equals_raw=no" in caplog.text
+    assert "14:771" not in body
+    assert "14:771" not in caplog.text
     # Nenhum segredo/ID em logs.
     assert "REAL_AT" not in caplog.text
 
@@ -1079,7 +1114,7 @@ def test_callback_buyer_freight_passes_destination_from_env(app_client, monkeypa
     monkeypatch.setenv("ALIEXPRESS_SMOKE_PROVINCE_CODE", "SP")
     monkeypatch.setenv("ALIEXPRESS_SMOKE_CITY_CODE", "SAO_PAULO")
     calls = []
-    get_map = {"100500123": _probe_product_detail("100500123", ["s1"])}
+    get_map = {"100500123": _probe_product_canonical_skus("100500123", [("s1", 5, "14:771")])}
     buyer = {"100500123": _probe_buyer_success()}
     client = _ProbeClient(
         _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
@@ -1090,7 +1125,7 @@ def test_callback_buyer_freight_passes_destination_from_env(app_client, monkeypa
     _, sku, kw = client.buyer_get_calls[0]
     assert kw["province_code"] == "SP"
     assert kw["city_code"] == "SAO_PAULO"
-    assert sku is None
+    assert sku == "14:771"
     # Valores NÃO vazam em body nem em logs.
     assert "SP" not in body
     assert "SAO_PAULO" not in body
@@ -1098,14 +1133,16 @@ def test_callback_buyer_freight_passes_destination_from_env(app_client, monkeypa
     assert "SAO_PAULO" not in caplog.text
 
 
-def test_callback_buyer_freight_calls_without_eligible_sku(app_client, monkeypatch, caplog):
+def test_callback_buyer_freight_skips_to_canonical_eligible_sku(app_client, monkeypatch, caplog):
     import logging
 
     monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
     monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
     calls = []
-    # Todos os SKUs sem estoque: o freight.get NÃO exige SKU elegível.
-    get_map = {"100500123": _probe_product_detail_skus("100500123", [("s0", 0), ("s1", 0)])}
+    # Primeiro sem estoque (ignorado); segundo elegível e canônico -> usado.
+    get_map = {"100500123": _probe_product_canonical_skus(
+        "100500123", [("s0", 0, "1:1"), ("s1", 5, "14:771")]
+    )}
     buyer = {"100500123": _probe_buyer_success()}
     client = _ProbeClient(
         _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
@@ -1113,10 +1150,35 @@ def test_callback_buyer_freight_calls_without_eligible_sku(app_client, monkeypat
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)
     assert "Buyer freight.get: success" in body
-    # Chamada única mesmo sem SKU elegível.
+    # Somente UMA freight.get no callback, com o SKU canônico do elegível.
     assert len(client.buyer_get_calls) == 1
     _, sku, _ = client.buyer_get_calls[0]
-    assert sku is None
+    assert sku == "14:771"
+    # IDs/valores não vazam em body nem em logs.
+    assert "s0" not in body
+    assert "s1" not in body
+    assert "14:771" not in caplog.text
+    assert "s0" not in caplog.text
+    assert "s1" not in caplog.text
+
+
+def test_callback_buyer_freight_unavailable_without_canonical_sku(app_client, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
+    calls = []
+    # SKU local (sem propriedades canônicas) -> nenhum SKU canônico válido.
+    get_map = {"100500123": _probe_product_detail("100500123", ["s1"])}
+    client = _ProbeClient(
+        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map={}
+    )
+    with caplog.at_level(logging.INFO):
+        body = _run_probe(app_client, monkeypatch, client)
+    assert "Buyer freight.get: unavailable" in body
+    assert "motivo: nenhum SKU elegível com SKU canônico válido" in body
+    # Não chama a API quando não há SKU elegível com SKU canônico.
+    assert client.buyer_get_calls == []
     # IDs/valores não vazam em body nem em logs.
     assert "s0" not in body
     assert "s1" not in body
@@ -1130,7 +1192,7 @@ def test_callback_buyer_freight_failure_sanitized(app_client, monkeypatch, caplo
     monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
     monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
     calls = []
-    get_map = {"100500123": _probe_product_detail("100500123", ["s1"])}
+    get_map = {"100500123": _probe_product_canonical_skus("100500123", [("s1", 5, "14:771")])}
     buyer = {"100500123": AliExpressAPIError("method not found", code=27, sub_code="isp.x")}
     client = _ProbeClient(
         _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
@@ -1141,6 +1203,7 @@ def test_callback_buyer_freight_failure_sanitized(app_client, monkeypatch, caplo
     assert "code: 27" in body
     assert "sub_code: isp.x" in body
     assert client.calls == []
+    assert "14:771" not in caplog.text
     assert "REAL_AT" not in caplog.text
 
 

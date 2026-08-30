@@ -15,20 +15,91 @@ Mantemos gateway /sync, sign_method=sha256 e access_token como `session`.
 
 import json
 import logging
+import re
 from decimal import Decimal
 from typing import Any, Iterable, List, Mapping, Optional
 
 from .errors import AliExpressAPIError
 from .models import AliExpressFreightOption, AliExpressFreightResult
+from .product import _extract_sku_property_items
 from .search import _as_int, _as_str, parse_price
 
 logger = logging.getLogger(__name__)
+
+# SKU canônico AliExpress: "<sku_property_id>:<property_value_id>[;...]".
+_CANONICAL_SKU_RE = re.compile(r"^[0-9]+:[0-9]+(;[0-9]+:[0-9]+)*$")
+
+
+def _clean_sku_id(raw_id: Any) -> str:
+    """Remove espaços e aspas/quotes externos acidentais."""
+    return ("" if raw_id is None else str(raw_id)).strip().strip('"').strip("'")
+
+
+def _derive_sku_pairs(sku: Any) -> List[str]:
+    """Pares <sku_property_id>:<property_value_id> das propriedades do raw."""
+    raw = getattr(sku, "raw", None)
+    if not isinstance(raw, Mapping):
+        return []
+    container = raw.get("aeop_s_k_u_propertys") or raw.get("ae_sku_property_dtos")
+    properties = (
+        _extract_sku_property_items(container) if container is not None else []
+    )
+    pairs: List[str] = []
+    for prop in properties:
+        if not isinstance(prop, Mapping):
+            continue
+        prop_id = _as_str(prop.get("sku_property_id"))
+        # property_value_id_long tem prioridade; property_value_id é fallback.
+        value_id = _as_str(
+            prop.get("property_value_id_long") or prop.get("property_value_id")
+        )
+        if prop_id and value_id:
+            pairs.append(f"{prop_id}:{value_id}")
+    return pairs
+
+
+def canonical_freight_sku_id(sku: Any) -> Optional[str]:
+    """Deriva o SKU canônico AliExpress (ex.: "14:771" ou "14:771;5:100014064").
+
+    Prioridade: propriedades preservadas em `sku.raw` (aeop_s_k_u_propertys ou
+    wrapper equivalente, já suportado pelo parser). Nomes NUNCA são anexados
+    depois de '#'. Sem propriedades, aceita `sku.sku_id` somente se, após strip
+    e remoção de aspas externas, satisfizer <n>:<n>(;<n>:<n>)*. NUNCA usa
+    sku_code, barcode ou IDs locais como fallback.
+    """
+    if sku is None:
+        return None
+    if sku.raw is not None:
+        pairs = _derive_sku_pairs(sku)
+        if pairs:
+            return ";".join(pairs)
+    raw_id = _clean_sku_id(getattr(sku, "sku_id", None))
+    if raw_id and _CANONICAL_SKU_RE.match(raw_id):
+        return raw_id
+    return None
+
+
+def freight_sku_shape(sku: Any, canonical: Optional[str]) -> Mapping[str, Any]:
+    """Forma NÃO sensível do SKU para diagnóstico (nunca expõe IDs/valores)."""
+    raw = getattr(sku, "raw", None)
+    raw_pairs = _derive_sku_pairs(sku) if isinstance(raw, Mapping) else []
+    raw_id = _clean_sku_id(getattr(sku, "sku_id", None))
+    return {
+        "raw_id_present": "yes" if raw_id else "no",
+        "raw_id_canonical": "yes" if raw_id and _CANONICAL_SKU_RE.match(raw_id) else "no",
+        "properties_present": "yes" if raw_pairs else "no",
+        "property_count": len(raw_pairs),
+        "derived_sku": "yes" if canonical else "no",
+        "derived_equals_raw": "yes"
+        if canonical and canonical == raw_id
+        else "no",
+    }
 
 
 def build_buyer_freight_get_params(
     *,
     product_id: str,
-    sku_id: Optional[str] = None,
+    sku_id: str,
     country_code: str = "BR",
     product_num: int = 1,
     send_goods_country_code: str = "CN",
@@ -37,14 +108,16 @@ def build_buyer_freight_get_params(
 ) -> Mapping[str, str]:
     """Monta o business param para aliexpress.logistics.buyer.freight.get.
 
-    O DTO JSON usa tipos corretos (product_id/product_num como number) e
-    province_code/city_code só quando preenchidos. NÃO envia sku_id (o live do
-    freight.get não exige e aceita melhor sem). O parâmetro externo é
-    `aeopFreightCalculateForBuyerDTO` (JSON compacto que participa da
-    assinatura), NÃO o `param_...d_t_o` do freight.calculate.
+    O DTO JSON usa tipos corretos (product_id/product_num como number), exige
+    o SKU canônico AliExpress e envia province_code/city_code só quando
+    preenchidos. O parâmetro externo é `aeopFreightCalculateForBuyerDTO`
+    (JSON compacto que participa da assinatura), NÃO o `param_...d_t_o` do
+    freight.calculate.
     """
     if not product_id:
         raise ValueError("product_id é obrigatório para buyer.freight.get")
+    if not sku_id:
+        raise ValueError("sku_id é obrigatório para buyer.freight.get")
     if not country_code:
         raise ValueError("country_code é obrigatório para buyer.freight.get")
     if not send_goods_country_code:
@@ -61,6 +134,7 @@ def build_buyer_freight_get_params(
     dto: dict = {
         "product_id": product_id_num,
         "product_num": int(product_num),
+        "sku_id": str(sku_id),
         "country_code": country_code,
         "send_goods_country_code": send_goods_country_code,
     }

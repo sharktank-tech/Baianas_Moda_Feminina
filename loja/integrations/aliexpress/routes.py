@@ -20,7 +20,12 @@ from typing import Any, Callable, Optional
 
 from flask import Blueprint, current_app, redirect, request, session
 
-from loja.integrations.aliexpress import AliExpressClient, DEFAULT_BASE_URL
+from loja.integrations.aliexpress import (
+    AliExpressClient,
+    DEFAULT_BASE_URL,
+    canonical_freight_sku_id,
+    freight_sku_shape,
+)
 from loja.integrations.aliexpress.errors import (
     AliExpressAPIError,
     AliExpressAuthError,
@@ -291,13 +296,41 @@ def callback():
 
     elif product_detail is not None and use_buyer:
         # ---- logistics.buyer.freight.get (Fase 4b isolada) ----
-        #    Chamada única por product_id (sem sku_id no request). Não exige SKU
-        #    elegível. Reutiliza o mesmo product_detail da Fase 3; sem loop/sleep.
+        #    Chamada única por product_id. Percorre os SKUs apenas para achar o
+        #    primeiro com estoque E SKU canônico AliExpress válido (derivado das
+        #    propriedades e validado antes de chamar). Sem loop/sleep.
         product_id = product_detail.product_id
-        if product_id is not None:
+        selected_sku = None
+        canonical_sku_id = None
+        for sku in product_detail.skus or []:
+            if (
+                getattr(sku, "available_stock", None) is not None
+                and getattr(sku, "available_stock", None) <= 0
+            ):
+                continue
+            canonical_sku_id = canonical_freight_sku_id(sku)
+            if canonical_sku_id is None:
+                continue
+            selected_sku = sku
+            break
+        if product_id is not None and selected_sku is not None:
+            # Forma NÃO sensível do SKU (nunca expõe IDs/valores/request body).
+            shape = freight_sku_shape(selected_sku, canonical_sku_id)
+            current_app.logger.info(
+                "buyer freight SKU shape: raw_id_present=%s raw_id_canonical=%s "
+                "properties_present=%s property_count=%d derived_sku=%s "
+                "derived_equals_raw=%s",
+                shape["raw_id_present"],
+                shape["raw_id_canonical"],
+                shape["properties_present"],
+                shape["property_count"],
+                shape["derived_sku"],
+                shape["derived_equals_raw"],
+            )
             try:
                 fret = client.get_buyer_freight(
                     product_id=product_id,
+                    sku_id=canonical_sku_id,
                     country_code="BR",
                     product_num=1,
                     send_goods_country_code=send_goods_country_code,
@@ -309,6 +342,14 @@ def callback():
             except (AliExpressAPIError, AliExpressTransportError) as exc:
                 freight_error = exc
                 freight_candidates = 1
+        elif product_id is not None:
+            freight_unavailable = {
+                "attempted": 0,
+                "code_501": 0,
+                "code_505": 0,
+                "other": 0,
+                "reason": "nenhum SKU elegível com SKU canônico válido",
+            }
 
     if not use_buyer and freight_result is None and freight_error is None:
         unavail["attempted"] = freight_candidates
