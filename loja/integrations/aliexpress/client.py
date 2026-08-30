@@ -338,6 +338,7 @@ class AliExpressClient:
         sku_id: Optional[str] = None,
         price: Optional[Decimal] = None,
         price_currency: Optional[str] = None,
+        sku_key: str = "sku_id",
     ) -> "AliExpressFreightResult":
         """Busca read-only aliexpress.logistics.buyer.freight.calculate.
 
@@ -345,7 +346,8 @@ class AliExpressClient:
         access_token como `session` (ainda não migramos para eco.taobao.com).
         O parâmetro de negócio `param_aeop_freight_calculate_for_buyer_d_t_o`
         é um JSON compacto e participa da assinatura. price/price_currency
-        são opcionais e omitidos no primeiro smoke.
+        são opcionais e omitidos no primeiro smoke; `sku_key` controla a chave
+        do SKU no DTO (snake_case por padrão; o teste skuId usa camelCase).
         """
         from .buyer_freight import (
             build_buyer_freight_params,
@@ -362,6 +364,7 @@ class AliExpressClient:
             sku_id=sku_id,
             price=price,
             price_currency=price_currency,
+            sku_key=sku_key,
         )
         payload = self.call(
             "aliexpress.logistics.buyer.freight.calculate", **business

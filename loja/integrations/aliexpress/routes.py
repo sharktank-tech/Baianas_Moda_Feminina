@@ -23,8 +23,6 @@ from flask import Blueprint, current_app, redirect, request, session
 from loja.integrations.aliexpress import (
     AliExpressClient,
     DEFAULT_BASE_URL,
-    freight_product_id,
-    freight_product_sku_shape,
     raw_canonical_sku_id,
 )
 from loja.integrations.aliexpress.errors import (
@@ -218,12 +216,13 @@ def callback():
     #    Dois caminhos mutuamente exclusivos (para respeitar o timeout de 10s da
     #    Vercel, nunca os dois no mesmo callback):
     #      - ds.freight.query (Fase 4): baseado em SKU, sonda até 2 candidatos.
-    #      - logistics.buyer.freight.get (Fase 4b isolada): chamada única por
-    #        product_id + primeiro SKU elegível. Selecionado por
-    #        ALIEXPRESS_SMOKE_BUYER_FREIGHT. Buyer freight.calculate ficou como
-    #        diagnóstico histórico (não é chamado no smoke ativo).
+    #      - logistics.buyer.freight.calculate (Fase 4b): chamada única com DTO
+    #        mínimo usando skuId (camelCase) e o sku.id bruto do ds.product.get —
+    #        teste de compatibilidade do campo SKU. Selecionado por
+    #        ALIEXPRESS_SMOKE_BUYER_FREIGHT. freight.get é diagnóstico histórico
+    #        (não é chamado mais no smoke ativo).
     use_buyer = bool(os.environ.get("ALIEXPRESS_SMOKE_BUYER_FREIGHT"))
-    freight_label = "Buyer freight.get" if use_buyer else "DS freight.query"
+    freight_label = "Buyer freight.calculate" if use_buyer else "DS freight.query"
     freight_result = None
     freight_error = None
     freight_unavailable = None
@@ -296,11 +295,12 @@ def callback():
                 break
 
     elif product_detail is not None and use_buyer:
-        # ---- logistics.buyer.freight.get (Fase 4b isolada) ----
-        #    Chamada única: usa o `sku.id` bruto do ds.product.get (só quando
-        #    canônico) e o main_product_id do converter como product_id
-        #    (fallback: product_detail.product_id). Sem retries, sem loop de
-        #    candidatos e sem sleep (respeita o timeout da Vercel).
+        # ---- logistics.buyer.freight.calculate (Fase 4b, teste skuId) ----
+        #    Chamada única com DTO mínimo: skuId (camelCase) + o sku.id bruto
+        #    do ds.product.get (só quando canônico). Sem province/city/price
+        #    mesmo que as envs existam — eliminar variáveis para testar apenas
+        #    a compatibilidade do campo SKU. freight.get/ds.freight.query não
+        #    são chamados. Sem retries, loop de candidatos ou sleep.
         product_id = product_detail.product_id
         selected_sku = None
         raw_sku_id = None
@@ -316,30 +316,30 @@ def callback():
             selected_sku = sku
             raw_sku_id = raw_candidate
             break
-        logistics_product_id = freight_product_id(product_detail)
-        if logistics_product_id is not None and selected_sku is not None:
-            # Forma NÃO sensível do product/SKU (nunca expõe IDs/valores/body).
-            shape = freight_product_sku_shape(product_detail, raw_sku_id)
+        product_id_numeric = "no"
+        try:
+            if product_id is not None:
+                int(product_id)
+                product_id_numeric = "yes"
+        except (TypeError, ValueError):
+            product_id_numeric = "no"
+        if product_id is not None and selected_sku is not None:
+            # Forma NÃO sensível do request (nunca expõe SKU/IDs/payload).
             current_app.logger.info(
-                "buyer freight product/SKU shape: converter_present=%s "
-                "main_product_present=%s main_differs_from_base=%s "
-                "sub_product_present=%s raw_sku_present=%s raw_sku_canonical=%s",
-                shape["converter_present"],
-                shape["main_product_present"],
-                shape["main_differs_from_base"],
-                shape["sub_product_present"],
-                shape["raw_sku_present"],
-                shape["raw_sku_canonical"],
+                "buyer freight.calculate request shape: sku_present=%s sku_key=camel "
+                "raw_sku_canonical=%s product_id_numeric=%s province_sent=no city_sent=no",
+                "yes" if raw_sku_id else "no",
+                "yes" if raw_sku_id else "no",
+                product_id_numeric,
             )
             try:
-                fret = client.get_buyer_freight(
-                    product_id=logistics_product_id,
+                fret = client.calculate_buyer_freight(
+                    product_id=product_id,
                     sku_id=raw_sku_id,
+                    sku_key="skuId",
                     country_code="BR",
                     product_num=1,
                     send_goods_country_code=send_goods_country_code,
-                    province_code=province_code,
-                    city_code=city_code,
                 )
                 freight_result = fret
                 freight_candidates = 1
@@ -514,20 +514,10 @@ def _render_success(
             f"{freight_label}: success",
             f"candidatos testados: {freight_candidates}",
             f"opções de frete: {len(options)}",
+            f"frete mínimo: {'presente' if has_fee else 'ausente'}",
+            f"moeda: {'presente' if has_currency else 'ausente'}",
+            f"prazo: {'presente' if has_days else 'ausente'}",
         ]
-        if freight_label == "Buyer freight.get":
-            # Smoke do freight.get: ainda sem custo definitivo (bruto em raw),
-            # então exibimos apenas moeda/prazo.
-            lines += [
-                f"moeda: {'presente' if has_currency else 'ausente'}",
-                f"prazo: {'presente' if has_days else 'ausente'}",
-            ]
-        else:
-            lines += [
-                f"frete mínimo: {'presente' if has_fee else 'ausente'}",
-                f"moeda: {'presente' if has_currency else 'ausente'}",
-                f"prazo: {'presente' if has_days else 'ausente'}",
-            ]
     else:
         lines += ["", f"{freight_label}: skipped (sem SKU elegível)"]
 

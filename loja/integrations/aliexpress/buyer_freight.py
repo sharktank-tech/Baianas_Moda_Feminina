@@ -41,13 +41,15 @@ def build_buyer_freight_params(
     sku_id: Optional[str] = None,
     price: Optional[Decimal] = None,
     price_currency: Optional[str] = None,
+    sku_key: str = "sku_id",
 ) -> Mapping[str, str]:
     """Monta os parâmetros de negócio (business) para buyer.freight.calculate.
 
     `param_aeop_freight_calculate_for_buyer_d_t_o` recebe um JSON compacto e
     participa da assinatura gerada em client.py. province_code/city_code e
-    price/price_currency são opcionais. No primeiro smoke price/price_currency
-    são omitidos.
+    price/price_currency são opcionais. `sku_key` controla a chave do SKU no
+    DTO (default snake_case `sku_id`; o teste de compatibilidade skuId usa
+    camelCase `skuId`).
     """
     if not product_id:
         raise ValueError("product_id é obrigatório para buyer.freight.calculate")
@@ -75,7 +77,7 @@ def build_buyer_freight_params(
     if city_code:
         dto["city_code"] = city_code
     if sku_id:
-        dto["sku_id"] = str(sku_id)
+        dto[sku_key] = str(sku_id)
     if price is not None and price_currency is not None:
         dto["price"] = str(price)
         dto["price_currency"] = price_currency

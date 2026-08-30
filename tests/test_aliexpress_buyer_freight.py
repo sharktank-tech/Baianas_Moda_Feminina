@@ -145,6 +145,47 @@ def test_buyer_freight_sku_id_omitted_when_absent():
     assert "sku_id" not in dto
 
 
+# ----- teste de compatibilidade skuId (camelCase) ---------------------------
+def test_buyer_camel_sku_dto_contains_skuId_not_sku_id():
+    p = build_buyer_freight_params(
+        product_id=123456, sku_id="14:771", sku_key="skuId"
+    )
+    dto = p["param_aeop_freight_calculate_for_buyer_d_t_o"]
+    assert '"skuId":"14:771"' in dto
+    assert "sku_id" not in dto
+
+
+def test_buyer_camel_sku_dto_number_types_and_omits_extras():
+    p = build_buyer_freight_params(
+        product_id="123456", sku_id="14:771", sku_key="skuId"
+    )
+    dto = p["param_aeop_freight_calculate_for_buyer_d_t_o"]
+    assert '"product_id":123456' in dto
+    assert '"product_id":"123456"' not in dto
+    assert '"product_num":1' in dto
+    assert '"product_num":"1"' not in dto
+    assert "province_code" not in dto
+    assert "city_code" not in dto
+    assert "price" not in dto
+    assert "price_currency" not in dto
+
+
+def test_buyer_camel_sku_via_client_uses_skuId():
+    transport = _FakeTransport(
+        '{"aliexpress_logistics_buyer_freight_calculate_response":{"code":"00"}}'
+    )
+    client = AliExpressClient(
+        app_key="k", app_secret="s", access_token="tok", transport=transport
+    )
+    client.calculate_buyer_freight(product_id="123", sku_id="14:771", sku_key="skuId")
+    params = transport.last_params
+    assert params["method"] == "aliexpress.logistics.buyer.freight.calculate"
+    assert "param_aeop_freight_calculate_for_buyer_d_t_o" in params
+    dto = params["param_aeop_freight_calculate_for_buyer_d_t_o"]
+    assert '"skuId":"14:771"' in dto
+    assert "sku_id" not in dto
+
+
 # ----- assinatura inclui o business param -----------------------------------
 def test_buyer_param_participates_in_signature():
     transport = _FakeTransport(
