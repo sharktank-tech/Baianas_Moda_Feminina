@@ -7,6 +7,7 @@ import hmac
 import time
 from decimal import Decimal
 from types import SimpleNamespace
+from urllib.parse import quote
 
 import pytest
 from flask import Blueprint, Flask, request
@@ -1474,7 +1475,15 @@ def _cookie_names(client):
     return [storage_key[2] for storage_key in cookies]
 
 
-def _run_probe_via_cookies(app_client, monkeypatch, probe_client, code, state):
+def _run_probe_via_cookies(
+    app_client,
+    monkeypatch,
+    probe_client,
+    code,
+    state,
+    path="/integrations/aliexpress/callback",
+    encoded=False,
+):
     monkeypatch.setattr(
         "loja.integrations.aliexpress.routes.exchange_authorization_code",
         lambda *a, **k: _fake_token(),
@@ -1485,9 +1494,10 @@ def _run_probe_via_cookies(app_client, monkeypatch, probe_client, code, state):
     )
     with app_client.session_transaction() as sess:
         sess[STATE_KEY] = {"state": state, "ts": time.time()}
-    app_client.set_cookie(OAUTH_CODE_COOKIE, code, path=OAUTH_CALLBACK_COOKIE_PATH)
+    cookie_code = quote(code, safe="") if encoded else code
+    app_client.set_cookie(OAUTH_CODE_COOKIE, cookie_code, path=OAUTH_CALLBACK_COOKIE_PATH)
     app_client.set_cookie(OAUTH_STATE_COOKIE, state, path=OAUTH_CALLBACK_COOKIE_PATH)
-    return app_client.get("/integrations/aliexpress/callback")
+    return app_client.get(path)
 
 
 def test_callback_recovers_code_and_state_from_cookies(app_client, monkeypatch, caplog):
@@ -1571,6 +1581,110 @@ def test_callback_cookie_path_preview_skips_freight(app_client, monkeypatch):
     assert "PH_STATE" not in body
     assert OAUTH_CODE_COOKIE not in _cookie_names(app_client)
     assert OAUTH_STATE_COOKIE not in _cookie_names(app_client)
+
+
+def test_callback_complete_recovers_code_and_state_from_cookies(
+    app_client, monkeypatch, caplog
+):
+    import logging
+
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
+    calls = []
+    get_map = {"100500123": _probe_product_raw_skus("100500123", [("14:771", 5)])}
+    buyer = {"100500123": _probe_buyer_success()}
+    client = _ProbeClient(
+        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
+    )
+    code = "PH_CODE"
+    state = "PH_STATE"
+    with caplog.at_level(logging.INFO):
+        r = _run_probe_via_cookies(
+            app_client,
+            monkeypatch,
+            client,
+            code,
+            state,
+            path="/integrations/aliexpress/callback/complete",
+        )
+    body = r.data.decode()
+    assert r.status_code == 200
+    assert "Buyer freight.calculate: success" in body
+    # Cookies apagados após processar o callback (caminho limpo /complete).
+    assert OAUTH_CODE_COOKIE not in _cookie_names(app_client)
+    assert OAUTH_STATE_COOKIE not in _cookie_names(app_client)
+    # Nenhuma saída de log contém a query, o code ou o state (placeholders).
+    assert "?code=" not in caplog.text
+    assert "&state=" not in caplog.text
+    assert code not in caplog.text
+    assert state not in caplog.text
+
+
+def test_callback_complete_unquotes_cookie_code(app_client, monkeypatch):
+    calls = []
+    get_map = {"100500123": _probe_product_detail("100500123", [])}
+    client = _ProbeClient(_probe_search_result(["100500123"]), get_map, {}, calls)
+    captured = {}
+
+    def _fake_exchange(*a, **kw):
+        captured["code"] = a[2] if len(a) > 2 else kw.get("code")
+        return _fake_token()
+
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes.exchange_authorization_code",
+        _fake_exchange,
+    )
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes.AliExpressClient",
+        lambda *a, **k: client,
+    )
+    code_raw = "ABC+def%2FXYZ"
+    state = "ST_COMPLETE"
+    with app_client.session_transaction() as sess:
+        sess[STATE_KEY] = {"state": state, "ts": time.time()}
+    # O Node grava encodeURIComponent(valor); aqui espelhamos com quote.
+    app_client.set_cookie(
+        OAUTH_CODE_COOKIE, quote(code_raw, safe=""), path=OAUTH_CALLBACK_COOKIE_PATH
+    )
+    app_client.set_cookie(OAUTH_STATE_COOKIE, state, path=OAUTH_CALLBACK_COOKIE_PATH)
+    r = app_client.get("/integrations/aliexpress/callback/complete")
+    assert r.status_code == 200
+    # unquote recupera o valor original exatamente (encodeURIComponent/unquote).
+    assert captured.get("code") == code_raw
+
+
+def test_callback_complete_removes_cookies_on_error(app_client):
+    # Cookies presentes mas SEM state de sessão -> erro 400 E cookies apagados.
+    app_client.set_cookie(OAUTH_CODE_COOKIE, "PH_CODE", path=OAUTH_CALLBACK_COOKIE_PATH)
+    app_client.set_cookie(OAUTH_STATE_COOKIE, "PH_STATE", path=OAUTH_CALLBACK_COOKIE_PATH)
+    r = app_client.get("/integrations/aliexpress/callback/complete")
+    assert r.status_code == 400
+    assert OAUTH_CODE_COOKIE not in _cookie_names(app_client)
+    assert OAUTH_STATE_COOKIE not in _cookie_names(app_client)
+
+
+def test_callback_complete_clean_reaches_flask(app_client):
+    r = app_client.get("/integrations/aliexpress/callback/complete")
+    assert r.status_code == 400
+    assert "Falha de validação de estado OAuth" in r.data.decode()
+
+
+def test_local_callback_query_string_still_works(app_client, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
+    calls = []
+    get_map = {"100500123": _probe_product_raw_skus("100500123", [("14:771", 5)])}
+    buyer = {"100500123": _probe_buyer_success()}
+    client = _ProbeClient(
+        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
+    )
+    with caplog.at_level(logging.INFO):
+        body = _run_probe(app_client, monkeypatch, client)
+    assert "Buyer freight.calculate: success" in body
+    assert "?code=" not in caplog.text
+    assert "&state=" not in caplog.text
 
 
 def _fake_http_response(status: int, content_type: str, body: str):

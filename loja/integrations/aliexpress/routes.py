@@ -17,6 +17,7 @@ import os
 import time
 from functools import wraps
 from typing import Any, Callable, Optional
+from urllib.parse import unquote
 
 from flask import (
     Blueprint,
@@ -170,6 +171,7 @@ def authorize():
 
 
 @aliexpress_blueprint.route("/callback", methods=["GET"])
+@aliexpress_blueprint.route("/callback/complete", methods=["GET"])
 def callback():
     # Depois de processar o callback, apaga imediatamente os cookies do
     # fallback (path restrito ao callback). Vale para qualquer desfecho.
@@ -180,9 +182,13 @@ def callback():
         return response
 
     # Fonte do code/state: query string (local/dev) OU cookie gravado pelo
-    # middleware da Vercel (fluxo principal). Nunca registra o valor.
-    code = request.args.get("code") or request.cookies.get(OAUTH_CODE_COOKIE)
-    state = request.args.get("state") or request.cookies.get(OAUTH_STATE_COOKIE)
+    # endpoint Node (caminho principal; /callback/complete chega sem query).
+    # O Node usa encodeURIComponent; portanto decodifica explicitamente.
+    # Nunca registra o valor.
+    cookie_code = request.cookies.get(OAUTH_CODE_COOKIE)
+    cookie_state = request.cookies.get(OAUTH_STATE_COOKIE)
+    code = request.args.get("code") or (unquote(cookie_code) if cookie_code else None)
+    state = request.args.get("state") or (unquote(cookie_state) if cookie_state else None)
     # Consome imediatamente (uso único); qualquer falha abaixo rejeita.
     stored = session.pop(STATE_KEY, None)
 
