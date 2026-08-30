@@ -212,10 +212,12 @@ def callback():
     #    Dois caminhos mutuamente exclusivos (para respeitar o timeout de 10s da
     #    Vercel, nunca os dois no mesmo callback):
     #      - ds.freight.query (Fase 4): baseado em SKU, sonda até 2 candidatos.
-    #      - logistics.buyer.freight.calculate (Fase 4b): baseado em product_id,
-    #        chamada única. Selecionado por ALIEXPRESS_SMOKE_BUYER_FREIGHT.
+    #      - logistics.buyer.freight.get (Fase 4b isolada): chamada única por
+    #        product_id + primeiro SKU elegível. Selecionado por
+    #        ALIEXPRESS_SMOKE_BUYER_FREIGHT. Buyer freight.calculate ficou como
+    #        diagnóstico histórico (não é chamado no smoke ativo).
     use_buyer = bool(os.environ.get("ALIEXPRESS_SMOKE_BUYER_FREIGHT"))
-    freight_label = "Buyer freight.calculate" if use_buyer else "DS freight.query"
+    freight_label = "Buyer freight.get" if use_buyer else "DS freight.query"
     freight_result = None
     freight_error = None
     freight_unavailable = None
@@ -288,9 +290,9 @@ def callback():
                 break
 
     elif product_detail is not None and use_buyer:
-        # ---- logistics.buyer.freight.calculate (Fase 4b) ----
+        # ---- logistics.buyer.freight.get (Fase 4b isolada) ----
         #    Chamada única por product_id + primeiro SKU elegível (a API exige
-        #    skuId). Reutiliza o mesmo product_detail da Fase 3; sem loop/sleep.
+        #    sku_id). Reutiliza o mesmo product_detail da Fase 3; sem loop/sleep.
         product_id = product_detail.product_id
         eligible_sku = next(
             (
@@ -306,7 +308,7 @@ def callback():
         )
         if product_id is not None and eligible_sku is not None:
             try:
-                fret = client.calculate_buyer_freight(
+                fret = client.get_buyer_freight(
                     product_id=product_id,
                     sku_id=eligible_sku.sku_id,
                     country_code="BR",
@@ -482,16 +484,28 @@ def _render_success(
         options = freight_result.options or []
         has_fee = freight_result.min_fee is not None
         has_currency = freight_result.currency is not None
-        has_days = freight_result.min_delivery_days is not None
+        has_days = freight_result.min_delivery_days is not None or any(
+            o.estimated_delivery for o in options
+        )
         lines += [
             "",
             f"{freight_label}: success",
             f"candidatos testados: {freight_candidates}",
             f"opções de frete: {len(options)}",
-            f"frete mínimo: {'presente' if has_fee else 'ausente'}",
-            f"moeda: {'presente' if has_currency else 'ausente'}",
-            f"prazo: {'presente' if has_days else 'ausente'}",
         ]
+        if freight_label == "Buyer freight.get":
+            # Smoke do freight.get: ainda sem custo definitivo (bruto em raw),
+            # então exibimos apenas moeda/prazo.
+            lines += [
+                f"moeda: {'presente' if has_currency else 'ausente'}",
+                f"prazo: {'presente' if has_days else 'ausente'}",
+            ]
+        else:
+            lines += [
+                f"frete mínimo: {'presente' if has_fee else 'ausente'}",
+                f"moeda: {'presente' if has_currency else 'ausente'}",
+                f"prazo: {'presente' if has_days else 'ausente'}",
+            ]
     else:
         lines += ["", f"{freight_label}: skipped (sem SKU elegível)"]
 

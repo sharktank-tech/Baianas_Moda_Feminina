@@ -812,6 +812,7 @@ class _ProbeClient:
         self.freight_kwargs = []
         self._buyer = buyer_map or {}
         self.buyer_calls = []
+        self.buyer_get_calls = []
 
     def search_products(self, **kw):
         return self._search
@@ -830,6 +831,13 @@ class _ProbeClient:
 
     def calculate_buyer_freight(self, *, product_id, **kw):
         self.buyer_calls.append((product_id, kw))
+        outcome = self._buyer.get(product_id)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    def get_buyer_freight(self, *, product_id, sku_id, **kw):
+        self.buyer_get_calls.append((product_id, sku_id, kw))
         outcome = self._buyer.get(product_id)
         if isinstance(outcome, Exception):
             raise outcome
@@ -1043,18 +1051,22 @@ def test_callback_buyer_freight_success(app_client, monkeypatch, caplog):
     )
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)
-    assert "Buyer freight.calculate: success" in body
+    assert "Buyer freight.get: success" in body
+    assert "candidatos testados: 1" in body
     assert "opções de frete: 1" in body
-    assert "frete mínimo: presente" in body
-    # Chamada única por product_id.
-    assert len(client.buyer_calls) == 1
-    # ds.freight.query NÃO é chamado quando o caminho buyer está ativo.
+    assert "moeda: presente" in body
+    assert "prazo: presente" in body
+    # O smoke do freight.get não mostra custo definitivo (bruto em raw).
+    assert "frete mínimo:" not in body
+    # Chamada única por product_id + primeiro SKU.
+    assert len(client.buyer_get_calls) == 1
+    # Sem ds.freight.query e sem buyer.freight.calculate no mesmo callback.
     assert client.calls == []
-    # Origem de envio enviada ao método.
-    _, kw = client.buyer_calls[0]
+    assert client.buyer_calls == []
+    # Origem de envio e SKU elegível enviados ao método.
+    pid, sku, kw = client.buyer_get_calls[0]
     assert kw["send_goods_country_code"] == "CN"
-    # SKU elegível enviado à API (snake_case).
-    assert kw["sku_id"] == "s1"
+    assert sku == "s1"
     # Nenhum segredo/ID em logs.
     assert "REAL_AT" not in caplog.text
 
@@ -1074,11 +1086,11 @@ def test_callback_buyer_freight_passes_destination_from_env(app_client, monkeypa
     )
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)
-    assert "Buyer freight.calculate: success" in body
-    _, kw = client.buyer_calls[0]
+    assert "Buyer freight.get: success" in body
+    _, sku, kw = client.buyer_get_calls[0]
     assert kw["province_code"] == "SP"
     assert kw["city_code"] == "SAO_PAULO"
-    assert kw["sku_id"] == "s1"
+    assert sku == "s1"
     # Valores NÃO vazam em body nem em logs.
     assert "SP" not in body
     assert "SAO_PAULO" not in body
@@ -1099,11 +1111,11 @@ def test_callback_buyer_freight_skips_out_of_stock_and_uses_first_eligible(app_c
     )
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)
-    assert "Buyer freight.calculate: success" in body
+    assert "Buyer freight.get: success" in body
     # Chamada única, usando o primeiro SKU com estoque (s1, ignora s0=0).
-    assert len(client.buyer_calls) == 1
-    _, kw = client.buyer_calls[0]
-    assert kw["sku_id"] == "s1"
+    assert len(client.buyer_get_calls) == 1
+    _, sku, _ = client.buyer_get_calls[0]
+    assert sku == "s1"
     assert "s0" not in caplog.text
 
 
@@ -1119,10 +1131,10 @@ def test_callback_buyer_freight_no_eligible_sku_unavailable(app_client, monkeypa
     )
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)
-    assert "Buyer freight.calculate: unavailable" in body
+    assert "Buyer freight.get: unavailable" in body
     assert "motivo: nenhum SKU elegível" in body
     # Não deve chamar a API quando não há SKU elegível.
-    assert client.buyer_calls == []
+    assert client.buyer_get_calls == []
     # IDs/valores não vazam em body nem em logs.
     assert "s0" not in body
     assert "s1" not in body
@@ -1143,7 +1155,7 @@ def test_callback_buyer_freight_failure_sanitized(app_client, monkeypatch, caplo
     )
     with caplog.at_level(logging.INFO):
         body = _run_probe(app_client, monkeypatch, client)
-    assert "Buyer freight.calculate: failure" in body
+    assert "Buyer freight.get: failure" in body
     assert "code: 27" in body
     assert "sub_code: isp.x" in body
     assert client.calls == []
