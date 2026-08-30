@@ -40,6 +40,10 @@ from loja.integrations.aliexpress.errors import (
     AliExpressRateLimitError,
     AliExpressTransportError,
 )
+from loja.integrations.aliexpress.importer import (
+    DraftImportError,
+    import_product_draft,
+)
 from loja.integrations.aliexpress.oauth import (
     DEFAULT_OAUTH_API_BASE_URL,
     DEFAULT_OAUTH_AUTHORIZE_URL,
@@ -242,6 +246,20 @@ def callback():
         except (AliExpressAPIError, AliExpressTransportError) as exc:
             product_error = exc
 
+    # 4a) Draft import idempotente (Fase 5).
+    #     Reutiliza o product_detail em memória (sem nova chamada à API) e só
+    #     roda após product.get bem-sucedido, se explicitamente habilitado.
+    #     Preview/Production nunca escrevem (VERCEL difere).
+    draft_result = None
+    draft_error = None
+    if product_detail is not None and _draft_import_enabled():
+        try:
+            draft_result = import_product_draft(
+                detail=product_detail, seller_id=token.seller_id
+            )
+        except DraftImportError as exc:
+            draft_error = exc
+
     # 4) Freight smoke.
     #    INVESTIGAÇÃO LIVE DE FRETE ENCERRADA: o provider bloqueou o frete (ver
     #    FREIGHT_PROBE.md). Estado registrado como bloqueado pelo provider — NÃO
@@ -438,6 +456,8 @@ def callback():
         freight_candidates=freight_candidates,
         freight_label=freight_label,
         freight_disabled=freight_disabled,
+        draft_result=draft_result,
+        draft_error=draft_error,
     )
 
 
@@ -457,6 +477,17 @@ def _freight_smoke_enabled() -> bool:
     return True
 
 
+def _draft_import_enabled() -> bool:
+    """Import de rascunho AliExpress (Fase 5): opt-in local/controlado apenas.
+
+    Preview/Production (Vercel) NUNCA escrevem no banco a partir do callback
+    OAuth — mesmo que ALIEXPRESS_DRAFT_IMPORT=1.
+    """
+    if os.environ.get("VERCEL"):
+        return False
+    return os.environ.get("ALIEXPRESS_DRAFT_IMPORT") == "1"
+
+
 # --------------------------------------------------------------------------
 # Renderização sanitizada (nunca tokens/code/sign)
 # --------------------------------------------------------------------------
@@ -472,6 +503,8 @@ def _render_success(
     freight_candidates: int = 0,
     freight_label: str = "DS freight.query",
     freight_disabled: bool = False,
+    draft_result: Any = None,
+    draft_error: Any = None,
 ) -> str:
     lines = [
         "AliExpress autorizado com sucesso",
@@ -588,6 +621,24 @@ def _render_success(
         ]
     else:
         lines += ["", f"{freight_label}: skipped (sem SKU elegível)"]
+
+    # Seção draft import (Fase 5) — sanitizada (sem seller_id/ids/raw/sign).
+    if draft_result is not None:
+        lines += [
+            "",
+            "Draft import: success",
+            f"criado: {'sim' if draft_result.created else 'nao'}",
+            "variantes criadas/atualizadas/desativadas: "
+            f"{draft_result.variants_created}/{draft_result.variants_updated}/"
+            f"{draft_result.variants_disabled}",
+            f"imagens: {draft_result.images}",
+        ]
+    elif draft_error is not None:
+        lines += [
+            "",
+            "Draft import: skipped",
+            f"motivo: {draft_error}",
+        ]
 
     return "<br>\n".join(lines)
 

@@ -1410,6 +1410,7 @@ class ProductVariant(db.Model):
     supplier_sku_id = db.Column(db.String(64))
     color = db.Column(db.String(60))
     size = db.Column(db.String(20))
+    attributes = db.Column(JSONB)
     stock = db.Column(db.Integer, nullable=False, default=0)
     price = db.Column(db.Numeric(10, 2))
     sale_price = db.Column(db.Numeric(10, 2))
@@ -1470,6 +1471,17 @@ class SupplierProduct(db.Model):
         default="BRL",
         server_default="BRL",
     )
+    # Estado do frete do fornecedor (Fase 4/5). Ausência de frete NUNCA vira
+    # zero: provider_unavailable mantém shipping_cost/landed_cost como NULL.
+    freight_status = db.Column(
+        db.String(30),
+        nullable=False,
+        default="unknown",
+        server_default="unknown",
+    )
+    shipping_cost = db.Column(db.Numeric(10, 2))
+    landed_cost = db.Column(db.Numeric(10, 2))
+    freight_currency = db.Column(db.String(3))
     sync_status = db.Column(db.String(20))
     last_sync_at = db.Column(db.DateTime)
     sync_error = db.Column(db.Text)
@@ -1493,6 +1505,14 @@ class SupplierProduct(db.Model):
         db.CheckConstraint(
             "wholesale_price >= 0",
             name="ck_supplier_product_wholesale_nonneg",
+        ),
+        db.CheckConstraint(
+            "shipping_cost IS NULL OR shipping_cost >= 0",
+            name="ck_supplier_product_shipping_cost_nonneg",
+        ),
+        db.CheckConstraint(
+            "landed_cost IS NULL OR landed_cost >= 0",
+            name="ck_supplier_product_landed_cost_nonneg",
         ),
     )
 

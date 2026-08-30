@@ -108,6 +108,17 @@ REQUIRED_COLUMNS = {
     ("suppliers", "last_sync_at"): {"type": "datetime", "nullable": True},
     ("suppliers", "sync_status"): {"type": "string", "length": 20, "nullable": True},
     ("suppliers", "sync_error"): {"type": "text", "nullable": True},
+    # supplier_products (frete do fornecedor / upload de rascunho AliExpress)
+    ("supplier_products", "freight_status"): {
+        "type": "string", "length": 30, "nullable": False, "default": "'unknown'",
+    },
+    ("supplier_products", "shipping_cost"): {"type": "numeric", "nullable": True},
+    ("supplier_products", "landed_cost"): {"type": "numeric", "nullable": True},
+    ("supplier_products", "freight_currency"): {
+        "type": "string", "length": 3, "nullable": True,
+    },
+    # product_variants (atributos brutos do SKU AliExpress)
+    ("product_variants", "attributes"): {"type": "jsonb", "nullable": True},
     # products (dropshipping / sincronização)
     ("products", "external_id"): {"type": "string", "length": 64, "nullable": True},
     ("products", "source"): {
@@ -165,6 +176,8 @@ def _sql_type(dialect, generic):
         return "TEXT"
     if generic == "numeric":
         return "NUMERIC(10,2)"
+    if generic == "jsonb":
+        return "JSONB" if dialect == "postgresql" else "JSON"
     if generic == "datetime":
         return "TIMESTAMP" if dialect == "postgresql" else "DATETIME"
     if generic == "boolean":
