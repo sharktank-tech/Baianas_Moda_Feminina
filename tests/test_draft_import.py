@@ -95,6 +95,42 @@ def _fetch_product(external_id):
     ).first()
 
 
+def test_duplicate_sku_in_payload_dedupes_single_variant(db):
+    external_id = "1005000000000009d"
+    detail = _detail(
+        product_id=external_id,
+        skus=[
+            _sku(sku_id="1", sale_price="10.00", stock=5),
+            _sku(sku_id="2", sale_price="15.00", stock=3),
+            _sku(sku_id="1", sale_price="99.00", stock=9),  # sku_id duplicado
+        ],
+    )
+    # A primeira ocorrência vence; a única row respeita a constraint
+    # uq_product_variant_supplier (nunca explode em 2 rows).
+    result = import_product_draft(detail=detail, seller_id="SELLER_DEDUP")
+
+    assert result.created is True
+    assert result.variants_created == 2
+    product = _fetch_product(external_id)
+    variants = ProductVariant.query.filter_by(
+        supplier_product_id=result.supplier_product_id
+    ).all()
+    assert len(variants) == 2
+    by_sku = {v.supplier_sku_id: v for v in variants}
+    assert by_sku["1"].stock == 5
+    assert by_sku["1"].price == Decimal("10.00")
+    assert by_sku["2"].stock == 3
+
+    # Reimport com o mesmo payload duplicado continua idempotente.
+    again = import_product_draft(detail=detail, seller_id="SELLER_DEDUP")
+    assert again.created is False
+    assert again.variants_created == 0
+    assert again.variants_updated == 2
+    assert ProductVariant.query.filter_by(
+        supplier_product_id=result.supplier_product_id
+    ).count() == 2
+
+
 # --------------------------------------------------------------------------
 # 1º import e idempotência
 # --------------------------------------------------------------------------

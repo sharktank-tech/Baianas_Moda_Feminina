@@ -49,6 +49,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'ck_supplier_product_shipping_cost_nonneg'
+          AND conrelid = 'pollomodas.supplier_products'::regclass
     ) THEN
         ALTER TABLE supplier_products
             ADD CONSTRAINT ck_supplier_product_shipping_cost_nonneg
@@ -58,6 +59,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'ck_supplier_product_landed_cost_nonneg'
+          AND conrelid = 'pollomodas.supplier_products'::regclass
     ) THEN
         ALTER TABLE supplier_products
             ADD CONSTRAINT ck_supplier_product_landed_cost_nonneg

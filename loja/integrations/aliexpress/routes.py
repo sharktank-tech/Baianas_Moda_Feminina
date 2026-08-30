@@ -260,11 +260,11 @@ def callback():
         except DraftImportError as exc:
             draft_error = exc
 
-    # 4) Freight smoke.
-    #    INVESTIGAÇÃO LIVE DE FRETE ENCERRADA: o provider bloqueou o frete (ver
-    #    FREIGHT_PROBE.md). Estado registrado como bloqueado pelo provider — NÃO
-    #    fazer novos experimentos de endpoint/parâmetro. Em Preview o smoke de
-    #    frete fica DESATIVADO (sem chamadas desnecessárias).
+    # 4) Freight smoke — INVESTIGAÇÃO LIVE ENCERRADA.
+    #    O provider bloqueou o frete (ver FREIGHT_PROBE.md): o smoke NÃO roda em
+    #    runtime — nem em Production, nem em Preview, nem local. _freight_smoke_
+    #    enabled() retorna False sempre; os módulos de frete ficam apenas como
+    #    diagnóstico  histórico/teste (opt-in explícito nos testes).
     #
     #    Implementação experimental canônica (única mantida):
     #      aliexpress.logistics.buyer.freight.calculate
@@ -471,10 +471,14 @@ def _is_unavailable_code(code: Any) -> bool:
 
 
 def _freight_smoke_enabled() -> bool:
-    """Investigação live de frete encerrada (provider bloqueou): nunca roda no Preview."""
-    if os.environ.get("VERCEL_ENV") == "preview":
-        return False
-    return True
+    """Investigação live de frete ENCERRADA: nunca roda em runtime.
+
+    O provider bloqueou o frete nesta App Key (ver FREIGHT_PROBE.md). O smoke
+    NÃO volta a rodar automaticamente em Production (ou em qualquer ambiente)
+    no callback. Os módulos de frete permanecem como histórico/diagnóstico e
+    os testes que exercitam a sondagem fazem opt-in explícito (monkeypatch).
+    """
+    return False
 
 
 def _draft_import_enabled() -> bool:

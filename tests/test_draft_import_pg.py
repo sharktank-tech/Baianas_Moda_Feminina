@@ -70,14 +70,14 @@ def _url_with_search_path(url, schema):
 
 
 def _public_columns_snapshot(eng):
+    """Snapshot de TODAS as tabelas/colunas de `public` (invariante intocável)."""
     with eng.connect() as c:
         rows = c.execute(
             text(
                 "SELECT table_name, column_name, data_type "
-                "FROM information_schema.columns "
-                "WHERE table_schema = 'public' "
-                "  AND table_name IN ('supplier_products', 'product_variants') "
-                "ORDER BY table_name, ordinal_position"
+                "FROM   information_schema.columns "
+                "WHERE  table_schema = 'public' "
+                "ORDER  BY table_name, ordinal_position"
             )
         ).fetchall()
     return [tuple(r) for r in rows]
@@ -88,6 +88,10 @@ def _apply_migration(engine, schema):
     sql = sql.replace(
         "SET search_path TO pollomodas;",
         "SET search_path TO %s;" % schema,
+    )
+    sql = sql.replace(
+        "'pollomodas.supplier_products'::regclass",
+        "'%s.supplier_products'::regclass" % schema,
     )
     with engine.begin() as c:
         for stmt in _split_sql_statements(sql):
@@ -234,9 +238,17 @@ def test_import_reimport_end_to_end_in_disposable_schema(env, monkeypatch):
                 sku_id="2", sale_price="15.00", original_price="25.00",
                 available_stock=3, currency="USD",
             ),
+            # sku_id duplicado no MESMO payload: a primeira ocorrência vence
+            # (uma única variante; nunca viola uq_product_variant_supplier).
+            AliExpressProductSku(
+                sku_id="1", sale_price="99.00", original_price="199.00",
+                available_stock=9, currency="USD",
+            ),
         ],
         currency="USD",
     )
+
+    public_before = _public_columns_snapshot(eng)
 
     app = create_app()
     with app.app_context():
@@ -248,7 +260,7 @@ def test_import_reimport_end_to_end_in_disposable_schema(env, monkeypatch):
 
         first = import_product_draft(detail=detail, seller_id="SELLER_PG")
         assert first.created is True
-        assert first.variants_created == 2
+        assert first.variants_created == 2  # duplicado deduplicado
         assert first.images == 2
 
         second = import_product_draft(detail=detail, seller_id="SELLER_PG")
@@ -267,3 +279,5 @@ def test_import_reimport_end_to_end_in_disposable_schema(env, monkeypatch):
         assert supplier_product.shipping_cost is None
         assert supplier_product.landed_cost is None
         assert supplier_product.currency == "USD"
+
+    assert _public_columns_snapshot(eng) == public_before, "public foi alterado!"

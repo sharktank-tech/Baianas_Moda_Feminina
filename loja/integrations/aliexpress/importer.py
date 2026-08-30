@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import List, Optional, Tuple
 from uuid import UUID
 
@@ -160,10 +161,16 @@ def import_product_draft(
 # preço / moeda
 # --------------------------------------------------------------------------
 
-def _effective_supplier_price(sku: AliExpressProductSku):
-    if sku.sale_price is not None:
-        return sku.sale_price
-    return sku.original_price
+def _effective_supplier_price(sku: AliExpressProductSku) -> Optional[Decimal]:
+    value = sku.sale_price if sku.sale_price is not None else sku.original_price
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = Decimal(value)
+        except InvalidOperation:
+            return None
+    return value
 
 
 def _priced_skus(skus: List[AliExpressProductSku]) -> List[AliExpressProductSku]:
@@ -316,8 +323,12 @@ def _apply_category(
     ).first()
     if mapping is not None and mapping.category_id is not None:
         product.category_id = mapping.category_id
+        if mapping.category is not None:
+            product.category = mapping.category.name
     elif created:
+        # Sem mapping conhecido: novo draft começa SEM categoria manual.
         product.category_id = None
+        product.category = None
 
 
 def _apply_product(
@@ -377,6 +388,10 @@ def _apply_variants_and_images(
         if not sku.sku_id:
             continue
         sku_id = str(sku.sku_id)
+        if sku_id in seen:
+            # sku_id duplicado no MESMO payload: primeira ocorrência vence; a
+            # constraint uq_product_variant_supplier impede a segunda row.
+            continue
         seen.add(sku_id)
         attributes = list(sku.attributes or [])
         color, size = _extract_variant_meta(attributes)

@@ -634,6 +634,10 @@ def test_callback_success_shows_no_token(app_client, monkeypatch):
     monkeypatch.setattr(
         "loja.integrations.aliexpress.routes.AliExpressClient", _SearchProductClient
     )
+    # Opt-in explícito: este teste valida o histórico do smoke DS de frete.
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes._freight_smoke_enabled", lambda: True
+    )
     state = "ST1"
     with app_client.session_transaction() as sess:
         sess[STATE_KEY] = {"state": state, "ts": time.time()}
@@ -731,6 +735,10 @@ def test_callback_freight_failure_shows_sanitized(app_client, monkeypatch):
             )
 
     monkeypatch.setattr("loja.integrations.aliexpress.routes.AliExpressClient", _FailFreightClient)
+    # Opt-in explícito: teste do caminho de falha do smoke (histórico).
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes._freight_smoke_enabled", lambda: True
+    )
     state = "ST_FREIGHT"
     with app_client.session_transaction() as sess:
         sess[STATE_KEY] = {"state": state, "ts": time.time()}
@@ -868,6 +876,13 @@ def _run_probe(app_client, monkeypatch, probe_client):
     monkeypatch.setattr(
         "loja.integrations.aliexpress.routes.AliExpressClient",
         lambda *a, **k: probe_client,
+    )
+    # O smoke de frete está ENCERRADO em runtime (_freight_smoke_enabled() ->
+    # False). Estes testes de sondagem fazem opt-in explícito para manter a
+    # cobertura diagnóstica do caminho de frete no callback.
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes._freight_smoke_enabled",
+        lambda: True,
     )
     state = "ST_PROBE"
     with app_client.session_transaction() as sess:
@@ -1236,19 +1251,70 @@ def test_callback_buyer_calculate_failure_sanitized(app_client, monkeypatch, cap
 
 def test_callback_freight_smoke_disabled_on_preview(app_client, monkeypatch):
     monkeypatch.setenv("VERCEL_ENV", "preview")
+    monkeypatch.setenv("VERCEL", "1")
     monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes.exchange_authorization_code",
+        lambda *a, **k: _fake_token(),
+    )
     calls = []
     get_map = {"100500123": _probe_product_raw_skus("100500123", [("14:771", 5)])}
     client = _ProbeClient(
         _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map={}
     )
-    body = _run_probe(app_client, monkeypatch, client)
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes.AliExpressClient",
+        lambda *a, **k: client,
+    )
+    state = "ST_PREV"
+    with app_client.session_transaction() as sess:
+        sess[STATE_KEY] = {"state": state, "ts": time.time()}
+    body = app_client.get(
+        f"/integrations/aliexpress/callback?code=ABC&state={state}"
+    ).data.decode()
     assert "Smoke de frete: desativado (investigação encerrada)" in body
     # NENHUMA chamada de frete no Preview (nem buyer, nem ds, nem freight.get).
     assert client.buyer_calls == []
     assert client.buyer_get_calls == []
     assert client.calls == []
     assert "14:771" not in body
+
+
+def test_callback_freight_smoke_disabled_by_default_in_production(
+    app_client, monkeypatch
+):
+    # Regressão Fase 5-fechamento: o smoke de frete está ENCERRADO em runtime.
+    # Mesmo em "produção" (sem VERCEL_ENV, sem opt-in), NENHUMA chamada de
+    # frete acontece e a resposta avisa que a investigação foi encerrada.
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes.exchange_authorization_code",
+        lambda *a, **k: _fake_token(),
+    )
+    calls = []
+    get_map = {"100500123": _probe_product_raw_skus("100500123", [("14:771", 5)])}
+    buyer = {"100500123": _probe_buyer_success()}
+    client = _ProbeClient(
+        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
+    )
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes.AliExpressClient",
+        lambda *a, **k: client,
+    )
+    state = "ST_PROD"
+    with app_client.session_transaction() as sess:
+        sess[STATE_KEY] = {"state": state, "ts": time.time()}
+    body = app_client.get(
+        f"/integrations/aliexpress/callback?code=ABC&state={state}"
+    ).data.decode()
+    assert "Smoke de frete: desativado (investigação encerrada)" in body
+    assert client.buyer_calls == []
+    assert client.buyer_get_calls == []
+    assert client.calls == []
+    assert "14:771" not in body
+    # O gate em runtime é absoluto: nunca roda automaticamente.
+    from loja.integrations.aliexpress.routes import _freight_smoke_enabled
+
+    assert _freight_smoke_enabled() is False
 
 
 def test_callback_oauth_failure_shows_sanitized(app_client, monkeypatch, caplog):
@@ -1505,6 +1571,10 @@ def test_callback_recovers_code_and_state_from_cookies(app_client, monkeypatch, 
 
     monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
     monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
+    # Opt-in explícito: teste do caminho Buyer voyage pelo callback via cookie.
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes._freight_smoke_enabled", lambda: True
+    )
     calls = []
     get_map = {"100500123": _probe_product_raw_skus("100500123", [("14:771", 5)])}
     buyer = {"100500123": _probe_buyer_success()}
@@ -1590,6 +1660,10 @@ def test_callback_complete_recovers_code_and_state_from_cookies(
 
     monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
     monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
+    # Opt-in explícito: teste do caminho Buyer voyage no /callback/complete.
+    monkeypatch.setattr(
+        "loja.integrations.aliexpress.routes._freight_smoke_enabled", lambda: True
+    )
     calls = []
     get_map = {"100500123": _probe_product_raw_skus("100500123", [("14:771", 5)])}
     buyer = {"100500123": _probe_buyer_success()}
