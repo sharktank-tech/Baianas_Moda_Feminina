@@ -1310,6 +1310,106 @@ def test_create_app_keeps_werkzeug_access_log_outside_vercel(monkeypatch):
         lg.disabled = False
 
 
+class _AccessLogStub:
+    from werkzeug.serving import WSGIRequestHandler
+
+    command = "GET"
+    request_version = "HTTP/1.1"
+    _control_char_table = WSGIRequestHandler._control_char_table
+
+    def __init__(self, path, requestline):
+        self.path = path
+        self.requestline = requestline
+        self.lines = []
+
+    def address_string(self):
+        return "127.0.0.1"
+
+    def log_date_time_string(self):
+        return "01/Jan/2026 00:00:00"
+
+    def log(self, log_type, message, *args):
+        self.lines.append((message % args, self.path, self.requestline))
+
+
+def _emit_access_log(path, requestline):
+    from werkzeug.serving import WSGIRequestHandler
+
+    stub = _AccessLogStub(path, requestline)
+    WSGIRequestHandler.log_request(stub)
+    return stub
+
+
+def _ensure_werkzeug_hardened(monkeypatch):
+    from loja import _harden_werkzeug_access_log
+
+    monkeypatch.setenv("VERCEL", "1")
+    _harden_werkzeug_access_log()
+
+
+def test_access_log_sanitizes_oauth_callback_query(monkeypatch):
+    _ensure_werkzeug_hardened(monkeypatch)
+    original = "/integrations/aliexpress/callback?code=AAA&state=BBB"
+    stub = _emit_access_log(original, "GET /integrations/aliexpress/callback?code=AAA&state=BBB HTTP/1.1")
+    assert len(stub.lines) == 1
+    line, path_at_emit, requestline_at_emit = stub.lines[0]
+    assert "?code=" not in line
+    assert "&state=" not in line
+    assert "/integrations/aliexpress/callback HTTP/1.1" in line
+    # Durante a emissão o path/requestline estão redigidos...
+    assert path_at_emit == "/integrations/aliexpress/callback"
+    assert requestline_at_emit == "GET /integrations/aliexpress/callback HTTP/1.1"
+    # ...e restaurados depois de log_request (a request da app não muda).
+    assert stub.path == original
+    assert stub.requestline == "GET /integrations/aliexpress/callback?code=AAA&state=BBB HTTP/1.1"
+
+
+def test_access_log_other_route_keeps_query(monkeypatch):
+    _ensure_werkzeug_hardened(monkeypatch)
+    stub = _emit_access_log("/products?page=2", "GET /products?page=2 HTTP/1.1")
+    line, path_at_emit, _ = stub.lines[0]
+    assert "?page=2" in line
+    assert path_at_emit == "/products?page=2"
+    assert stub.path == "/products?page=2"
+
+
+def test_access_log_callback_without_query_intact(monkeypatch):
+    _ensure_werkzeug_hardened(monkeypatch)
+    stub = _emit_access_log(
+        "/integrations/aliexpress/callback", "GET /integrations/aliexpress/callback HTTP/1.1"
+    )
+    line, path_at_emit, requestline_at_emit = stub.lines[0]
+    assert "HTTPS/1.1" not in line
+    assert "/integrations/aliexpress/callback HTTP/1.1" in line
+    assert path_at_emit == "/integrations/aliexpress/callback"
+    assert requestline_at_emit == "GET /integrations/aliexpress/callback HTTP/1.1"
+
+
+def test_access_log_patch_applied_only_when_vercel(monkeypatch):
+    from werkzeug.serving import WSGIRequestHandler
+
+    monkeypatch.delenv("VERCEL", raising=False)
+    WSGIRequestHandler._pollomodas_oauth_hardened = False
+    from loja import _harden_werkzeug_access_log
+
+    original = WSGIRequestHandler.log_request
+    _harden_werkzeug_access_log()
+    assert WSGIRequestHandler.log_request is original
+    assert not getattr(WSGIRequestHandler, "_pollomodas_oauth_hardened", False)
+
+
+def test_access_log_patch_idempotent(monkeypatch):
+    from werkzeug.serving import WSGIRequestHandler
+
+    _ensure_werkzeug_hardened(monkeypatch)
+    first = WSGIRequestHandler.log_request
+    from loja import _harden_werkzeug_access_log
+
+    _harden_werkzeug_access_log()
+    assert WSGIRequestHandler.log_request is first
+    assert getattr(WSGIRequestHandler, "_pollomodas_oauth_hardened", False) is True
+
+
 def test_vercel_callback_never_logs_oauth_query_string(monkeypatch):
     import logging
 
@@ -1339,6 +1439,26 @@ def test_vercel_callback_never_logs_oauth_query_string(monkeypatch):
     finally:
         lg.disabled = False
         lg.removeHandler(sink)
+
+
+def test_vercel_callback_still_receives_code_and_state(app_client, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_BUYER_FREIGHT", "1")
+    monkeypatch.setenv("ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE", "CN")
+    calls = []
+    get_map = {"100500123": _probe_product_raw_skus("100500123", [("14:771", 5)])}
+    buyer = {"100500123": _probe_buyer_success()}
+    client = _ProbeClient(
+        _probe_search_result(["100500123"]), get_map, {}, calls, buyer_map=buyer
+    )
+    with caplog.at_level(logging.INFO):
+        body = _run_probe(app_client, monkeypatch, client)
+    # O fluxo OAuth (code/state) chega intacto à aplicação mesmo com o patch.
+    assert "Buyer freight.calculate: success" in body
+    assert len(client.buyer_calls) == 1
+    assert "14:771" not in caplog.text
 
 
 def _fake_http_response(status: int, content_type: str, body: str):

@@ -9,13 +9,65 @@ from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import text
 import uuid
 
-# Em ambientes serverless (Vercel) o logger de acesso do Werkzeug registraria a
-# query string completa do callback OAuth (code/state) em cada request. Em vez
-# de reduzir o nível, desligamos o access log do Werkzeug ANTES de servir
-# requests. Logs próprios da aplicação (OAuth/API, já sanitizados) permanecem.
+# Em ambientes serverless (Vercel) o access log do Werkzeug registraria a query
+# string completa do callback OAuth (code/state) em cada request. Defesas:
+#   1) desliga o access log do Werkzeug ANTES de servir requests; e
+#   2) mesmo que algo ainda emita o access log, sanitiza o self.path no momento
+#      da emissão (somente o caminho do callback OAuth), sem remover a query da
+#      request que a aplicação já processou em request.args.
+# Logs próprios da aplicação (OAuth/API, já sanitizados) permanecem.
+def _sanitize_oauth_access_path(path: str) -> str:
+    if not path:
+        return path
+
+    base = path.split("?", 1)[0]
+    if base == "/integrations/aliexpress/callback":
+        return base
+
+    return path
+
+
+def _sanitize_access_requestline(requestline: str) -> str:
+    # 'METHOD <path>?<query> HTTP/x.y' -> redige a query do callback OAuth.
+    parts = requestline.split()
+    if len(parts) == 3:
+        method, path_, rest = parts
+        return f"{method} {_sanitize_oauth_access_path(path_)} {rest}"
+    return requestline
+
+
 def _harden_werkzeug_access_log() -> None:
-    if os.environ.get("VERCEL"):
-        logging.getLogger("werkzeug").disabled = True
+    if not os.environ.get("VERCEL"):
+        return
+
+    logging.getLogger("werkzeug").disabled = True
+
+    from werkzeug.serving import WSGIRequestHandler
+
+    if getattr(WSGIRequestHandler, "_pollomodas_oauth_hardened", False):
+        return
+
+    original = WSGIRequestHandler.log_request
+
+    def safe_log_request(self, code="-", size="-"):
+        original_path = getattr(self, "path", None)
+        original_requestline = getattr(self, "requestline", None)
+        try:
+            if isinstance(original_path, str):
+                self.path = _sanitize_oauth_access_path(original_path)
+            # O access log do Werkzeug imprime self.requestline; sem isso a
+            # redação do self.path não apareceria na linha emitida.
+            if isinstance(original_requestline, str):
+                self.requestline = _sanitize_access_requestline(original_requestline)
+            return original(self, code, size)
+        finally:
+            if original_path is not None:
+                self.path = original_path
+            if original_requestline is not None:
+                self.requestline = original_requestline
+
+    WSGIRequestHandler.log_request = safe_log_request
+    WSGIRequestHandler._pollomodas_oauth_hardened = True
 
 db = SQLAlchemy()
 login_manager = LoginManager()
