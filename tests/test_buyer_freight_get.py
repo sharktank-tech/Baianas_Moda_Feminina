@@ -12,11 +12,13 @@ from loja.integrations.aliexpress import (
     AliExpressClient,
     build_buyer_freight_get_params,
     canonical_freight_sku_id,
-    freight_sku_shape,
+    freight_product_id,
+    freight_product_sku_shape,
     normalize_buyer_freight_get_response,
+    raw_canonical_sku_id,
 )
 from loja.integrations.aliexpress.errors import AliExpressAPIError
-from loja.integrations.aliexpress.models import AliExpressProductSku
+from loja.integrations.aliexpress.models import AliExpressProductDetail, AliExpressProductSku
 from loja.integrations.aliexpress.sign import sign_sync
 
 
@@ -31,6 +33,16 @@ def _mksku(
         available_stock=stock,
         attributes=[],
         raw=raw,
+    )
+
+
+def _mkdetail(product_id="100500123", raw=None) -> AliExpressProductDetail:
+    return AliExpressProductDetail(
+        product_id=product_id,
+        title="p",
+        images=["https://x/a.jpg"],
+        skus=[],
+        raw=raw or {},
     )
 
 
@@ -165,6 +177,23 @@ def test_canonical_raw_id_when_no_properties():
     assert canonical_freight_sku_id(sku) == "200000182:193;200007763:201336100"
 
 
+def test_canonical_raw_sku_id_priority_over_derived():
+    # O sku.id bruto canônico NÃO é substituído pelas propriedades.
+    sku = _mksku(
+        sku_id="14:99",
+        properties=[{"sku_property_id": "5", "property_value_id": "9"}],
+    )
+    assert canonical_freight_sku_id(sku) == "14:99"
+    assert raw_canonical_sku_id(sku) == "14:99"
+
+
+def test_raw_canonical_sku_id_invalid_returns_none():
+    assert raw_canonical_sku_id(_mksku(sku_id="s1")) is None
+    assert raw_canonical_sku_id(_mksku(sku_id="14:771:extra")) is None
+    assert raw_canonical_sku_id(_mksku(sku_id="")) is None
+    assert raw_canonical_sku_id(None) is None
+
+
 def test_canonical_raw_id_trimmed_and_unquoted():
     sku = _mksku(sku_id='  "14:771"  ')
     assert canonical_freight_sku_id(sku) == "14:771"
@@ -201,21 +230,55 @@ def test_canonical_none_and_empty_skus():
     assert canonical_freight_sku_id(_mksku(sku_id="")) is None
 
 
-def test_freight_sku_shape_sensitive_fields_only():
-    sku = _mksku(
-        sku_id="s1",
-        properties=[{"sku_property_id": "14", "property_value_id": "771"}],
+def test_freight_product_id_uses_main_product_id():
+    detail = _mkdetail(
+        raw={
+            "product_id_converter_result": {
+                "main_product_id": "2000000001",
+                "sub_product_id": "100500123",
+            }
+        }
     )
-    shape = freight_sku_shape(sku, canonical_freight_sku_id(sku))
-    assert shape["raw_id_present"] == "yes"
-    assert shape["raw_id_canonical"] == "no"
-    assert shape["properties_present"] == "yes"
-    assert shape["property_count"] == 1
-    assert shape["derived_sku"] == "yes"
-    assert shape["derived_equals_raw"] == "no"
-    # A forma NÃO expõe IDs/valores do SKU.
-    assert "14" not in str(shape)
-    assert "771" not in str(shape)
+    assert freight_product_id(detail) == "2000000001"
+
+
+def test_freight_product_id_falls_back_to_base_when_absent():
+    assert freight_product_id(_mkdetail()) == "100500123"
+    detail = _mkdetail(raw={"product_id_converter_result": {}})
+    assert freight_product_id(detail) == "100500123"
+    empty = _mkdetail(raw={"product_id_converter_result": {"main_product_id": ""}})
+    assert freight_product_id(empty) == "100500123"
+
+
+def test_freight_product_id_invalid_converter_falls_back_safely():
+    detail = _mkdetail(raw={"product_id_converter_result": "oops"})
+    assert freight_product_id(detail) == "100500123"
+    none_raw = _mkdetail(raw=None)
+    assert freight_product_id(none_raw) == "100500123"
+
+
+def test_freight_product_sku_shape_sensitive_fields_only():
+    detail = _mkdetail(
+        raw={
+            "product_id_converter_result": {
+                "main_product_id": "2000000001",
+                "sub_product_id": "100500123",
+            }
+        }
+    )
+    shape = freight_product_sku_shape(detail, "14:771")
+    assert shape["converter_present"] == "yes"
+    assert shape["main_product_present"] == "yes"
+    assert shape["main_differs_from_base"] == "yes"
+    assert shape["sub_product_present"] == "yes"
+    assert shape["raw_sku_present"] == "yes"
+    assert shape["raw_sku_canonical"] == "yes"
+    # A forma NÃO expõe IDs/valores do product/SKU.
+    serialized = str(shape)
+    assert "2000000001" not in serialized
+    assert "100500123" not in serialized
+    assert "14" not in serialized
+    assert "771" not in serialized
 
 
 # ----- method/top-level param/assinatura ------------------------------------

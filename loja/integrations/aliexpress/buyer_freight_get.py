@@ -35,6 +35,20 @@ def _clean_sku_id(raw_id: Any) -> str:
     return ("" if raw_id is None else str(raw_id)).strip().strip('"').strip("'")
 
 
+def raw_canonical_sku_id(sku: Any) -> Optional[str]:
+    """Retorna o `sku.id` bruto do ds.product.get se já for canônico.
+
+    Aceita apenas o formato exato <n>:<n>(;<n>:<n>)* após strip e remoção de
+    aspas externas acidentais. Nunca usa sku_code, barcode ou IDs locais.
+    """
+    if sku is None:
+        return None
+    raw_id = _clean_sku_id(getattr(sku, "sku_id", None))
+    if raw_id and _CANONICAL_SKU_RE.match(raw_id):
+        return raw_id
+    return None
+
+
 def _derive_sku_pairs(sku: Any) -> List[str]:
     """Pares <sku_property_id>:<property_value_id> das propriedades do raw."""
     raw = getattr(sku, "raw", None)
@@ -61,37 +75,59 @@ def _derive_sku_pairs(sku: Any) -> List[str]:
 def canonical_freight_sku_id(sku: Any) -> Optional[str]:
     """Deriva o SKU canônico AliExpress (ex.: "14:771" ou "14:771;5:100014064").
 
-    Prioridade: propriedades preservadas em `sku.raw` (aeop_s_k_u_propertys ou
-    wrapper equivalente, já suportado pelo parser). Nomes NUNCA são anexados
-    depois de '#'. Sem propriedades, aceita `sku.sku_id` somente se, após strip
-    e remoção de aspas externas, satisfizer <n>:<n>(;<n>:<n>)*. NUNCA usa
-    sku_code, barcode ou IDs locais como fallback.
+    Prioridade: o `sku.id` bruto do ds.product.get quando já satisfaz o formato
+    canônico (live mostrou `raw_id_canonical=yes`). As propriedades preservadas
+    em `sku.raw` (aeop_s_k_u_propertys ou wrapper equivalente) continuam sendo
+    derivação de fallback para testes/utilitários, mas NÃO substituem o
+    `sku.id`. Nomes nunca são anexados depois de '#'. NUNCA usa sku_code,
+    barcode ou IDs locais como fallback.
     """
-    if sku is None:
-        return None
-    if sku.raw is not None:
+    raw_canonical = raw_canonical_sku_id(sku)
+    if raw_canonical is not None:
+        return raw_canonical
+    if sku is not None and sku.raw is not None:
         pairs = _derive_sku_pairs(sku)
         if pairs:
             return ";".join(pairs)
-    raw_id = _clean_sku_id(getattr(sku, "sku_id", None))
-    if raw_id and _CANONICAL_SKU_RE.match(raw_id):
-        return raw_id
     return None
 
 
-def freight_sku_shape(sku: Any, canonical: Optional[str]) -> Mapping[str, Any]:
-    """Forma NÃO sensível do SKU para diagnóstico (nunca expõe IDs/valores)."""
-    raw = getattr(sku, "raw", None)
-    raw_pairs = _derive_sku_pairs(sku) if isinstance(raw, Mapping) else []
-    raw_id = _clean_sku_id(getattr(sku, "sku_id", None))
+def freight_product_id(product_detail: Any) -> Optional[str]:
+    """product_id para logística (freight.get).
+
+    Usa o `main_product_id` do `product_id_converter_result` preservado em
+    `product_detail.raw` quando presente; caso contrário cai para
+    `product_detail.product_id`. Conversor inválido/vazio cai com segurança.
+    """
+    raw = getattr(product_detail, "raw", None) or {}
+    converter = raw.get("product_id_converter_result")
+    if isinstance(converter, Mapping):
+        main_id = converter.get("main_product_id")
+        if main_id:
+            return str(main_id)
+    return getattr(product_detail, "product_id", None)
+
+
+def freight_product_sku_shape(
+    product_detail: Any, raw_sku_id: Optional[str]
+) -> Mapping[str, Any]:
+    """Forma NÃO sensível do product/SKU para diagnóstico (nunca expõe IDs)."""
+    raw = getattr(product_detail, "raw", None) or {}
+    converter = raw.get("product_id_converter_result")
+    converter_present = isinstance(converter, Mapping)
+    main_id = converter.get("main_product_id") if converter_present else None
+    sub_id = converter.get("sub_product_id") if converter_present else None
+    base_id = getattr(product_detail, "product_id", None)
     return {
-        "raw_id_present": "yes" if raw_id else "no",
-        "raw_id_canonical": "yes" if raw_id and _CANONICAL_SKU_RE.match(raw_id) else "no",
-        "properties_present": "yes" if raw_pairs else "no",
-        "property_count": len(raw_pairs),
-        "derived_sku": "yes" if canonical else "no",
-        "derived_equals_raw": "yes"
-        if canonical and canonical == raw_id
+        "converter_present": "yes" if converter_present else "no",
+        "main_product_present": "yes" if main_id else "no",
+        "main_differs_from_base": "yes"
+        if main_id and base_id and str(main_id) != str(base_id)
+        else "no",
+        "sub_product_present": "yes" if sub_id else "no",
+        "raw_sku_present": "yes" if raw_sku_id else "no",
+        "raw_sku_canonical": "yes"
+        if raw_sku_id and _CANONICAL_SKU_RE.match(raw_sku_id)
         else "no",
     }
 

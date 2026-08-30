@@ -54,8 +54,10 @@ from .buyer_freight import (
 from .buyer_freight_get import (
     build_buyer_freight_get_params,
     canonical_freight_sku_id,
-    freight_sku_shape,
+    freight_product_id,
+    freight_product_sku_shape,
     normalize_buyer_freight_get_response,
+    raw_canonical_sku_id,
 )
 from .sign import sign_sync, sign_top
 from .transport import RequestsTransport, Transport, TransportError, TransportTimeout
@@ -114,7 +116,9 @@ __all__: Iterable[str] = [
     "normalize_buyer_freight_response",
     "build_buyer_freight_get_params",
     "canonical_freight_sku_id",
-    "freight_sku_shape",
+    "freight_product_id",
+    "freight_product_sku_shape",
+    "raw_canonical_sku_id",
     "normalize_buyer_freight_get_response",
     "create_client_from_env",
     "RequestsTransport",

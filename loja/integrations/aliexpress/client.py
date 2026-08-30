@@ -385,9 +385,9 @@ class AliExpressClient:
 
         Diferente do freight.calculate: o parâmetro externo é
         `aeopFreightCalculateForBuyerDTO` (JSON compacto que participa da
-        assinatura). Exige o SKU canônico AliExpress (obtido via
-        `canonical_freight_sku_id`). Mesmo gateway /sync,
-        sign_method=sha256 e session=token. Não persiste nada.
+        assinatura). Exige um SKU canônico AliExpress (<n>:<n>;<n>:<n>) — o
+        smoke usa o próprio `sku.id` bruto do ds.product.get. Mesmo gateway
+        /sync, sign_method=sha256 e session=token. Não persiste nada.
         """
         from .buyer_freight_get import (
             build_buyer_freight_get_params,
