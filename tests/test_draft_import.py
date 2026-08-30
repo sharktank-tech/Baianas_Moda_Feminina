@@ -1091,10 +1091,11 @@ def test_currency_change_goes_stale_with_null_landed(db):
     db.session.refresh(product)
     db.session.refresh(sp)
     assert sp.currency == "EUR"
-    assert product.currency == "EUR"
+    assert sp.landed_cost is None
+    # snapshot comercial NÃO é relabelado: Product.currency continua USD
+    assert product.currency == "USD"
     assert product.pricing_status == "stale"
     assert product.pricing_error == "currency_changed"
-    assert sp.landed_cost is None
     assert product.price == Decimal("15.00")  # preservado para auditoria
     _assert_publication_blocked(product)
 
@@ -1261,3 +1262,88 @@ def test_stale_when_freight_becomes_unusable_on_reimport(db):
     assert sp.landed_cost is None                         # frete inutilizável
     assert product.price == Decimal("125.00")             # preservado
     _assert_publication_blocked(product)
+
+
+def test_currency_change_does_not_relabel_stale_price(db):
+    from loja.services.pricing import PricingBlocked, price_dropshipping_product
+
+    # priced em USD: cost 80 + shipping 20 -> landed 100, sale 125 (margem 20%)
+    product, sp, _ = _priced_draft_with(db, "1005000000000064", 80, 20)
+    assert product.pricing_status == "priced"
+    assert product.price == Decimal("125.00")
+    assert product.target_margin_percent == Decimal("20.00")
+
+    # reimport vindo do fornecedor agora em EUR
+    import_product_draft(
+        detail=_detail(
+            product_id="1005000000000064",
+            currency="EUR",
+            skus=[_sku(sku_id="1", sale_price="100.00", stock=5, currency="EUR")],
+        ),
+        seller_id="SELLER_STALE",
+    )
+    db.session.refresh(product)
+    db.session.refresh(sp)
+    assert product.pricing_status == "stale"
+    assert product.pricing_error == "currency_changed"
+    assert sp.currency == "EUR"                 # moeda nova do fornecedor
+    assert sp.landed_cost is None
+    # snapshot comercial NÃO é relabelado: o valor em USD não vira EUR em silêncio
+    assert product.currency == "USD"
+    assert product.price == Decimal("125.00")
+    assert product.target_margin_percent == Decimal("20.00")
+    _assert_publication_blocked(product)
+
+    # repricing enquanto Product.currency ainda USD: moeda de venda != fornecedor
+    with pytest.raises(PricingBlocked) as exc:
+        price_dropshipping_product(product=product, target_margin_percent="20")
+    assert exc.value.args[0] == "currency_mismatch"
+    db.session.refresh(product)
+    assert product.price == Decimal("125.00")   # preço antigo intacto
+
+    # adoção EXPLÍCITA da moeda de venda EUR + frete coerente + repricing
+    product.currency = "EUR"
+    sp.freight_currency = "EUR"
+    db.session.flush()
+    price_dropshipping_product(product=product, target_margin_percent="20")
+    db.session.commit()
+    db.session.refresh(product)
+    db.session.refresh(sp)
+    assert product.pricing_status == "priced"
+    assert product.pricing_error is None
+    assert sp.landed_cost == Decimal("120.00")  # 100 + 20
+    assert product.price == Decimal("150.00")   # 120 / 0.8
+    from loja.services.publication import evaluate_publication
+
+    assert evaluate_publication(product).allowed is True
+
+
+def test_never_priced_reimport_adopts_new_currency(db):
+    external_id = "1005000000000065"
+    import_product_draft(
+        detail=_detail(
+            product_id=external_id,
+            currency="USD",
+            skus=[_sku(sku_id="1", sale_price="10.00", stock=5, currency="USD")],
+        ),
+        seller_id="SELLER_STALE",
+    )
+    product = _fetch_product(external_id)
+    assert product.pricing_status == "blocked"
+    assert product.currency == "USD"
+    assert product.price == Decimal("10.00")
+
+    # draft que NUNCA foi precificado continua adotando a moeda resolvida
+    import_product_draft(
+        detail=_detail(
+            product_id=external_id,
+            currency="EUR",
+            skus=[_sku(sku_id="1", sale_price="9.50", stock=5, currency="EUR")],
+        ),
+        seller_id="SELLER_STALE",
+    )
+    db.session.refresh(product)
+    assert product.currency == "EUR"
+    assert product.price == Decimal("9.50")
+    assert product.pricing_status == "blocked"
+    assert product.pricing_error == "freight_unavailable"

@@ -453,11 +453,17 @@ def _apply_product(
     # Fase 6: moeda de VENDA = moeda resolvida do fornecedor (sem camada FX;
     # Product.currency/SupplierProduct.currency devem ser iguais para pricing).
     # Para produtos já PRECIFICADOS (priced) ou INVALIDADOS (stale) o reimport
-    # não rebaixa o pricing_status, nem sobrescreve o preço de venda calculado
-    # nem a margem alvo (decisões comerciais/auditoria). Drafts que nunca foram
-    # precificados nascem `blocked`/freight_unavailable.
-    product.currency = currency
+    # NÃO altera automaticamente Product.currency/price/target_margin_percent:
+    # esses três valores formam o ÚLTIMO snapshot comercial precificado (p.ex.
+    # em USD) e uma moeda de venda nova é adoção EXPLÍCITA do vendedor, nunca
+    # consequência silenciosa do catálogo (senão o mesmo valor de price passaria
+    # a valer em EUR sem FX/repricing). A divergência Product.currency !=
+    # SupplierProduct.currency fica deliberada enquanto `stale`, mantendo
+    # price_dropshipping_product()/evaluate_publication() bloqueados por
+    # currency_mismatch. Drafts que nunca foram precificados continuam adotando
+    # a moeda resolvida do fornecedor e nascem `blocked`/freight_unavailable.
     if product.pricing_status not in (PRICED, STALE):
+        product.currency = currency
         product.price = catalog_price
         product.pricing_status = BLOCKED
         product.pricing_error = "freight_unavailable"
