@@ -1110,3 +1110,154 @@ def test_same_cost_reimport_keeps_priced_after_freight(db):
     assert product.price == Decimal("15.00")
     assert sp.cost == Decimal("10.00")
     assert sp.landed_cost == Decimal("12.00")
+
+
+def _priced_draft_with(
+    db, external_id, sku_price, shipping, margin="20", currency="USD"
+):
+    from loja.services.pricing import price_dropshipping_product
+
+    detail = _detail(
+        product_id=external_id,
+        currency=currency,
+        skus=[_sku(sku_id="1", sale_price=str(sku_price), stock=5, currency=currency)],
+    )
+    import_product_draft(detail=detail, seller_id="SELLER_STALE")
+    product = _fetch_product(external_id)
+    sp = SupplierProduct.query.filter_by(supplier_product_id=external_id).one()
+    sp.freight_status = "available"
+    sp.shipping_cost = Decimal(str(shipping))
+    sp.freight_currency = currency
+    db.session.flush()
+    price_dropshipping_product(product=product, target_margin_percent=margin)
+    db.session.commit()
+    db.session.refresh(product)
+    db.session.refresh(sp)
+    return product, sp, detail
+
+
+def test_stale_reconciles_landed_across_consecutive_reimports(db):
+    # priced: cost 80 + shipping 20 -> landed 100; sale = 100 / 0.8 = 125
+    product, sp, _ = _priced_draft_with(db, "1005000000000060", 80, 20)
+    assert product.pricing_status == "priced"
+    assert product.price == Decimal("125.00")
+    assert sp.landed_cost == Decimal("100.00")
+
+    import_product_draft(
+        detail=_detail(
+            product_id="1005000000000060",
+            skus=[_sku(sku_id="1", sale_price="90.00", stock=5)],
+        ),
+        seller_id="SELLER_STALE",
+    )
+    db.session.refresh(product)
+    db.session.refresh(sp)
+    assert product.pricing_status == "stale"
+    assert product.pricing_error == "supplier_cost_changed"
+    assert sp.landed_cost == Decimal("110.00")  # 90 + 20
+
+    import_product_draft(
+        detail=_detail(
+            product_id="1005000000000060",
+            skus=[_sku(sku_id="1", sale_price="100.00", stock=5)],
+        ),
+        seller_id="SELLER_STALE",
+    )
+    db.session.refresh(product)
+    db.session.refresh(sp)
+    assert product.pricing_status == "stale"               # continua stale
+    assert product.pricing_error == "supplier_cost_changed"
+    assert sp.landed_cost == Decimal("120.00")             # 100 + 20 (NOVO custo)
+    assert product.price == Decimal("125.00")              # preço preservado
+    assert product.target_margin_percent == Decimal("20.00")  # margem preservada
+    _assert_publication_blocked(product)
+
+
+def test_stale_reimport_without_changes_preserves_state(db):
+    product, sp, _ = _priced_draft_with(db, "1005000000000061", 80, 20)
+
+    import_product_draft(
+        detail=_detail(
+            product_id="1005000000000061",
+            skus=[_sku(sku_id="1", sale_price="90.00", stock=5)],
+        ),
+        seller_id="SELLER_STALE",
+    )
+    db.session.refresh(product)
+    db.session.refresh(sp)
+    assert product.pricing_status == "stale"
+    assert sp.landed_cost == Decimal("110.00")
+    sale_price = product.price
+    margin = product.target_margin_percent
+
+    import_product_draft(
+        detail=_detail(
+            product_id="1005000000000061",
+            skus=[_sku(sku_id="1", sale_price="90.00", stock=5)],
+        ),
+        seller_id="SELLER_STALE",
+    )
+    db.session.refresh(product)
+    db.session.refresh(sp)
+    assert product.pricing_status == "stale"               # inalterado
+    assert product.pricing_error == "supplier_cost_changed"
+    assert sp.landed_cost == Decimal("110.00")             # inalterado
+    assert product.currency == "USD"
+    assert product.price == sale_price
+    assert product.target_margin_percent == margin
+
+
+def test_stale_keeps_stale_after_further_currency_change(db):
+    product, sp, _ = _priced_draft_with(db, "1005000000000062", 80, 20)
+
+    import_product_draft(
+        detail=_detail(
+            product_id="1005000000000062",
+            skus=[_sku(sku_id="1", sale_price="90.00", stock=5)],
+        ),
+        seller_id="SELLER_STALE",
+    )
+    db.session.refresh(product)
+    assert product.pricing_status == "stale"
+
+    import_product_draft(
+        detail=_detail(
+            product_id="1005000000000062",
+            currency="EUR",
+            skus=[_sku(sku_id="1", sale_price="100.00", stock=5, currency="EUR")],
+        ),
+        seller_id="SELLER_STALE",
+    )
+    db.session.refresh(product)
+    db.session.refresh(sp)
+    assert product.pricing_status == "stale"
+    assert product.pricing_error == "currency_changed"
+    assert sp.landed_cost is None
+    assert product.price == Decimal("125.00")              # preservado
+    _assert_publication_blocked(product)
+
+
+def test_stale_when_freight_becomes_unusable_on_reimport(db):
+    product, sp, _ = _priced_draft_with(db, "1005000000000063", 80, 20)
+    assert product.pricing_status == "priced"
+    assert sp.landed_cost == Decimal("100.00")
+
+    sp.freight_status = "provider_unavailable"
+    sp.shipping_cost = None
+    sp.freight_currency = None
+    db.session.commit()
+
+    import_product_draft(
+        detail=_detail(
+            product_id="1005000000000063",
+            skus=[_sku(sku_id="1", sale_price="90.00", stock=5)],
+        ),
+        seller_id="SELLER_STALE",
+    )
+    db.session.refresh(product)
+    db.session.refresh(sp)
+    assert product.pricing_status == "stale"
+    assert product.pricing_error == "supplier_cost_changed"
+    assert sp.landed_cost is None                         # frete inutilizável
+    assert product.price == Decimal("125.00")             # preservado
+    _assert_publication_blocked(product)

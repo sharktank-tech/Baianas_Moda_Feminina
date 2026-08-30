@@ -20,6 +20,8 @@ Regras invariantes desta fase:
   * Reimport com mudança MATERIAL de custo/moeda do fornecedor invalida
     `priced` -> `stale` (supplier_cost_changed ou currency_changed) e NUNCA
     reprecifica automaticamente; preço/margem preservados para auditoria.
+    Reimports sucessivos de um produto já `stale` continuam reconciliando o
+    landed com o custo novo (ou NULL quando frete/moeda divergirem).
   * Price/cost do rascunho = menor preço observado (provisório, não publicável).
   * Moeda única entre os SKUs com preço; divergência aborta (sem conversão).
   * Idempotente: reimport não duplica Supplier/Product/Variante/Imagem/Sync.
@@ -48,7 +50,14 @@ from loja.modules.models import (
     SupplierCategoryMapping,
     SupplierProduct,
 )
-from loja.services.pricing import BLOCKED, PRICED, STALE, to_decimal
+from loja.services.pricing import (
+    BLOCKED,
+    PRICED,
+    STALE,
+    PricingBlocked,
+    calculate_landed_cost,
+    to_decimal,
+)
 from loja.utils import utcnow
 
 from .models import AliExpressProductDetail, AliExpressProductSku
@@ -351,17 +360,21 @@ def _reconcile_pricing_on_supplier_change(
 ) -> None:
     """Reconciliação de pricing após atualização de custo/moeda (Fase 6).
 
-    Só age em produtos `priced` (mais nova decisão comercial válida):
-      * custo E moeda inalterados     -> preserva `priced` (reimport benigno).
-      * moeda do fornecedor mudou     -> `stale`/currency_changed + landed
-        cost NULL (moeda é moeda; não existe conversão/FX).
-      * custo mudou (moeda igual)     -> `stale`/supplier_cost_changed com
-        landed recalculado = custo_novo + frete (quando o frete continua
-        válido). NUNCA reprecifica: Product.price e target_margin_percent
-        ficam preservados para auditoria; `stale` impede publicação até uma
-        nova chamada explícita de price_dropshipping_product().
+    Aplica-se a produtos `priced` E `stale` (reimports sucessivos continuam
+    reconciliando o landed sem reprecificar):
+      * custo E moeda inalterados   -> nenhuma mudança (mantém estado atual,
+        inclusive `priced`).
+      * moeda do fornecedor mudou   -> `stale`/currency_changed e landed cost
+        NULL (moeda é moeda; não existe conversão/FX).
+      * custo mudou (moeda igual)   -> `stale`/supplier_cost_changed. O landed
+        é recalculado reutilizando calculate_landed_cost(): frete utilizável
+        => landed = custo_novo + frete; caso contrário landed NULL.
+
+    NUNCA reprecifica: Product.price e target_margin_percent ficam preservados
+    para auditoria; `stale` impede publicação até uma nova chamada explícita de
+    price_dropshipping_product().
     """
-    if product.pricing_status != PRICED:
+    if product.pricing_status not in (PRICED, STALE):
         return
 
     cost_before = to_decimal(previous_cost)
@@ -373,26 +386,31 @@ def _reconcile_pricing_on_supplier_change(
         return
 
     if currency_before != currency_after:
-        product.pricing_status = STALE
-        product.pricing_error = "currency_changed"
+        _mark_pricing_stale(product, "currency_changed")
         supplier_product.landed_cost = None
-        logger.info("pricing: stale reason=currency_changed")
         return
 
-    shipping = to_decimal(supplier_product.shipping_cost)
-    freight_valid = (
-        supplier_product.freight_status == FREIGHT_AVAILABLE
-        and shipping is not None
-    )
-    if freight_valid:
-        supplier_product.landed_cost = (
-            cost_after + shipping
-        ).quantize(Decimal("0.01"))
-    else:
+    try:
+        supplier_product.landed_cost = calculate_landed_cost(supplier_product)
+    except PricingBlocked as exc:
+        code = exc.args[0] if exc.args else "unknown"
         supplier_product.landed_cost = None
+        if code == "currency_mismatch":
+            # Incoerência de moeda (fornecedor × frete): irrecuperável sem FX.
+            _mark_pricing_stale(product, "currency_changed")
+        else:
+            # Frete deixou de ser utilizável (ou custo agora inválido): landed
+            # fica NULL, mas a causa continua sendo a mudança de custo.
+            _mark_pricing_stale(product, "supplier_cost_changed")
+        return
+
+    _mark_pricing_stale(product, "supplier_cost_changed")
+
+
+def _mark_pricing_stale(product: Product, error_code: str) -> None:
     product.pricing_status = STALE
-    product.pricing_error = "supplier_cost_changed"
-    logger.info("pricing: stale reason=supplier_cost_changed")
+    product.pricing_error = error_code
+    logger.info("pricing: stale reason=%s", error_code)
 
 
 def _apply_category(
