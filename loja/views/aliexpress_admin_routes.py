@@ -59,6 +59,8 @@ from loja.integrations.aliexpress.importer import (
 from loja.modules.models import Product
 from loja.modules.services import get_layout_data
 from loja.services.pricing import (
+    PRICED,
+    STALE,
     PricingBlocked,
     PricingError,
     calculate_landed_cost,
@@ -162,13 +164,33 @@ def _norm_currency(value) -> Optional[str]:
     return normalized or None
 
 
+def _equals_decimal(a, b) -> bool:
+    """Comparação Decimal tolerante a None (None nunca é igual a valor)."""
+    if a is None and b is None:
+        return True
+    if a is None or b is None:
+        return False
+    return Decimal(a) == Decimal(b)
+
+
 def _load_draft(product_id: str) -> Optional[Product]:
+    """Carrega APENAS rascunhos AliExpress editáveis (nunca produtos publicados).
+
+    Um produto publicado (is_active=True / is_draft=False) não pode ser
+    carregado nem editado pelas rotas /rascunho/*: a publicação congela os custos
+    e preços até uma reimportação explícita (que o importer também bloqueia).
+    """
     product = (
         Product.query.options(
             selectinload(Product.supplier_links),
             selectinload(Product.variants),
         )
-        .filter_by(source="aliexpress", external_id=str(product_id))
+        .filter_by(
+            source="aliexpress",
+            external_id=str(product_id),
+            is_draft=True,
+            is_active=False,
+        )
         .first()
     )
     return product
@@ -350,6 +372,12 @@ def rascunho_frete(product_id: str):
         flash("Moeda do frete diverge da moeda do fornecedor (sem conversão).", "danger")
         return redirect(url_for("aliexpress_admin.rascunho", product_id=product_id))
 
+    # Valores ANTERIORES capturados antes de qualquer mutação: usados para
+    # detectar mudança material (nunca reprecificar automaticamente).
+    prev_shipping = supplier_product.shipping_cost
+    prev_currency = supplier_product.freight_currency
+    prev_status = supplier_product.freight_status
+
     supplier_product.freight_status = FREIGHT_AVAILABLE
     supplier_product.shipping_cost = shipping
     supplier_product.freight_currency = currency
@@ -362,6 +390,18 @@ def rascunho_frete(product_id: str):
         current_app.logger.info("frete admin: landed blocked reason=%s", code)
         flash(f"Landed cost indisponível ({code}).", "danger")
         return redirect(url_for("aliexpress_admin.rascunho", product_id=product_id))
+
+    # Mudança material de frete invalida a precificação existente: price e
+    # target_margin_percent SÃO PRESERVADOS, mas o produto volta a ser STALE
+    # (publish bloqueia com pricing_not_ready até reprecificar explicitamente).
+    if product.pricing_status == PRICED and (
+        _equals_decimal(prev_shipping, shipping) is False
+        or (prev_currency or None) != currency
+        or (prev_status or None) != FREIGHT_AVAILABLE
+    ):
+        product.pricing_status = STALE
+        product.pricing_error = "freight_changed"
+        current_app.logger.info("frete admin: pricing invalidated reason=freight_changed")
 
     db.session.commit()
     current_app.logger.info("frete admin: status=available")
@@ -397,7 +437,8 @@ def rascunho_margem(product_id: str):
     current_app.logger.info("pricing admin: success")
     flash(
         "Preço calculado: "
-        f"R$ {result.sale_price} com margem {result.target_margin_percent}%.",
+        f"{(product.currency or 'BRL')} {result.sale_price} "
+        f"com margem {result.target_margin_percent}%.",
         "success",
     )
     return redirect(url_for("aliexpress_admin.rascunho", product_id=product_id))

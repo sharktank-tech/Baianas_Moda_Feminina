@@ -41,7 +41,7 @@
                 <div class="flex justify-between">
                     <dt class="text-gray-500">Custo do fornecedor</dt>
                     <dd class="font-medium text-gray-800">
-                        {{ "%.2f"|format(product.cost) if product.cost is not none else '—' }}
+                        {{ "%.2f"|format(supplier_product.cost) if supplier_product and supplier_product.cost is not none else '—' }}
                         {% if supplier_product and supplier_product.currency %}{{ supplier_product.currency }}{% endif %}
                     </dd>
                 </div>
@@ -56,6 +56,7 @@
                     <dt class="text-gray-500">Landed cost</dt>
                     <dd class="font-medium text-gray-800">
                         {{ "%.2f"|format(supplier_product.landed_cost) if supplier_product and supplier_product.landed_cost is not none else '—' }}
+                        {% if supplier_product %}{{ supplier_product.freight_currency or supplier_product.currency }}{% endif %}
                     </dd>
                 </div>
                 <div class="flex justify-between">
@@ -93,7 +94,8 @@
                 <label class="block">
                     <span class="text-sm font-medium text-gray-700">Moeda do frete</span>
                     <input type="text" name="freight_currency"
-                           placeholder="Ex: BRL" value="BRL"
+                           placeholder="Ex: BRL"
+                           value="{{ supplier_product.currency if supplier_product and supplier_product.currency else '' }}"
                            class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
                 </label>
                 <button type="submit"

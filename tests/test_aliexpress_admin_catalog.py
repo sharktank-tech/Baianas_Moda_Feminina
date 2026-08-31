@@ -36,6 +36,9 @@ PRODUCT_ID = "2000000000001"
 TITLE = "Vestido Teste Fase7"
 SELLER_ID = "seller-test"
 ACCESS_TOKEN = "token-test"
+# Chave Fernet NATIVA válida para os testes (gerada com Fernet.generate_key()).
+# Nunca é imprimida nos logs; apenas exercita o caminho de configuração.
+ADMIN_SESSION_KEY = "5ssrAWjAL2KymHrLzGxXHTkkpw-SYiIcEt2ELfkKvnA="
 
 
 # --------------------------------------------------------------------------
@@ -175,7 +178,7 @@ def fake_client(monkeypatch):
 
 @pytest.fixture()
 def ae_env(monkeypatch):
-    monkeypatch.setenv("ALIEXPRESS_ADMIN_SESSION_KEY", "chave-admin-sessao-teste")
+    monkeypatch.setenv("ALIEXPRESS_ADMIN_SESSION_KEY", ADMIN_SESSION_KEY)
     monkeypatch.setenv("ALIEXPRESS_APP_KEY", "test-app-key")
     monkeypatch.setenv("ALIEXPRESS_APP_SECRET", "test-app-secret")
     yield
@@ -283,11 +286,25 @@ def test_regular_user_denied(client, regular_user, login):
     assert "não possui permissão" in resp.get_data(as_text=True)
 
 
-@pytest.mark.parametrize("path", ["buscar", "detalhe", "rascunho", "frete", "margem", "publicar"])
-def test_other_routes_require_admin(client, ae_env, fake_client, path):
-    # erro do ali_session_required é posterior ao admin_required; sem login
-    # todas as rotas redirecionam para /login.
-    resp = client.post(f"{PREFIX}/{PRODUCT_ID}/importar")
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("GET", PREFIX),
+        ("POST", f"{PREFIX}/buscar"),
+        ("GET", f"{PREFIX}/{PRODUCT_ID}/detalhe"),
+        ("POST", f"{PREFIX}/{PRODUCT_ID}/importar"),
+        ("GET", f"{PREFIX}/rascunho/{PRODUCT_ID}"),
+        ("POST", f"{PREFIX}/rascunho/{PRODUCT_ID}/frete"),
+        ("POST", f"{PREFIX}/rascunho/{PRODUCT_ID}/margem"),
+        ("POST", f"{PREFIX}/rascunho/{PRODUCT_ID}/publicar"),
+        ("POST", f"{PREFIX}/encerrar"),
+    ],
+)
+def test_other_routes_require_admin(client, method, path):
+    # cada rota do blueprint é exigida autenticada: @admin_required dispara
+    # antes de qualquer validação de sessão AliExpress; sem login, redireciona
+    # para /login (e nunca executa buscas/escritas).
+    resp = client.open(path, method=method)
     assert resp.status_code == 302
     assert resp.headers["Location"].endswith("/login")
 
@@ -298,6 +315,15 @@ def test_other_routes_require_admin(client, ae_env, fake_client, path):
 
 def test_config_missing_fails_closed(client, admin_user, login, fake_client):
     # ALIEXPRESS_ADMIN_SESSION_KEY ausente -> rotas protegidas retornam 500.
+    login(admin_user.email)
+    resp = client.post(f"{PREFIX}/buscar", data={"q": "x"})
+    assert resp.status_code == 500
+    assert "ALIEXPRESS_ADMIN_SESSION_KEY" in resp.get_data(as_text=True)
+
+
+def test_config_invalid_key_fails_closed(client, admin_user, login, fake_client, monkeypatch):
+    # Chave presente porém NÃO Fernet válida -> fail-closed (500 sanitizado).
+    monkeypatch.setenv("ALIEXPRESS_ADMIN_SESSION_KEY", "nao-e-uma-chave-fernet")
     login(admin_user.email)
     resp = client.post(f"{PREFIX}/buscar", data={"q": "x"})
     assert resp.status_code == 500
@@ -471,9 +497,7 @@ def test_margem_invalida_bloqueada(admin_catalog, db):
 def test_margem_sem_frete_bloqueada(admin_catalog, db):
     _import(admin_catalog)
     resp = _margem(admin_catalog, margin="30")
-    b=resp.get_data(as_text=True)
-    i=b.find("Precifica"); print("FLASH-HUNT>>>", b[i:i+120] if i>=0 else "NOT-FOUND (len %d)" % len(b))
-    assert "Precificacao bloqueada" in resp.get_data(as_text=True) or "Precificação bloqueada" in resp.get_data(as_text=True)
+    assert "Precificação bloqueada" in resp.get_data(as_text=True)
     product = _draft_from_db()
     assert product.pricing_status == "blocked"
     assert product.pricing_error == "freight_unavailable"
@@ -531,7 +555,144 @@ def test_publicacao_permitida_apos_frete_e_pricing(admin_catalog, db):
 
 
 # --------------------------------------------------------------------------
-# 8) Visibilidade no storefront
+# 8) Mudança material de frete invalida precificação (stale/freight_changed)
+# --------------------------------------------------------------------------
+
+def test_frete_altera_precificacao_para_stale_e_reprice(admin_catalog, db):
+    _import(admin_catalog)
+    _frete(admin_catalog, shipping="20.00", currency="BRL")
+    _margem(admin_catalog, margin="30")
+
+    product = _draft_from_db()
+    assert product.pricing_status == "priced"
+    assert product.price == Decimal("142.86")
+    assert product.target_margin_percent == Decimal("30.00")
+
+    # Mudança material do frete: landed recalculado; preço/margem PRESERVADOS;
+    # precificação marcada como stale/freight_changed (nunca reprecifica sozinha).
+    resp = _frete(admin_catalog, shipping="10", currency="BRL")
+    assert resp.status_code == 200
+    assert "Frete salvo e landed cost recalculado." in resp.get_data(as_text=True)
+
+    db.session.refresh(product)
+    assert product.pricing_status == "stale"
+    assert product.pricing_error == "freight_changed"
+    assert product.price == Decimal("142.86")
+    assert product.target_margin_percent == Decimal("30.00")
+
+    sp = _supplier_product_from_db(db)
+    assert sp.freight_status == "available"
+    assert sp.shipping_cost == Decimal("10.00")
+    assert sp.landed_cost == Decimal("90.00")
+
+    # Publicação bloqueada até reprecificar explicitamente.
+    resp = _publicar(admin_catalog)
+    assert "Publicação bloqueada" in resp.get_data(as_text=True)
+    assert "pricing_not_ready" in resp.get_data(as_text=True)
+
+    db.session.refresh(product)
+    assert product.is_draft is True
+    assert product.is_active is False
+
+    # Reprecificar explicitamente => novo preço (90 / 0.70 = 128.5714 ->
+    # arredondado para CIMA: 128.58) e status priced.
+    resp = _margem(admin_catalog, margin="30")
+    assert "Preço calculado" in resp.get_data(as_text=True)
+
+    db.session.refresh(product)
+    assert product.pricing_status == "priced"
+    assert product.pricing_error is None
+    assert product.price == Decimal("128.58")
+
+    # Agora a publicação é permitida.
+    resp = _publicar(admin_catalog)
+    assert "Produto publicado" in resp.get_data(as_text=True)
+
+    db.session.refresh(product)
+    assert product.is_draft is False
+    assert product.is_active is True
+
+
+def test_frete_identico_nao_invalida_precificacao(admin_catalog, db):
+    _import(admin_catalog)
+    _frete(admin_catalog, shipping="20.00", currency="BRL")
+    _margem(admin_catalog, margin="30")
+    product = _draft_from_db()
+    assert product.pricing_status == "priced"
+
+    # Re-submissão dos MESMOS valores: nenhuma mudança material -> segue priced.
+    _frete(admin_catalog, shipping="20.00", currency="BRL")
+
+    db.session.refresh(product)
+    assert product.pricing_status == "priced"
+    assert product.pricing_error is None
+    assert product.price == Decimal("142.86")
+
+
+# --------------------------------------------------------------------------
+# 9) Publicação congela o rascunho (imutabilidade)
+# --------------------------------------------------------------------------
+
+def _product_sp_state(db):
+    product = _draft_from_db()
+    if product is None:
+        return None
+    sp = _supplier_product_from_db(db)
+    return {
+        "price": product.price,
+        "target_margin_percent": product.target_margin_percent,
+        "pricing_status": product.pricing_status,
+        "pricing_error": product.pricing_error,
+        "is_active": product.is_active,
+        "is_draft": product.is_draft,
+        "product_cost": product.cost,
+        "sp_cost": sp.cost if sp else None,
+        "sp_currency": sp.currency if sp else None,
+        "freight_status": sp.freight_status if sp else None,
+        "shipping_cost": sp.shipping_cost if sp else None,
+        "freight_currency": sp.freight_currency if sp else None,
+        "landed_cost": sp.landed_cost if sp else None,
+        "sync_status": sp.sync_status if sp else None,
+    }
+
+
+def test_publicado_recusa_carregamento_no_rascunho(admin_catalog, db):
+    _import(admin_catalog)
+    _frete(admin_catalog, shipping="20.00", currency="BRL")
+    _margem(admin_catalog, margin="30")
+    _publicar(admin_catalog)
+
+    resp = admin_catalog.get(f"{PREFIX}/rascunho/{PRODUCT_ID}", follow_redirects=True)
+    assert "não encontrado" in resp.get_data(as_text=True)
+
+
+def test_publicado_imutavel_aos_posts_da_url_antiga(admin_catalog, db):
+    _import(admin_catalog)
+    _frete(admin_catalog, shipping="20.00", currency="BRL")
+    _margem(admin_catalog, margin="30")
+    _publicar(admin_catalog)
+
+    before = _product_sp_state(db)
+    assert before["is_active"] is True
+    assert before["is_draft"] is False
+
+    # POSTs usando a URL antiga do rascunho não editam o publicado: todas
+    # redirecionam (rascunho não encontrado) e nenhuma coluna muda.
+    for attempt in (
+        lambda: _frete(admin_catalog, shipping="10", currency="BRL", follow=False),
+        lambda: _margem(admin_catalog, margin="50", follow=False),
+        lambda: _publicar(admin_catalog, follow=False),
+    ):
+        resp = attempt()
+        assert resp.status_code == 302
+
+    db.session.expire_all()
+    after = _product_sp_state(db)
+    assert after == before
+
+
+# --------------------------------------------------------------------------
+# 10) Visibilidade no storefront
 # --------------------------------------------------------------------------
 
 def _storefront_exposes(q):
@@ -561,7 +722,7 @@ def test_publicado_visivel_no_storefront(admin_catalog, db):
 
 
 # --------------------------------------------------------------------------
-# 9) Segurança operacional
+# 11) Segurança operacional
 # --------------------------------------------------------------------------
 
 def test_nenhuma_chamada_de_freight_api(admin_catalog, db):

@@ -5,20 +5,23 @@ apenas assinado) com a credencial temporária do admin. O access_token ABREVIADO
 NUNCA é persistido em banco, memória de longo prazo, HTML, query string ou logs.
 
 Segurança:
-  * Fernet (AES128-CBC + HMAC-SHA256) via cryptography. A chave é derivada por
-    SHA-256 a partir de ALIEXPRESS_ADMIN_SESSION_KEY (sem chave padrão).
-  * Fail-closed: sem a env, is_configured() == False e nenhuma rota do catálogo
-    admin funciona (500 sanitizado / sem criação de sessão no callback).
+  * Fernet (AES128-CBC + HMAC-SHA256) via cryptography. ALIEXPRESS_ADMIN_SESSION_KEY
+    DEVE ser uma chave Fernet nativa válida (gerada por Fernet.generate_key());
+    NUNCA derivada de passphrase com SHA-256.
+  * Fail-closed: sem a env OU com chave Fernet inválida, is_configured() == False
+    e nenhuma rota do catálogo admin funciona (500 sanitizado / sem criação de
+    sessão no callback).
   * TTL curto (~30 min) verificado no claim `exp` ao ler; sem renovação.
   * Cookie: HttpOnly, Secure, SameSite=Lax e path restrito a
     /admin/integrations/aliexpress (nunca enviado fora do catálogo admin).
-  * Logs nunca contêm o payload, o ciphertext nem o access_token.
+  * Logs nunca contêm o payload, o ciphertext, a chave nem o access_token.
+
+Geração operacional da chave:
+    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 """
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
 import os
 import time
@@ -39,19 +42,31 @@ def _config_key() -> Optional[str]:
     return value or None
 
 
+def _try_fernet(key: Optional[str]) -> Optional[Fernet]:
+    """Constrói o Fernet a partir da chave NATIVA da env. None se inválida.
+
+    A chave é lida como está na env (Fernet key em base64-urlsafe de 32 bytes,
+    como gerada por Fernet.generate_key()); sem SHA-256/passphrase.
+    """
+    if not key:
+        return None
+    try:
+        return Fernet(key.encode("utf-8"))
+    except (ValueError, TypeError):
+        return None
+
+
 def is_configured() -> bool:
-    """Fail-closed: funcionalidade só existe com a env explicitamente configurada."""
-    return _config_key() is not None
+    """Fail-closed: funcionalidade só existe com chave Fernet válida na env."""
+    return _try_fernet(_config_key()) is not None
 
 
 def _fernet() -> Fernet:
-    """Instância Fernet derivada da env (32 bytes via SHA-256). Nunca em cache."""
-    key = _config_key()
-    if key is None:
-        raise RuntimeError("ALIEXPRESS_ADMIN_SESSION_KEY ausente")
-    digest = hashlib.sha256(key.encode("utf-8")).digest()
-    fernet_key = base64.urlsafe_b64encode(digest)
-    return Fernet(fernet_key)
+    """Instância Fernet a partir da env (nunca em cache; chave nunca logada)."""
+    fernet = _try_fernet(_config_key())
+    if fernet is None:
+        raise RuntimeError("ALIEXPRESS_ADMIN_SESSION_KEY ausente ou chave Fernet inválida")
+    return fernet
 
 
 def create_admin_session_value(
