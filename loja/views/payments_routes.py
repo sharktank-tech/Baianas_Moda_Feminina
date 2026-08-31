@@ -410,6 +410,14 @@ def _reserve_stock(item_data):
                 f"Produto {item['product_name']} não está mais disponível."
             )
 
+        # Defesa em profundidade: produto que usa variantes (ex.: AliExpress)
+        # NUNCA pode ser debitado apenas no agregado Product.stock. Sem
+        # variant_id, bloqueia — jamais cai no fluxo legacy por selected_size.
+        if _product_uses_variants(product) and not item.get("variant_id"):
+            raise ValueError(
+                f"A variação de {product.name} não foi informada."
+            )
+
         variant = None
 
         if item.get("variant_id"):
@@ -803,6 +811,19 @@ def _sync_payment(payment_id):
                 ):
                     review_reasons.append(
                         f"Estoque insuficiente: {item.product_name}."
+                    )
+
+                if (
+                    product is not None
+                    and _product_uses_variants(product)
+                    and item.variant_id is None
+                ):
+                    # Integridade: produto que usa variantes (ex.: AliExpress)
+                    # com OrderItem sem variant_id. NUNCA debitamos Product.stock
+                    # isoladamente aqui — o pagamento vai para revisão manual com
+                    # mensagem sanitizada (sem supplier_sku_id/external_sku_id).
+                    review_reasons.append(
+                        f"Variação não informada: {item.product_name}."
                     )
 
                 if item.variant_id is not None:

@@ -1039,3 +1039,244 @@ def test_legacy_product_without_variant_uses_old_flow(db, client, make_user):
     item = list(cart.items)[0]
     assert item.variant_id is None
     assert item.selected_size == "M"
+
+
+# ── Fase 7.2.5 ────────────────────────────────────────────────────────────────
+# 2) AliExpress nunca vira fluxo legacy por falta de variant_id no checkout.
+# 3) _reserve_stock bloqueia AliExpress sem variant_id e não mexe em estoque.
+# 4) _sync_payment: AliExpress variantless -> manual_review, sem débito em
+#    Product.stock; legacy continua normal; retry idempotente.
+
+
+def _add_variantless_aliexpress_item(db, user, product):
+    """Cria um carrinho com um CartItem AliExpress sem variant_id.
+
+    `variant_id` fica None simulando exatamente a remoção da variante via
+    ON DELETE SET NULL (a FK vira NULL mas o item continua no carrinho).
+    """
+    cart = Cart(id=uuid.uuid4(), user_id=user.id)
+    db.session.add(cart)
+    db.session.flush()
+    cart.items.append(
+        CartItem(
+            id=uuid.uuid4(),
+            product_id=product.id,
+            selected_size="M",
+            variant_id=None,
+            quantity=1,
+            unit_price=Decimal(str(product.price)),
+        )
+    )
+    db.session.commit()
+    return cart
+
+
+def test_validate_cart_aliexpress_variant_id_none_is_rejected(
+    db, make_user, ae_product
+):
+    user = make_user()
+    product, _, _ = ae_product
+    assert product.stock > 0
+
+    cart = _add_variantless_aliexpress_item(db, user, product)
+
+    # Mesmo com Product.stock > 0, um AliExpress sem variant_id NÃO cai para
+    # o fluxo legacy por selected_size.
+    with pytest.raises(ValueError) as exc_info:
+        _validate_cart_for_checkout(cart)
+    assert "variação" in str(exc_info.value).lower()
+
+
+def test_validate_cart_aliexpress_variant_removed_set_null_not_legacy(
+    db, make_user, ae_product
+):
+    """Variante removida (FK SET NULL) não deixa o carrinho cair para legacy."""
+    user = make_user()
+    product, rosa_m, _ = ae_product
+
+    # Monta o item COM variante e depois simula o FK ON DELETE SET NULL:
+    # a variante "removida" vira NULL, mas o item permanece.
+    cart = Cart(id=uuid.uuid4(), user_id=user.id)
+    db.session.add(cart)
+    db.session.flush()
+    cart.items.append(
+        CartItem(
+            id=uuid.uuid4(),
+            product_id=product.id,
+            selected_size="M",
+            variant_id=rosa_m.id,
+            quantity=1,
+            unit_price=Decimal(str(product.price)),
+        )
+    )
+    db.session.commit()
+
+    # FK SET NULL (mesmo efeito de apagar a ProductVariant da base).
+    item = list(cart.items)[0]
+    item.variant_id = None
+    db.session.commit()
+
+    with pytest.raises(ValueError) as exc_info:
+        _validate_cart_for_checkout(cart)
+    # NÃO deve acusar erro de "tamanho inválido" (fluxo legacy); deve exigir
+    # a variação.
+    assert "variação" in str(exc_info.value).lower()
+
+
+def test_reserve_stock_aliexpress_without_variant_blocks_no_stock_change(
+    db, ae_product
+):
+    product, rosa_m, azul_m = ae_product
+    initial_product_stock = product.stock
+    initial_rosa = rosa_m.stock
+    initial_azul = azul_m.stock
+
+    item = [
+        {
+            "product_id": product.id,
+            "product_name": product.name,
+            "selected_size": "M",
+            "quantity": 2,
+            "unit_price": Decimal(str(product.price)),
+            "line_total": Decimal(str(product.price)) * 2,
+        }
+    ]
+
+    with pytest.raises(ValueError) as exc_info:
+        pr._reserve_stock(item)
+    assert "variação" in str(exc_info.value).lower()
+
+    # Nenhum estoque pode ter sido debitado (nem agregado, nem por variante).
+    db.session.refresh(product)
+    db.session.refresh(rosa_m)
+    db.session.refresh(azul_m)
+    assert product.stock == initial_product_stock
+    assert rosa_m.stock == initial_rosa
+    assert azul_m.stock == initial_azul
+
+
+def _make_variantless_order(db, user, product, quantity=2, stock_reserved=True):
+    from loja.modules.getway_mercado_pago.payment_models import Order, OrderItem
+
+    unit_price = Decimal(str(product.price))
+    order = Order(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        checkout_type="product",
+        status="pending_payment",
+        subtotal=unit_price * quantity,
+        shipping=Decimal("18.90"),
+        discount=Decimal("0.00"),
+        total=unit_price * quantity + Decimal("18.90"),
+        stock_reserved=stock_reserved,
+        customer_name="Cliente Teste",
+        customer_email=user.email,
+        zip_code="01310100",
+        street="Rua Teste",
+        number="10",
+        neighborhood="Centro",
+        city="São Paulo",
+        state="SP",
+    )
+    order.items.append(
+        OrderItem(
+            id=uuid.uuid4(),
+            product_id=product.id,
+            product_name=product.name,
+            selected_size="M",
+            variant_id=None,
+            quantity=quantity,
+            unit_price=unit_price,
+            line_total=unit_price * quantity,
+        )
+    )
+    db.session.add(order)
+    db.session.commit()
+    return order
+
+
+def test_sync_payment_aliexpress_variantless_late_approved_manual_review(
+    db, make_user, ae_product, monkeypatch
+):
+    user = make_user()
+    product, _, _ = ae_product
+    order = _make_variantless_order(db, user, product, stock_reserved=True)
+
+    monkeypatch.setattr(
+        pr,
+        "get_payment",
+        lambda pid: _mp_payload(pid, order, "approved", "accredited"),
+    )
+
+    synced = pr._sync_payment("sync-a")
+    assert synced.status == "manual_review"
+    assert "Variação não informada" in str(synced.manual_review_reason)
+
+    # Nenhum débito extra em Product.stock.
+    db.session.refresh(product)
+    assert product.stock == 9
+
+
+def test_sync_payment_aliexpress_variantless_unreserved_manual_review_no_debit(
+    db, make_user, ae_product, monkeypatch
+):
+    user = make_user()
+    product, _, _ = ae_product
+    # stock_reserved=False: sem reserva prévia; mesmo assim não pode debitar
+    # apenas Product.stock para um item AliExpress sem variante.
+    order = _make_variantless_order(db, user, product, stock_reserved=False)
+
+    monkeypatch.setattr(
+        pr,
+        "get_payment",
+        lambda pid: _mp_payload(pid, order, "approved", "accredited"),
+    )
+
+    synced = pr._sync_payment("sync-b")
+    assert synced.status == "manual_review"
+    assert "Variação não informada" in str(synced.manual_review_reason)
+
+    db.session.refresh(product)
+    assert product.stock == 9  # intocado, sem segundo débito
+
+
+def test_sync_payment_legacy_variantless_continues_normal(
+    db, make_user, make_product, monkeypatch
+):
+    user = make_user()
+    product = make_product(stock=10)
+    order = _make_variantless_order(db, user, product, stock_reserved=False)
+
+    monkeypatch.setattr(
+        pr,
+        "get_payment",
+        lambda pid: _mp_payload(pid, order, "approved", "accredited"),
+    )
+
+    synced = pr._sync_payment("sync-c")
+    assert synced.status == "paid"
+    db.session.refresh(product)
+    assert product.stock == 8  # débito legado normal em Product.stock
+
+
+def test_sync_payment_retry_after_manual_review_is_idempotent(
+    db, make_user, ae_product, monkeypatch
+):
+    user = make_user()
+    product, _, _ = ae_product
+    order = _make_variantless_order(db, user, product, stock_reserved=True)
+
+    monkeypatch.setattr(
+        pr,
+        "get_payment",
+        lambda pid: _mp_payload(pid, order, "approved", "accredited"),
+    )
+
+    first = pr._sync_payment("sync-d")
+    assert first.status == "manual_review"
+
+    # Retry: mesma aprovação não deve reprocessar nem alterar o estado.
+    retry = pr._sync_payment("sync-d")
+    assert retry.status == "manual_review"
+    db.session.refresh(product)
+    assert product.stock == 9

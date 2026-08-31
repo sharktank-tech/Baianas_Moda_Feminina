@@ -1108,7 +1108,6 @@ body.product-lightbox-open {
         ? form.querySelectorAll('.dimension-input')
         : [];
     const variantIdInput = form.querySelector('input[name="variant_id"]');
-    const dimensionSelections = {};
 
     function setPurchaseEnabled(enabled) {
         purchaseButtons.forEach(function (button) {
@@ -1127,44 +1126,67 @@ body.product-lightbox-open {
         }
     }
 
+    // Seleção POSICIONAL: um slot por dimensão renderizada ([data-dimension]).
+    // Dimensões não selecionadas ficam como null (nunca são comprimidas, para
+    // que os índices sempre correspondam a variant.dims).
     function currentSelections() {
-        const picks = [];
-        dimensionInputs.forEach(function (input) {
-            if (input.checked) {
-                picks.push(input.value);
+        return Array.prototype.map.call(
+            form.querySelectorAll('[data-dimension]'),
+            function (group) {
+                const checked = group.querySelector('.dimension-input:checked');
+                return checked ? checked.value : null;
             }
-        });
-        return picks;
+        );
     }
 
+    function selectedDimensionCount(selections) {
+        return selections.reduce(function (count, value) {
+            return value != null ? count + 1 : count;
+        }, 0);
+    }
+
+    // Filtragem parcial: null atua como wildcard, mantendo a posição das
+    // demais dimensões (não remove os null/undefined do array).
     function matchingVariants(selections) {
-        if (!selections.length) return [];
+        const slotCount = selections.length;
+        if (!slotCount) return [];
         return selectableVariants.filter(function (variant) {
-            if (!variant.dims || variant.dims.length !== selections.length) {
+            if (!variant.dims || variant.dims.length !== slotCount) {
                 return false;
             }
             return selections.every(function (sel, index) {
-                return variant.dims[index] === sel;
+                return sel == null || variant.dims[index] === sel;
             });
         });
     }
 
+    // Só resolve um variant_id quando TODAS as dimensões estiverem
+    // selecionadas e houver EXATAMENTE uma variante correspondente.
+    function resolveSelectedVariant(selections) {
+        const totalDims = form.querySelectorAll('[data-dimension]').length;
+        if (selectedDimensionCount(selections) !== totalDims) {
+            return null;
+        }
+        const matches = matchingVariants(selections);
+        return matches.length === 1 ? matches[0] : null;
+    }
+
     function refreshDimensionDisabledState() {
         const selections = currentSelections();
+        const dimensionGroups = form.querySelectorAll('[data-dimension]');
         dimensionInputs.forEach(function (input) {
             const dimensionGroup = input.closest('[data-dimension]');
             if (!dimensionGroup) return;
 
             const dimIndex = Array.prototype.indexOf.call(
-                form.querySelectorAll('[data-dimension]'),
+                dimensionGroups,
                 dimensionGroup
             );
 
+            // Testa esta opção mantendo as posições das outras dimensões.
             const hypothetical = selections.slice();
             hypothetical[dimIndex] = input.value;
-            const matches = matchingVariants(
-                hypothetical.filter(function (v) { return v !== undefined; })
-            );
+            const matches = matchingVariants(hypothetical);
             const hasStock = matches.some(function (v) {
                 return v.stock > 0;
             });
@@ -1177,7 +1199,7 @@ body.product-lightbox-open {
     function handleVariantChange() {
         const selections = currentSelections();
 
-        const selectedVariant = matchingVariants(selections)[0] || null;
+        const selectedVariant = resolveSelectedVariant(selections) || null;
 
         if (selectedVariant && variantIdInput) {
             variantIdInput.value = selectedVariant.id;
@@ -1267,7 +1289,9 @@ body.product-lightbox-open {
 
     form.addEventListener('submit', function (event) {
         if (usesVariants) {
-            const selected = matchingVariants(currentSelections())[0] || null;
+            // Só aceita quando TODAS as dimensões estão selecionadas e há
+            // exatamente uma variante correspondente (combinação completa).
+            const selected = resolveSelectedVariant(currentSelections());
 
             if (!selected || !variantIdInput || !variantIdInput.value) {
                 event.preventDefault();

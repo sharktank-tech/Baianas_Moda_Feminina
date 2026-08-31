@@ -1034,11 +1034,20 @@ def _validate_cart_for_checkout(cart):
             )
 
         variant = getattr(item, "variant", None)
+        uses_variants = _uses_variants(product)
 
-        if variant is not None:
-            # Item vinculado a uma variante. Ordem de lock Produto→Variante
-            # (consistente com _reserve_stock) e validação cruzada de que a
-            # variante realmente pertence ao produto do item.
+        if uses_variants:
+            # Produto com variantes (ex.: AliExpress) NUNCA cai para o fluxo
+            # legacy por selected_size. variant_id é obrigatório: sem ele,
+            # uma variante removida (FK SET NULL) ou nunca preenchida deve
+            # bloquear o checkout, mesmo que Product.stock > 0.
+            if variant is None:
+                raise ValueError(
+                    f"A variação de {product.name} não foi informada."
+                )
+
+            # Ordem de lock Produto→Variante (consistente com _reserve_stock)
+            # e validação cruzada de que a variante pertence ao produto.
             locked_variant = (
                 ProductVariant.query
                 .filter_by(id=variant.id, product_id=product.id)
@@ -1061,6 +1070,7 @@ def _validate_cart_for_checkout(cart):
                 )
             continue
 
+        # Apenas produto realmente legacy (sem variantes) usa selected_size.
         stock = getattr(product, "stock", None)
 
         if stock is not None:
