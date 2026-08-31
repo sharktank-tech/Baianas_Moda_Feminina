@@ -169,7 +169,8 @@ def test_first_import_creates_full_relation(db):
     assert product.name == "Camiseta AliExpress"
     assert product.description == "descricao"
     assert product.price == Decimal("10.00")
-    assert product.cost == Decimal("10.00")
+    # Fase 7.1: Product.cost acompanha o cost basis do fornecedor = MAIOR SKU ativo.
+    assert product.cost == Decimal("15.00")
     assert product.is_draft is True
     assert product.is_active is False
     assert product.source == "aliexpress"
@@ -181,7 +182,8 @@ def test_first_import_creates_full_relation(db):
     ).one()
     assert supplier_product.product_id == product.id
     assert supplier_product.currency == "USD"
-    assert supplier_product.cost == Decimal("10.00")
+    # Fase 7.1: SupplierProduct.cost = cost basis seguro (maior SKU ativo).
+    assert supplier_product.cost == Decimal("15.00")
     assert supplier_product.external_sku_id is None
 
     variants = ProductVariant.query.filter_by(

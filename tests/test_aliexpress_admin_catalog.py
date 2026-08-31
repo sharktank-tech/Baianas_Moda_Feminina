@@ -382,6 +382,60 @@ def test_detalhe_readonly(admin_catalog):
     assert "Importar como rascunho" in body
 
 
+def test_detalhe_mostra_faixa_de_preco_dos_skus(admin_catalog):
+    # SKUs 27.59/39.09/46.60 -> faixa "BRL 27,59 – 46,60" (vírgula decimal);
+    # NUNCA R$ 0,00.
+    FakeAliExpressClient.details[PRODUCT_ID] = make_multi_detail(
+        ["27.59", "39.09", "46.60"],
+        [5, 3, 2],
+    )
+    resp = admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/detalhe")
+    body = resp.get_data(as_text=True)
+    assert "R$ 0.00" not in body
+    assert "R$ 0,00" not in body
+    assert "BRL 27,59" in body
+    assert "46,60" in body
+    assert "27,59" in body and "46,60" in body
+
+
+def test_detalhe_preco_unico_mostra_so_um_valor(admin_catalog):
+    # Um único SKU/preço -> "BRL 80,00" (sem faixa " – ").
+    FakeAliExpressClient.details[PRODUCT_ID] = make_detail()
+    resp = admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/detalhe")
+    body = resp.get_data(as_text=True)
+    assert "BRL 80,00" in body
+    assert "–" not in body.split("BRL 80,00")[0].split("</span>")[-1]
+
+
+def test_detalhe_sem_preco_nao_mostra_zero(admin_catalog):
+    # Nenhum SKU/preço global -> "Preço indisponível" (nunca 0,00).
+    sku = AliExpressProductSku(
+        sku_id="SKU-X",
+        sale_price=None,
+        original_price=None,
+        currency="USD",
+        available_stock=3,
+        attributes=[],
+    )
+    detail = AliExpressProductDetail(
+        product_id=PRODUCT_ID,
+        title=TITLE,
+        description="sem preço",
+        images=[],
+        skus=[sku],
+        available_stock=3,
+        sale_price=None,
+        original_price=None,
+        currency="BRL",
+    )
+    FakeAliExpressClient.details[PRODUCT_ID] = detail
+    resp = admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/detalhe")
+    body = resp.get_data(as_text=True)
+    assert "R$ 0.00" not in body
+    assert "R$ 0,00" not in body
+    assert "Preço indisponível" in body
+
+
 # --------------------------------------------------------------------------
 # 4) Import como rascunho + idempotência
 # --------------------------------------------------------------------------
@@ -429,6 +483,244 @@ def test_reimport_idempotente(admin_catalog, db):
     assert len(products) == 1
     assert (db.session.query(ProductVariant).filter_by(product_id=first_product_id).count()
             == first_variants)
+
+
+# --------------------------------------------------------------------------
+# 4b) Cost basis seguro para multivariantes (Fase 7.1)
+# --------------------------------------------------------------------------
+
+MULTI_ID = "2000000000009"
+
+
+def make_multi_detail(sku_prices, stocks, product_id=MULTI_ID):
+    """múltiplos SKUs com preços e estoques independentes."""
+    skus = [
+        make_sku(f"{product_id}-{i}", price, "BRL", stock)
+        for i, (price, stock) in enumerate(zip(sku_prices, stocks), start=1)
+    ]
+    detail = make_detail(product_id=product_id)
+    detail.skus = skus
+    return detail
+
+
+def _set_detail(product_id, detail):
+    FakeAliExpressClient.details[product_id or PRODUCT_ID] = detail
+
+
+def make_multi_detail_with_stock(sku_prices, stocks, product_id=MULTI_ID):
+    skus = [
+        AliExpressProductSku(
+            sku_id=f"{product_id}-{i}",
+            sale_price=Decimal(price),
+            original_price=Decimal(price),
+            currency="BRL",
+            available_stock=stock,
+            attributes=[{"name": "Cor", "value": f"Cor {i}"}],
+        )
+        for i, (price, stock) in enumerate(zip(sku_prices, stocks), start=1)
+    ]
+    detail = make_detail(product_id=product_id)
+    detail.skus = skus
+    return detail
+
+
+def test_reimport_draft_existente_single_com_multivariante_eleva_cost_basis(
+    admin_catalog, db
+):
+    # Draft real antigo: 1 SKU 27.59 => price=27.59, cost=27.59, blocked.
+    FakeAliExpressClient.details[PRODUCT_ID] = make_detail(
+        product_id=PRODUCT_ID, price="27.59", stock=2
+    )
+    _import(admin_catalog)
+    product = _draft_from_db()
+    sp = _supplier_product_from_db(db)
+    assert product.price == Decimal("27.59")
+    assert sp.cost == Decimal("27.59")
+    assert product.pricing_status == "blocked"
+    assert product.pricing_error == "freight_unavailable"
+
+    # Reimport agora multivariante: preço provisório preservado (menor),
+    # cost basis sobe para o maior SKU ativo (custo seguro).
+    FakeAliExpressClient.details[PRODUCT_ID] = make_multi_detail_with_stock(
+        ["27.59", "39.09", "46.60"], [5, 3, 2], product_id=PRODUCT_ID
+    )
+    _import(admin_catalog)
+
+    db.session.refresh(product)
+    db.session.refresh(sp)
+    assert product.price == Decimal("27.59")  # provisório preservado/menor
+    assert product.cost == Decimal("46.60")
+    assert sp.cost == Decimal("46.60")
+    assert product.pricing_status == "blocked"
+    assert product.pricing_error == "freight_unavailable"
+    assert product.is_draft is True
+    assert product.is_active is False
+
+
+def test_reimport_apos_priced_new_max_invalida_pricing(admin_catalog, db):
+    # Preço antes: importa 46.60 max, frete 10, margem 30 -> priced.
+    FakeAliExpressClient.details[MULTI_ID] = make_multi_detail(
+        ["27.59", "39.09", "46.60"],
+        [5, 3, 2],
+    )
+    admin_catalog.post(f"{PREFIX}/{MULTI_ID}/importar", follow_redirects=True)
+    _frete(admin_catalog, product_id=MULTI_ID, shipping="10", currency="BRL")
+    _margem(admin_catalog, product_id=MULTI_ID, margin="30")
+
+    product = Product.query.filter_by(source="aliexpress", external_id=MULTI_ID).first()
+    sp = _supplier_product_from_db(db, MULTI_ID)
+    assert product.pricing_status == "priced"
+    assert sp.cost == Decimal("46.60")
+    commercial_price = product.price  # preservado após invalidação
+    commercial_margin = product.target_margin_percent
+
+    # Reimport com max SKU maior (46.60 -> 50.00): cost basis sobe.
+    FakeAliExpressClient.details[MULTI_ID] = make_multi_detail(
+        ["27.59", "39.09", "50.00"],
+        [5, 3, 2],
+    )
+    admin_catalog.post(f"{PREFIX}/{MULTI_ID}/importar", follow_redirects=True)
+
+    db.session.refresh(product)
+    db.session.refresh(sp)
+    assert sp.cost == Decimal("50.00")
+    assert product.cost == Decimal("50.00")
+    assert product.price == commercial_price  # preservado p/ auditoria
+    assert product.target_margin_percent == commercial_margin
+    assert product.pricing_status == "stale"
+    assert product.pricing_error == "supplier_cost_changed"
+
+
+def test_cost_basis_ignora_skus_sem_estoque(admin_catalog, db):
+    # SKU caro (50.00) com estoque 0 NÃO entra no cost basis: é o máximo
+    # apenas entre SKUs realmente vendáveis/ativos (estoque > 0).
+    FakeAliExpressClient.details[MULTI_ID] = make_multi_detail_with_stock(
+        ["27.59", "39.09", "50.00"],
+        [5, 3, 0],
+        product_id=MULTI_ID,
+    )
+    admin_catalog.post(f"{PREFIX}/{MULTI_ID}/importar", follow_redirects=True)
+
+    sp = _supplier_product_from_db(db, MULTI_ID)
+    product = Product.query.filter_by(source="aliexpress", external_id=MULTI_ID).first()
+    # max ativo = 39.09 (o 50.00 está sem estoque); catalog price (menor) = 27.59
+    assert sp.cost == Decimal("39.09")
+    assert product.cost == Decimal("39.09")
+    assert product.price == Decimal("27.59")
+
+    # A variante sem estoque existe porém INATIVA.
+    inactive = ProductVariant.query.filter_by(
+        supplier_product_id=sp.id, is_active=False
+    ).first()
+    assert inactive is not None
+    assert inactive.stock == 0
+    assert inactive.price == Decimal("50.00")
+
+
+def test_draft_multivariante_cost_basis_seguro(admin_catalog, db):
+    # SKUs 27.59 / 39.09 / 46.60 (todos ativos) -> custo = MAIOR (46.60);
+    # Product.price provisório = MENOR (27.59).
+    FakeAliExpressClient.details[MULTI_ID] = make_multi_detail(
+        ["27.59", "39.09", "46.60"],
+        [5, 3, 2],
+    )
+    resp = admin_catalog.post(f"{PREFIX}/{MULTI_ID}/importar", follow_redirects=True)
+    assert "Rascunho AliExpress" in resp.get_data(as_text=True)
+
+    product = (
+        Product.query.filter_by(source="aliexpress", external_id=MULTI_ID).first()
+    )
+    sp = _supplier_product_from_db(db, MULTI_ID)
+    assert sp is not None
+    assert sp.cost == Decimal("46.60")
+    assert product.cost == Decimal("46.60")
+    assert product.price == Decimal("27.59")
+    assert product.pricing_status == "blocked"
+    assert product.is_draft is True
+    assert product.is_active is False
+
+
+def test_draft_multivariante_nenhum_custo_ativos_acima_do_basis(admin_catalog, db):
+    FakeAliExpressClient.details[MULTI_ID] = make_multi_detail(
+        ["27.59", "39.09", "46.60"],
+        [5, 3, 2],
+    )
+    admin_catalog.post(f"{PREFIX}/{MULTI_ID}/importar", follow_redirects=True)
+
+    sp = _supplier_product_from_db(db, MULTI_ID)
+    max_active_price = Decimal("-1")
+    variants = (
+        ProductVariant.query.filter_by(
+            supplier_product_id=sp.id, is_active=True
+        ).all()
+    )
+    assert len(variants) == 3
+    for v in variants:
+        assert v.price <= sp.cost
+        if v.price is not None:
+            max_active_price = max(max_active_price, v.price)
+    assert max_active_price == Decimal("46.60")
+    assert max_active_price == sp.cost
+
+
+def test_draft_multivariante_cost_basis_usado_no_pricing(admin_catalog, db):
+    # landed = cost(46.60) + frete(10.00) = 56.60; margem 30%
+    # preço venda = 56.60 / 0.70 = 80.8571... -> arredonda CIMA: 80.86.
+    FakeAliExpressClient.details[MULTI_ID] = make_multi_detail(
+        ["27.59", "39.09", "46.60"],
+        [5, 3, 2],
+    )
+    admin_catalog.post(f"{PREFIX}/{MULTI_ID}/importar", follow_redirects=True)
+    _frete(admin_catalog, product_id=MULTI_ID, shipping="10", currency="BRL")
+    resp = _margem(admin_catalog, product_id=MULTI_ID, margin="30")
+    assert "Preço calculado" in resp.get_data(as_text=True)
+
+    product = (
+        Product.query.filter_by(source="aliexpress", external_id=MULTI_ID).first()
+    )
+    sp = _supplier_product_from_db(db, MULTI_ID)
+    assert sp.landed_cost == Decimal("56.60")
+    assert product.pricing_status == "priced"
+    assert product.price == Decimal("80.86")
+    assert product.target_margin_percent == Decimal("30.00")
+
+
+def test_reimport_sku_max_aumentado_invalida_pricing(admin_catalog, db):
+    FakeAliExpressClient.details[MULTI_ID] = make_multi_detail(
+        ["27.59", "39.09", "46.60"],
+        [5, 3, 2],
+    )
+    admin_catalog.post(f"{PREFIX}/{MULTI_ID}/importar", follow_redirects=True)
+    _frete(admin_catalog, product_id=MULTI_ID, shipping="10", currency="BRL")
+    _margem(admin_catalog, product_id=MULTI_ID, margin="30")
+
+    product = (
+        Product.query.filter_by(source="aliexpress", external_id=MULTI_ID).first()
+    )
+    assert product.pricing_status == "priced"
+    sp = _supplier_product_from_db(db, MULTI_ID)
+    assert sp.cost == Decimal("46.60")
+
+    # Reimport com SKU máximo maior => cost basis sobe => pricing invalida.
+    FakeAliExpressClient.details[MULTI_ID] = make_multi_detail(
+        ["27.59", "39.09", "51.20"],
+        [5, 3, 2],
+    )
+    admin_catalog.post(f"{PREFIX}/{MULTI_ID}/importar", follow_redirects=True)
+
+    db.session.refresh(product)
+    assert product.pricing_status == "stale"
+    assert product.pricing_error == "supplier_cost_changed"
+    assert product.price == Decimal("80.86")  # preservado p/ auditoria
+    assert product.target_margin_percent == Decimal("30.00")
+
+    db.session.refresh(sp)
+    assert sp.cost == Decimal("51.20")
+
+    # Publicação bloqueada até reprecificar.
+    resp = _publicar(admin_catalog, product_id=MULTI_ID)
+    assert "Publicação bloqueada" in resp.get_data(as_text=True)
+    assert "pricing_not_ready" in resp.get_data(as_text=True)
 
 
 # --------------------------------------------------------------------------

@@ -6,6 +6,10 @@
 
 <div class="max-w-5xl mx-auto px-4 py-8">
 
+    {% macro ptx(v) %}{{ "%.2f"|format(v)|replace('.', ',') }}{% endmacro %}
+
+
+
     <div class="mb-8">
         <a href="{{ url_for('aliexpress_admin.index') }}"
            class="text-sm text-gray-500 hover:text-gray-800 underline">
@@ -29,18 +33,39 @@
                 {% endif %}
             </div>
             <div class="md:w-1/2">
+                {# Fase 7.1: moeda/preços vêm dos SKUs quando disponíveis; o preço
+                   global ausente NUNCA vira R$ 0,00 — mostra a faixa de preço. #}
+                {% set skus = detail.skus|default([]) %}
+                {% set priced_skus = [] %}
+                {% set sku_currency = detail.currency or '' %}
+                {% for sku in skus %}
+                    {% set sp = sku.sale_price if sku.sale_price is not none else sku.original_price %}
+                    {% if sp %}
+                        {% if priced_skus.append(sp) %}{% endif %}
+                        {% if sku.currency %}{% set sku_currency = sku.currency %}{% endif %}
+                    {% endif %}
+                {% endfor %}
+
                 <div class="flex items-center gap-3 mb-4">
-                    <span class="text-3xl text-pink-600 font-bold">
-                        R$ {{ "%.2f"|format(detail.sale_price or detail.original_price or 0) }}
-                    </span>
-                    {% if detail.original_price and detail.sale_price and detail.original_price > detail.sale_price %}
-                        <span class="text-gray-400 line-through">
-                            R$ {{ "%.2f"|format(detail.original_price) }}
-                        </span>
+                    {% if priced_skus %}
+                        {% set mn = priced_skus|min %}
+                        {% set mx = priced_skus|max %}
+                        {% if mn == mx %}
+                            <span class="text-3xl text-pink-600 font-bold">
+                                {{ sku_currency }} {{ ptx(mn) }}
+                            </span>
+                        {% else %}
+                            <span class="text-3xl text-pink-600 font-bold">
+                                {{ sku_currency }} {{ ptx(mn) }} – {{ ptx(mx) }}
+                            </span>
+                        {% endif %}
+                    {% else %}
+                        <span class="text-3xl text-pink-600 font-bold">Preço indisponível</span>
                     {% endif %}
                 </div>
                 <p class="text-gray-500">
-                    Moeda: {{ detail.currency or 'BRL' }} &middot; Estoque disponível:
+                    {% if priced_skus %}Moeda: {{ sku_currency }}{% endif %}
+                    &middot; Estoque disponível:
                     {{ detail.available_stock if detail.available_stock is not none else '—' }}
                 </p>
 
@@ -75,11 +100,12 @@
                         <tr class="text-left text-gray-500 border-b">
                             <th class="py-2 pr-4">Atributos</th>
                             <th class="py-2 pr-4">Estoque</th>
-                            <th class="py-2 pr-4">Preço ({{ detail.currency or 'BRL' }})</th>
+                            <th class="py-2 pr-4">Preço ({{ sku_currency }})</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for sku in detail.skus %}
+                            {% set sp = sku.sale_price if sku.sale_price is not none else sku.original_price %}
                             <tr class="border-b">
                                 <td class="py-2 pr-4 text-gray-700">
                                     {% if sku.attributes %}
@@ -92,7 +118,7 @@
                                     {{ sku.available_stock if sku.available_stock is not none else '—' }}
                                 </td>
                                 <td class="py-2 pr-4 text-gray-700">
-                                    {{ "%.2f"|format(sku.sale_price or sku.original_price or 0) }}
+                                    {{ ptx(sp) if sp else '—' }}
                                 </td>
                             </tr>
                         {% endfor %}
