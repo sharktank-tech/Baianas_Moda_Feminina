@@ -11,6 +11,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from loja.modules.newsletter import subscribe_newsletter
+from loja.services.product_content import (
+    build_product_gallery,
+    product_description_excerpt,
+    sanitize_product_description_html,
+    sanitize_product_description_without_images,
+)
 from loja.modules.services import (
     get_favorited_ids,
     get_footer_data,
@@ -24,6 +30,7 @@ from loja import db
 from loja.modules.models import (
     User,
     Product,
+    ProductVariant,
     ContactInfo,
     SocialLink,
     Cart,
@@ -110,6 +117,23 @@ def inject_footer():
     return {"footer": get_footer_data()}
 
 
+# ── Injeção global de helpers de conteúdo seguro (descrição de produto) ──────
+@main_blueprint.app_context_processor
+def inject_product_content_helpers():
+    """Disponibiliza sanitização/excerpt de descrição a todos os templates.
+
+    Corpo da página: `sanitize_product_description_html(...)` — o resultado é
+    um Markup JÁ limpo, mas os templates continuam SEM usar `|safe` (autoescape
+    padrão do Jinja sobre o conteúdo já sanitizado).
+    Reveal/meta/cards: `product_description_excerpt(...)` — texto puro sem HTML.
+    """
+    return {
+        "sanitize_product_description_html": sanitize_product_description_html,
+        "sanitize_product_description_without_images": sanitize_product_description_without_images,
+        "product_description_excerpt": product_description_excerpt,
+    }
+
+
 # ── Home ──────────────────────────────────────────────────────────────────────
 @main_blueprint.route("/")
 def home():
@@ -172,6 +196,13 @@ def produto_individual(id):
     product = public_product_query().filter(Product.id == id).first_or_404()
     product.is_favorited = product.id in get_favorited_ids()
 
+    selector = _build_variant_selector(product)
+    uses_variants = selector["uses_variants"]
+    no_variants_available = bool(
+        uses_variants
+        and not selector["variants"]
+    )
+
     related_query = public_product_query().filter(
         Product.id != product.id,
     )
@@ -185,16 +216,250 @@ def produto_individual(id):
         .all()
     )
 
+    gallery_images = build_product_gallery(product)
+
     return render_template(
         "main/produto_individual.html",
         product=product,
         related_products=related_products,
+        selector=selector,
+        uses_variants=uses_variants,
+        no_variants_available=no_variants_available,
+        gallery_images=gallery_images,
     )
 
 
 # ── Helpers do fluxo produto → carrinho/checkout ─────────────────────────────
 VALID_PRODUCT_SIZES = {"P", "M", "G", "GG"}
 VALID_CART_SIZES = VALID_PRODUCT_SIZES | {"UNICO", "ÚNICO"}
+
+
+def _active_variants_for_product(product):
+    """Variantes ATIVAS e com estoque de um produto, com dados seguros.
+
+    Nunca expõe supplier_sku_id/supplier_product_id/external_sku_id ao HTML.
+    Produtos que não usam variantes (ex.: internos/legados) retornam [].
+    A ordenação segue cor/size para uma interface estável.
+    """
+    if not product.variants:
+        return []
+
+    variants = [
+        v for v in product.variants
+        if getattr(v, "is_active", False) and int(v.stock or 0) > 0
+    ]
+
+    def _sort_key(v):
+        return (v.color or "", v.size or "")
+
+    return [
+        {
+            "id": str(v.id),
+            "color": v.color or "",
+            "size": v.size or "",
+            "stock": int(v.stock or 0),
+            "attributes": getattr(v, "attributes", None),
+            "label": " ".join(
+                part for part in (v.color or "", v.size or "") if part
+            ).strip()
+            or "Único",
+        }
+        for v in sorted(variants, key=_sort_key)
+    ]
+
+
+_VARIANT_COLOR_ATTR_NAMES = {"cor", "color"}
+_VARIANT_SIZE_ATTR_NAMES = {"tamanho", "size", "talla"}
+
+
+def _variant_attr_value(attributes, wanted_key):
+    """Busca o valor de um atributo AliExpress (Cor/Tamanho) em `attributes`.
+
+    `attributes` pode ser uma lista de {"name","value"} (formato do importer)
+    ou um dict nome->valor.
+    """
+    if not attributes:
+        return None
+    if isinstance(attributes, dict):
+        items = list(attributes.items())
+    else:
+        items = []
+        for attr in attributes:
+            if isinstance(attr, dict):
+                items.append((attr.get("name"), attr.get("value")))
+
+    wanted = wanted_key.lower()
+    for name, value in items:
+        name_norm = str(name or "").strip().lower()
+        if wanted == "color" and name_norm in _VARIANT_COLOR_ATTR_NAMES:
+            val = str(value or "").strip()
+            if val:
+                return val
+        if wanted == "size" and name_norm in _VARIANT_SIZE_ATTR_NAMES:
+            val = str(value or "").strip()
+            if val:
+                return val
+    return None
+
+
+def _variant_dim_label(meta, key):
+    """Label de uma dimensão (color/size) para uma variante, com fallback ao
+    dict de atributos AliExpress. Nunca expõe SKUs externos."""
+    raw = (meta.get(key) or "").strip()
+    if raw:
+        return raw
+    attr_val = _variant_attr_value(meta.get("attributes"), key)
+    if attr_val:
+        return attr_val
+    return None
+
+
+def _distinct_ordered(values):
+    seen = []
+    for value in values:
+        if value is not None and value not in seen:
+            seen.append(value)
+    return seen
+
+
+def _build_variant_selector(product):
+    """Estrutura de seleção por dimensões (Cor/Tamanho) para o storefront.
+
+    Garante que cada combinação renderizada resulte em EXATAMENTE um variant_id:
+
+      * Cada `variant.dims[i]` pertence a `dimensions[i].options`;
+      * As tuplas `dims` são únicas entre variantes (nunca há colisão fazendo o
+        cliente usar apenas `matchingVariants(...)[0]`);
+      * Não exige traduzir cor/tamanho ausente em um valor impossível: uma
+        variante sem tamanho ganha um rótulo "Opção N" que também entra nas
+        options daquela dimensão (cenário misto / dimensão parcialmente ausente).
+      * Nunca expõe supplier_sku_id/external_sku_id/supplier_product_id.
+    """
+    metas = _active_variants_for_product(product)
+    uses_variants = _uses_variants(product)
+    selector_base = {
+        "uses_variants": uses_variants,
+        "dimensions": [],
+        "variants": [],
+    }
+    if not metas:
+        # AliExpress com variantes porém nenhuma ativa/em estoque: o storefront
+        # deve exibir o estado "sem variações disponíveis", não o fluxo interno
+        # por tamanho.
+        return selector_base
+
+    for meta in metas:
+        meta["color_label"] = _variant_dim_label(meta, "color")
+        meta["size_label"] = _variant_dim_label(meta, "size")
+
+    color_vals = _distinct_ordered(meta["color_label"] for meta in metas)
+    size_vals = _distinct_ordered(meta["size_label"] for meta in metas)
+
+    dims_spec = []
+    if color_vals:
+        dims_spec.append(("color", "Cor"))
+    if size_vals:
+        dims_spec.append(("size", "Tamanho"))
+    if not dims_spec:
+        dims_spec.append(("option", "Opção"))
+
+    # Passo 1: dimensões + valores por variante, com fallback "Opção N" para
+    # slots ausentes (contador por dimensão -> valores únicos dentro da dim e
+    # presentes nas options, satisfazendo a asserção de defesa).
+    fallback_count = {di: 0 for di in range(len(dims_spec))}
+    raw_dims = []  # lista (por variante) de listas de valores
+
+    for meta in metas:
+        values = []
+        for di, (key, title) in enumerate(dims_spec):
+            if key == "option":
+                values.append("Opção %d" % (len(raw_dims) + 1))
+                continue
+            value = _variant_dim_label(meta, key)
+            if not value:
+                fallback_count[di] += 1
+                value = "Opção %d" % fallback_count[di]
+            values.append(value)
+        raw_dims.append(values)
+
+    dimensions = []
+    for di, (key, title) in enumerate(dims_spec):
+        slot_values = _distinct_ordered(row[di] for row in raw_dims)
+        dimensions.append({"key": key, "title": title, "options": slot_values})
+
+    variants = [
+        {
+            "id": meta["id"],
+            "stock": meta["stock"],
+            "label": meta["label"],
+            "dims": raw_dims[idx],
+        }
+        for idx, meta in enumerate(metas)
+    ]
+
+    # Passo 2: garante unicidade das tuplas. Se duas variantes geraram o mesmo
+    # dims (ex.: A=Rosa/M e B=Rosa/M), adiciono uma dimensão "Opção" segura
+    # (valores únicos por variante, ligados aos UUIDs internos) para desempatar.
+    seen_tuples = {}
+    duplicated = False
+    for variant in variants:
+        key = tuple(variant["dims"])
+        if key in seen_tuples:
+            duplicated = True
+            break
+        seen_tuples[key] = variant
+
+    if duplicated:
+        option_labels = ["Opção %d" % (i + 1) for i in range(len(variants))]
+        dimensions.append({"key": "option", "title": "Opção", "options": option_labels})
+        for i, variant in enumerate(variants):
+            variant["dims"].append(option_labels[i])
+
+    return {
+        "uses_variants": True,
+        "dimensions": dimensions,
+        "variants": variants,
+    }
+
+
+def _assert_selector_invariant(selector):
+    """Asserção de defesa: válida a unicidade e a consistência do seletor.
+
+    Para toda variante:
+      * cada variant.dims[i] pertence a dimensions[i].options
+      * as tuplas de dims são únicas entre variantes
+      * há exatamente uma combinação renderizada por variant_id
+    """
+    dimensions = selector.get("dimensions", [])
+    variants = selector.get("variants", [])
+
+    seen = set()
+    for variant in variants:
+        dims = variant.get("dims", [])
+        assert len(dims) == len(dimensions), (
+            "dims sem dimensões correspondentes"
+        )
+        for i, value in enumerate(dims):
+            assert value in dimensions[i]["options"], (
+                f"valor {value!r} fora das options da dimensão {i} "
+                f"({dimensions[i]['options']!r})"
+            )
+        key = tuple(dims)
+        assert key not in seen, f"tupla de dims duplicada: {key!r}"
+        seen.add(key)
+
+    # Cada combinação renderizada precisa mapear para exatamente um variant_id.
+    ids = [variant["id"] for variant in variants]
+    assert len(ids) == len(set(ids)), "variant_id duplicado no seletor"
+
+
+def _uses_variants(product):
+    """Produtos AliExpress (e qualquer um com variantes) usam seleção por
+    variante; produtos internos/legados continuam no fluxo por tamanho."""
+    return (
+        product.source == "aliexpress"
+        or bool(_active_variants_for_product(product))
+    )
 
 
 def _safe_internal_url(value):
@@ -264,12 +529,13 @@ def _cart_item_size_field(item_model):
     return None
 
 
-def _add_product_to_cart(product, size, quantity):
+def _add_product_to_cart(product, size=None, quantity=1, variant=None):
     """
     Adiciona ou incrementa o produto no carrinho.
 
-    O model relacionado em Cart.items precisa ter: product_id, quantity,
-    unit_price e um campo size ou selected_size.
+    Produtos com variante (AliExpress) usam `variant` (ProductVariant) e o
+    carrinho grava `variant_id`. Produtos internos/legados continuam usando
+    `size`/`selected_size`. O preço de venda é SEMPRE `Product.price`.
     """
     cart = _get_or_create_cart()
     item_model = Cart.items.property.mapper.class_
@@ -284,18 +550,36 @@ def _add_product_to_cart(product, size, quantity):
             "O item do carrinho precisa possuir um campo size ou selected_size."
         )
 
+    selected_variant = variant
+    if selected_variant is not None and selected_variant.product_id != product.id:
+        raise ValueError("A variação selecionada não pertence a este produto.")
+
     existing_item = None
     for item in _cart_items_as_list(cart):
-        item_size = getattr(item, size_field, None)
-        if item.product_id == product.id and item_size == size:
-            existing_item = item
-            break
+        if item.product_id != product.id:
+            continue
+
+        if selected_variant is not None:
+            if item.variant_id == selected_variant.id:
+                existing_item = item
+                break
+        else:
+            item_size = getattr(item, size_field, None)
+            if item_size == size:
+                existing_item = item
+                break
 
     new_quantity = quantity
     if existing_item:
         new_quantity += existing_item.quantity
 
-    stock = getattr(product, "stock", None)
+    if selected_variant is not None and not selected_variant.is_active:
+        raise ValueError("Esta variação está indisponível.")
+    stock = (
+        getattr(selected_variant, "stock", None)
+        if selected_variant is not None
+        else getattr(product, "stock", None)
+    )
     if stock is not None and stock >= 0 and new_quantity > stock:
         raise ValueError(
             f"Quantidade indisponível. Há somente {stock} unidade(s) em estoque."
@@ -308,17 +592,65 @@ def _add_product_to_cart(product, size, quantity):
         existing_item.unit_price = current_price
         return existing_item
 
+    selected_size = size
+    if selected_variant is not None:
+        # Para variante, `selected_size` guarda SOMENTE o tamanho (abaixo do
+        # limite VARCHAR). Cor e demais dados da opção vêm do relacionamento
+        # variant — nunca gravamos color+tamanho aqui (evita overflow).
+        selected_size = (selected_variant.size or "UNICO")[:10]
+
     values = _uuid_primary_key_values(item_model)
     values.update({
         "product_id": product.id,
         "quantity": quantity,
         "unit_price": current_price,
-        size_field: size,
+        size_field: selected_size or "Único",
     })
+    if selected_variant is not None and hasattr(item_model, "variant_id"):
+        values["variant_id"] = selected_variant.id
 
     item = item_model(**values)
     cart.items.append(item)
     return item
+
+
+def _resolve_selected_variant(product, variant_id):
+    """Resolve e valida uma variante selecionada do produto.
+
+    Retorna a ProductVariant ativa do produto, ou None quando o produto não usa
+    variantes candidatas. Levanta ValueError para indicações inválidas. Nunca
+    expõe supplier_sku_id/supplier_product_id nas mensagens.
+    """
+    uses_variants = _uses_variants(product)
+
+    if not uses_variants:
+        return None
+
+    if not variant_id:
+        raise ValueError("Selecione uma variação do produto.")
+
+    try:
+        variant_uuid = uuid.UUID(str(variant_id))
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError("A variação selecionada é inválida.")
+
+    variant = (
+        db.session.query(ProductVariant)
+        .filter(
+            ProductVariant.id == variant_uuid,
+            ProductVariant.product_id == product.id,
+            ProductVariant.is_active.is_(True),
+        )
+        .first()
+    )
+
+    if variant is None:
+        raise ValueError("A variação selecionada não está mais disponível.")
+
+    if int(variant.stock or 0) <= 0:
+        raise ValueError("Esta variação está temporariamente indisponível.")
+
+    return variant
 
 
 # ── Comprar agora ou adicionar ao carrinho ───────────────────────────────────
@@ -339,7 +671,13 @@ def processar_produto(product_id):
         flash("Ação de compra inválida.", "danger")
         return redirect(url_for("main.produto_individual", id=product.id))
 
-    if size not in VALID_PRODUCT_SIZES:
+    try:
+        variant = _resolve_selected_variant(product, request.form.get("variant_id"))
+    except ValueError as error:
+        flash(str(error), "warning")
+        return redirect(url_for("main.produto_individual", id=product.id))
+
+    if variant is None and size not in VALID_PRODUCT_SIZES:
         flash("Selecione um tamanho válido.", "warning")
         return redirect(url_for("main.produto_individual", id=product.id))
 
@@ -347,7 +685,11 @@ def processar_produto(product_id):
         flash("Informe uma quantidade válida.", "warning")
         return redirect(url_for("main.produto_individual", id=product.id))
 
-    stock = getattr(product, "stock", None)
+    if variant is not None:
+        stock = getattr(variant, "stock", None)
+    else:
+        stock = getattr(product, "stock", None)
+
     if stock is not None and stock <= 0:
         flash("Este produto está sem estoque.", "warning")
         return redirect(url_for("main.produto_individual", id=product.id))
@@ -360,12 +702,14 @@ def processar_produto(product_id):
         return redirect(url_for("main.produto_individual", id=product.id))
 
     if action == "buy_now":
-        # Salva somente identificador, tamanho e quantidade. Nome/preço/imagem
-        # são sempre recarregados do banco no checkout para evitar adulteração.
+        # Salva somente identificador, variação/tamanho e quantidade. Nome,
+        # preço e imagem são sempre recarregados do banco no checkout para
+        # evitar adulteração.
         session["checkout_product"] = {
             "product_id": str(product.id),
             "size": size,
             "quantity": quantity,
+            "variant_id": str(variant.id) if variant is not None else None,
         }
         session.modified = True
 
@@ -383,6 +727,7 @@ def processar_produto(product_id):
             "product_id": str(product.id),
             "size": size,
             "quantity": quantity,
+            "variant_id": str(variant.id) if variant is not None else None,
         }
         session["post_login_next"] = url_for("main.adicionar_carrinho_pendente")
         session.modified = True
@@ -390,7 +735,7 @@ def processar_produto(product_id):
         return redirect(url_for("main.login"))
 
     try:
-        _add_product_to_cart(product, size, quantity)
+        _add_product_to_cart(product, size=size, quantity=quantity, variant=variant)
         db.session.commit()
 
         session.pop("checkout_cart", None)
@@ -429,12 +774,22 @@ def adicionar_carrinho_pendente():
     size = str(pending.get("size") or "").upper()
     quantity = _parse_product_quantity(pending.get("quantity"))
 
-    if not product or size not in VALID_PRODUCT_SIZES or quantity is None:
+    if product is None or quantity is None:
         flash("Não foi possível recuperar o produto selecionado.", "danger")
         return redirect(url_for("main.carrinho"))
 
     try:
-        _add_product_to_cart(product, size, quantity)
+        variant = _resolve_selected_variant(product, pending.get("variant_id"))
+    except ValueError as error:
+        flash(str(error), "warning")
+        return redirect(url_for("main.carrinho"))
+
+    if variant is None and size not in VALID_PRODUCT_SIZES:
+        flash("Não foi possível recuperar o produto selecionado.", "danger")
+        return redirect(url_for("main.carrinho"))
+
+    try:
+        _add_product_to_cart(product, size=size, quantity=quantity, variant=variant)
         db.session.commit()
 
         session.pop("checkout_cart", None)
@@ -640,9 +995,14 @@ def _validate_cart_for_checkout(cart):
         raise ValueError("Seu carrinho está vazio.")
 
     for item in cart_items:
-        product = public_product_query().filter(
-            Product.id == item.product_id,
-        ).first()
+        product = (
+            public_product_query()
+            .filter(
+                Product.id == item.product_id,
+            )
+            .with_for_update()
+            .first()
+        )
 
         if product is None:
             raise ValueError(
@@ -673,6 +1033,44 @@ def _validate_cart_for_checkout(cart):
                 f"O valor de {product.name} é inválido."
             )
 
+        variant = getattr(item, "variant", None)
+        uses_variants = _uses_variants(product)
+
+        if uses_variants:
+            # Produto com variantes (ex.: AliExpress) NUNCA cai para o fluxo
+            # legacy por selected_size. variant_id é obrigatório: sem ele,
+            # uma variante removida (FK SET NULL) ou nunca preenchida deve
+            # bloquear o checkout, mesmo que Product.stock > 0.
+            if variant is None:
+                raise ValueError(
+                    f"A variação de {product.name} não foi informada."
+                )
+
+            # Ordem de lock Produto→Variante (consistente com _reserve_stock)
+            # e validação cruzada de que a variante pertence ao produto.
+            locked_variant = (
+                ProductVariant.query
+                .filter_by(id=variant.id, product_id=product.id)
+                .with_for_update()
+                .first()
+            )
+
+            if locked_variant is None or not locked_variant.is_active:
+                raise ValueError(
+                    f"Uma variação de {product.name} está indisponível."
+                )
+            if int(locked_variant.stock or 0) <= 0:
+                raise ValueError(
+                    f"Uma variação de {product.name} está sem estoque."
+                )
+            if quantity > int(locked_variant.stock or 0):
+                raise ValueError(
+                    f"A quantidade de {product.name} excede o estoque. "
+                    f"Disponível: {int(locked_variant.stock or 0)}."
+                )
+            continue
+
+        # Apenas produto realmente legacy (sem variantes) usa selected_size.
         stock = getattr(product, "stock", None)
 
         if stock is not None:
@@ -774,7 +1172,12 @@ def atualizar_quantidade_carrinho(item_id):
             )
             return redirect(url_for("main.carrinho"))
 
-        stock = getattr(product, "stock", None)
+        variant = getattr(item, "variant", None)
+
+        if variant is not None:
+            stock = getattr(variant, "stock", None)
+        else:
+            stock = getattr(product, "stock", None)
 
         if stock is not None and new_quantity > stock:
             flash(
@@ -985,7 +1388,21 @@ def checkout(product_id):
             )
         )
 
-    if selected_size not in VALID_PRODUCT_SIZES:
+    try:
+        variant = _resolve_selected_variant(
+            product,
+            checkout_data.get("variant_id"),
+        )
+    except ValueError as error:
+        flash(str(error), "warning")
+        return redirect(
+            url_for(
+                "main.produto_individual",
+                id=product.id,
+            )
+        )
+
+    if variant is None and selected_size not in VALID_PRODUCT_SIZES:
         flash(
             "Selecione um tamanho válido.",
             "warning",
@@ -997,7 +1414,10 @@ def checkout(product_id):
             )
         )
 
-    stock = getattr(product, "stock", None)
+    if variant is not None:
+        stock = getattr(variant, "stock", None)
+    else:
+        stock = getattr(product, "stock", None)
 
     if stock is not None:
         if stock <= 0:
@@ -1029,6 +1449,19 @@ def checkout(product_id):
         unit_price * quantity
     )
 
+    selected_variant_label = None
+    selected_variant_id = None
+    if variant is not None:
+        selected_variant_label = (
+            " ".join(
+                part
+                for part in (variant.color or "", variant.size or "")
+                if part
+            ).strip()
+            or "Único"
+        )
+        selected_variant_id = str(variant.id)
+
     applied_coupon, discount = _restore_checkout_coupon(
         "product",
         subtotal,
@@ -1045,6 +1478,8 @@ def checkout(product_id):
         checkout_mode="buy_now",
         product=product,
         selected_size=selected_size,
+        selected_variant=selected_variant_label,
+        selected_variant_id=selected_variant_id,
         quantity=quantity,
         unit_price=unit_price,
         subtotal=subtotal,
@@ -1100,7 +1535,9 @@ def _get_checkout_subtotal(
 
         stock = getattr(product, "stock", None)
 
-        if stock is not None:
+        # Produtos com variante validam estoque por variante no checkout; o
+        # subtotal aqui é só financeiro (price * quantity).
+        if stock is not None and not _uses_variants(product):
             if stock <= 0:
                 raise ValueError(
                     "Produto sem estoque."
@@ -1328,7 +1765,9 @@ def calcular_frete():
 
     stock = getattr(product, "stock", None)
 
-    if stock is not None and quantity > stock:
+    # Produtos com variante validam estoque por variante no checkout; aqui o
+    # frete só depende do subtotal financeiro.
+    if stock is not None and not _uses_variants(product) and quantity > stock:
         return jsonify({
             "error": "Quantidade maior que o estoque disponível.",
         }), 400

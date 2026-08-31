@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block title %}{{ product.name }} — {{ site.name }}{% endblock %}
-{% block meta_description %}{{ (product.description or product.name)[:160] }}{% endblock %}
+{% block meta_description %}{{ product_description_excerpt(product.description) or product.name }}{% endblock %}
 
 {% block extra_head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='styles/produtos_individual.css') }}">
@@ -358,13 +358,10 @@ body.product-lightbox-open {
 
 {% block content %}
 
-{% set primary_image = product.image1 or product.image2 or product.image3 or product.image4 %}
-{% set image_count =
-    (1 if product.image1 else 0)
-    + (1 if product.image2 else 0)
-    + (1 if product.image3 else 0)
-    + (1 if product.image4 else 0)
-%}
+{% set gallery = gallery_images %}
+{% set gallery_length = gallery|length %}
+{% set primary_image = gallery[0].url if gallery else none %}
+{% set image_count = gallery_length %}
 
 <div class="product-container">
 
@@ -381,65 +378,20 @@ body.product-lightbox-open {
 
             <div class="product-gallery-thumbs" role="tablist" aria-label="Selecionar imagem">
 
-                {% if product.image1 %}
+                {% for image in gallery %}
                 <button
-                    class="product-gallery-thumb is-active"
+                    class="product-gallery-thumb{{ ' is-active' if loop.first else '' }}"
                     type="button"
                     role="tab"
-                    aria-selected="true"
-                    aria-label="Exibir imagem 1 de {{ product.name }}"
-                    data-gallery-index="0"
-                    data-gallery-src="{{ product.image1 }}"
-                    data-gallery-alt="{{ product.name }} — imagem 1"
+                    aria-selected="{{ 'true' if loop.first else 'false' }}"
+                    aria-label="Exibir imagem {{ loop.index }} de {{ product.name }}"
+                    data-gallery-index="{{ loop.index0 }}"
+                    data-gallery-src="{{ image.url }}"
+                    data-gallery-alt="{{ image.alt }}"
                 >
-                    <img src="{{ product.image1 }}" alt="" width="90" height="112" loading="eager">
+                    <img src="{{ image.url }}" alt="" width="90" height="112" loading="{{ 'eager' if loop.first else 'lazy' }}">
                 </button>
-                {% endif %}
-
-                {% if product.image2 %}
-                <button
-                    class="product-gallery-thumb"
-                    type="button"
-                    role="tab"
-                    aria-selected="false"
-                    aria-label="Exibir imagem 2 de {{ product.name }}"
-                    data-gallery-index="{{ 1 if product.image1 else 0 }}"
-                    data-gallery-src="{{ product.image2 }}"
-                    data-gallery-alt="{{ product.name }} — imagem 2"
-                >
-                    <img src="{{ product.image2 }}" alt="" width="90" height="112" loading="lazy">
-                </button>
-                {% endif %}
-
-                {% if product.image3 %}
-                <button
-                    class="product-gallery-thumb"
-                    type="button"
-                    role="tab"
-                    aria-selected="false"
-                    aria-label="Exibir imagem 3 de {{ product.name }}"
-                    data-gallery-index="{{ (1 if product.image1 else 0) + (1 if product.image2 else 0) }}"
-                    data-gallery-src="{{ product.image3 }}"
-                    data-gallery-alt="{{ product.name }} — imagem 3"
-                >
-                    <img src="{{ product.image3 }}" alt="" width="90" height="112" loading="lazy">
-                </button>
-                {% endif %}
-
-                {% if product.image4 %}
-                <button
-                    class="product-gallery-thumb"
-                    type="button"
-                    role="tab"
-                    aria-selected="false"
-                    aria-label="Exibir imagem 4 de {{ product.name }}"
-                    data-gallery-index="{{ (1 if product.image1 else 0) + (1 if product.image2 else 0) + (1 if product.image3 else 0) }}"
-                    data-gallery-src="{{ product.image4 }}"
-                    data-gallery-alt="{{ product.name }} — imagem 4"
-                >
-                    <img src="{{ product.image4 }}" alt="" width="90" height="112" loading="lazy">
-                </button>
-                {% endif %}
+                {% endfor %}
 
             </div>
 
@@ -537,9 +489,18 @@ body.product-lightbox-open {
             </div>
 
             {% if product.description %}
-            <div class="product-description">
-                {{ product.description }}
-            </div>
+            {% if uses_variants %}
+                {% set excerpt = product_description_excerpt(product.description, max_words=40) %}
+                {% if excerpt %}
+                <div class="product-description product-description-excerpt">
+                    {{ excerpt }}
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="product-description">
+                    {{ sanitize_product_description_html(product.description) }}
+                </div>
+            {% endif %}
             {% endif %}
 
             <form
@@ -559,6 +520,40 @@ body.product-lightbox-open {
                     value=""
                 >
 
+                {% if uses_variants %}
+                {% if no_variants_available %}
+                <div class="variants-unavailable" data-variants-unavailable>
+                    <p class="unavailable-message">Sem variações disponíveis no momento.</p>
+                    <small>Este produto está temporariamente esgotado ou em reposição.</small>
+                </div>
+                {% else %}
+                <div class="variant-selector" data-variant-selector
+                     data-variants-json='{{ selector.variants | tojson | forceescape }}'>
+                    {% for dim in selector.dimensions %}
+                    <fieldset class="size-fieldset">
+                        <legend class="size-title">{{ dim.title }}</legend>
+                        <div class="size-options" data-dimension="{{ dim.key }}">
+                            {% for value in dim.options %}
+                            <input
+                                class="size-option-input dimension-input"
+                                type="radio"
+                                name="variant_dim_{{ dim.key }}"
+                                id="vdim-{{ dim.key }}-{{ loop.index }}"
+                                value="{{ value }}"
+                                data-dimension-value="{{ value }}"
+                            >
+                            <label class="size-option" for="vdim-{{ dim.key }}-{{ loop.index }}">
+                                {{ value }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </fieldset>
+                    {% endfor %}
+
+                    <input type="hidden" name="variant_id" value="">
+                </div>
+                {% endif %}
+                {% else %}
                 <fieldset class="size-fieldset">
                     <legend class="size-title">Tamanho</legend>
 
@@ -578,6 +573,7 @@ body.product-lightbox-open {
                         {% endfor %}
                     </div>
                 </fieldset>
+                {% endif %}
 
                 <div class="quantity-field">
                     <label class="quantity-title" for="productQuantity">Quantidade</label>
@@ -599,7 +595,7 @@ body.product-lightbox-open {
                             name="quantity"
                             value="1"
                             min="1"
-                            max="{{ product.stock if product.stock is not none and product.stock > 0 else 99 }}"
+                            max="{{ 99 }}"
                             inputmode="numeric"
                             required
                         >
@@ -614,7 +610,17 @@ body.product-lightbox-open {
                         </button>
                     </div>
 
-                    {% if product.stock is not none %}
+                    {% if uses_variants %}
+                        {% if no_variants_available %}
+                        <small class="stock-info">
+                            Produto temporariamente indisponível
+                        </small>
+                        {% else %}
+                        <small class="stock-info" data-variant-stock-info>
+                            Selecione uma variação para ver o estoque disponível.
+                        </small>
+                        {% endif %}
+                    {% elif product.stock is not none %}
                     <small class="stock-info">
                         {% if product.stock > 0 %}
                             {{ product.stock }} unidade{% if product.stock != 1 %}s{% endif %}
@@ -632,7 +638,7 @@ body.product-lightbox-open {
                         type="submit"
                         value="buy_now"
                         data-purchase-action="buy_now"
-                        {% if product.stock is not none and product.stock <= 0 %}disabled{% endif %}
+                        {% if uses_variants %}disabled{% elif product.stock is not none and product.stock <= 0 %}disabled{% endif %}
                     >
                         Comprar Agora
                     </button>
@@ -642,7 +648,7 @@ body.product-lightbox-open {
                         type="submit"
                         value="add_to_cart"
                         data-purchase-action="add_to_cart"
-                        {% if product.stock is not none and product.stock <= 0 %}disabled{% endif %}
+                        {% if uses_variants %}disabled{% elif product.stock is not none and product.stock <= 0 %}disabled{% endif %}
                     >
                         Carrinho
                     </button>
@@ -668,15 +674,30 @@ body.product-lightbox-open {
 
 </div>
 
+{% if product.source == "aliexpress" %}
+{% set desc_without_images = sanitize_product_description_without_images(product.description) %}
+{% if product_description_excerpt(desc_without_images) %}
 <section class="details-section">
 
     <h2 class="section-title">Descrição</h2>
 
     <div class="details-text">
-        {{ product.description }}
+        {{ desc_without_images }}
     </div>
 
 </section>
+{% endif %}
+{% else %}
+<section class="details-section">
+
+    <h2 class="section-title">Descrição</h2>
+
+    <div class="details-text">
+        {{ sanitize_product_description_html(product.description) }}
+    </div>
+
+</section>
+{% endif %}
 
 <section class="related-products">
 
@@ -1063,7 +1084,167 @@ body.product-lightbox-open {
         ? form.querySelectorAll('[data-purchase-action]')
         : [];
 
+    const variantSelector = document.querySelector('[data-variant-selector]');
+    const variantStockInfo = document.querySelector('[data-variant-stock-info]');
+    const variantsUnavailable = document.querySelector('[data-variants-unavailable]');
+
+    let selectableVariants = [];
+    let usesVariants = false;
+
+    if (variantSelector) {
+        usesVariants = true;
+        try {
+            selectableVariants = JSON.parse(
+                variantSelector.getAttribute('data-variants-json') || '[]'
+            );
+        } catch (err) {
+            selectableVariants = [];
+        }
+    }
+
     if (!form || !quantityInput || !actionInput) return;
+
+    const dimensionInputs = usesVariants
+        ? form.querySelectorAll('.dimension-input')
+        : [];
+    const variantIdInput = form.querySelector('input[name="variant_id"]');
+
+    function setPurchaseEnabled(enabled) {
+        purchaseButtons.forEach(function (button) {
+            button.disabled = !enabled;
+        });
+        if (enabled && purchaseButtons.length) {
+            purchaseButtons[0].focus({ preventScroll: true });
+        }
+    }
+
+    function setVariantMax(stock) {
+        const max = Math.max(1, Math.min(stock || 1, 99));
+        quantityInput.max = String(max);
+        if (normalizeQuantity(quantityInput.value) > max) {
+            quantityInput.value = String(max);
+        }
+    }
+
+    // Seleção POSICIONAL: um slot por dimensão renderizada ([data-dimension]).
+    // Dimensões não selecionadas ficam como null (nunca são comprimidas, para
+    // que os índices sempre correspondam a variant.dims).
+    function currentSelections() {
+        return Array.prototype.map.call(
+            form.querySelectorAll('[data-dimension]'),
+            function (group) {
+                const checked = group.querySelector('.dimension-input:checked');
+                return checked ? checked.value : null;
+            }
+        );
+    }
+
+    function selectedDimensionCount(selections) {
+        return selections.reduce(function (count, value) {
+            return value != null ? count + 1 : count;
+        }, 0);
+    }
+
+    // Filtragem parcial: null atua como wildcard, mantendo a posição das
+    // demais dimensões (não remove os null/undefined do array).
+    function matchingVariants(selections) {
+        const slotCount = selections.length;
+        if (!slotCount) return [];
+        return selectableVariants.filter(function (variant) {
+            if (!variant.dims || variant.dims.length !== slotCount) {
+                return false;
+            }
+            return selections.every(function (sel, index) {
+                return sel == null || variant.dims[index] === sel;
+            });
+        });
+    }
+
+    // Só resolve um variant_id quando TODAS as dimensões estiverem
+    // selecionadas e houver EXATAMENTE uma variante correspondente.
+    function resolveSelectedVariant(selections) {
+        const totalDims = form.querySelectorAll('[data-dimension]').length;
+        if (selectedDimensionCount(selections) !== totalDims) {
+            return null;
+        }
+        const matches = matchingVariants(selections);
+        return matches.length === 1 ? matches[0] : null;
+    }
+
+    function refreshDimensionDisabledState() {
+        const selections = currentSelections();
+        const dimensionGroups = form.querySelectorAll('[data-dimension]');
+        dimensionInputs.forEach(function (input) {
+            const dimensionGroup = input.closest('[data-dimension]');
+            if (!dimensionGroup) return;
+
+            const dimIndex = Array.prototype.indexOf.call(
+                dimensionGroups,
+                dimensionGroup
+            );
+
+            // Testa esta opção mantendo as posições das outras dimensões.
+            const hypothetical = selections.slice();
+            hypothetical[dimIndex] = input.value;
+            const matches = matchingVariants(hypothetical);
+            const hasStock = matches.some(function (v) {
+                return v.stock > 0;
+            });
+
+            // Preserva o checked para que o usuário possa voltar/alterar.
+            input.disabled = !hasStock;
+        });
+    }
+
+    function handleVariantChange() {
+        const selections = currentSelections();
+
+        const selectedVariant = resolveSelectedVariant(selections) || null;
+
+        if (selectedVariant && variantIdInput) {
+            variantIdInput.value = selectedVariant.id;
+        } else if (variantIdInput) {
+            variantIdInput.value = '';
+        }
+
+        const hasSelection = Boolean(selectedVariant);
+        const hasStock = hasSelection && selectedVariant.stock > 0;
+
+        setPurchaseEnabled(hasSelection && hasStock);
+
+        refreshDimensionDisabledState();
+
+        if (!hasSelection) {
+            quantityInput.max = '99';
+            if (variantStockInfo) {
+                variantStockInfo.textContent =
+                    'Selecione uma variação para ver o estoque disponível.';
+            }
+            return;
+        }
+
+        const stock = selectedVariant.stock || 0;
+        setVariantMax(stock);
+
+        if (variantStockInfo) {
+            if (stock <= 0) {
+                variantStockInfo.textContent =
+                    'Esta variação está temporariamente indisponível.';
+            } else {
+                variantStockInfo.textContent = stock + ' unidade'
+                    + (stock === 1 ? '' : 's')
+                    + ' disponíve'
+                    + (stock === 1 ? 'l' : 'is')
+                    + ' para esta variação.';
+            }
+        }
+    }
+
+    if (usesVariants && !variantsUnavailable) {
+        dimensionInputs.forEach(function (input) {
+            input.addEventListener('change', handleVariantChange);
+        });
+    }
 
     function normalizeQuantity(value) {
         const min = Number(quantityInput.min || 1);
@@ -1107,19 +1288,47 @@ body.product-lightbox-open {
     });
 
     form.addEventListener('submit', function (event) {
-        const selectedSize = form.querySelector('input[name="size"]:checked');
+        if (usesVariants) {
+            // Só aceita quando TODAS as dimensões estão selecionadas e há
+            // exatamente uma variante correspondente (combinação completa).
+            const selected = resolveSelectedVariant(currentSelections());
 
-        if (!selectedSize) {
-            event.preventDefault();
-            feedback.textContent = 'Selecione um tamanho antes de continuar.';
+            if (!selected || !variantIdInput || !variantIdInput.value) {
+                event.preventDefault();
+                feedback.textContent =
+                    'Selecione uma variação antes de continuar.';
 
-            const firstSize = form.querySelector('input[name="size"]');
+                const firstInput = form.querySelector('.dimension-input');
 
-            if (firstSize) {
-                firstSize.focus();
+                if (firstInput) {
+                    firstInput.focus();
+                }
+
+                return;
             }
 
-            return;
+            const selectedStock = selected.stock || 0;
+            if (selectedStock <= 0) {
+                event.preventDefault();
+                feedback.textContent =
+                    'Esta variação está temporariamente indisponível.';
+                return;
+            }
+        } else {
+            const selectedSize = form.querySelector('input[name="size"]:checked');
+
+            if (!selectedSize) {
+                event.preventDefault();
+                feedback.textContent = 'Selecione um tamanho antes de continuar.';
+
+                const firstSize = form.querySelector('input[name="size"]');
+
+                if (firstSize) {
+                    firstSize.focus();
+                }
+
+                return;
+            }
         }
 
         quantityInput.value = normalizeQuantity(quantityInput.value);

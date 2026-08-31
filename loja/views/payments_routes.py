@@ -17,7 +17,12 @@ from flask_login import current_user, login_required
 
 from loja import db, csrf
 from loja.utils import utcnow
-from loja.modules.models import Cart, Coupon, Product
+from loja.modules.models import (
+    Cart,
+    Coupon,
+    Product,
+    ProductVariant,
+)
 from loja.modules.getway_mercado_pago.payment_models import (
     Order,
     OrderItem,
@@ -157,6 +162,60 @@ def _get_customer_data():
     }
 
 
+def _product_uses_variants(product):
+    """Um produto usa variantes quando vem do AliExpress ou possui variantes
+    ativas com estoque. Mesma semântica do storefront (routes.py)."""
+    variants = getattr(product, "variants", None) or []
+
+    return (
+        getattr(product, "source", None) == "aliexpress"
+        or any(
+            getattr(v, "is_active", False)
+            and int(getattr(v, "stock", 0) or 0) > 0
+            for v in variants
+        )
+    )
+
+
+def _resolve_payment_variant(product, raw_variant_id, fallback_size):
+    """Resolve e valida a variante selecionada para o checkout.
+
+    Produtos que usam variantes exigem uma variante válida (ativa, com
+    estoque > 0). Retorna (variant, size_label). Nunca expõe
+    supplier_sku_id/supplier_product_id.
+    """
+    if not _product_uses_variants(product):
+        return None, str(fallback_size or "Único").strip()[:20]
+
+    if not raw_variant_id:
+        raise ValueError("Selecione uma variação do produto.")
+
+    try:
+        variant_uuid = uuid.UUID(str(raw_variant_id))
+    except (TypeError, ValueError, AttributeError):
+        raise ValueError("A variação selecionada é inválida.")
+
+    variant = (
+        ProductVariant.query
+        .filter(
+            ProductVariant.id == variant_uuid,
+            ProductVariant.product_id == product.id,
+            ProductVariant.is_active.is_(True),
+        )
+        .first()
+    )
+
+    if variant is None:
+        raise ValueError("A variação selecionada não está mais disponível.")
+
+    if int(variant.stock or 0) <= 0:
+        raise ValueError("Esta variação está temporariamente indisponível.")
+
+    label = (variant.size or "UNICO")[:20]
+
+    return variant, label
+
+
 def _get_direct_product_items():
     raw_product_id = str(
         request.form.get("product_id") or ""
@@ -185,18 +244,23 @@ def _get_direct_product_items():
         request.form.get("quantity")
     )
 
-    stock = getattr(product, "stock", None)
+    variant, selected_size = _resolve_payment_variant(
+        product,
+        request.form.get("variant_id"),
+        request.form.get("selected_size")
+        or request.form.get("size")
+        or "Único",
+    )
+
+    if variant is not None:
+        stock = getattr(variant, "stock", None)
+    else:
+        stock = getattr(product, "stock", None)
 
     if stock is not None and stock < quantity:
         raise ValueError(
             f"Estoque insuficiente para {product.name}."
         )
-
-    selected_size = str(
-        request.form.get("selected_size")
-        or request.form.get("size")
-        or "Único"
-    ).strip()[:20]
 
     unit_price = money(product.price)
     line_total = money(unit_price * quantity)
@@ -209,6 +273,9 @@ def _get_direct_product_items():
             "quantity": quantity,
             "unit_price": unit_price,
             "line_total": line_total,
+            "variant_id": (
+                variant.id if variant is not None else None
+            ),
         }
     ]
 
@@ -237,7 +304,17 @@ def _get_cart_items():
             )
 
         quantity = _parse_quantity(cart_item.quantity)
-        stock = getattr(product, "stock", None)
+
+        variant, selected_size = _resolve_payment_variant(
+            product,
+            getattr(cart_item, "variant_id", None),
+            cart_item.selected_size or "Único",
+        )
+
+        if variant is not None:
+            stock = getattr(variant, "stock", None)
+        else:
+            stock = getattr(product, "stock", None)
 
         if stock is not None and stock < quantity:
             raise ValueError(
@@ -254,13 +331,14 @@ def _get_cart_items():
             {
                 "product_id": product.id,
                 "product_name": product.name,
-                "selected_size": (
-                    cart_item.selected_size or "Único"
-                ),
+                "selected_size": selected_size,
                 "quantity": quantity,
                 "unit_price": unit_price,
                 "line_total": money(
                     unit_price * quantity
+                ),
+                "variant_id": (
+                    variant.id if variant is not None else None
                 ),
             }
         )
@@ -332,34 +410,112 @@ def _reserve_stock(item_data):
                 f"Produto {item['product_name']} não está mais disponível."
             )
 
-        if product.stock is not None and product.stock < item["quantity"]:
+        # Defesa em profundidade: produto que usa variantes (ex.: AliExpress)
+        # NUNCA pode ser debitado apenas no agregado Product.stock. Sem
+        # variant_id, bloqueia — jamais cai no fluxo legacy por selected_size.
+        if _product_uses_variants(product) and not item.get("variant_id"):
             raise ValueError(
-                f"Estoque insuficiente para {product.name}."
+                f"A variação de {product.name} não foi informada."
             )
 
-        if product.stock is not None:
-            product.stock -= item["quantity"]
+        variant = None
+
+        if item.get("variant_id"):
+            variant = (
+                ProductVariant.query
+                .filter_by(
+                    id=item["variant_id"],
+                    product_id=product.id,
+                )
+                .with_for_update()
+                .first()
+            )
+
+            if variant is None or not variant.is_active:
+                raise ValueError(
+                    f"Uma variação de {product.name} não está mais disponível."
+                )
+
+        if variant is not None:
+            if int(variant.stock or 0) < item["quantity"]:
+                raise ValueError(
+                    f"Estoque insuficiente para {product.name}."
+                )
+            variant.stock = int(variant.stock or 0) - item["quantity"]
+            if product.stock is not None:
+                product.stock -= item["quantity"]
+        else:
+            if product.stock is not None and product.stock < item["quantity"]:
+                raise ValueError(
+                    f"Estoque insuficiente para {product.name}."
+                )
+            if product.stock is not None:
+                product.stock -= item["quantity"]
 
 
 def _release_stock(order):
-    """Devolve ao estoque o que foi reservado em um pedido não pago."""
+    """Devolve ao estoque o que foi reservado em um pedido não pago.
+
+    Para itens com variante, resolve sempre Product primeiro e ProductVariant
+    depois (ordem de lock consistente com _reserve_stock). Se a variante não
+    resolver (id inexistente ou pertencente a outro produto), ABORTA com erro
+    para que a transação faça rollback — jamais restaura apenas o agregado
+    (Product.stock) e deixa a soma das variantes divergente.
+    """
     if not order.stock_reserved:
         return
 
     for item in order.items:
-        if item.product_id is None:
-            continue
+        if item.variant_id is not None:
+            # Guard: sem product_id não há como validar a integridade da
+            # variante — aborta em vez de restaurar cegamente.
+            if item.product_id is None:
+                raise ValueError(
+                    f"Item inválido em {item.product_name}: "
+                    "variant_id sem product_id não pode ser restituído."
+                )
 
-        product = (
-            Product.query
-            .filter_by(id=item.product_id)
-            .with_for_update()
-            .first()
-        )
+            product = (
+                Product.query
+                .filter_by(id=item.product_id)
+                .with_for_update()
+                .first()
+            )
+            if product is None:
+                raise ValueError(
+                    f"Produto não encontrado para restituir: {item.product_name}."
+                )
 
-        if product is not None and product.stock is not None:
-            product.stock += item.quantity
+            variant = (
+                ProductVariant.query
+                .filter_by(id=item.variant_id, product_id=item.product_id)
+                .with_for_update()
+                .first()
+            )
+            if variant is None:
+                # Erro de integridade: não restaurar Product.stock isoladamente.
+                raise ValueError(
+                    f"Variação inválida ao restituir: {item.product_name}."
+                )
 
+            if variant.stock is not None:
+                variant.stock += item.quantity
+            if product.stock is not None:
+                product.stock += item.quantity
+        else:
+            if item.product_id is None:
+                continue
+
+            product = (
+                Product.query
+                .filter_by(id=item.product_id)
+                .with_for_update()
+                .first()
+            )
+            if product is not None and product.stock is not None:
+                product.stock += item.quantity
+
+    # Só após TODOS os itens restaurados com sucesso a reserva é encerrada.
     order.stock_reserved = False
 
 
@@ -626,6 +782,7 @@ def _sync_payment(payment_id):
     if mapped_status == "paid":
         if order.status not in {"paid", "manual_review"}:
             locked_products = {}
+            locked_variants = {}
             review_reasons = []
 
             for item in order.items:
@@ -656,6 +813,47 @@ def _sync_payment(payment_id):
                         f"Estoque insuficiente: {item.product_name}."
                     )
 
+                if (
+                    product is not None
+                    and _product_uses_variants(product)
+                    and item.variant_id is None
+                ):
+                    # Integridade: produto que usa variantes (ex.: AliExpress)
+                    # com OrderItem sem variant_id. NUNCA debitamos Product.stock
+                    # isoladamente aqui — o pagamento vai para revisão manual com
+                    # mensagem sanitizada (sem supplier_sku_id/external_sku_id).
+                    review_reasons.append(
+                        f"Variação não informada: {item.product_name}."
+                    )
+
+                if item.variant_id is not None:
+                    variant = (
+                        ProductVariant.query
+                        .filter_by(id=item.variant_id, product_id=item.product_id)
+                        .with_for_update()
+                        .first()
+                    )
+                    locked_variants[item.id] = variant
+
+                    # Integridade Product<->Variant: a variante deve existir E
+                    # pertencer ao produto do item — validada SEMPRE,
+                    # independentemente de stock_reserved. Uma variante
+                    # inexistente ou de outro produto é erro de integridade e
+                    # nunca deve virar "paid" silenciosamente.
+                    if variant is None:
+                        review_reasons.append(
+                            f"Variação inválida: {item.product_name}."
+                        )
+                    elif not order.stock_reserved and (
+                        not variant.is_active
+                        or int(variant.stock or 0) < item.quantity
+                    ):
+                        # Estoque/disponibilidade só importam quando um novo
+                        # débito será necessário (reserva já abatida dispensa).
+                        review_reasons.append(
+                            f"Estoque insuficiente: {item.product_name}."
+                        )
+
             locked_coupon = None
             if order.coupon_id and order.coupon_counted_at is None:
                 locked_coupon = (
@@ -685,6 +883,18 @@ def _sync_payment(payment_id):
                         product = locked_products.get(item.id)
                         if product is not None and product.stock is not None:
                             product.stock -= item.quantity
+
+                        if item.variant_id is not None:
+                            variant = locked_variants.get(item.id)
+                            if (
+                                variant is not None
+                                and variant.stock is not None
+                            ):
+                                variant.stock -= item.quantity
+
+                    # Pagamento aprovado tardio: o estoque foi debitado agora e
+                    # precisa poder ser restituído em um eventual refund.
+                    order.stock_reserved = True
 
                 if locked_coupon is not None:
                     locked_coupon.times_used += 1
