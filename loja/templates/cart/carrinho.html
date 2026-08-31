@@ -593,10 +593,17 @@
                     </div>
 
                     <div class="cart-meta">
+                        {% if item.variant %}
+                        <span class="cart-meta-item">
+                            Variação:
+                            <strong>{{ item.variant.color or item.variant.size or 'Único' }}{% if item.variant.color and item.variant.size %} · {{ item.variant.size }}{% endif %}</strong>
+                        </span>
+                        {% else %}
                         <span class="cart-meta-item">
                             Tamanho:
                             <strong>{{ item.selected_size or item.size or 'Único' }}</strong>
                         </span>
+                        {% endif %}
 
                         <span class="cart-meta-item">
                             Valor unitário:
@@ -654,7 +661,8 @@
                                             class="quantity-btn"
                                             type="submit"
                                             aria-label="Aumentar quantidade de {{ item.product.name }}"
-                                            {% if item.product.stock is not none and item.quantity >= item.product.stock %}disabled{% endif %}
+                                            {% set stock_limit = item.variant.stock if item.variant else item.product.stock %}
+                                            {% if stock_limit is not none and item.quantity >= stock_limit %}disabled{% endif %}
                                         >
                                             +
                                         </button>

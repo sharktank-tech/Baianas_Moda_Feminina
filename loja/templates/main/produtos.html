@@ -221,7 +221,7 @@
             <span class="product-category">{{ product.category }}</span>
             {% endif %}
             <h2 class="product-name">{{ product.name }}</h2>
-            <p class="product-desc">{{ product.description }}</p>
+            <p class="product-desc">{{ product_description_excerpt(product.description, max_words=30) }}</p>
             <div class="product-footer">
               <span class="product-price">R$ {{ "%.2f"|format(product.price) }}</span>
               <span class="product-cta">Ver →</span>

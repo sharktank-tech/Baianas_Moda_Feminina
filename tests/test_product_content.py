@@ -1,0 +1,76 @@
+"""Testes do sanitizador de HTML (bleach) e extrato para o storefront (Fase 7.2).
+
+A descrição de produtos AliExpress pode conter HTML de terceiros; ela nunca deve
+ser confiada como segura. Cobrimos: remoção de <script>/on*/javascript:, tags
+básicas preservadas, remoção de atributos style (sem css_sanitizer), e extrato
+em texto puro para <meta>/cards.
+"""
+
+from markupsafe import Markup
+
+from loja.services.product_content import (
+    product_description_excerpt,
+    sanitize_product_description_html,
+)
+
+
+def test_sanitize_removes_script_and_handlers():
+    raw = (
+        "<p>Olá</p><script>alert(1)</script>"
+        '<img src="x" onerror="alert(2)">'
+        '<a href="javascript:alert(3)">link</a>'
+        '<p onclick="alert(4)">texto</p>'
+    )
+    out = str(sanitize_product_description_html(raw))
+    assert "<script" not in out
+    assert "onclick" not in out
+    assert "onerror" not in out
+    assert "javascript:" not in out
+    assert "<p>Olá</p>" in out
+    assert "link" in out
+
+
+def test_sanitize_keeps_basic_tags():
+    raw = (
+        "<p><strong>Legal</strong> <em>isso</em> e "
+        '<a href="https://ex.com">ok</a></p>'
+    )
+    out = str(sanitize_product_description_html(raw))
+    assert "<strong>Legal</strong>" in out
+    assert "<em>isso</em>" in out
+    assert 'href="https://ex.com"' in out
+    assert "ok" in out
+
+
+def test_sanitize_strips_style_attribute():
+    out = str(sanitize_product_description_html('<p style="color:red">cor</p>'))
+    assert "style" not in out
+
+
+def test_sanitize_returns_markup_object():
+    out = sanitize_product_description_html("<p>x</p>")
+    assert isinstance(out, Markup)
+
+
+def test_sanitize_empty_or_none():
+    assert str(sanitize_product_description_html(None)) == ""
+    assert str(sanitize_product_description_html("")) == ""
+
+
+def test_sanitize_allows_img_with_src():
+    out = str(sanitize_product_description_html('<img src="https://x/img.png" alt="foto">'))
+    assert 'src="https://x/img.png"' in out
+    assert 'onerror' not in out
+
+
+def test_excerpt_strips_html_and_limits_words():
+    raw = "<p>uma duas três quatro cinco</p>"
+    exc = product_description_excerpt(raw, max_words=3)
+    assert exc == "uma duas três…"
+    assert "<p>" not in exc
+
+
+def test_excerpt_handles_entities_and_none():
+    assert product_description_excerpt("mais&nbsp;e&nbsp;mais &amp; tal") == "mais e mais & tal"
+    assert product_description_excerpt(None) == ""
+    assert product_description_excerpt("") == ""

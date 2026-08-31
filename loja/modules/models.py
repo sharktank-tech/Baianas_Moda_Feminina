@@ -1156,13 +1156,26 @@ class CartItem(db.Model):
     )
 
     __table_args__ = (
-        # O mesmo produto pode aparecer em tamanhos diferentes, mas não deve
-        # criar duas linhas para o mesmo produto e o mesmo tamanho no carrinho.
-        db.UniqueConstraint(
+        # Itens com variante (AliExpress) são únicos por (cart, variant):
+        # permite Rosa/M e Azul/M coexistirem no mesmo carrinho.
+        db.Index(
+            "uq_cart_item_variant",
+            "cart_id",
+            "variant_id",
+            unique=True,
+            sqlite_where=db.text("variant_id IS NOT NULL"),
+            postgresql_where=db.text("variant_id IS NOT NULL"),
+        ),
+        # Itens legados (sem variante) continuam únicos por
+        # (cart, product, selected_size).
+        db.Index(
+            "uq_cart_item_product_size",
             "cart_id",
             "product_id",
             "selected_size",
-            name="uq_cart_item_product_size"
+            unique=True,
+            sqlite_where=db.text("variant_id IS NULL"),
+            postgresql_where=db.text("variant_id IS NULL"),
         ),
         db.CheckConstraint(
             "quantity >= 1",

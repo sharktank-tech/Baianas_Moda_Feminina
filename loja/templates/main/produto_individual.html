@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block title %}{{ product.name }} — {{ site.name }}{% endblock %}
-{% block meta_description %}{{ (product.description or product.name)[:160] }}{% endblock %}
+{% block meta_description %}{{ product_description_excerpt(product.description) or product.name }}{% endblock %}
 
 {% block extra_head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='styles/produtos_individual.css') }}">
@@ -538,7 +538,7 @@ body.product-lightbox-open {
 
             {% if product.description %}
             <div class="product-description">
-                {{ product.description }}
+                {{ sanitize_product_description_html(product.description) }}
             </div>
             {% endif %}
 
@@ -559,6 +559,29 @@ body.product-lightbox-open {
                     value=""
                 >
 
+                {% if uses_variants %}
+                <fieldset class="size-fieldset">
+                    <legend class="size-title">Variação</legend>
+
+                    <div class="size-options" data-variant-options>
+                        {% for variant in active_variants %}
+                        <input
+                            class="size-option-input"
+                            type="radio"
+                            name="variant_id"
+                            id="variant-{{ variant.id }}"
+                            value="{{ variant.id }}"
+                            data-variant-stock="{{ variant.stock }}"
+                            data-variant-label="{{ variant.label }}"
+                            required
+                        >
+                        <label class="size-option" for="variant-{{ variant.id }}">
+                            {{ variant.label }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                </fieldset>
+                {% else %}
                 <fieldset class="size-fieldset">
                     <legend class="size-title">Tamanho</legend>
 
@@ -578,6 +601,7 @@ body.product-lightbox-open {
                         {% endfor %}
                     </div>
                 </fieldset>
+                {% endif %}
 
                 <div class="quantity-field">
                     <label class="quantity-title" for="productQuantity">Quantidade</label>
@@ -599,7 +623,7 @@ body.product-lightbox-open {
                             name="quantity"
                             value="1"
                             min="1"
-                            max="{{ product.stock if product.stock is not none and product.stock > 0 else 99 }}"
+                            max="{{ 99 }}"
                             inputmode="numeric"
                             required
                         >
@@ -614,7 +638,11 @@ body.product-lightbox-open {
                         </button>
                     </div>
 
-                    {% if product.stock is not none %}
+                    {% if uses_variants %}
+                    <small class="stock-info" data-variant-stock-info>
+                        Selecione uma variação para ver o estoque disponível.
+                    </small>
+                    {% elif product.stock is not none %}
                     <small class="stock-info">
                         {% if product.stock > 0 %}
                             {{ product.stock }} unidade{% if product.stock != 1 %}s{% endif %}
@@ -632,7 +660,7 @@ body.product-lightbox-open {
                         type="submit"
                         value="buy_now"
                         data-purchase-action="buy_now"
-                        {% if product.stock is not none and product.stock <= 0 %}disabled{% endif %}
+                        {% if uses_variants %}disabled{% elif product.stock is not none and product.stock <= 0 %}disabled{% endif %}
                     >
                         Comprar Agora
                     </button>
@@ -642,7 +670,7 @@ body.product-lightbox-open {
                         type="submit"
                         value="add_to_cart"
                         data-purchase-action="add_to_cart"
-                        {% if product.stock is not none and product.stock <= 0 %}disabled{% endif %}
+                        {% if uses_variants %}disabled{% elif product.stock is not none and product.stock <= 0 %}disabled{% endif %}
                     >
                         Carrinho
                     </button>
@@ -673,7 +701,7 @@ body.product-lightbox-open {
     <h2 class="section-title">Descrição</h2>
 
     <div class="details-text">
-        {{ product.description }}
+        {{ sanitize_product_description_html(product.description) }}
     </div>
 
 </section>
@@ -1063,7 +1091,70 @@ body.product-lightbox-open {
         ? form.querySelectorAll('[data-purchase-action]')
         : [];
 
+    const variantOptions = form
+        ? form.querySelectorAll('input[name="variant_id"]')
+        : [];
+    const variantStockInfo = document.querySelector('[data-variant-stock-info]');
+    const usesVariants = variantOptions.length > 0;
+
     if (!form || !quantityInput || !actionInput) return;
+
+    function setPurchaseEnabled(enabled) {
+        purchaseButtons.forEach(function (button) {
+            button.disabled = !enabled;
+        });
+        if (purchaseButtons.length) {
+            purchaseButtons[0].focus({ preventScroll: true });
+        }
+    }
+
+    function setVariantMax(stock) {
+        const max = Math.max(1, Math.min(stock || 1, 99));
+        quantityInput.max = String(max);
+        if (normalizeQuantity(quantityInput.value) > max) {
+            quantityInput.value = String(max);
+        }
+    }
+
+    function handleVariantChange() {
+        if (!usesVariants) return;
+
+        const selected = form.querySelector('input[name="variant_id"]:checked');
+        const anySelected = Boolean(selected);
+
+        purchaseButtons.forEach(function (button) {
+            button.disabled = !anySelected;
+        });
+
+        if (!selected) {
+            quantityInput.max = '99';
+            if (variantStockInfo) {
+                variantStockInfo.textContent =
+                    'Selecione uma variação para ver o estoque disponível.';
+            }
+            return;
+        }
+
+        const stock = Number(selected.dataset.variantStock || 0);
+        setVariantMax(stock);
+
+        if (variantStockInfo) {
+            if (stock <= 0) {
+                variantStockInfo.textContent =
+                    'Esta variação está temporariamente indisponível.';
+            } else {
+                variantStockInfo.textContent = stock + ' unidade'
+                    + (stock === 1 ? '' : 's')
+                    + ' disponíve'
+                    + (stock === 1 ? 'l' : 'is')
+                    + ' para esta variação.';
+            }
+        }
+    }
+
+    variantOptions.forEach(function (option) {
+        option.addEventListener('change', handleVariantChange);
+    });
 
     function normalizeQuantity(value) {
         const min = Number(quantityInput.min || 1);
@@ -1107,19 +1198,45 @@ body.product-lightbox-open {
     });
 
     form.addEventListener('submit', function (event) {
-        const selectedSize = form.querySelector('input[name="size"]:checked');
+        if (usesVariants) {
+            const selected = form.querySelector('input[name="variant_id"]:checked');
 
-        if (!selectedSize) {
-            event.preventDefault();
-            feedback.textContent = 'Selecione um tamanho antes de continuar.';
+            if (!selected) {
+                event.preventDefault();
+                feedback.textContent =
+                    'Selecione uma variação antes de continuar.';
 
-            const firstSize = form.querySelector('input[name="size"]');
+                const firstVariant = form.querySelector('input[name="variant_id"]');
 
-            if (firstSize) {
-                firstSize.focus();
+                if (firstVariant) {
+                    firstVariant.focus();
+                }
+
+                return;
             }
 
-            return;
+            const selectedStock = Number(selected.dataset.variantStock || 0);
+            if (selectedStock <= 0) {
+                event.preventDefault();
+                feedback.textContent =
+                    'Esta variação está temporariamente indisponível.';
+                return;
+            }
+        } else {
+            const selectedSize = form.querySelector('input[name="size"]:checked');
+
+            if (!selectedSize) {
+                event.preventDefault();
+                feedback.textContent = 'Selecione um tamanho antes de continuar.';
+
+                const firstSize = form.querySelector('input[name="size"]');
+
+                if (firstSize) {
+                    firstSize.focus();
+                }
+
+                return;
+            }
         }
 
         quantityInput.value = normalizeQuantity(quantityInput.value);

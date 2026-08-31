@@ -691,6 +691,14 @@
                         value="{{ selected_size | default('ÚNICO', true) }}"
                     >
 
+                    {% if selected_variant_id is defined and selected_variant_id %}
+                    <input
+                        type="hidden"
+                        name="variant_id"
+                        value="{{ selected_variant_id }}"
+                    >
+                    {% endif %}
+
                 {% endif %}
 
                 <input
@@ -915,7 +923,11 @@
                         </div>
 
                         <div class="summary-price">
-                            Tamanho: {{ item.selected_size or item.size or 'Único' }}
+                            {% if item.variant %}
+                                Variação: {{ item.variant.color or item.variant.size or 'Único' }}{% if item.variant.color and item.variant.size %} · {{ item.variant.size }}{% endif %}
+                            {% else %}
+                                Tamanho: {{ item.selected_size or item.size or 'Único' }}
+                            {% endif %}
                         </div>
 
                         <div class="summary-price">
@@ -959,7 +971,11 @@
                             {{ product.name }}
                         </div>
 
-                        {% if selected_size is defined and selected_size %}
+                        {% if selected_variant is defined and selected_variant %}
+                        <div class="summary-price">
+                            Variação: {{ selected_variant }}
+                        </div>
+                        {% elif selected_size is defined and selected_size %}
                         <div class="summary-price">
                             Tamanho: {{ selected_size }}
                         </div>
