@@ -22,7 +22,13 @@ Regras invariantes desta fase:
     reprecifica automaticamente; preço/margem preservados para auditoria.
     Reimports sucessivos de um produto já `stale` continuam reconciliando o
     landed com o custo novo (ou NULL quando frete/moeda divergirem).
-  * Price/cost do rascunho = menor preço observado (provisório, não publicável).
+  * Fase 7.1 (multivariantes — custo seguro): separa o custo do fornecedor do
+    preço de exibição do draft. `supplier_cost_basis` = MAIOR preço positivo
+    entre os SKUs ATIVOS (é a base de custo para landed/pricing; `SupplierProduct.cost`
+    recebe esse valore `Product.cost` o acompanha). `catalog_price` = MENOR
+    preço positivo entre os SKUs, usado apenas como preço provisório/display de
+    `Product.price` enquanto `pricing_status != 'priced'`. Nenhuma variante ativa
+    pode ter custo superior ao cost basis (defesa abaixo).
   * Moeda única entre os SKUs com preço; divergência aborta (sem conversão).
   * Idempotente: reimport não duplica Supplier/Product/Variante/Imagem/Sync.
   * Transação única atômica; qualquer falha faz rollback total.
@@ -122,7 +128,10 @@ def import_product_draft(
     if not priced:
         raise DraftImportError("missing_supplier_price")
     currency = _resolve_currency(detail, priced)
+    # Menu de preços do fornecedor: menor = provisório/display; maior = base de
+    # custo segura (SupplierProduct.cost / Product.cost) para landed e pricing.
     catalog_price = _catalog_price(priced)
+    supplier_cost_basis = _supplier_cost_basis(priced)
     now = utcnow()
 
     try:
@@ -133,11 +142,12 @@ def import_product_draft(
             detail=detail,
             currency=currency,
             catalog_price=catalog_price,
+            supplier_cost_basis=supplier_cost_basis,
             now=now,
         )
 
         _apply_category(product, supplier, detail, created)
-        _apply_product(product, detail, catalog_price, currency, now)
+        _apply_product(product, detail, catalog_price, supplier_cost_basis, currency, now)
         variant_counts, images = _apply_variants_and_images(
             product, supplier_product, detail, now
         )
@@ -195,15 +205,54 @@ def _priced_skus(skus: List[AliExpressProductSku]) -> List[AliExpressProductSku]
     return [sku for sku in skus if _effective_supplier_price(sku) is not None]
 
 
-def _catalog_price(priced: List[AliExpressProductSku]):
-    positive = [
+def _sku_is_active(sku: AliExpressProductSku) -> bool:
+    stock = sku.available_stock
+    if stock is None:
+        return True
+    try:
+        return int(stock) > 0
+    except (TypeError, ValueError):
+        return True
+
+
+def _sku_positives(priced: List[AliExpressProductSku]) -> List[Decimal]:
+    return [
         price
         for price in (_effective_supplier_price(sku) for sku in priced)
         if price is not None and price > 0
     ]
+
+
+def _catalog_price(priced: List[AliExpressProductSku]):
+    """MENOR preço positivo entre os SKUs — provisório/display (não publicável).
+
+    Usado apenas como Product.price provisório enquanto `pricing_status != priced`
+    (o preço de venda canônico vem de price_dropshipping_product()).
+    """
+    positive = _sku_positives(priced)
     if not positive:
         raise DraftImportError("missing_supplier_price")
     return min(positive)
+
+
+def _supplier_cost_basis(priced: List[AliExpressProductSku]):
+    """MAIOR preço efetivo positivo entre os SKUs ATIVOS — base de custo segura.
+
+    Custo conservador (pior caso) para dismantling seguro do landed/pricing:
+    repor o produto inteiro custaria o SKU mais caro ainda vendável (ativo).
+    """
+    active_positive = [
+        price
+        for sku in priced
+        for price in [_effective_supplier_price(sku)]
+        if price is not None and price > 0 and _sku_is_active(sku)
+    ]
+    if not active_positive:
+        # sem SKU ativo com preço: cai para o menor preço positivo observado
+        # (defensivo; mantém o import não-falho mesmo em dados incompletos).
+        fallback = _sku_positives(priced)
+        return min(fallback) if fallback else None
+    return max(active_positive)
 
 
 def _norm_currency(value: Optional[str]) -> Optional[str]:
@@ -260,6 +309,7 @@ def _resolve_product_and_link(
     detail: AliExpressProductDetail,
     currency: str,
     catalog_price,
+    supplier_cost_basis,
     now,
 ) -> Tuple[Product, SupplierProduct, bool]:
     existing_sp = SupplierProduct.query.filter_by(
@@ -271,7 +321,14 @@ def _resolve_product_and_link(
         # rascunho (decisões comerciais não são sobrescritas nesta fase).
         if not product.is_draft or product.is_active:
             raise DraftImportConflict("already_published")
-        _apply_supplier_product(existing_sp, product, catalog_price, currency, now)
+        _apply_supplier_product(
+            existing_sp,
+            product,
+            catalog_price,
+            supplier_cost_basis,
+            currency,
+            now,
+        )
         return product, existing_sp, False
 
     matches = Product.query.filter_by(
@@ -307,7 +364,9 @@ def _resolve_product_and_link(
         supplier_product_id=external_id,
     )
     db.session.add(supplier_product)
-    _apply_supplier_product(supplier_product, product, catalog_price, currency, now)
+    _apply_supplier_product(
+        supplier_product, product, catalog_price, supplier_cost_basis, currency, now
+    )
     db.session.flush()
     return product, supplier_product, created
 
@@ -316,13 +375,17 @@ def _apply_supplier_product(
     supplier_product: SupplierProduct,
     product: Product,
     catalog_price,
+    supplier_cost_basis,
     currency: str,
     now,
 ) -> None:
     previous_cost = supplier_product.cost
     previous_currency = supplier_product.currency
 
-    supplier_product.cost = catalog_price
+    # Fase 7.1: SupplierProduct.cost = MAIOR preço efetivo positivo entre SKUs
+    # ativos (base de custo segura), e Product.cost acompanha esse mesmo basis.
+    supplier_product.cost = supplier_cost_basis
+    product.cost = supplier_cost_basis
     supplier_product.wholesale_price = None
     supplier_product.currency = currency
     supplier_product.sync_status = "synced"
@@ -436,6 +499,7 @@ def _apply_product(
     product: Product,
     detail: AliExpressProductDetail,
     catalog_price,
+    supplier_cost_basis,
     currency: str,
     now,
 ) -> None:
@@ -443,7 +507,10 @@ def _apply_product(
     product.description = detail.description
     product.source = SOURCE_ALIEXPRESS
     product.external_id = str(detail.product_id)
-    product.cost = catalog_price
+    # Fase 7.1: Product.cost acompanha o cost basis do fornecedor (não é fonte
+    # canônica de pricing, mas evita informação administrativa enganosa). O
+    # preço provisório de display é o MENOR preço (catalog_price).
+    product.cost = supplier_cost_basis
     product.wholesale_price = None
     product.is_draft = True
     product.is_active = False

@@ -2,12 +2,17 @@
 
  GET /integrations/aliexpress/authorize  -> gera state, redireciona p/ AliExpress
  GET /integrations/aliexpress/callback   -> valida state, troca code, faz DS smoke
+ GET /integrations/aliexpress/callback/complete -> idem (fallback cookie Vercel)
 
 Regras de segurança:
   - state obrigatório, comparado com hmac.compare_digest, consumido após uso.
   - NUNCA mostra/exibe access_token, refresh_token, app_secret, code ou sign.
-  - Token usado SOMENTE em memória para o smoke read-only; não gravado em
-    cookie/session/.env. Sem refresh automático.
+  - O token é usado SOMENTE em memória nos smokes read-only. Fase 7: após
+    sucesso, a credencial admin temporária (payload criptografado contendo
+    access_token + seller_id + exp) é gravada num cookie HttpOnly/Secure/
+    SameSite=Lax com path restrito a /admin/integrations/aliexpress e TTL ~30
+    min (ver loja.integrations.aliexpress.admin_session). Token nunca em
+    plaintext em banco/log/HTML/query string. Sem refresh automático.
 """
 
 from __future__ import annotations
@@ -33,6 +38,7 @@ from loja.integrations.aliexpress import (
     DEFAULT_BASE_URL,
     raw_canonical_sku_id,
 )
+from loja.integrations.aliexpress import admin_session
 from loja.integrations.aliexpress.errors import (
     AliExpressAPIError,
     AliExpressAuthError,
@@ -445,6 +451,15 @@ def callback():
             "yes" if city_code else "no",
         )
 
+    # Fase 7 — credencial administrativa temporária criptografada.
+    # Após sucesso OAuth, cria o cookie admin e redireciona para o catálogo
+    # admin (fail-closed: sem ALIEXPRESS_ADMIN_SESSION_KEY não há sessão nem
+    # redirect; apenas o smoke opt-in dos testes mantém a página de diagnóstico).
+    if not use_freight_smoke:
+        admin_redirect = _build_admin_redirect(token)
+        if admin_redirect is not None:
+            return admin_redirect
+
     return _render_success(
         token,
         result,
@@ -459,6 +474,39 @@ def callback():
         draft_result=draft_result,
         draft_error=draft_error,
     )
+
+
+def _build_admin_redirect(token: Any) -> Optional[tuple]:
+    """Cria o cookie admin criptografado (Fase 7) e redireciona para o catálogo.
+
+    Retorna None quando a funcionalidade está desabilitada (env ausente) ou
+    falhou de forma segura — nesses casos o callback mantém a página antiga de
+    diagnóstico (sem sessão admin). Nunca expõe token/state/code. O cookie é
+    definido via after_this_request com path restrito + HttpOnly + Secure.
+    """
+    if not admin_session.is_configured():
+        current_app.logger.error(
+            "AliExpress admin session: env ausente (fail-closed, sem sessão)"
+        )
+        return None
+
+    try:
+        session_value = admin_session.create_admin_session_value(
+            seller_id=token.seller_id,
+            access_token=token.access_token,
+        )
+    except Exception:
+        current_app.logger.error(
+            "AliExpress admin session: falha ao criptografar (sem sessão)"
+        )
+        return None
+
+    @after_this_request
+    def _set_admin_session_cookie(response):
+        admin_session.set_admin_session_cookie(response, session_value)
+        return response
+
+    return redirect(admin_session.ADMIN_CATALOG_PATH, code=302)
 
 
 # Limite de chamadas de frete no smoke (mantém o callback dentro do timeout).
