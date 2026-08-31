@@ -135,6 +135,42 @@
     line-height:2;
 }
 
+/* Descrição sanitizada: conteúdo externo nunca provoca overflow da viewport.
+   Os width/height gigantes do fornecedor são anulados por CSS responsivo
+   (o sanitizer não aceita style); wrappers e tabelas ficam contidos. */
+.product-description,
+.details-text{
+    min-width:0;
+    max-width:100%;
+    overflow-wrap:anywhere;
+    overflow-x:hidden;
+}
+
+.product-description img,
+.details-text img{
+    display:block;
+    max-width:100% !important;
+    width:auto !important;
+    height:auto !important;
+    margin:0 auto 1rem;
+    object-fit:contain;
+}
+
+.product-description div,
+.product-description p,
+.details-text div,
+.details-text p{
+    max-width:100%;
+    min-width:0;
+}
+
+.product-description table,
+.details-text table{
+    max-width:100%;
+    table-layout:fixed;
+    word-break:break-word;
+}
+
 .related-products{
     max-width:1280px;
     margin:6rem auto;

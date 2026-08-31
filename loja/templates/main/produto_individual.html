@@ -537,9 +537,18 @@ body.product-lightbox-open {
             </div>
 
             {% if product.description %}
-            <div class="product-description">
-                {{ sanitize_product_description_html(product.description) }}
-            </div>
+            {% if uses_variants %}
+                {% set excerpt = product_description_excerpt(product.description, max_words=40) %}
+                {% if excerpt %}
+                <div class="product-description product-description-excerpt">
+                    {{ excerpt }}
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="product-description">
+                    {{ sanitize_product_description_html(product.description) }}
+                </div>
+            {% endif %}
             {% endif %}
 
             <form

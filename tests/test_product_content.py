@@ -126,3 +126,124 @@ def test_excerpt_handles_entities_and_none():
     assert product_description_excerpt("mais&nbsp;e&nbsp;mais &amp; tal") == "mais e mais & tal"
     assert product_description_excerpt(None) == ""
     assert product_description_excerpt("") == ""
+
+
+# ── Fase 7.2.3: apresentação segura/responsiva da descrição ──────────────────
+
+def _make_public(db, *, name, description, source="internal"):
+    from decimal import Decimal
+    from uuid import uuid4
+
+    from loja.modules.models import Product
+
+    product = Product(
+        id=uuid4(),
+        name=name,
+        description=description,
+        price=Decimal("99.90"),
+        cost=Decimal("40.00"),
+        image1="https://exemplo.com/img.png",
+        source=source,
+        is_active=True,
+        is_draft=False,
+        currency="BRL",
+        target_margin_percent=Decimal("30.00"),
+        pricing_status="priced" if source == "aliexpress" else "unpriced",
+    )
+    db.session.add(product)
+    db.session.commit()
+    return product
+
+
+def _description_card_excerpt(client, product_name):
+    from html import unescape
+
+    resp = client.get("/produtos")
+    assert resp.status_code == 200
+    body = unescape(resp.get_data(as_text=True))
+    idx = body.index(product_name)
+    tail = body[idx: idx + 4000]
+    p = tail.index("product-desc")
+    start = tail.index(">", p) + 1
+    end = tail.index("</p>", start)
+    return tail[start:end].strip()
+
+
+def test_card_image_only_description_falls_back_to_name(client, db):
+    _make_public(
+        db,
+        name="Vestido Só Imagens",
+        description='<img src="https://ae01.alicdn.com/kf/x.jpg" width="944">',
+    )
+    assert _description_card_excerpt(client, "Vestido Só Imagens") == "Vestido Só Imagens"
+
+
+def test_card_empty_description_falls_back_to_name(client, db):
+    _make_public(db, name="Sem Descrição", description=None)
+    assert _description_card_excerpt(client, "Sem Descrição") == "Sem Descrição"
+
+
+def test_card_textual_description_uses_excerpt(client, db):
+    _make_public(
+        db,
+        name="Com Texto",
+        description="<p>primeiro segundo terceiro quarto</p>",
+    )
+    given = _description_card_excerpt(client, "Com Texto")
+    assert given == "primeiro segundo terceiro quarto"
+    assert given != "Com Texto"
+    assert "<" not in given
+
+
+def test_aliexpress_image_heavy_description_not_rendered_twice(client, db):
+    desc = (
+        '<div style="width:944px">'
+        '<p style="color:red">boas-vindas</p>'
+        '<img src="https://ae01.alicdn.com/kf/1.jpg" onerror="alert(1)" width="944">'
+        '<img src="https://ae-pic-a1.aliexpress-media.com/2.png" width="944">'
+        "</div>"
+    )
+    product = _make_public(db, name="Ali Foto", description=desc, source="aliexpress")
+    resp = client.get(f"/produtos/{product.id}")
+    body = resp.get_data(as_text=True)
+    # Descrição completa sanitizada aparece UMA única vez (na .details-text).
+    assert body.count("details-text") == 1
+    assert "product-description-excerpt" in body
+    # Conteúdo da região de descrição completa (fora do restante do layout).
+    section_marker = '<div class="details-text">'
+    start = body.index(section_marker) + len(section_marker)
+    details_start = body.index("<p", start)
+    details_close = body.index("</section>", start)
+    details_block = body[start:details_close]
+    # Imagens permitidas dos CDNs AliExpress preservadas.
+    assert "ae01.alicdn.com/kf/1.jpg" in details_block
+    assert "aliexpress-media.com/2.png" in details_block
+    # style/onerror/peso do fornecedor removidos da descrição.
+    assert "style=" not in details_block
+    assert "onerror" not in details_block
+
+
+def test_sanitized_description_keeps_valid_images_removes_style_and_onerror():
+    raw = (
+        '<img src="https://ae01.alicdn.com/kf/x.jpg" '
+        'onerror="alert(1)" style="width:944px" width="944" height="10000" alt="ok">'
+    )
+    out = str(sanitize_product_description_html(raw))
+    assert 'src="https://ae01.alicdn.com/kf/x.jpg"' in out
+    assert "style" not in out
+    assert "onerror" not in out
+    assert 'alt="ok"' in out
+
+
+def test_description_css_has_responsive_image_rules():
+    css_path = "loja/static/styles/produtos_individual.css"
+    with open(css_path, encoding="utf-8") as fh:
+        css = fh.read()
+    # Regras para imagens da descrição responsivas.
+    assert "max-width:100% !important" in css
+    assert "height:auto !important" in css
+    assert "width:auto !important" in css
+    # Nunca usa largura fixa do fornecedor.
+    assert "width:944px" not in css
+    # Tabelas/wrappers contidos (sem overflow horizontal).
+    assert ".product-description table" in css or ".details-text table" in css

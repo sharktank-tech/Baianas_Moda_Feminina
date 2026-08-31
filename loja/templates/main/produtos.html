@@ -221,7 +221,8 @@
             <span class="product-category">{{ product.category }}</span>
             {% endif %}
             <h2 class="product-name">{{ product.name }}</h2>
-            <p class="product-desc">{{ product_description_excerpt(product.description, max_words=30) }}</p>
+            {% set excerpt = product_description_excerpt(product.description, max_words=30) %}
+            <p class="product-desc">{{ excerpt or product.name }}</p>
             <div class="product-footer">
               <span class="product-price">R$ {{ "%.2f"|format(product.price) }}</span>
               <span class="product-cta">Ver →</span>
