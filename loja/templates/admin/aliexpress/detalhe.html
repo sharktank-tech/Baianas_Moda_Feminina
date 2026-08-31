@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Detalhes do produto AliExpress{% endblock %}
+
+{% block content %}
+
+<div class="max-w-5xl mx-auto px-4 py-8">
+
+    <div class="mb-8">
+        <a href="{{ url_for('aliexpress_admin.index') }}"
+           class="text-sm text-gray-500 hover:text-gray-800 underline">
+            &larr; Voltar ao catálogo
+        </a>
+        <h1 class="text-3xl font-bold text-gray-800 mt-2">
+            {{ detail.title or 'Produto AliExpress' }}
+        </h1>
+        <p class="text-gray-500 mt-2">
+            {% if detail.product_id %}ID: {{ detail.product_id }}{% endif %}
+            {% if detail.category_id %} &middot; Categoria: {{ detail.category_id }}{% endif %}
+        </p>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow p-6 mb-8">
+        <div class="flex flex-col md:flex-row gap-8">
+            <div class="md:w-1/2">
+                {% if detail.images %}
+                    <img src="{{ detail.images[0] }}" alt="{{ detail.title or 'Produto AliExpress' }}"
+                         class="w-full rounded-2xl object-cover">
+                {% endif %}
+            </div>
+            <div class="md:w-1/2">
+                <div class="flex items-center gap-3 mb-4">
+                    <span class="text-3xl text-pink-600 font-bold">
+                        R$ {{ "%.2f"|format(detail.sale_price or detail.original_price or 0) }}
+                    </span>
+                    {% if detail.original_price and detail.sale_price and detail.original_price > detail.sale_price %}
+                        <span class="text-gray-400 line-through">
+                            R$ {{ "%.2f"|format(detail.original_price) }}
+                        </span>
+                    {% endif %}
+                </div>
+                <p class="text-gray-500">
+                    Moeda: {{ detail.currency or 'BRL' }} &middot; Estoque disponível:
+                    {{ detail.available_stock if detail.available_stock is not none else '—' }}
+                </p>
+
+                <form method="POST"
+                      action="{{ url_for('aliexpress_admin.importar', product_id=detail.product_id or '') }}"
+                      class="mt-6">
+                    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+                    <button type="submit"
+                            class="bg-pink-600 hover:bg-pink-700 text-white font-semibold px-6 py-3 rounded-lg">
+                        Importar como rascunho
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    {% if detail.description %}
+        <div class="bg-white rounded-2xl shadow p-6 mb-8">
+            <h2 class="text-xl font-semibold text-gray-800 mb-3">Descrição</h2>
+            <div class="text-gray-600">{{ detail.description }}</div>
+        </div>
+    {% endif %}
+
+    {% if detail.skus %}
+        <div class="bg-white rounded-2xl shadow p-6">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">
+                Variações ({{ detail.skus|length }})
+            </h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-gray-500 border-b">
+                            <th class="py-2 pr-4">Atributos</th>
+                            <th class="py-2 pr-4">Estoque</th>
+                            <th class="py-2 pr-4">Preço ({{ detail.currency or 'BRL' }})</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for sku in detail.skus %}
+                            <tr class="border-b">
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {% if sku.attributes %}
+                                        {{ sku.attributes|map(attribute='value')|join(', ') }}
+                                    {% else %}
+                                        —
+                                    {% endif %}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ sku.available_stock if sku.available_stock is not none else '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ "%.2f"|format(sku.sale_price or sku.original_price or 0) }}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+
+</div>
+
+{% endblock %}

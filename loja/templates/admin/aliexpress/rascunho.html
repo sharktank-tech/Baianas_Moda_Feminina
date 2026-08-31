@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}Rascunho AliExpress — públicos, frete e preço{% endblock %}
+
+{% block content %}
+
+<div class="max-w-5xl mx-auto px-4 py-8">
+
+    <div class="mb-8">
+        <a href="{{ url_for('aliexpress_admin.index') }}"
+           class="text-sm text-gray-500 hover:text-gray-800 underline">
+            &larr; Voltar ao catálogo
+        </a>
+        <h1 class="text-3xl font-bold text-gray-800 mt-2">
+            {{ product.name }}
+        </h1>
+        <p class="text-gray-500 mt-2">
+            Rascunho AliExpress{% if product.external_id %} &middot; ID: {{ product.external_id }}{% endif %}
+        </p>
+
+        <div class="flex flex-wrap gap-2 mt-3">
+            <span class="text-sm font-medium px-3 py-1 rounded-full border
+                         {% if supplier_product and supplier_product.freight_status == 'available' %}text-green-700 bg-green-50 border-green-200{% else %}text-yellow-700 bg-yellow-50 border-yellow-200{% endif %}">
+                Frete: {{ supplier_product.freight_status if supplier_product else '—' }}
+            </span>
+            <span class="text-sm font-medium px-3 py-1 rounded-full border
+                         {% if product.pricing_status == 'priced' %}text-green-700 bg-green-50 border-green-200{% else %}text-yellow-700 bg-yellow-50 border-yellow-200{% endif %}">
+                Pricing: {{ product.pricing_status or '—' }}
+                {% if product.pricing_error %}({{ product.pricing_error }}){% endif %}
+            </span>
+            <span class="text-sm font-medium px-3 py-1 rounded-full border text-gray-600 bg-gray-50 border-gray-200">
+                {{ 'Publicado' if product.is_active else 'Rascunho (invisível na loja)' }}
+            </span>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <div class="bg-white rounded-2xl shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-4">Situação atual</h2>
+            <dl class="text-sm space-y-2">
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Custo do fornecedor</dt>
+                    <dd class="font-medium text-gray-800">
+                        {{ "%.2f"|format(product.cost) if product.cost is not none else '—' }}
+                        {% if supplier_product and supplier_product.currency %}{{ supplier_product.currency }}{% endif %}
+                    </dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Frete</dt>
+                    <dd class="font-medium text-gray-800">
+                        {{ "%.2f"|format(supplier_product.shipping_cost) if supplier_product and supplier_product.shipping_cost is not none else '—' }}
+                        {% if supplier_product and supplier_product.freight_currency %}{{ supplier_product.freight_currency }}{% endif %}
+                    </dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Landed cost</dt>
+                    <dd class="font-medium text-gray-800">
+                        {{ "%.2f"|format(supplier_product.landed_cost) if supplier_product and supplier_product.landed_cost is not none else '—' }}
+                    </dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Margem alvo</dt>
+                    <dd class="font-medium text-gray-800">
+                        {{ "%.2f"|format(product.target_margin_percent) if product.target_margin_percent is not none else '—' }}%
+                    </dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Preço de venda</dt>
+                    <dd class="font-medium text-pink-600 font-bold">
+                        {{ "%.2f"|format(product.price) if product.price is not none else '—' }}
+                        {% if product.currency %}{{ product.currency }}{% endif %}
+                    </dd>
+                </div>
+            </dl>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-4">Frete manual</h2>
+            <p class="text-xs text-gray-500 mb-4">
+                0,00 só é aceito quando o envio é realmente gratuito. A moeda do
+                frete deve ser igual à moeda do fornecedor (sem conversão).
+            </p>
+            <form method="POST"
+                  action="{{ url_for('aliexpress_admin.rascunho_frete', product_id=product.external_id or '') }}"
+                  class="space-y-4">
+                {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+                <label class="block">
+                    <span class="text-sm font-medium text-gray-700">Custo do frete</span>
+                    <input type="number" step="0.01" min="0" name="shipping_cost"
+                           placeholder="Ex: 20,00"
+                           class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+                </label>
+                <label class="block">
+                    <span class="text-sm font-medium text-gray-700">Moeda do frete</span>
+                    <input type="text" name="freight_currency"
+                           placeholder="Ex: BRL" value="BRL"
+                           class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+                </label>
+                <button type="submit"
+                        class="bg-pink-600 hover:bg-pink-700 text-white font-semibold px-6 py-3 rounded-lg">
+                    Salvar frete
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <div class="bg-white rounded-2xl shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-4">Definir margem e precificar</h2>
+            <form method="POST"
+                  action="{{ url_for('aliexpress_admin.rascunho_margem', product_id=product.external_id or '') }}"
+                  class="space-y-4">
+                {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+                <label class="block">
+                    <span class="text-sm font-medium text-gray-700">Margem alvo (%)</span>
+                    <input type="number" step="0.01" min="0.01" max="99.99" name="target_margin_percent"
+                           placeholder="Ex: 30"
+                           class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+                </label>
+                <button type="submit"
+                        class="bg-pink-600 hover:bg-pink-700 text-white font-semibold px-6 py-3 rounded-lg">
+                    Calcular preço
+                </button>
+            </form>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-4">Publicar na loja</h2>
+            <p class="text-xs text-gray-500 mb-4">
+                A publicação só é liberada quando frete, moeda, preço e estoque
+                estiverem válidos (avaliado pelo serviço de publicação).
+            </p>
+            <form method="POST"
+                  action="{{ url_for('aliexpress_admin.rascunho_publicar', product_id=product.external_id or '') }}">
+                {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+                <button type="submit"
+                        class="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-lg">
+                    Publicar produto
+                </button>
+            </form>
+        </div>
+    </div>
+
+</div>
+
+{% endblock %}
