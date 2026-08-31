@@ -7,11 +7,13 @@ descrição no storefront.
 """
 
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 
 import loja.views.payments_routes as pr
+from loja.modules.getway_mercado_pago.payment_models import Order
 from loja.modules.models import (
     Cart,
     CartItem,
@@ -20,7 +22,9 @@ from loja.modules.models import (
     Supplier,
     SupplierProduct,
 )
+from loja.utils import utcnow
 from loja.views.routes import (
+    _assert_selector_invariant,
     _build_variant_selector,
     _resolve_selected_variant,
     _uses_variants,
@@ -378,6 +382,130 @@ def test_approved_sync_no_double_decrement_variant(
     assert synced.status == "paid"
 
     assert rosa_m.stock == 2
+    assert synced.stock_reserved is True
+
+
+def test_late_approved_refund_releases_reservation(
+    db, make_user, ae_product, monkeypatch
+):
+    user = make_user()
+    product, rosa_m, _ = ae_product
+    order = _make_variant_order(db, user, product, rosa_m, quantity=2)
+
+    pr._reserve_stock(_variant_item(product, rosa_m, quantity=2))
+    pr._release_stock(order)
+    assert order.stock_reserved is False
+    assert rosa_m.stock == 4
+    assert product.stock == 9
+
+    monkeypatch.setattr(
+        pr,
+        "get_payment",
+        lambda pid: _mp_payload(pid, order, "approved", "accredited"),
+    )
+    synced = pr._sync_payment("9012")
+    assert synced.status == "paid"
+    assert synced.stock_reserved is True
+    assert rosa_m.stock == 2
+    assert product.stock == 7
+
+    monkeypatch.setattr(
+        pr,
+        "get_payment",
+        lambda pid: _mp_payload(pid, order, "refunded", "refunded"),
+    )
+    synced = pr._sync_payment("9013")
+    assert synced.status == "refunded"
+    assert synced.stock_reserved is False
+    assert rosa_m.stock == 4
+    assert product.stock == 9
+
+
+def test_second_refund_does_not_double_release(
+    db, make_user, ae_product, monkeypatch
+):
+    user = make_user()
+    product, rosa_m, _ = ae_product
+    order = _make_variant_order(db, user, product, rosa_m, quantity=2)
+    pr._reserve_stock(_variant_item(product, rosa_m, quantity=2))
+
+    def refund_payload(pid):
+        return _mp_payload(pid, order, "refunded", "refunded")
+
+    monkeypatch.setattr(pr, "get_payment", refund_payload)
+    first = pr._sync_payment("9014")
+    assert first.status == "refunded"
+    assert rosa_m.stock == 4
+
+    second = pr._sync_payment("9015")
+    assert second.status == "refunded"
+    assert second.stock_reserved is False
+    assert rosa_m.stock == 4
+    assert product.stock == 9
+
+
+def test_payment_failed_releases_variant_reservation(
+    db, make_user, ae_product, monkeypatch
+):
+    user = make_user()
+    product, rosa_m, _ = ae_product
+    order = _make_variant_order(db, user, product, rosa_m, quantity=2)
+    pr._reserve_stock(_variant_item(product, rosa_m, quantity=2))
+    assert rosa_m.stock == 2
+    assert product.stock == 7
+
+    monkeypatch.setattr(
+        pr,
+        "get_payment",
+        lambda pid: _mp_payload(
+            pid, order, "rejected", "rejected"
+        ),
+    )
+    synced = pr._sync_payment("9016")
+    assert synced.status == "payment_failed"
+    assert synced.stock_reserved is False
+    assert rosa_m.stock == 4
+    assert product.stock == 9
+
+
+def test_reserve_approved_keeps_no_double_debit(
+    db, make_user, ae_product, monkeypatch
+):
+    user = make_user()
+    product, rosa_m, _ = ae_product
+    order = _make_variant_order(db, user, product, rosa_m, quantity=2)
+    order.stock_reserved = True
+    db.session.commit()
+    pr._reserve_stock(_variant_item(product, rosa_m, quantity=2))
+    assert rosa_m.stock == 2
+
+    monkeypatch.setattr(
+        pr,
+        "get_payment",
+        lambda pid: _mp_payload(pid, order, "approved", "accredited"),
+    )
+    synced = pr._sync_payment("9017")
+    assert synced.status == "paid"
+    assert synced.stock_reserved is True
+    assert rosa_m.stock == 2
+
+
+def test_release_expired_reservations_variant(
+    db, make_user, ae_product
+):
+    user = make_user()
+    product, rosa_m, _ = ae_product
+    order = _make_variant_order(db, user, product, rosa_m, quantity=2)
+    order.created_at = utcnow() - timedelta(hours=48)
+    db.session.commit()
+    pr._reserve_stock(_variant_item(product, rosa_m, quantity=2))
+    assert rosa_m.stock == 2
+
+    pr.release_expired_stock_reservations(hours=24)
+
+    assert rosa_m.stock == 4
+    assert product.stock == 9
+    assert order.stock_reserved is False
 
 
 def test_refunded_sync_releases_variant_reservation(
@@ -654,3 +782,260 @@ def test_release_stock_restores_exactly_once(db, make_user, ae_product):
     pr._release_stock(order)
     assert rosa_m.stock == 4
     assert product.stock == 9
+
+
+# ── Fase 7.2.2 ───────────────────────────────────────────────────────────────
+
+# F: pagamento aprovado tardio / expiração / lifecycle completo com refund.
+
+def _foreign_variant(db, product_price="10.00"):
+    other = Product(
+        id=uuid.uuid4(),
+        name="Outro Produto",
+        price=Decimal(product_price),
+        is_active=True,
+    )
+    db.session.add(other)
+    db.session.flush()
+    foreign = ProductVariant(
+        id=uuid.uuid4(),
+        product_id=other.id,
+        color="Cinza",
+        size="P",
+        stock=7,
+        is_active=True,
+        price=Decimal("5.00"),
+    )
+    db.session.add(foreign)
+    db.session.commit()
+    return foreign
+
+
+def test_sync_approved_cross_product_variant_manual_review(
+    db, make_user, ae_product, monkeypatch
+):
+    user = make_user()
+    product, _, _ = ae_product
+    foreign = _foreign_variant(db)
+    order = _make_variant_order(db, user, product, foreign, quantity=2)
+    # Simula uma reserva pré-existente (stock_reserved=True), sem registrar
+    # o desconto aqui: deve seguir para manual_review sem mexer em estoque.
+    order.stock_reserved = True
+    db.session.commit()
+
+    monkeypatch.setattr(
+        pr,
+        "get_payment",
+        lambda pid: _mp_payload(pid, order, "approved", "accredited"),
+    )
+    synced = pr._sync_payment("9201")
+
+    assert synced.status == "manual_review"
+    assert synced.stock_reserved is True
+    assert product.stock == 9
+    assert foreign.stock == 7
+
+
+def test_release_cross_product_variant_aborts_and_rolls_back(
+    db, make_user, ae_product
+):
+    user = make_user()
+    product, _, _ = ae_product
+    foreign = _foreign_variant(db)
+    order = _make_variant_order(db, user, product, foreign, quantity=2)
+    order.stock_reserved = True
+    db.session.commit()
+
+    with pytest.raises(ValueError):
+        pr._release_stock(order)
+
+    # Rollback: nenhum estoque é alterado isoladamente e a reserva não fecha.
+    db.session.rollback()
+    db.session.expire_all()
+    assert product.stock == 9
+    assert foreign.stock == 7
+    assert order.stock_reserved is True
+
+
+# G: unicidade/validade das combinações de dimensões no seletor.
+
+def test_selector_no_duplicate_combinations_standard(ae_product):
+    product, _, _ = ae_product
+    selector = _build_variant_selector(product)
+    _assert_selector_invariant(selector)
+
+
+def test_selector_duplicate_dimensions_disambiguated(db):
+    a = _sku("a-1", "Rosa", "M", 3)
+    b = _sku("a-2", "Rosa", "M", 3)
+    product = _sized_product(db, [a, b])
+
+    selector = _build_variant_selector(product)
+    _assert_selector_invariant(selector)
+
+    keys = [d["key"] for d in selector["dimensions"]]
+    assert "color" in keys
+    assert "size" in keys
+    assert "option" in keys
+
+    tuples = [tuple(v["dims"]) for v in selector["variants"]]
+    assert len(tuples) == len(set(tuples)) == 2
+
+
+def test_selector_partial_missing_dimension_valid(db):
+    a = _sku("b-1", "Rosa", "M", 3)
+    b = _sku("b-2", "Azul", None, 3)
+    product = _sized_product(db, [a, b])
+
+    selector = _build_variant_selector(product)
+    _assert_selector_invariant(selector)
+
+    size_idx = next(
+        i for i, d in enumerate(selector["dimensions"]) if d["key"] == "size"
+    )
+    for variant in selector["variants"]:
+        assert variant["dims"][size_idx] in selector["dimensions"][size_idx]["options"]
+
+    tuples = [tuple(v["dims"]) for v in selector["variants"]]
+    assert len(tuples) == len(set(tuples))
+
+
+# H: carrinho/checkout real com variante e OrderItem.variant_id persistido.
+
+def test_same_variant_added_twice_increments_single_item(
+    db, client, make_user, ae_product
+):
+    product, rosa_m, _ = ae_product
+    user = make_user()
+    client.post("/login", data={"email": user.email, "password": "senha123"})
+
+    for _ in range(2):
+        resp = client.post(
+            f"/produtos/{product.id}/processar",
+            data={
+                "action": "add_to_cart",
+                "variant_id": str(rosa_m.id),
+                "quantity": "1",
+            },
+            follow_redirects=True,
+        )
+        assert "adicionado ao carrinho" in resp.get_data(as_text=True).lower()
+
+    cart = Cart.query.filter_by(user_id=user.id).first()
+    items = list(cart.items)
+    assert len(items) == 1
+    assert items[0].variant_id == rosa_m.id
+    assert items[0].quantity == 2
+
+
+def test_anonymous_selects_variant_then_login_keeps_variant(
+    db, client, make_user, ae_product
+):
+    product, rosa_m, _ = ae_product
+    user = make_user()
+
+    resp = client.post(
+        f"/produtos/{product.id}/processar",
+        data={
+            "action": "add_to_cart",
+            "variant_id": str(rosa_m.id),
+            "quantity": "1",
+        },
+    )
+    assert resp.status_code == 302
+
+    client.post(
+        "/login",
+        data={"email": user.email, "password": "senha123"},
+        follow_redirects=True,
+    )
+
+    cart = Cart.query.filter_by(user_id=user.id).first()
+    assert cart is not None
+    items = list(cart.items)
+    assert len(items) == 1
+    assert items[0].variant_id == rosa_m.id
+    assert items[0].quantity == 1
+
+
+def test_real_checkout_persists_variant_id_and_uses_product_price(
+    db, client, make_user, ae_product, monkeypatch
+):
+    from loja.modules.getway_mercado_pago.payment_models import OrderItem
+
+    user = make_user()
+    product, rosa_m, _ = ae_product
+    # Preço da variante (custo/supplier) diverge do preço de venda do produto;
+    # o vendido é sempre Product.price.
+    rosa_m.price = Decimal("50.00")
+    db.session.commit()
+
+    client.post("/login", data={"email": user.email, "password": "senha123"})
+
+    monkeypatch.setattr(pr, "calculate_shipping", lambda subtotal: Decimal("18.90"))
+    monkeypatch.setattr(
+        pr,
+        "create_preference",
+        lambda order: {
+            "preference_id": "pref-9222",
+            "checkout_url": "https://mp.example/x",
+        },
+    )
+
+    resp = client.post(
+        "/pagamentos/mercado-pago",
+        data={
+            "checkout_type": "product",
+            "product_id": str(product.id),
+            "quantity": "2",
+            "variant_id": str(rosa_m.id),
+            "selected_size": "M",
+            "nome": "Cliente Teste",
+            "email": user.email,
+            "cep": "01310100",
+            "estado": "SP",
+            "endereco": "Rua Teste",
+            "numero": "10",
+            "bairro": "Centro",
+            "cidade": "São Paulo",
+        },
+    )
+    assert resp.status_code == 302
+
+    order = Order.query.filter_by(user_id=user.id).first()
+    assert order is not None
+    item = OrderItem.query.filter_by(order_id=order.id).first()
+    assert item.variant_id == rosa_m.id
+    assert Decimal(str(item.unit_price)) == Decimal(str(product.price))
+    # Estoque debitado na reserva de criação do pedido.
+    assert rosa_m.stock == 2
+
+
+def test_legacy_product_without_variant_uses_old_flow(db, client, make_user):
+    product = Product(
+        id=uuid.uuid4(),
+        name="Legado",
+        description="<p>ok</p>",
+        price=Decimal("50.00"),
+        cost=Decimal("20.00"),
+        stock=5,
+        is_active=True,
+        is_draft=False,
+        source="internal",
+    )
+    db.session.add(product)
+    db.session.commit()
+    user = make_user()
+    client.post("/login", data={"email": user.email, "password": "senha123"})
+
+    resp = client.post(
+        f"/produtos/{product.id}/processar",
+        data={"action": "add_to_cart", "size": "M", "quantity": "1"},
+        follow_redirects=True,
+    )
+    assert "adicionado ao carrinho" in resp.get_data(as_text=True).lower()
+
+    cart = Cart.query.filter_by(user_id=user.id).first()
+    item = list(cart.items)[0]
+    assert item.variant_id is None
+    assert item.selected_size == "M"

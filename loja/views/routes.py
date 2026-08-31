@@ -319,9 +319,15 @@ def _distinct_ordered(values):
 def _build_variant_selector(product):
     """Estrutura de seleção por dimensões (Cor/Tamanho) para o storefront.
 
-    Se não houver informação distinguível de cor nem tamanho e existirem
-    múltiplas variantes, usa labels genéricos seguros "Opção N" — nunca expõe
-    supplier_sku_id/external_sku_id/supplier_product_id.
+    Garante que cada combinação renderizada resulte em EXATAMENTE um variant_id:
+
+      * Cada `variant.dims[i]` pertence a `dimensions[i].options`;
+      * As tuplas `dims` são únicas entre variantes (nunca há colisão fazendo o
+        cliente usar apenas `matchingVariants(...)[0]`);
+      * Não exige traduzir cor/tamanho ausente em um valor impossível: uma
+        variante sem tamanho ganha um rótulo "Opção N" que também entra nas
+        options daquela dimensão (cenário misto / dimensão parcialmente ausente).
+      * Nunca expõe supplier_sku_id/external_sku_id/supplier_product_id.
     """
     metas = _active_variants_for_product(product)
     uses_variants = _uses_variants(product)
@@ -343,70 +349,102 @@ def _build_variant_selector(product):
     color_vals = _distinct_ordered(meta["color_label"] for meta in metas)
     size_vals = _distinct_ordered(meta["size_label"] for meta in metas)
 
-    def _finalize(dim_value, meta, index):
-        """Garante valor na dimensão exibida: se a variante não tiver, usa um
-        rótulo genérico por índice para que continuem selecionáveis."""
-        if isinstance(dim_value, bool):
-            return dim_value
-        value = _variant_dim_label(meta, dim_value)
-        if value:
-            return value
-        return "Opção %d" % (index + 1)
+    dims_spec = []
+    if color_vals:
+        dims_spec.append(("color", "Cor"))
+    if size_vals:
+        dims_spec.append(("size", "Tamanho"))
+    if not dims_spec:
+        dims_spec.append(("option", "Opção"))
 
-    if color_vals and size_vals:
-        dimensions = [
-            {"key": "color", "title": "Cor", "options": color_vals},
-            {"key": "size", "title": "Tamanho", "options": size_vals},
-        ]
-        variants = [
-            {
-                "id": meta["id"],
-                "stock": meta["stock"],
-                "label": meta["label"],
-                "dims": [_finalize("color", meta, i), _finalize("size", meta, i)],
-            }
-            for i, meta in enumerate(metas)
-        ]
-    elif color_vals:
-        dimensions = [{"key": "color", "title": "Cor", "options": color_vals}]
-        variants = [
-            {
-                "id": meta["id"],
-                "stock": meta["stock"],
-                "label": meta["label"],
-                "dims": [_finalize("color", meta, i)],
-            }
-            for i, meta in enumerate(metas)
-        ]
-    elif size_vals:
-        dimensions = [{"key": "size", "title": "Tamanho", "options": size_vals}]
-        variants = [
-            {
-                "id": meta["id"],
-                "stock": meta["stock"],
-                "label": meta["label"],
-                "dims": [_finalize("size", meta, i)],
-            }
-            for i, meta in enumerate(metas)
-        ]
-    else:
-        opt_vals = ["Opção %d" % (i + 1) for i in range(len(metas))]
-        dimensions = [{"key": "option", "title": "Opção", "options": opt_vals}]
-        variants = [
-            {
-                "id": meta["id"],
-                "stock": meta["stock"],
-                "label": meta["label"],
-                "dims": [opt_vals[i]],
-            }
-            for i, meta in enumerate(metas)
-        ]
+    # Passo 1: dimensões + valores por variante, com fallback "Opção N" para
+    # slots ausentes (contador por dimensão -> valores únicos dentro da dim e
+    # presentes nas options, satisfazendo a asserção de defesa).
+    fallback_count = {di: 0 for di in range(len(dims_spec))}
+    raw_dims = []  # lista (por variante) de listas de valores
+
+    for meta in metas:
+        values = []
+        for di, (key, title) in enumerate(dims_spec):
+            if key == "option":
+                values.append("Opção %d" % (len(raw_dims) + 1))
+                continue
+            value = _variant_dim_label(meta, key)
+            if not value:
+                fallback_count[di] += 1
+                value = "Opção %d" % fallback_count[di]
+            values.append(value)
+        raw_dims.append(values)
+
+    dimensions = []
+    for di, (key, title) in enumerate(dims_spec):
+        slot_values = _distinct_ordered(row[di] for row in raw_dims)
+        dimensions.append({"key": key, "title": title, "options": slot_values})
+
+    variants = [
+        {
+            "id": meta["id"],
+            "stock": meta["stock"],
+            "label": meta["label"],
+            "dims": raw_dims[idx],
+        }
+        for idx, meta in enumerate(metas)
+    ]
+
+    # Passo 2: garante unicidade das tuplas. Se duas variantes geraram o mesmo
+    # dims (ex.: A=Rosa/M e B=Rosa/M), adiciono uma dimensão "Opção" segura
+    # (valores únicos por variante, ligados aos UUIDs internos) para desempatar.
+    seen_tuples = {}
+    duplicated = False
+    for variant in variants:
+        key = tuple(variant["dims"])
+        if key in seen_tuples:
+            duplicated = True
+            break
+        seen_tuples[key] = variant
+
+    if duplicated:
+        option_labels = ["Opção %d" % (i + 1) for i in range(len(variants))]
+        dimensions.append({"key": "option", "title": "Opção", "options": option_labels})
+        for i, variant in enumerate(variants):
+            variant["dims"].append(option_labels[i])
 
     return {
         "uses_variants": True,
         "dimensions": dimensions,
         "variants": variants,
     }
+
+
+def _assert_selector_invariant(selector):
+    """Asserção de defesa: válida a unicidade e a consistência do seletor.
+
+    Para toda variante:
+      * cada variant.dims[i] pertence a dimensions[i].options
+      * as tuplas de dims são únicas entre variantes
+      * há exatamente uma combinação renderizada por variant_id
+    """
+    dimensions = selector.get("dimensions", [])
+    variants = selector.get("variants", [])
+
+    seen = set()
+    for variant in variants:
+        dims = variant.get("dims", [])
+        assert len(dims) == len(dimensions), (
+            "dims sem dimensões correspondentes"
+        )
+        for i, value in enumerate(dims):
+            assert value in dimensions[i]["options"], (
+                f"valor {value!r} fora das options da dimensão {i} "
+                f"({dimensions[i]['options']!r})"
+            )
+        key = tuple(dims)
+        assert key not in seen, f"tupla de dims duplicada: {key!r}"
+        seen.add(key)
+
+    # Cada combinação renderizada precisa mapear para exatamente um variant_id.
+    ids = [variant["id"] for variant in variants]
+    assert len(ids) == len(set(ids)), "variant_id duplicado no seletor"
 
 
 def _uses_variants(product):

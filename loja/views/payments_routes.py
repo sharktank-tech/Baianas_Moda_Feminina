@@ -446,34 +446,68 @@ def _reserve_stock(item_data):
 
 
 def _release_stock(order):
-    """Devolve ao estoque o que foi reservado em um pedido não pago."""
+    """Devolve ao estoque o que foi reservado em um pedido não pago.
+
+    Para itens com variante, resolve sempre Product primeiro e ProductVariant
+    depois (ordem de lock consistente com _reserve_stock). Se a variante não
+    resolver (id inexistente ou pertencente a outro produto), ABORTA com erro
+    para que a transação faça rollback — jamais restaura apenas o agregado
+    (Product.stock) e deixa a soma das variantes divergente.
+    """
     if not order.stock_reserved:
         return
 
     for item in order.items:
-        if item.product_id is None:
-            continue
-
-        product = (
-            Product.query
-            .filter_by(id=item.product_id)
-            .with_for_update()
-            .first()
-        )
-
         if item.variant_id is not None:
+            # Guard: sem product_id não há como validar a integridade da
+            # variante — aborta em vez de restaurar cegamente.
+            if item.product_id is None:
+                raise ValueError(
+                    f"Item inválido em {item.product_name}: "
+                    "variant_id sem product_id não pode ser restituído."
+                )
+
+            product = (
+                Product.query
+                .filter_by(id=item.product_id)
+                .with_for_update()
+                .first()
+            )
+            if product is None:
+                raise ValueError(
+                    f"Produto não encontrado para restituir: {item.product_name}."
+                )
+
             variant = (
                 ProductVariant.query
                 .filter_by(id=item.variant_id, product_id=item.product_id)
                 .with_for_update()
                 .first()
             )
-            if variant is not None and variant.stock is not None:
+            if variant is None:
+                # Erro de integridade: não restaurar Product.stock isoladamente.
+                raise ValueError(
+                    f"Variação inválida ao restituir: {item.product_name}."
+                )
+
+            if variant.stock is not None:
                 variant.stock += item.quantity
+            if product.stock is not None:
+                product.stock += item.quantity
+        else:
+            if item.product_id is None:
+                continue
 
-        if product is not None and product.stock is not None:
-            product.stock += item.quantity
+            product = (
+                Product.query
+                .filter_by(id=item.product_id)
+                .with_for_update()
+                .first()
+            )
+            if product is not None and product.stock is not None:
+                product.stock += item.quantity
 
+    # Só após TODOS os itens restaurados com sucesso a reserva é encerrada.
     order.stock_reserved = False
 
 
@@ -780,11 +814,21 @@ def _sync_payment(payment_id):
                     )
                     locked_variants[item.id] = variant
 
-                    if not order.stock_reserved and (
-                        variant is None
-                        or not variant.is_active
+                    # Integridade Product<->Variant: a variante deve existir E
+                    # pertencer ao produto do item — validada SEMPRE,
+                    # independentemente de stock_reserved. Uma variante
+                    # inexistente ou de outro produto é erro de integridade e
+                    # nunca deve virar "paid" silenciosamente.
+                    if variant is None:
+                        review_reasons.append(
+                            f"Variação inválida: {item.product_name}."
+                        )
+                    elif not order.stock_reserved and (
+                        not variant.is_active
                         or int(variant.stock or 0) < item.quantity
                     ):
+                        # Estoque/disponibilidade só importam quando um novo
+                        # débito será necessário (reserva já abatida dispensa).
                         review_reasons.append(
                             f"Estoque insuficiente: {item.product_name}."
                         )
@@ -826,6 +870,10 @@ def _sync_payment(payment_id):
                                 and variant.stock is not None
                             ):
                                 variant.stock -= item.quantity
+
+                    # Pagamento aprovado tardio: o estoque foi debitado agora e
+                    # precisa poder ser restituído em um eventual refund.
+                    order.stock_reserved = True
 
                 if locked_coupon is not None:
                     locked_coupon.times_used += 1
