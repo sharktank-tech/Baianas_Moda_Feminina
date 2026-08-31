@@ -12,8 +12,10 @@ from sqlalchemy.orm import selectinload
 
 from loja.modules.newsletter import subscribe_newsletter
 from loja.services.product_content import (
+    build_product_gallery,
     product_description_excerpt,
     sanitize_product_description_html,
+    sanitize_product_description_without_images,
 )
 from loja.modules.services import (
     get_favorited_ids,
@@ -127,6 +129,7 @@ def inject_product_content_helpers():
     """
     return {
         "sanitize_product_description_html": sanitize_product_description_html,
+        "sanitize_product_description_without_images": sanitize_product_description_without_images,
         "product_description_excerpt": product_description_excerpt,
     }
 
@@ -213,6 +216,8 @@ def produto_individual(id):
         .all()
     )
 
+    gallery_images = build_product_gallery(product)
+
     return render_template(
         "main/produto_individual.html",
         product=product,
@@ -220,6 +225,7 @@ def produto_individual(id):
         selector=selector,
         uses_variants=uses_variants,
         no_variants_available=no_variants_available,
+        gallery_images=gallery_images,
     )
 
 

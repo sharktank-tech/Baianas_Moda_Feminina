@@ -358,13 +358,10 @@ body.product-lightbox-open {
 
 {% block content %}
 
-{% set primary_image = product.image1 or product.image2 or product.image3 or product.image4 %}
-{% set image_count =
-    (1 if product.image1 else 0)
-    + (1 if product.image2 else 0)
-    + (1 if product.image3 else 0)
-    + (1 if product.image4 else 0)
-%}
+{% set gallery = gallery_images %}
+{% set gallery_length = gallery|length %}
+{% set primary_image = gallery[0].url if gallery else none %}
+{% set image_count = gallery_length %}
 
 <div class="product-container">
 
@@ -381,65 +378,20 @@ body.product-lightbox-open {
 
             <div class="product-gallery-thumbs" role="tablist" aria-label="Selecionar imagem">
 
-                {% if product.image1 %}
+                {% for image in gallery %}
                 <button
-                    class="product-gallery-thumb is-active"
+                    class="product-gallery-thumb{{ ' is-active' if loop.first else '' }}"
                     type="button"
                     role="tab"
-                    aria-selected="true"
-                    aria-label="Exibir imagem 1 de {{ product.name }}"
-                    data-gallery-index="0"
-                    data-gallery-src="{{ product.image1 }}"
-                    data-gallery-alt="{{ product.name }} — imagem 1"
+                    aria-selected="{{ 'true' if loop.first else 'false' }}"
+                    aria-label="Exibir imagem {{ loop.index }} de {{ product.name }}"
+                    data-gallery-index="{{ loop.index0 }}"
+                    data-gallery-src="{{ image.url }}"
+                    data-gallery-alt="{{ image.alt }}"
                 >
-                    <img src="{{ product.image1 }}" alt="" width="90" height="112" loading="eager">
+                    <img src="{{ image.url }}" alt="" width="90" height="112" loading="{{ 'eager' if loop.first else 'lazy' }}">
                 </button>
-                {% endif %}
-
-                {% if product.image2 %}
-                <button
-                    class="product-gallery-thumb"
-                    type="button"
-                    role="tab"
-                    aria-selected="false"
-                    aria-label="Exibir imagem 2 de {{ product.name }}"
-                    data-gallery-index="{{ 1 if product.image1 else 0 }}"
-                    data-gallery-src="{{ product.image2 }}"
-                    data-gallery-alt="{{ product.name }} — imagem 2"
-                >
-                    <img src="{{ product.image2 }}" alt="" width="90" height="112" loading="lazy">
-                </button>
-                {% endif %}
-
-                {% if product.image3 %}
-                <button
-                    class="product-gallery-thumb"
-                    type="button"
-                    role="tab"
-                    aria-selected="false"
-                    aria-label="Exibir imagem 3 de {{ product.name }}"
-                    data-gallery-index="{{ (1 if product.image1 else 0) + (1 if product.image2 else 0) }}"
-                    data-gallery-src="{{ product.image3 }}"
-                    data-gallery-alt="{{ product.name }} — imagem 3"
-                >
-                    <img src="{{ product.image3 }}" alt="" width="90" height="112" loading="lazy">
-                </button>
-                {% endif %}
-
-                {% if product.image4 %}
-                <button
-                    class="product-gallery-thumb"
-                    type="button"
-                    role="tab"
-                    aria-selected="false"
-                    aria-label="Exibir imagem 4 de {{ product.name }}"
-                    data-gallery-index="{{ (1 if product.image1 else 0) + (1 if product.image2 else 0) + (1 if product.image3 else 0) }}"
-                    data-gallery-src="{{ product.image4 }}"
-                    data-gallery-alt="{{ product.name }} — imagem 4"
-                >
-                    <img src="{{ product.image4 }}" alt="" width="90" height="112" loading="lazy">
-                </button>
-                {% endif %}
+                {% endfor %}
 
             </div>
 
@@ -722,6 +674,20 @@ body.product-lightbox-open {
 
 </div>
 
+{% if product.source == "aliexpress" %}
+{% set desc_without_images = sanitize_product_description_without_images(product.description) %}
+{% if product_description_excerpt(desc_without_images) %}
+<section class="details-section">
+
+    <h2 class="section-title">Descrição</h2>
+
+    <div class="details-text">
+        {{ desc_without_images }}
+    </div>
+
+</section>
+{% endif %}
+{% else %}
 <section class="details-section">
 
     <h2 class="section-title">Descrição</h2>
@@ -731,6 +697,7 @@ body.product-lightbox-open {
     </div>
 
 </section>
+{% endif %}
 
 <section class="related-products">
 
