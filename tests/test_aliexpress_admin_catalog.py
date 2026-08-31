@@ -407,6 +407,22 @@ def test_detalhe_preco_unico_mostra_so_um_valor(admin_catalog):
     assert "–" not in body.split("BRL 80,00")[0].split("</span>")[-1]
 
 
+def test_detalhe_moeda_vem_dos_skus_nao_do_global(admin_catalog):
+    # O `set` dentro do loop NÃO persiste fora; a moeda exibida deve vir da
+    # moeda dos SKUs (BRL) via namespace, e NÃO da moeda global do produto.
+    detail = make_multi_detail(
+        ["27.59", "39.09", "46.60"],
+        [5, 3, 2],
+    )
+    detail.currency = "CNY"  # moeda global diverge dos SKUs
+    FakeAliExpressClient.details[PRODUCT_ID] = detail
+    resp = admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/detalhe")
+    body = resp.get_data(as_text=True)
+    assert "BRL 27,59" in body
+    assert "CNY 27,59" not in body
+    assert "CNY" not in body or "Moeda: CNY" not in body
+
+
 def test_detalhe_sem_preco_nao_mostra_zero(admin_catalog):
     # Nenhum SKU/preço global -> "Preço indisponível" (nunca 0,00).
     sku = AliExpressProductSku(

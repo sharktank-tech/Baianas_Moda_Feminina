@@ -33,16 +33,17 @@
                 {% endif %}
             </div>
             <div class="md:w-1/2">
-                {# Fase 7.1: moeda/preços vêm dos SKUs quando disponíveis; o preço
-                   global ausente NUNCA vira R$ 0,00 — mostra a faixa de preço. #}
+                {# Fase 7.1: moeda/preços vêm dos SKUs (namespace, pois `set`
+                   dentro do loop não persiste fora dele); o preço global ausente
+                   NUNCA vira R$ 0,00 — mostra a faixa de preço. #}
                 {% set skus = detail.skus|default([]) %}
                 {% set priced_skus = [] %}
-                {% set sku_currency = detail.currency or '' %}
+                {% set ns = namespace(currency=detail.currency or '') %}
                 {% for sku in skus %}
                     {% set sp = sku.sale_price if sku.sale_price is not none else sku.original_price %}
                     {% if sp %}
                         {% if priced_skus.append(sp) %}{% endif %}
-                        {% if sku.currency %}{% set sku_currency = sku.currency %}{% endif %}
+                        {% if sku.currency %}{% set ns.currency = sku.currency %}{% endif %}
                     {% endif %}
                 {% endfor %}
 
@@ -52,11 +53,11 @@
                         {% set mx = priced_skus|max %}
                         {% if mn == mx %}
                             <span class="text-3xl text-pink-600 font-bold">
-                                {{ sku_currency }} {{ ptx(mn) }}
+                                {{ ns.currency }} {{ ptx(mn) }}
                             </span>
                         {% else %}
                             <span class="text-3xl text-pink-600 font-bold">
-                                {{ sku_currency }} {{ ptx(mn) }} – {{ ptx(mx) }}
+                                {{ ns.currency }} {{ ptx(mn) }} – {{ ptx(mx) }}
                             </span>
                         {% endif %}
                     {% else %}
@@ -64,7 +65,7 @@
                     {% endif %}
                 </div>
                 <p class="text-gray-500">
-                    {% if priced_skus %}Moeda: {{ sku_currency }}{% endif %}
+                    {% if priced_skus %}Moeda: {{ ns.currency }}{% endif %}
                     &middot; Estoque disponível:
                     {{ detail.available_stock if detail.available_stock is not none else '—' }}
                 </p>
@@ -100,7 +101,7 @@
                         <tr class="text-left text-gray-500 border-b">
                             <th class="py-2 pr-4">Atributos</th>
                             <th class="py-2 pr-4">Estoque</th>
-                            <th class="py-2 pr-4">Preço ({{ sku_currency }})</th>
+                            <th class="py-2 pr-4">Preço ({{ ns.currency }})</th>
                         </tr>
                     </thead>
                     <tbody>
