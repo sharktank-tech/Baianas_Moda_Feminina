@@ -88,13 +88,26 @@ def get_home_data() -> dict:
         .all()
     )
 
-    # Ofertas do dia: vêm de Promotion (Product não tem sale_price/original_price)
+    # Ofertas do dia: vêm de Promotion (Product não tem sale_price/original_price).
+    # Promoções só enxergam produtos PÚBLICOS (drafts nunca aparecem).
     now = utcnow()
+    public_product_ids = (
+        db.session.query(Product.id)
+        .filter(
+            Product.is_active.is_(True),
+            Product.is_draft.is_(False),
+        )
+        .subquery()
+    )
     promotions = (
         Promotion.query
         .filter(
             Promotion.is_active == True,  # noqa: E712
             db.or_(Promotion.ends_at.is_(None), Promotion.ends_at > now),
+            db.or_(
+                Promotion.product_id.is_(None),
+                Promotion.product_id.in_(public_product_ids),
+            ),
         )
         .order_by(Promotion.created_at.desc())
         .limit(8)
@@ -104,8 +117,7 @@ def get_home_data() -> dict:
         promo.is_favorited = bool(promo.product_id) and promo.product_id in favoritos
 
     products = (
-        Product.query
-        .filter(Product.is_active == True)  # noqa: E712
+        public_product_query()
         .order_by(Product.created_at.desc())
         .limit(8)
         .all()
@@ -174,6 +186,19 @@ def get_home_data() -> dict:
     }
 
 
+def public_product_query():
+    """Query base de produtos PUBLICAMENTE visíveis.
+
+    Centraliza o guarda de visibilidade: um produto só é público se estiver
+    ativo E não for rascunho. Não depender apenas de template para esconder
+    drafts (AliExpress não precificado jamais vaza publicamente).
+    """
+    return Product.query.filter(
+        Product.is_active.is_(True),
+        Product.is_draft.is_(False),
+    )
+
+
 def get_favorited_ids() -> set:
     """IDs de produtos favoritados pelo usuário logado. Anônimo = nenhum."""
     if not current_user.is_authenticated:
@@ -207,6 +232,7 @@ def _get_home_categories(limit=10):
         .query(Product.category, Product.image1)
         .filter(
             Product.is_active == True,  # noqa: E712
+            Product.is_draft.is_(False),
             Product.category.isnot(None),
             Product.category != ''
         )
@@ -236,8 +262,7 @@ def _get_hero_slides() -> list:
 
 def _get_active_products(limit: int = 8) -> list:
     return (
-        Product.query
-        .filter_by(is_active=True)
+        public_product_query()
         .order_by(Product.created_at.desc())
         .limit(limit)
         .all()

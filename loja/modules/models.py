@@ -217,6 +217,50 @@ class Product(db.Model):
     sync_status = db.Column(db.String(20))
     last_sync_at = db.Column(db.DateTime)
     sync_error = db.Column(db.Text)
+    # Precificação dropshipping (Fase 6). Moeda de VENDA: no import AliExpress
+    # preenche a moeda resolvida; produtos internos/legados permanecem BRL.
+    currency = db.Column(
+        db.String(3),
+        nullable=False,
+        default="BRL",
+        server_default="BRL",
+    )
+    # Margem alvo EXPLÍCITA. Sem margem padrão: NULL = não precificável nem
+    # publicável. Regra de negócio (0, 100) reforçada no banco.
+    target_margin_percent = db.Column(db.Numeric(5, 2))
+    # Estados: unpriced | blocked | ready | priced | stale.
+    pricing_status = db.Column(
+        db.String(20),
+        nullable=False,
+        default="unpriced",
+        server_default="unpriced",
+    )
+    pricing_error = db.Column(db.Text)
+    pricing_updated_at = db.Column(db.DateTime)
+
+    # Defesa de banco: AliExpress só pode ficar ATIVO se NÃO for rascunho E
+    # estiver priced. O resto da validação (landed cost, moeda, margem alvo,
+    # variantes) é responsabilidade de publication.evaluate_publication().
+    __table_args__ = (
+        db.CheckConstraint(
+            "target_margin_percent IS NULL "
+            "OR (target_margin_percent > 0 AND target_margin_percent < 100)",
+            name="ck_product_target_margin_range",
+        ),
+        db.CheckConstraint(
+            "source != 'aliexpress' "
+            "OR is_active = false "
+            "OR (is_draft = false AND pricing_status = 'priced')",
+            name="ck_product_aliexpress_publication_guard",
+        ),
+        # Estados canônicos de pricing (unpriced | blocked | ready | priced |
+        # stale). Reforça o contrato no banco.
+        db.CheckConstraint(
+            "pricing_status IN "
+            "('unpriced', 'blocked', 'ready', 'priced', 'stale')",
+            name="ck_product_pricing_status",
+        ),
+    )
 
     suppliers = db.relationship(
         "Supplier",
@@ -1410,6 +1454,7 @@ class ProductVariant(db.Model):
     supplier_sku_id = db.Column(db.String(64))
     color = db.Column(db.String(60))
     size = db.Column(db.String(20))
+    attributes = db.Column(JSONB)
     stock = db.Column(db.Integer, nullable=False, default=0)
     price = db.Column(db.Numeric(10, 2))
     sale_price = db.Column(db.Numeric(10, 2))
@@ -1470,6 +1515,17 @@ class SupplierProduct(db.Model):
         default="BRL",
         server_default="BRL",
     )
+    # Estado do frete do fornecedor (Fase 4/5). Ausência de frete NUNCA vira
+    # zero: provider_unavailable mantém shipping_cost/landed_cost como NULL.
+    freight_status = db.Column(
+        db.String(30),
+        nullable=False,
+        default="unknown",
+        server_default="unknown",
+    )
+    shipping_cost = db.Column(db.Numeric(10, 2))
+    landed_cost = db.Column(db.Numeric(10, 2))
+    freight_currency = db.Column(db.String(3))
     sync_status = db.Column(db.String(20))
     last_sync_at = db.Column(db.DateTime)
     sync_error = db.Column(db.Text)
@@ -1493,6 +1549,14 @@ class SupplierProduct(db.Model):
         db.CheckConstraint(
             "wholesale_price >= 0",
             name="ck_supplier_product_wholesale_nonneg",
+        ),
+        db.CheckConstraint(
+            "shipping_cost IS NULL OR shipping_cost >= 0",
+            name="ck_supplier_product_shipping_cost_nonneg",
+        ),
+        db.CheckConstraint(
+            "landed_cost IS NULL OR landed_cost >= 0",
+            name="ck_supplier_product_landed_cost_nonneg",
         ),
     )
 

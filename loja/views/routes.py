@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from flask import (
     Blueprint, render_template, request, redirect, url_for,
-    flash, jsonify, Response, session, current_app
+    flash, jsonify, Response, session, current_app, abort
 )
 from flask_login import login_user, login_required, current_user, logout_user
 from sqlalchemy import asc, desc
@@ -15,6 +15,7 @@ from loja.modules.services import (
     get_favorited_ids,
     get_footer_data,
     get_home_data,
+    public_product_query,
 )
 from loja.cache import get_cached, set_cached
 from loja.utils import utcnow
@@ -89,7 +90,8 @@ def inject_categories():
         db.session
         .query(Product.category)
         .filter(
-            Product.is_active == True,
+            Product.is_active == True,  # noqa: E712
+            Product.is_draft.is_(False),
             Product.category.isnot(None),
             Product.category != ''
         )
@@ -121,7 +123,7 @@ def produtos():
     ordenar = request.args.get("ordenar", "recentes")
     busca = (request.args.get("q") or "").strip()
 
-    query = Product.query.filter(Product.is_active == True)
+    query = public_product_query()
 
     if categoria:
         query = query.filter(Product.category == categoria)
@@ -142,7 +144,8 @@ def produtos():
         db.session
         .query(Product.category)
         .filter(
-            Product.is_active == True,
+            Product.is_active == True,  # noqa: E712
+            Product.is_draft.is_(False),
             Product.category.isnot(None),
             Product.category != ""
         )
@@ -166,11 +169,10 @@ def produtos():
 # ids são UUID no banco, não int -> usar o conversor <uuid:id>
 @main_blueprint.route("/produtos/<uuid:id>")
 def produto_individual(id):
-    product = Product.query.filter_by(id=id, is_active=True).first_or_404()
+    product = public_product_query().filter(Product.id == id).first_or_404()
     product.is_favorited = product.id in get_favorited_ids()
 
-    related_query = Product.query.filter(
-        Product.is_active == True,
+    related_query = public_product_query().filter(
         Product.id != product.id,
     )
     if product.category:
@@ -325,9 +327,8 @@ def _add_product_to_cart(product, size, quantity):
     methods=["POST"],
 )
 def processar_produto(product_id):
-    product = Product.query.filter_by(
-        id=product_id,
-        is_active=True,
+    product = public_product_query().filter(
+        Product.id == product_id,
     ).first_or_404()
 
     action = (request.form.get("action") or "").strip()
@@ -422,7 +423,9 @@ def adicionar_carrinho_pendente():
         flash("O produto pendente é inválido.", "danger")
         return redirect(url_for("main.carrinho"))
 
-    product = Product.query.filter_by(id=product_id, is_active=True).first()
+    product = (
+        public_product_query().filter(Product.id == product_id).first()
+    )
     size = str(pending.get("size") or "").upper()
     quantity = _parse_product_quantity(pending.get("quantity"))
 
@@ -455,6 +458,9 @@ def adicionar_carrinho_pendente():
 @login_required
 def favoritar(id):
     Product.query.filter_by(id=id).first_or_404()
+    public = public_product_query().filter(Product.id == id).first()
+    if public is None:
+        return abort(404)
 
     existente = Favorite.query.filter_by(
         user_id=current_user.id, product_id=id
@@ -634,9 +640,8 @@ def _validate_cart_for_checkout(cart):
         raise ValueError("Seu carrinho está vazio.")
 
     for item in cart_items:
-        product = Product.query.filter_by(
-            id=item.product_id,
-            is_active=True,
+        product = public_product_query().filter(
+            Product.id == item.product_id,
         ).first()
 
         if product is None:
@@ -736,9 +741,8 @@ def atualizar_quantidade_carrinho(item_id):
         flash("Ação de quantidade inválida.", "danger")
         return redirect(url_for("main.carrinho"))
 
-    product = Product.query.filter_by(
-        id=item.product_id,
-        is_active=True,
+    product = public_product_query().filter(
+        Product.id == item.product_id,
     ).first()
 
     if product is None:
@@ -940,9 +944,8 @@ def checkout_carrinho():
 @main_blueprint.route("/checkout/<uuid:product_id>")
 @login_required
 def checkout(product_id):
-    product = Product.query.filter_by(
-        id=product_id,
-        is_active=True,
+    product = public_product_query().filter(
+        Product.id == product_id,
     ).first_or_404()
 
     checkout_data = session.get("checkout_product") or {}
@@ -1077,9 +1080,8 @@ def _get_checkout_subtotal(
                 "Produto inválido."
             ) from error
 
-        product = Product.query.filter_by(
-            id=parsed_product_id,
-            is_active=True,
+        product = public_product_query().filter(
+            Product.id == parsed_product_id,
         ).first()
 
         if product is None:
@@ -1315,9 +1317,8 @@ def calcular_frete():
             "error": "product_id inválido.",
         }), 400
 
-    product = Product.query.filter_by(
-        id=product_uuid,
-        is_active=True,
+    product = public_product_query().filter(
+        Product.id == product_uuid,
     ).first()
 
     if product is None:

@@ -6,12 +6,20 @@ from sqlalchemy import event, inspect, text
 # ---------------------------------------------------------------------------
 # Bootstrap de schema aditivo e idempotente (sem Flask-Migrate).
 #
-# O projeto não usa migrações versionadas: o schema é corrigido sob demanda
-# no primeiro boot (ambientes serverless como Vercel). A ordem de boot é:
+# O projeto não usa migrações versionadas. O bootstrap (create_all +
+# ensure_schema) ocorre EM AMBIENTE CONTROLADO/local ou quando
+# POLLOMODAS_BOOTSTRAP_ON_STARTUP=1. A ordem de bootstrap é:
 #
 #   1. importar models (legados + P0/P1)
 #   2. db.create_all()            -> cria tabelas NOVAS que ainda não existem
 #   3. ensure_schema(app)         -> corrige tabelas EXISTENTES (colunas/FKs/índices)
+#
+# Ambiente serverless (Vercel): create_app() NÃO executa DDL/bootstrap em cold
+# start. O banco persistente já foi previamente bootstrapped. Apenas o hook de
+# transação SET LOCAL search_path é instalado (configuração do Engine).
+#
+# Bootstrap controlado (local / POLLOMODAS_BOOTSTRAP_ON_STARTUP=1):
+#   db.create_all()  +  ensure_schema(app)
 #
 # Política de segurança (Fase 0): NUNCA DROP/RENAME/ALTER destrutivo, NUNCA
 # SET NOT NULL em coluna legada, NUNCA backfill destrutivo, NUNCA delete.
@@ -100,6 +108,17 @@ REQUIRED_COLUMNS = {
     ("suppliers", "last_sync_at"): {"type": "datetime", "nullable": True},
     ("suppliers", "sync_status"): {"type": "string", "length": 20, "nullable": True},
     ("suppliers", "sync_error"): {"type": "text", "nullable": True},
+    # supplier_products (frete do fornecedor / upload de rascunho AliExpress)
+    ("supplier_products", "freight_status"): {
+        "type": "string", "length": 30, "nullable": False, "default": "'unknown'",
+    },
+    ("supplier_products", "shipping_cost"): {"type": "numeric", "nullable": True},
+    ("supplier_products", "landed_cost"): {"type": "numeric", "nullable": True},
+    ("supplier_products", "freight_currency"): {
+        "type": "string", "length": 3, "nullable": True,
+    },
+    # product_variants (atributos brutos do SKU AliExpress)
+    ("product_variants", "attributes"): {"type": "jsonb", "nullable": True},
     # products (dropshipping / sincronização)
     ("products", "external_id"): {"type": "string", "length": 64, "nullable": True},
     ("products", "source"): {
@@ -113,6 +132,17 @@ REQUIRED_COLUMNS = {
     ("products", "sync_status"): {"type": "string", "length": 20, "nullable": True},
     ("products", "last_sync_at"): {"type": "datetime", "nullable": True},
     ("products", "sync_error"): {"type": "text", "nullable": True},
+    # products (precificação dropshipping / Fase 6). Sem margem padrão: a margem
+    # alvo precisa ser fornecida; ausência mantém o produto não publicável.
+    ("products", "currency"): {
+        "type": "string", "length": 3, "nullable": False, "default": "'BRL'",
+    },
+    ("products", "target_margin_percent"): {"type": "numeric5", "nullable": True},
+    ("products", "pricing_status"): {
+        "type": "string", "length": 20, "nullable": False, "default": "'unpriced'",
+    },
+    ("products", "pricing_error"): {"type": "text", "nullable": True},
+    ("products", "pricing_updated_at"): {"type": "datetime", "nullable": True},
     # shipments (rastreio de fornecedor)
     ("shipments", "ali_order_id"): {"type": "string", "length": 64, "nullable": True},
     ("shipments", "external_shipment_id"): {
@@ -157,6 +187,10 @@ def _sql_type(dialect, generic):
         return "TEXT"
     if generic == "numeric":
         return "NUMERIC(10,2)"
+    if generic == "numeric5":
+        return "NUMERIC(5,2)"
+    if generic == "jsonb":
+        return "JSONB" if dialect == "postgresql" else "JSON"
     if generic == "datetime":
         return "TIMESTAMP" if dialect == "postgresql" else "DATETIME"
     if generic == "boolean":

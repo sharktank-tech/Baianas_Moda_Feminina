@@ -2,6 +2,10 @@
   "version": 2,
   "builds": [
     {
+      "src": "api/aliexpress-oauth-callback.js",
+      "use": "@vercel/node"
+    },
+    {
       "src": "run.py",
       "use": "@vercel/python",
       "config": {
@@ -10,6 +14,10 @@
     }
   ],
   "routes": [
+    {
+      "src": "^/integrations/aliexpress/callback$",
+      "dest": "/api/aliexpress-oauth-callback.js"
+    },
     {
       "src": "/(.*)",
       "dest": "run.py"
