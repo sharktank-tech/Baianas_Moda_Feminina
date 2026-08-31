@@ -21,6 +21,7 @@ from loja.modules.models import (
     SupplierProduct,
 )
 from loja.views.routes import (
+    _build_variant_selector,
     _resolve_selected_variant,
     _uses_variants,
     _validate_cart_for_checkout,
@@ -248,7 +249,9 @@ def test_two_variants_same_product_same_size_persist(db, client, make_user, ae_p
     assert variant_ids == {rosa_m.id, azul_m.id}
     for it in items:
         assert Decimal(str(it.unit_price)) == Decimal(str(product.price))
-    assert {it.selected_size for it in items} == {"Rosa M", "Azul M"}
+    # Ordem das variantes (Rosa/M, Azul/M) não importa; selected_size guarda
+    # SOMENTE o tamanho (nunca cor+tamanho), evitando overflow em VARCHAR(10).
+    assert {it.selected_size for it in items} == {"M"}
 
 
 def test_buy_now_without_variant_redirects_with_warning(db, client, make_user, ae_product):
@@ -398,3 +401,256 @@ def test_refunded_sync_releases_variant_reservation(
 
     assert rosa_m.stock == 4
     assert synced.stock_reserved is False
+
+
+# ── Fase 7.2.1 ───────────────────────────────────────────────────────────────
+
+# B: estoque zerado no AliExpress -> estado "sem variações disponíveis".
+
+def _sized_product(db, variants):
+    product = Product(
+        id=uuid.uuid4(),
+        name="Produto Seletores",
+        description="<p>ok</p>",
+        price=Decimal("100.00"),
+        cost=Decimal("40.00"),
+        stock=sum(int(v.stock or 0) for v in variants),
+        is_active=True,
+        is_draft=False,
+        source="aliexpress",
+        external_id=str(uuid.uuid4()),
+        currency="BRL",
+        target_margin_percent=Decimal("30.00"),
+        pricing_status="priced",
+    )
+    db.session.add(product)
+    db.session.flush()
+    for v in variants:
+        v.product_id = product.id
+    db.session.add_all(variants)
+    db.session.commit()
+    db.session.refresh(product)
+    return product
+
+
+def test_no_in_stock_variant_shows_unavailable_state(db, client):
+    out_of_stock = _sku("x-1", "Rosa", "M", 0)
+    product = _sized_product(db, [out_of_stock])
+
+    resp = client.get(f"/produtos/{product.id}")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+
+    assert "Sem variações disponíveis no momento" in body
+    # Não cai no fluxo interno por tamanho (P/M/G/GG): nenhum radio de tamanho
+    # é renderizado (a string name="size" existe no JS, não no HTML).
+    assert 'id="size-' not in body
+    assert "Comprar Agora" in body
+
+
+# C: selected_size = variant.size or "UNICO" (curto, dentro de VARCHAR(10)).
+
+def test_cart_selected_size_uses_size_only_when_size_absent(
+    db, client, make_user
+):
+    no_size = _sku("x-2", "Verde", None, 4)
+    product = _sized_product(db, [no_size])
+    user = make_user()
+    client.post("/login", data={"email": user.email, "password": "senha123"})
+
+    resp = client.post(
+        f"/produtos/{product.id}/processar",
+        data={"action": "add_to_cart", "variant_id": str(no_size.id), "quantity": "1"},
+        follow_redirects=True,
+    )
+    assert "adicionado ao carrinho" in resp.get_data(as_text=True).lower()
+
+    cart = Cart.query.filter_by(user_id=user.id).first()
+    item = list(cart.items)[0]
+    assert item.selected_size == "UNICO"
+    assert item.variant_id == no_size.id
+
+
+def test_long_size_truncated_to_varchar10(db, client, make_user):
+    long_size = _sku("x-3", "Preto", "EXTRA-GRANDE-GG", 4)
+    product = _sized_product(db, [long_size])
+    user = make_user()
+    client.post("/login", data={"email": user.email, "password": "senha123"})
+
+    client.post(
+        f"/produtos/{product.id}/processar",
+        data={"action": "add_to_cart", "variant_id": str(long_size.id), "quantity": "1"},
+        follow_redirects=True,
+    )
+
+    cart = Cart.query.filter_by(user_id=user.id).first()
+    item = list(cart.items)[0]
+    # Aberração defensiva: mesmo com tamanho longo, não estoura VARCHAR(10).
+    assert len(item.selected_size) <= 10
+
+
+# D: seletores reais Cor/Tamanho + fallback de atributos + "Opção N".
+
+def test_page_renders_color_and_size_selectors(client, ae_product):
+    product, rosa_m, azul_m = ae_product
+    resp = client.get(f"/produtos/{product.id}")
+    body = resp.get_data(as_text=True)
+
+    assert 'data-dimension="color"' in body
+    assert 'data-dimension="size"' in body
+    assert "Rosa" in body
+    assert "Azul" in body
+    assert "Tamanho" in body
+    # SKUs externos continuam ocultos
+    assert rosa_m.supplier_sku_id not in body
+
+
+def test_generic_option_labels_when_no_distinguishing_info(db):
+    v1 = ProductVariant(
+        id=uuid.uuid4(),
+        color=None,
+        size=None,
+        stock=2,
+        price=Decimal("5.00"),
+        is_active=True,
+    )
+    v2 = ProductVariant(
+        id=uuid.uuid4(),
+        color=None,
+        size=None,
+        stock=2,
+        price=Decimal("5.00"),
+        is_active=True,
+    )
+    product = _sized_product(db, [v1, v2])
+
+    selector = _build_variant_selector(product)
+    assert selector["uses_variants"] is True
+    assert len(selector["dimensions"]) == 1
+    assert selector["dimensions"][0]["key"] == "option"
+    assert selector["dimensions"][0]["options"] == ["Opção 1", "Opção 2"]
+    assert {v["id"] for v in selector["variants"]} == {str(v1.id), str(v2.id)}
+    # Nunca expõe SKUs externos
+    for v in selector["variants"]:
+        assert "supplier_sku_id" not in v
+        assert "external_sku_id" not in v
+
+
+def test_attribute_fallback_labels(db):
+    v = ProductVariant(
+        id=uuid.uuid4(),
+        color=None,
+        size=None,
+        stock=3,
+        price=Decimal("5.00"),
+        is_active=True,
+        attributes=[
+            {"name": "Color", "value": "Vermelho"},
+            {"name": "Size", "value": "L"},
+        ],
+    )
+    product = _sized_product(db, [v])
+
+    selector = _build_variant_selector(product)
+    assert len(selector["dimensions"]) == 2
+    assert selector["dimensions"][0]["options"] == ["Vermelho"]
+    assert selector["dimensions"][1]["options"] == ["L"]
+    assert selector["variants"][0]["dims"] == ["Vermelho", "L"]
+
+
+# E: validação cruzada variante/produto e idempotência do refund.
+
+def test_reserve_stock_rejects_variant_from_other_product(db, ae_product):
+    product, _, _ = ae_product
+    other = Product(
+        id=uuid.uuid4(),
+        name="Outro",
+        price=Decimal("10.00"),
+        is_active=True,
+    )
+    db.session.add(other)
+    db.session.flush()
+    other_variant = ProductVariant(
+        product_id=other.id,
+        color="Cinza",
+        size="P",
+        stock=3,
+        is_active=True,
+        price=Decimal("5.00"),
+    )
+    db.session.add(other_variant)
+    db.session.flush()
+    db.session.commit()
+
+    items = [
+        {
+            "product_id": product.id,
+            "product_name": product.name,
+            "quantity": 1,
+            "variant_id": other_variant.id,
+        }
+    ]
+    with pytest.raises(ValueError) as exc_info:
+        pr._reserve_stock(items)
+    assert "não está mais disponível" in str(exc_info.value)
+
+
+def test_validate_cart_rejects_variant_from_other_product(db, make_user, ae_product):
+    from loja.modules.models import ProductVariant as PV
+
+    user = make_user()
+    product, _, _ = ae_product
+    other = Product(
+        id=uuid.uuid4(),
+        name="Outro",
+        price=Decimal("10.00"),
+        is_active=True,
+    )
+    db.session.add(other)
+    db.session.flush()
+    foreign_variant = PV(
+        product_id=other.id,
+        color="Bege",
+        size="M",
+        stock=3,
+        is_active=True,
+        price=Decimal("5.00"),
+    )
+    db.session.add(foreign_variant)
+
+    cart = Cart(id=uuid.uuid4(), user_id=user.id)
+    db.session.add(cart)
+    db.session.flush()
+    cart.items.append(
+        CartItem(
+            id=uuid.uuid4(),
+            product_id=product.id,
+            selected_size="M",
+            variant_id=foreign_variant.id,
+            quantity=1,
+            unit_price=Decimal(str(product.price)),
+        )
+    )
+    db.session.commit()
+
+    with pytest.raises(ValueError) as exc_info:
+        _validate_cart_for_checkout(cart)
+    assert "indisponível" in str(exc_info.value)
+
+
+def test_release_stock_restores_exactly_once(db, make_user, ae_product):
+    user = make_user()
+    product, rosa_m, _ = ae_product
+
+    pr._reserve_stock(_variant_item(product, rosa_m, quantity=2))
+    assert rosa_m.stock == 2
+
+    order = _make_variant_order(db, user, product, rosa_m, quantity=2)
+    pr._release_stock(order)
+    assert rosa_m.stock == 4
+    assert order.stock_reserved is False
+
+    # Segunda chamada é idempotente: não devolve 2x.
+    pr._release_stock(order)
+    assert rosa_m.stock == 4
+    assert product.stock == 9

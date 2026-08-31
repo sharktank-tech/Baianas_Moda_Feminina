@@ -193,8 +193,12 @@ def produto_individual(id):
     product = public_product_query().filter(Product.id == id).first_or_404()
     product.is_favorited = product.id in get_favorited_ids()
 
-    active_variants = _active_variants_for_product(product)
-    uses_variants = bool(active_variants)
+    selector = _build_variant_selector(product)
+    uses_variants = selector["uses_variants"]
+    no_variants_available = bool(
+        uses_variants
+        and not selector["variants"]
+    )
 
     related_query = public_product_query().filter(
         Product.id != product.id,
@@ -213,8 +217,9 @@ def produto_individual(id):
         "main/produto_individual.html",
         product=product,
         related_products=related_products,
-        active_variants=active_variants,
+        selector=selector,
         uses_variants=uses_variants,
+        no_variants_available=no_variants_available,
     )
 
 
@@ -247,6 +252,7 @@ def _active_variants_for_product(product):
             "color": v.color or "",
             "size": v.size or "",
             "stock": int(v.stock or 0),
+            "attributes": getattr(v, "attributes", None),
             "label": " ".join(
                 part for part in (v.color or "", v.size or "") if part
             ).strip()
@@ -254,6 +260,153 @@ def _active_variants_for_product(product):
         }
         for v in sorted(variants, key=_sort_key)
     ]
+
+
+_VARIANT_COLOR_ATTR_NAMES = {"cor", "color"}
+_VARIANT_SIZE_ATTR_NAMES = {"tamanho", "size", "talla"}
+
+
+def _variant_attr_value(attributes, wanted_key):
+    """Busca o valor de um atributo AliExpress (Cor/Tamanho) em `attributes`.
+
+    `attributes` pode ser uma lista de {"name","value"} (formato do importer)
+    ou um dict nome->valor.
+    """
+    if not attributes:
+        return None
+    if isinstance(attributes, dict):
+        items = list(attributes.items())
+    else:
+        items = []
+        for attr in attributes:
+            if isinstance(attr, dict):
+                items.append((attr.get("name"), attr.get("value")))
+
+    wanted = wanted_key.lower()
+    for name, value in items:
+        name_norm = str(name or "").strip().lower()
+        if wanted == "color" and name_norm in _VARIANT_COLOR_ATTR_NAMES:
+            val = str(value or "").strip()
+            if val:
+                return val
+        if wanted == "size" and name_norm in _VARIANT_SIZE_ATTR_NAMES:
+            val = str(value or "").strip()
+            if val:
+                return val
+    return None
+
+
+def _variant_dim_label(meta, key):
+    """Label de uma dimensão (color/size) para uma variante, com fallback ao
+    dict de atributos AliExpress. Nunca expõe SKUs externos."""
+    raw = (meta.get(key) or "").strip()
+    if raw:
+        return raw
+    attr_val = _variant_attr_value(meta.get("attributes"), key)
+    if attr_val:
+        return attr_val
+    return None
+
+
+def _distinct_ordered(values):
+    seen = []
+    for value in values:
+        if value is not None and value not in seen:
+            seen.append(value)
+    return seen
+
+
+def _build_variant_selector(product):
+    """Estrutura de seleção por dimensões (Cor/Tamanho) para o storefront.
+
+    Se não houver informação distinguível de cor nem tamanho e existirem
+    múltiplas variantes, usa labels genéricos seguros "Opção N" — nunca expõe
+    supplier_sku_id/external_sku_id/supplier_product_id.
+    """
+    metas = _active_variants_for_product(product)
+    uses_variants = _uses_variants(product)
+    selector_base = {
+        "uses_variants": uses_variants,
+        "dimensions": [],
+        "variants": [],
+    }
+    if not metas:
+        # AliExpress com variantes porém nenhuma ativa/em estoque: o storefront
+        # deve exibir o estado "sem variações disponíveis", não o fluxo interno
+        # por tamanho.
+        return selector_base
+
+    for meta in metas:
+        meta["color_label"] = _variant_dim_label(meta, "color")
+        meta["size_label"] = _variant_dim_label(meta, "size")
+
+    color_vals = _distinct_ordered(meta["color_label"] for meta in metas)
+    size_vals = _distinct_ordered(meta["size_label"] for meta in metas)
+
+    def _finalize(dim_value, meta, index):
+        """Garante valor na dimensão exibida: se a variante não tiver, usa um
+        rótulo genérico por índice para que continuem selecionáveis."""
+        if isinstance(dim_value, bool):
+            return dim_value
+        value = _variant_dim_label(meta, dim_value)
+        if value:
+            return value
+        return "Opção %d" % (index + 1)
+
+    if color_vals and size_vals:
+        dimensions = [
+            {"key": "color", "title": "Cor", "options": color_vals},
+            {"key": "size", "title": "Tamanho", "options": size_vals},
+        ]
+        variants = [
+            {
+                "id": meta["id"],
+                "stock": meta["stock"],
+                "label": meta["label"],
+                "dims": [_finalize("color", meta, i), _finalize("size", meta, i)],
+            }
+            for i, meta in enumerate(metas)
+        ]
+    elif color_vals:
+        dimensions = [{"key": "color", "title": "Cor", "options": color_vals}]
+        variants = [
+            {
+                "id": meta["id"],
+                "stock": meta["stock"],
+                "label": meta["label"],
+                "dims": [_finalize("color", meta, i)],
+            }
+            for i, meta in enumerate(metas)
+        ]
+    elif size_vals:
+        dimensions = [{"key": "size", "title": "Tamanho", "options": size_vals}]
+        variants = [
+            {
+                "id": meta["id"],
+                "stock": meta["stock"],
+                "label": meta["label"],
+                "dims": [_finalize("size", meta, i)],
+            }
+            for i, meta in enumerate(metas)
+        ]
+    else:
+        opt_vals = ["Opção %d" % (i + 1) for i in range(len(metas))]
+        dimensions = [{"key": "option", "title": "Opção", "options": opt_vals}]
+        variants = [
+            {
+                "id": meta["id"],
+                "stock": meta["stock"],
+                "label": meta["label"],
+                "dims": [opt_vals[i]],
+            }
+            for i, meta in enumerate(metas)
+        ]
+
+    return {
+        "uses_variants": True,
+        "dimensions": dimensions,
+        "variants": variants,
+    }
 
 
 def _uses_variants(product):
@@ -397,14 +550,10 @@ def _add_product_to_cart(product, size=None, quantity=1, variant=None):
 
     selected_size = size
     if selected_variant is not None:
-        selected_size = (
-            " ".join(
-                part
-                for part in (selected_variant.color or "", selected_variant.size or "")
-                if part
-            ).strip()
-            or "Único"
-        )
+        # Para variante, `selected_size` guarda SOMENTE o tamanho (abaixo do
+        # limite VARCHAR). Cor e demais dados da opção vêm do relacionamento
+        # variant — nunca gravamos color+tamanho aqui (evita overflow).
+        selected_size = (selected_variant.size or "UNICO")[:10]
 
     values = _uuid_primary_key_values(item_model)
     values.update({
@@ -802,9 +951,14 @@ def _validate_cart_for_checkout(cart):
         raise ValueError("Seu carrinho está vazio.")
 
     for item in cart_items:
-        product = public_product_query().filter(
-            Product.id == item.product_id,
-        ).first()
+        product = (
+            public_product_query()
+            .filter(
+                Product.id == item.product_id,
+            )
+            .with_for_update()
+            .first()
+        )
 
         if product is None:
             raise ValueError(
@@ -838,20 +992,28 @@ def _validate_cart_for_checkout(cart):
         variant = getattr(item, "variant", None)
 
         if variant is not None:
-            # Item vinculado a uma variante: o estoque é o da variante e o
-            # preço de venda deve permanecer Product.price.
-            if not getattr(variant, "is_active", False):
+            # Item vinculado a uma variante. Ordem de lock Produto→Variante
+            # (consistente com _reserve_stock) e validação cruzada de que a
+            # variante realmente pertence ao produto do item.
+            locked_variant = (
+                ProductVariant.query
+                .filter_by(id=variant.id, product_id=product.id)
+                .with_for_update()
+                .first()
+            )
+
+            if locked_variant is None or not locked_variant.is_active:
                 raise ValueError(
                     f"Uma variação de {product.name} está indisponível."
                 )
-            if int(variant.stock or 0) <= 0:
+            if int(locked_variant.stock or 0) <= 0:
                 raise ValueError(
                     f"Uma variação de {product.name} está sem estoque."
                 )
-            if quantity > int(variant.stock or 0):
+            if quantity > int(locked_variant.stock or 0):
                 raise ValueError(
                     f"A quantidade de {product.name} excede o estoque. "
-                    f"Disponível: {int(variant.stock or 0)}."
+                    f"Disponível: {int(locked_variant.stock or 0)}."
                 )
             continue
 

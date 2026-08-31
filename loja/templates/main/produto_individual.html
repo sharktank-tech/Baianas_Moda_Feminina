@@ -560,27 +560,38 @@ body.product-lightbox-open {
                 >
 
                 {% if uses_variants %}
-                <fieldset class="size-fieldset">
-                    <legend class="size-title">Variação</legend>
+                {% if no_variants_available %}
+                <div class="variants-unavailable" data-variants-unavailable>
+                    <p class="unavailable-message">Sem variações disponíveis no momento.</p>
+                    <small>Este produto está temporariamente esgotado ou em reposição.</small>
+                </div>
+                {% else %}
+                <div class="variant-selector" data-variant-selector
+                     data-variants-json='{{ selector.variants | tojson | forceescape }}'>
+                    {% for dim in selector.dimensions %}
+                    <fieldset class="size-fieldset">
+                        <legend class="size-title">{{ dim.title }}</legend>
+                        <div class="size-options" data-dimension="{{ dim.key }}">
+                            {% for value in dim.options %}
+                            <input
+                                class="size-option-input dimension-input"
+                                type="radio"
+                                name="variant_dim_{{ dim.key }}"
+                                id="vdim-{{ dim.key }}-{{ loop.index }}"
+                                value="{{ value }}"
+                                data-dimension-value="{{ value }}"
+                            >
+                            <label class="size-option" for="vdim-{{ dim.key }}-{{ loop.index }}">
+                                {{ value }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </fieldset>
+                    {% endfor %}
 
-                    <div class="size-options" data-variant-options>
-                        {% for variant in active_variants %}
-                        <input
-                            class="size-option-input"
-                            type="radio"
-                            name="variant_id"
-                            id="variant-{{ variant.id }}"
-                            value="{{ variant.id }}"
-                            data-variant-stock="{{ variant.stock }}"
-                            data-variant-label="{{ variant.label }}"
-                            required
-                        >
-                        <label class="size-option" for="variant-{{ variant.id }}">
-                            {{ variant.label }}
-                        </label>
-                        {% endfor %}
-                    </div>
-                </fieldset>
+                    <input type="hidden" name="variant_id" value="">
+                </div>
+                {% endif %}
                 {% else %}
                 <fieldset class="size-fieldset">
                     <legend class="size-title">Tamanho</legend>
@@ -639,9 +650,15 @@ body.product-lightbox-open {
                     </div>
 
                     {% if uses_variants %}
-                    <small class="stock-info" data-variant-stock-info>
-                        Selecione uma variação para ver o estoque disponível.
-                    </small>
+                        {% if no_variants_available %}
+                        <small class="stock-info">
+                            Produto temporariamente indisponível
+                        </small>
+                        {% else %}
+                        <small class="stock-info" data-variant-stock-info>
+                            Selecione uma variação para ver o estoque disponível.
+                        </small>
+                        {% endif %}
                     {% elif product.stock is not none %}
                     <small class="stock-info">
                         {% if product.stock > 0 %}
@@ -1091,19 +1108,37 @@ body.product-lightbox-open {
         ? form.querySelectorAll('[data-purchase-action]')
         : [];
 
-    const variantOptions = form
-        ? form.querySelectorAll('input[name="variant_id"]')
-        : [];
+    const variantSelector = document.querySelector('[data-variant-selector]');
     const variantStockInfo = document.querySelector('[data-variant-stock-info]');
-    const usesVariants = variantOptions.length > 0;
+    const variantsUnavailable = document.querySelector('[data-variants-unavailable]');
+
+    let selectableVariants = [];
+    let usesVariants = false;
+
+    if (variantSelector) {
+        usesVariants = true;
+        try {
+            selectableVariants = JSON.parse(
+                variantSelector.getAttribute('data-variants-json') || '[]'
+            );
+        } catch (err) {
+            selectableVariants = [];
+        }
+    }
 
     if (!form || !quantityInput || !actionInput) return;
+
+    const dimensionInputs = usesVariants
+        ? form.querySelectorAll('.dimension-input')
+        : [];
+    const variantIdInput = form.querySelector('input[name="variant_id"]');
+    const dimensionSelections = {};
 
     function setPurchaseEnabled(enabled) {
         purchaseButtons.forEach(function (button) {
             button.disabled = !enabled;
         });
-        if (purchaseButtons.length) {
+        if (enabled && purchaseButtons.length) {
             purchaseButtons[0].focus({ preventScroll: true });
         }
     }
@@ -1116,17 +1151,72 @@ body.product-lightbox-open {
         }
     }
 
-    function handleVariantChange() {
-        if (!usesVariants) return;
-
-        const selected = form.querySelector('input[name="variant_id"]:checked');
-        const anySelected = Boolean(selected);
-
-        purchaseButtons.forEach(function (button) {
-            button.disabled = !anySelected;
+    function currentSelections() {
+        const picks = [];
+        dimensionInputs.forEach(function (input) {
+            if (input.checked) {
+                picks.push(input.value);
+            }
         });
+        return picks;
+    }
 
-        if (!selected) {
+    function matchingVariants(selections) {
+        if (!selections.length) return [];
+        return selectableVariants.filter(function (variant) {
+            if (!variant.dims || variant.dims.length !== selections.length) {
+                return false;
+            }
+            return selections.every(function (sel, index) {
+                return variant.dims[index] === sel;
+            });
+        });
+    }
+
+    function refreshDimensionDisabledState() {
+        const selections = currentSelections();
+        dimensionInputs.forEach(function (input) {
+            const dimensionGroup = input.closest('[data-dimension]');
+            if (!dimensionGroup) return;
+
+            const dimIndex = Array.prototype.indexOf.call(
+                form.querySelectorAll('[data-dimension]'),
+                dimensionGroup
+            );
+
+            const hypothetical = selections.slice();
+            hypothetical[dimIndex] = input.value;
+            const matches = matchingVariants(
+                hypothetical.filter(function (v) { return v !== undefined; })
+            );
+            const hasStock = matches.some(function (v) {
+                return v.stock > 0;
+            });
+
+            // Preserva o checked para que o usuário possa voltar/alterar.
+            input.disabled = !hasStock;
+        });
+    }
+
+    function handleVariantChange() {
+        const selections = currentSelections();
+
+        const selectedVariant = matchingVariants(selections)[0] || null;
+
+        if (selectedVariant && variantIdInput) {
+            variantIdInput.value = selectedVariant.id;
+        } else if (variantIdInput) {
+            variantIdInput.value = '';
+        }
+
+        const hasSelection = Boolean(selectedVariant);
+        const hasStock = hasSelection && selectedVariant.stock > 0;
+
+        setPurchaseEnabled(hasSelection && hasStock);
+
+        refreshDimensionDisabledState();
+
+        if (!hasSelection) {
             quantityInput.max = '99';
             if (variantStockInfo) {
                 variantStockInfo.textContent =
@@ -1135,7 +1225,7 @@ body.product-lightbox-open {
             return;
         }
 
-        const stock = Number(selected.dataset.variantStock || 0);
+        const stock = selectedVariant.stock || 0;
         setVariantMax(stock);
 
         if (variantStockInfo) {
@@ -1152,9 +1242,11 @@ body.product-lightbox-open {
         }
     }
 
-    variantOptions.forEach(function (option) {
-        option.addEventListener('change', handleVariantChange);
-    });
+    if (usesVariants && !variantsUnavailable) {
+        dimensionInputs.forEach(function (input) {
+            input.addEventListener('change', handleVariantChange);
+        });
+    }
 
     function normalizeQuantity(value) {
         const min = Number(quantityInput.min || 1);
@@ -1199,23 +1291,23 @@ body.product-lightbox-open {
 
     form.addEventListener('submit', function (event) {
         if (usesVariants) {
-            const selected = form.querySelector('input[name="variant_id"]:checked');
+            const selected = matchingVariants(currentSelections())[0] || null;
 
-            if (!selected) {
+            if (!selected || !variantIdInput || !variantIdInput.value) {
                 event.preventDefault();
                 feedback.textContent =
                     'Selecione uma variação antes de continuar.';
 
-                const firstVariant = form.querySelector('input[name="variant_id"]');
+                const firstInput = form.querySelector('.dimension-input');
 
-                if (firstVariant) {
-                    firstVariant.focus();
+                if (firstInput) {
+                    firstInput.focus();
                 }
 
                 return;
             }
 
-            const selectedStock = Number(selected.dataset.variantStock || 0);
+            const selectedStock = selected.stock || 0;
             if (selectedStock <= 0) {
                 event.preventDefault();
                 feedback.textContent =

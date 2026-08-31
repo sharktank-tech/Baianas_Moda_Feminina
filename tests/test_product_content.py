@@ -58,9 +58,61 @@ def test_sanitize_empty_or_none():
 
 
 def test_sanitize_allows_img_with_src():
+    # https://x/img.png é host EXTERNO -> atributo src removido
     out = str(sanitize_product_description_html('<img src="https://x/img.png" alt="foto">'))
-    assert 'src="https://x/img.png"' in out
+    assert "src=" not in out
+    assert "onerror" not in out
+
+
+def test_sanitize_allows_aliexpress_cdn_images():
+    raw = (
+        '<img src="https://ae01.alicdn.com/kf/x.jpg" alt="a">'
+        '<img src="https://ae-pic-a1.aliexpress-media.com/xyz.png" alt="b">'
+    )
+    out = str(sanitize_product_description_html(raw))
+    assert 'src="https://ae01.alicdn.com/kf/x.jpg"' in out
+    assert 'src="https://ae-pic-a1.aliexpress-media.com/xyz.png"' in out
+
+
+def test_sanitize_rejects_non_alicdn_hosts_and_schemes():
+    raws = [
+        '<img src="http://ae01.alicdn.com/kf/x.jpg">',       # http
+        '<img src="//ae01.alicdn.com/kf/x.jpg">',             # protocol-relative
+        '<img src="data:image/png;base64,AAAA">',             # data:
+        '<img src="javascript:alert(1)">',                    # javascript:
+        '<img src="https://alicdn.com.evil.test/x.jpg">',     # contém, mas não é subdomínio
+        '<img src="https://example.com/x.jpg">',              # host externo
+        '<img src="https://not-alicdn.com/x.jpg">',           # prefixo falso
+        '<img src="https://alicdn.com.evil.com/x.jpg">',      # sufixo falso
+    ]
+    for raw in raws:
+        out = str(sanitize_product_description_html(raw))
+        assert "src=" not in out, "deveria remover src de: %s" % raw
+
+
+def test_sanitize_keeps_valid_aliexpress_subdomains():
+    raw = (
+        '<img src="https://ae01.alicdn.com/x.jpg">'
+        '<img src="https://ae-pic-a1.aliexpress-media.com/x.png">'
+    )
+    out = str(sanitize_product_description_html(raw))
+    assert 'src="https://ae01.alicdn.com/x.jpg"' in out
+    assert 'src="https://ae-pic-a1.aliexpress-media.com/x.png"' in out
+
+
+def test_sanitize_strips_handlers_on_img_and_keeps_allowed_attrs():
+    # Mesmo com callback de img, onerror/onload não podem sobreviver; e alt/
+    # title/width/height continuam permitidos.
+    raw = (
+        '<img src="https://ae01.alicdn.com/x.jpg" onerror="alert(1)" '
+        'onload="evil()" alt="foto" width="120">'
+    )
+    out = str(sanitize_product_description_html(raw))
+    assert 'src="https://ae01.alicdn.com/x.jpg"' in out
     assert 'onerror' not in out
+    assert 'onload' not in out
+    assert 'alt="foto"' in out
+    assert 'width="120"' in out
 
 
 def test_excerpt_strips_html_and_limits_words():

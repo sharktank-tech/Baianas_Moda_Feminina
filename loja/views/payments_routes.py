@@ -211,16 +211,9 @@ def _resolve_payment_variant(product, raw_variant_id, fallback_size):
     if int(variant.stock or 0) <= 0:
         raise ValueError("Esta variação está temporariamente indisponível.")
 
-    label = (
-        " ".join(
-            part
-            for part in (variant.color or "", variant.size or "")
-            if part
-        ).strip()
-        or "Único"
-    )
+    label = (variant.size or "UNICO")[:20]
 
-    return variant, label[:20]
+    return variant, label
 
 
 def _get_direct_product_items():
@@ -471,7 +464,7 @@ def _release_stock(order):
         if item.variant_id is not None:
             variant = (
                 ProductVariant.query
-                .filter_by(id=item.variant_id)
+                .filter_by(id=item.variant_id, product_id=item.product_id)
                 .with_for_update()
                 .first()
             )
@@ -781,7 +774,7 @@ def _sync_payment(payment_id):
                 if item.variant_id is not None:
                     variant = (
                         ProductVariant.query
-                        .filter_by(id=item.variant_id)
+                        .filter_by(id=item.variant_id, product_id=item.product_id)
                         .with_for_update()
                         .first()
                     )
