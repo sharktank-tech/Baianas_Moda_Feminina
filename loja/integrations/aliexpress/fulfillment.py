@@ -80,6 +80,11 @@ ERROR_CODES = {
     "SUBMISSION_UNKNOWN": "submission_unknown",
     "RECONCILIATION_UNKNOWN": "reconciliation_unknown",
     "RECONCILIATION_ERROR": "reconciliation_error",
+    "STATUS_SYNC_HARD_OFF": "status_sync_hard_off",
+    "STATUS_SYNC_FAILED": "status_sync_failed",
+    "STATUS_SYNC_ERROR": "status_sync_error",
+    "STATUS_SYNC_UNKNOWN": "status_sync_unknown",
+    "STATUS_SYNC_INVALID_TRANSITION": "status_sync_invalid_transition",
 }
 
 

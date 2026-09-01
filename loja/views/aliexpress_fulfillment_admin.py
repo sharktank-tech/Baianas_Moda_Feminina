@@ -30,6 +30,7 @@ from loja.modules.models import AliExpressOrder, AliExpressOrderItem, Order, Sup
 from loja.integrations.aliexpress import (
     ensure_aliexpress_fulfillment,
     get_fulfillment_access_token,
+    sync_aliexpress_order_status,
     CredentialNotConfigured,
     CredentialNotFound,
     CredentialExpired,
@@ -73,6 +74,7 @@ def index():
     # Estados possíveis para filtro
     states = [
         "queued", "blocked", "ready", "submitting", "submitted",
+        "pending_reconciliation",
         "confirmed", "shipped", "delivered", "cancel_requested",
         "cancelled", "failed", "manual_review", "pending"
     ]
@@ -168,5 +170,50 @@ def revalidate(order_id):
         db.session.rollback()
         current_app.logger.exception("Erro ao revalidar fulfillment %s", order_id)
         flash("Erro interno ao revalidar fulfillment.", "danger")
+
+    return redirect(url_for("aliexpress_fulfillment_admin.detail", order_id=order_id))
+
+
+@fulfillment_admin_blueprint.route("/<uuid:order_id>/sincronizar-status", methods=["POST"])
+@admin_required
+def sync_status(order_id):
+    """Sincroniza status do fulfillment (Fase 8.0.6) — HARD-OFF.
+
+    Aciona o boundary ``sync_aliexpress_order_status`` com provider padrão
+    hard-off (nenhuma chamada externa) sobre uma ordem elegível (identidade
+    remota confiável: submitted/confirmed/shipped/delivered).
+    CSRF obrigatório (via template; sem @csrf.exempt).
+    Só flash de estado/código sanitizado; nunca exibe exception provider.
+    """
+    ali_order = AliExpressOrder.query.options(
+        selectinload(AliExpressOrder.items),
+        selectinload(AliExpressOrder.supplier),
+        selectinload(AliExpressOrder.order),
+    ).filter_by(id=order_id).first_or_404()
+
+    eligible = (
+        ali_order.ali_order_id
+        and ali_order.state
+        in ("submitted", "confirmed", "shipped", "delivered")
+    )
+    if not eligible:
+        flash(
+            f"Fulfillment em estado {ali_order.state} não pode ter status "
+            "sincronizado.",
+            "warning",
+        )
+        return redirect(url_for("aliexpress_fulfillment_admin.detail", order_id=order_id))
+
+    try:
+        # Provider padrão é HARD-OFF; em testes, um pytest-injectable syncer
+        # pode ser substituído via monkeypatch de get_default_order_status_syncer.
+        result = sync_aliexpress_order_status(ali_order)
+        db.session.commit()
+        state = (result.state if hasattr(result, "state") else ali_order.state) or ali_order.state
+        flash(f"Status sincronizado — estado: {state.upper()}.", "success")
+    except Exception:
+        db.session.rollback()
+        current_app.logger.error("Erro ao sincronizar status %s (sanitizado)", order_id)
+        flash("Erro interno ao sincronizar status.", "danger")
 
     return redirect(url_for("aliexpress_fulfillment_admin.detail", order_id=order_id))

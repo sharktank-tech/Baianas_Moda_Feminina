@@ -1615,6 +1615,8 @@ class AliExpressOrder(db.Model):
     ready_at = db.Column(db.DateTime)
     submitted_at = db.Column(db.DateTime)
     confirmed_at = db.Column(db.DateTime)
+    shipped_at = db.Column(db.DateTime)
+    delivered_at = db.Column(db.DateTime)
     cancelled_at = db.Column(db.DateTime)
     last_attempt_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=utcnow)

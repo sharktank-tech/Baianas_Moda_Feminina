@@ -267,7 +267,9 @@ def reconcile_aliexpress_order(
         order.ali_order_id = external_order_id
         order.ali_status = getattr(result, "external_status", None) or "submitted"
         order.submitted_at = now
-        order.confirmed_at = now
+        # 8.0.6: RECONCILE_FOUND significa "o pedido remoto EXISTE", não que o
+        # AliExpress confirmou comercialmente. confirmed_at passa a ser
+        # autoridade exclusiva do status sync (STATUS_CONFIRMED em diante).
         order.last_error = None
         order.updated_at = now
         for item in items:

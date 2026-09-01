@@ -35,6 +35,17 @@
                     Revalidar fulfillment
                 </button>
             </form>
+            {% if ali_order.ali_order_id and ali_order.state in ['submitted', 'confirmed', 'shipped', 'delivered'] %}
+            <form method="POST"
+                  action="{{ url_for('aliexpress_fulfillment_admin.sync_status', order_id=ali_order.id) }}"
+                  class="inline">
+                {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+                <button type="submit"
+                        class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg text-sm">
+                    Sincronizar status
+                </button>
+            </form>
+            {% endif %}
         </div>
     </div>
 
@@ -50,11 +61,11 @@
                             {% if ali_order.state == 'ready' %}text-green-700 bg-green-50 border-green-200
                             {% elif ali_order.state == 'blocked' %}text-red-700 bg-red-50 border-red-200
                             {% elif ali_order.state == 'queued' %}text-yellow-700 bg-yellow-50 border-yellow-200
-                            {% elif state in ['submitting', 'submitted', 'confirmed'] %}text-blue-700 bg-blue-50 border-blue-200
-                            {% elif state in ['shipped', 'delivered'] %}text-purple-700 bg-purple-50 border-purple-200
-                            {% elif state in ['cancelled', 'cancel_requested'] %}text-gray-700 bg-gray-50 border-gray-200
-                            {% elif state == 'failed' %}text-red-700 bg-red-50 border-red-200
-                            {% elif state == 'manual_review' %}text-orange-700 bg-orange-50 border-orange-200
+                            {% elif ali_order.state in ['submitting', 'submitted', 'confirmed'] %}text-blue-700 bg-blue-50 border-blue-200
+                            {% elif ali_order.state in ['shipped', 'delivered'] %}text-purple-700 bg-purple-50 border-purple-200
+                            {% elif ali_order.state in ['cancelled', 'cancel_requested'] %}text-gray-700 bg-gray-50 border-gray-200
+                            {% elif ali_order.state == 'failed' %}text-red-700 bg-red-50 border-red-200
+                            {% elif ali_order.state == 'manual_review' %}text-orange-700 bg-orange-50 border-orange-200
                             {% else %}text-gray-700 bg-gray-50 border-gray-200{% endif %} border">
                             {{ ali_order.state|upper }}
                         </span>
