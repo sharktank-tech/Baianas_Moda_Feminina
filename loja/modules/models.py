@@ -1591,6 +1591,12 @@ class AliExpressOrder(db.Model):
         nullable=True,
         index=True,
     )
+    supplier_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("suppliers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     ali_order_id = db.Column(db.String(64), unique=True)
     state = db.Column(
         db.String(30),
@@ -1602,6 +1608,14 @@ class AliExpressOrder(db.Model):
     ali_status = db.Column(db.Text)
     raw_payload = db.Column(JSONB)
     last_error = db.Column(db.Text)
+    attempt_count = db.Column(db.Integer, nullable=False, default=0)
+    next_attempt_at = db.Column(db.DateTime)
+    queued_at = db.Column(db.DateTime, default=utcnow)
+    ready_at = db.Column(db.DateTime)
+    submitted_at = db.Column(db.DateTime)
+    confirmed_at = db.Column(db.DateTime)
+    cancelled_at = db.Column(db.DateTime)
+    last_attempt_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=utcnow)
     updated_at = db.Column(
         db.DateTime,
@@ -1610,6 +1624,92 @@ class AliExpressOrder(db.Model):
     )
 
     order = db.relationship("Order", backref="aliexpress_orders")
+    supplier = db.relationship("Supplier")
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "state IN "
+            "('queued', 'blocked', 'ready', 'submitting', 'submitted', "
+            "'confirmed', 'shipped', 'delivered', 'cancel_requested', "
+            "'cancelled', 'failed', 'manual_review', 'pending')",
+            name="ck_aliexpress_order_state",
+        ),
+    )
+
+
+# ==========================================================
+# Item de fulfillment AliExpress (snapshot do SKU comprado)
+# ==========================================================
+class AliExpressOrderItem(db.Model):
+    __tablename__ = "aliexpress_order_items"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    aliexpress_order_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("aliexpress_orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    order_item_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("order_items.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    product_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    variant_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("product_variants.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    supplier_product_external_id = db.Column(db.String(64), nullable=False)
+    supplier_sku_external_id = db.Column(db.String(64), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    supplier_unit_cost = db.Column(db.Numeric(10, 2))
+    supplier_currency = db.Column(db.String(3))
+    variant_label = db.Column(db.String(255))
+    state = db.Column(
+        db.String(20),
+        nullable=False,
+        default="queued",
+        server_default="queued",
+    )
+    last_error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+    aliexpress_order = db.relationship(
+        "AliExpressOrder", backref=db.backref("items", lazy=True, cascade="all, delete-orphan")
+    )
+    order_item = db.relationship("OrderItem")
+    product = db.relationship("Product")
+    variant = db.relationship("ProductVariant")
+
+    __table_args__ = (
+        db.CheckConstraint("quantity > 0", name="ck_aliexpress_order_item_quantity"),
+        db.CheckConstraint(
+            "state IN "
+            "('queued', 'blocked', 'ready', 'submitting', 'submitted', "
+            "'confirmed', 'shipped', 'delivered', 'cancel_requested', "
+            "'cancelled', 'failed', 'manual_review')",
+            name="ck_aliexpress_order_item_state",
+        ),
+    )
 
 
 # ==========================================================

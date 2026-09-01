@@ -60,6 +60,24 @@ from .buyer_freight_get import (
     raw_canonical_sku_id,
 )
 from .sign import sign_sync, sign_top
+from .credential_store import (
+    AliExpressCredential,
+    is_configured,
+    persist_credential,
+    get_fulfillment_access_token,
+    mark_credential_error,
+    CredentialStoreError,
+    CredentialNotConfigured,
+    CredentialInvalid,
+    CredentialNotFound,
+    CredentialExpired,
+)
+from .fulfillment import (
+    ensure_aliexpress_fulfillment,
+    cancel_fulfillment_before_submission,
+    FulfillmentResult,
+    ERROR_CODES,
+)
 from .top_freight import (
     TOP_ROUTER_ENDPOINT,
     build_top_freight_calculate_dto,
@@ -99,6 +117,20 @@ def create_client_from_env(
 __all__: Iterable[str] = [
     "AliExpressClient",
     "AliExpressCredentials",
+    "AliExpressCredential",
+    "is_configured",
+    "persist_credential",
+    "get_fulfillment_access_token",
+    "mark_credential_error",
+    "CredentialStoreError",
+    "CredentialNotConfigured",
+    "CredentialInvalid",
+    "CredentialNotFound",
+    "CredentialExpired",
+    "ensure_aliexpress_fulfillment",
+    "cancel_fulfillment_before_submission",
+    "FulfillmentResult",
+    "ERROR_CODES",
     "AliExpressSearchResult",
     "AliExpressSearchProduct",
     "AliExpressProductDetail",

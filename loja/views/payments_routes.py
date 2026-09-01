@@ -39,6 +39,10 @@ from loja.modules.getway_mercado_pago.payment_service import (
     mp_status_to_order_status,
     validate_webhook_signature,
 )
+from loja.integrations.aliexpress import (
+    ensure_aliexpress_fulfillment,
+    cancel_fulfillment_before_submission,
+)
 
 
 # O nome "payments" precisa ser exatamente este,
@@ -903,9 +907,17 @@ def _sync_payment(payment_id):
                 order.status = "paid"
                 order.manual_review_reason = None
 
+                # Fulfillment AliExpress (Fase 8.0) — idempotente, mesma transação.
+                # Só roda para pedidos com status "paid" (não manual_review).
+                # Não enfileira quando Order.status em: manual_review, payment_failed, refunded, charged_back
+                if order.status == "paid":
+                    ensure_aliexpress_fulfillment(order)
+
     elif mapped_status in {"refunded", "charged_back"}:
         _release_stock(order)
         order.status = mapped_status
+        # Cancelar fulfillment pré-submissão (Fase 8.0)
+        cancel_fulfillment_before_submission(order)
     elif mapped_status == "payment_failed" and order.status not in {
         "paid",
         "manual_review",

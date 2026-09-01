@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+
+{% block title %}Fulfillment #{{ (ali_order.id|string)[:8] }} — {{ ali_order.state|upper }}{% endblock %}
+
+{% block content %}
+
+<div class="max-w-5xl mx-auto px-4 py-8">
+
+    <div class="mb-8 flex items-center justify-between">
+        <div>
+            <a href="{{ url_for('aliexpress_fulfillment_admin.index') }}"
+               class="text-sm text-gray-500 hover:text-gray-800 underline">
+                &larr; Voltar à fila
+            </a>
+            <h1 class="text-3xl font-bold text-gray-800 mt-2">
+                Fulfillment AliExpress
+            </h1>
+            <p class="text-gray-500 mt-1">
+                ID: {{ ali_order.id }} &middot;
+                {% if ali_order.order %}
+                    Pedido: {{ ali_order.order.order_number }}
+                {% else %}
+                    Pedido original removido
+                {% endif %}
+            </p>
+        </div>
+        <div class="flex gap-2">
+            <form method="POST"
+                  action="{{ url_for('aliexpress_fulfillment_admin.revalidate', order_id=ali_order.id) }}"
+                  class="inline">
+                {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+                <button type="submit"
+                        class="bg-pink-600 hover:bg-pink-700 text-white font-semibold px-4 py-2 rounded-lg text-sm"
+                        {% if ali_order.state in ['submitting', 'submitted', 'confirmed', 'shipped', 'delivered'] %}disabled{% endif %}>
+                    Revalidar fulfillment
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Header com estado e info do supplier -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div class="bg-white rounded-2xl shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-4">Estado do Fulfillment</h2>
+            <dl class="text-sm space-y-2">
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Estado</dt>
+                    <dd class="font-medium">
+                        <span class="px-2 py-1 rounded-full
+                            {% if ali_order.state == 'ready' %}text-green-700 bg-green-50 border-green-200
+                            {% elif ali_order.state == 'blocked' %}text-red-700 bg-red-50 border-red-200
+                            {% elif ali_order.state == 'queued' %}text-yellow-700 bg-yellow-50 border-yellow-200
+                            {% elif state in ['submitting', 'submitted', 'confirmed'] %}text-blue-700 bg-blue-50 border-blue-200
+                            {% elif state in ['shipped', 'delivered'] %}text-purple-700 bg-purple-50 border-purple-200
+                            {% elif state in ['cancelled', 'cancel_requested'] %}text-gray-700 bg-gray-50 border-gray-200
+                            {% elif state == 'failed' %}text-red-700 bg-red-50 border-red-200
+                            {% elif state == 'manual_review' %}text-orange-700 bg-orange-50 border-orange-200
+                            {% else %}text-gray-700 bg-gray-50 border-gray-200{% endif %} border">
+                            {{ ali_order.state|upper }}
+                        </span>
+                    </dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Último erro</dt>
+                    <dd class="font-medium text-red-600">{{ ali_order.last_error or '—' }}</dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Tentativas</dt>
+                    <dd class="font-medium">{{ ali_order.attempt_count }}</dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Idempotency Key</dt>
+                    <dd class="font-mono text-xs text-gray-500">{{ ali_order.idempotency_key or '—' }}</dd>
+                </div>
+            </dl>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-6 md:col-span-2">
+            <h2 class="text-lg font-semibold text-gray-800 mb-4">Supplier / Credencial</h2>
+            <dl class="text-sm space-y-2 grid grid-cols-2 gap-2">
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Supplier</dt>
+                    <dd class="font-medium">{{ ali_order.supplier.name if ali_order.supplier else '—' }}</dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Seller ID</dt>
+                    <dd class="font-medium">{{ ali_order.supplier.seller_id if ali_order.supplier else '—' }}</dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Channel</dt>
+                    <dd class="font-medium">{{ ali_order.supplier.channel_type if ali_order.supplier else '—' }}</dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Credencial configurada</dt>
+                    <dd class="font-medium">
+                        {% if ali_order.supplier and ali_order.supplier.aliexpress_credential %}
+                            <span class="text-green-600">Sim</span>
+                            {% if ali_order.supplier.aliexpress_credential.status %}
+                                <span class="ml-2 px-2 py-0.5 rounded text-xs
+                                    {% if ali_order.supplier.aliexpress_credential.status == 'active' %}text-green-700 bg-green-50 border-green-200
+                                    {% elif ali_order.supplier.aliexpress_credential.status == 'expired' %}text-yellow-700 bg-yellow-50 border-yellow-200
+                                    {% else %}text-red-700 bg-red-50 border-red-200{% endif %} border">
+                                    {{ ali_order.supplier.aliexpress_credential.status }}
+                                </span>
+                            {% endif %}
+                        {% else %}
+                            <span class="text-red-600">Não</span>
+                        {% endif %}
+                    </dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Token expira em</dt>
+                    <dd class="font-medium">
+                        {% if ali_order.supplier and ali_order.supplier.aliexpress_credential and ali_order.supplier.aliexpress_credential.access_token_expires_at %}
+                            {{ ali_order.supplier.aliexpress_credential.access_token_expires_at.strftime('%d/%m/%Y %H:%M') }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Erro credencial</dt>
+                    <dd class="font-medium text-red-600">
+                        {% if ali_order.supplier and ali_order.supplier.aliexpress_credential %}
+                            {{ ali_order.supplier.aliexpress_credential.last_error or '—' }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </dd>
+                </div>
+            </dl>
+        </div>
+    </div>
+
+    <!-- Itens do fulfillment -->
+    <div class="bg-white rounded-2xl shadow overflow-hidden">
+        <div class="p-6 border-b border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-800">Itens do Fulfillment ({{ ali_order.items|length }})</h2>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Produto</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cor / Tamanho</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qtd</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Custo snapshot</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Moeda</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Erro</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    {% for item in ali_order.items %}
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3">
+                            <div class="font-medium text-gray-800">{{ item.product.name if item.product else '—' }}</div>
+                            <div class="text-xs text-gray-500">{{ (item.product_id|string)[:8] }}...</div>
+                        </td>
+                        <td class="px-4 py-3 text-sm text-gray-800">{{ item.variant_label or '—' }}</td>
+                        <td class="px-4 py-3 text-sm text-gray-800">{{ item.quantity }}</td>
+                        <td class="px-4 py-3 text-sm text-gray-800">
+                            {% if item.supplier_unit_cost is not none %}
+                                {{ "%.2f"|format(item.supplier_unit_cost) }}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-sm text-gray-800">{{ item.supplier_currency or '—' }}</td>
+                        <td class="px-4 py-3">
+                            {% set s = item.state %}
+                            <span class="text-sm font-medium px-2 py-1 rounded-full
+                                {% if s == 'ready' %}text-green-700 bg-green-50 border-green-200
+                                {% elif s == 'blocked' %}text-red-700 bg-red-50 border-red-200
+                                {% elif s == 'queued' %}text-yellow-700 bg-yellow-50 border-yellow-200
+                                {% elif s in ['submitting', 'submitted', 'confirmed'] %}text-blue-700 bg-blue-50 border-blue-200
+                                {% elif s in ['shipped', 'delivered'] %}text-purple-700 bg-purple-50 border-purple-200
+                                {% elif s in ['cancelled', 'cancel_requested'] %}text-gray-700 bg-gray-50 border-gray-200
+                                {% elif s == 'failed' %}text-red-700 bg-red-50 border-red-200
+                                {% elif s == 'manual_review' %}text-orange-700 bg-orange-50 border-orange-200
+                                {% else %}text-gray-700 bg-gray-50 border-gray-200{% endif %} border">
+                                {{ s|upper }}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3 text-sm text-red-600">{{ item.last_error or '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Timestamps -->
+    <div class="mt-6 bg-white rounded-2xl shadow p-6">
+        <h2 class="text-lg font-semibold text-gray-800 mb-4">Histórico</h2>
+        <dl class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+                <dt class="text-gray-500">Enfileirado</dt>
+                <dd class="font-medium">{{ ali_order.queued_at.strftime('%d/%m/%Y %H:%M') if ali_order.queued_at else '—' }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500">Pronto (ready)</dt>
+                <dd class="font-medium">{{ ali_order.ready_at.strftime('%d/%m/%Y %H:%M') if ali_order.ready_at else '—' }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500">Submetido</dt>
+                <dd class="font-medium">{{ ali_order.submitted_at.strftime('%d/%m/%Y %H:%M') if ali_order.submitted_at else '—' }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500">Confirmado</dt>
+                <dd class="font-medium">{{ ali_order.confirmed_at.strftime('%d/%m/%Y %H:%M') if ali_order.confirmed_at else '—' }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500">Enviado</dt>
+                <dd class="font-medium">{{ ali_order.shipped_at.strftime('%d/%m/%Y %H:%M') if ali_order.shipped_at else '—' }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500">Entregue</dt>
+                <dd class="font-medium">{{ ali_order.delivered_at.strftime('%d/%m/%Y %H:%M') if ali_order.delivered_at else '—' }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500">Cancelado</dt>
+                <dd class="font-medium">{{ ali_order.cancelled_at.strftime('%d/%m/%Y %H:%M') if ali_order.cancelled_at else '—' }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500">Última atualização</dt>
+                <dd class="font-medium">{{ ali_order.updated_at.strftime('%d/%m/%Y %H:%M') if ali_order.updated_at else '—' }}</dd>
+            </div>
+        </dl>
+    </div>
+
+</div>
+
+{% endblock %}
