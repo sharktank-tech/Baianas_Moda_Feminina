@@ -1605,6 +1605,7 @@ class AliExpressOrder(db.Model):
         server_default="queued",
     )
     idempotency_key = db.Column(db.String(64), unique=True)
+    attempt_key = db.Column(db.String(64), nullable=True, index=True)
     ali_status = db.Column(db.Text)
     raw_payload = db.Column(JSONB)
     last_error = db.Column(db.Text)
@@ -1631,7 +1632,8 @@ class AliExpressOrder(db.Model):
             "state IN "
             "('queued', 'blocked', 'ready', 'submitting', 'submitted', "
             "'confirmed', 'shipped', 'delivered', 'cancel_requested', "
-            "'cancelled', 'failed', 'manual_review', 'pending')",
+            "'cancelled', 'failed', 'manual_review', 'pending', "
+            "'pending_reconciliation')",
             name="ck_aliexpress_order_state",
         ),
     )

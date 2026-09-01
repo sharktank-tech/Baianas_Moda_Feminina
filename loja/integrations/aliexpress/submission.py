@@ -20,16 +20,34 @@ MÁQUINA DE ESTADOS:
     * ``submitted`` só existe após sucesso confirmado (identidade externa
       persistida em ``AliExpressOrder.ali_order_id``);
     * nunca há transição direta ``ready -> submitted``;
-    * falha preserva a ordem/itens/id/snapshot e mantém ``submitting`` com
-      ``last_error`` sanitizado e ``attempt_count + 1`` para retry síncrono.
+    * falha CONFIRMADA preserva a ordem/itens/id/snapshot e mantém
+      ``submitting`` com ``last_error`` sanitizado e ``attempt_count + 1``
+      para retry síncrono.
 
-IDEMPOTÊNCIA:
-    Ordens já ``submitted`` retornam o resultado persistido sem chamar o
-    provider nem gerar nova identidade externa.
+DESFECHOS DO PROVIDER (Fase 8.0.5):
+    * sucesso confirmado    -> ``AliExpressSubmissionResult`` (external id)
+    * falha confirmada      -> ``AliExpressSubmissionFailed``
+                              (mantém ``submitting``, retry síncrono seguro)
+    * desconhecido/ambíguo  -> ``AliExpressSubmissionUnknown``
+                              (timeout/desconexão; RESULTADO REMOTO PODE TER
+                              ACONTECIDO). A ordem vai para
+                              ``pending_reconciliation``: não volta a ``ready``,
+                              não permite nova criação e exige reconciliação
+                              explícita (8.0.5) antes de novo submit.
+    * qualquer outra exceção do provider é conservadoramente tratada como
+      desconhecido (nunca interpretar timeout genérico como "não criado").
+
+IDEMPOTÊNCIA (por tentativa):
+    ``AliExpressOrder.attempt_key`` é a chave local estável da tentativa
+    corrente: gerada deterministicamente de (order.id, seq) ANTES da chamada
+    lógica ao provider, estável durante a reconciliação da mesma tentativa,
+    sem segredo e sem dependência do catálogo. Retry após conclusão
+    ``not_found`` gera nova chave (novo seq).
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 from abc import ABC, abstractmethod
@@ -52,7 +70,24 @@ class SubmissionHardOffError(Exception):
 
 
 class AliExpressSubmissionFailed(Exception):
-    """Falha do provider (fake) na submissão."""
+    """Falha confirmada do provider (fake) na submissão — retry seguro."""
+
+
+class AliExpressSubmissionUnknown(Exception):
+    """Resultado desconhecido/ambíguo (timeout, desconexão) — a ordem pode ter
+    sido criada remotamente; requer reconciliação antes de nova tentativa."""
+
+
+def _attempt_key(order: AliExpressOrder) -> str:
+    """Chave determinística de TENTATIVA: sha256('alias:attempt:<order>:<seq>').
+
+    ``seq = order.attempt_count + 1``: criada antes da chamada ao provider,
+    estável durante a reconciliação da mesma tentativa, sem segredo e sem
+    dependência do catálogo.
+    """
+    seq = (order.attempt_count or 0) + 1
+    base = f"alias:submission-attempt:v1:{order.id}:{seq}"
+    return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -75,6 +110,7 @@ class AliExpressSubmissionRequest:
     aliexpress_order_id: uuid.UUID
     order_id: Optional[uuid.UUID]
     supplier_id: Optional[uuid.UUID]
+    attempt_key: Optional[str]
     items: tuple[AliExpressSubmissionItem, ...]
 
 
@@ -91,7 +127,12 @@ class AliExpressOrderSubmitter(ABC):
 
     @abstractmethod
     def submit(self, request: AliExpressSubmissionRequest) -> AliExpressSubmissionResult:
-        """Envia o pedido. Deve levantar ``AliExpressSubmissionFailed`` em falha."""
+        """Envia o pedido (Fase 8.0.5 — desfechos):
+          * sucesso confirmado: retorna ``AliExpressSubmissionResult``;
+          * falha confirmada: levanta ``AliExpressSubmissionFailed``;
+          * desconhecido/ambíguo (timeout/desconexão): levanta
+            ``AliExpressSubmissionUnknown``.
+        """
 
 
 class HardOffOrderSubmitter(AliExpressOrderSubmitter):
@@ -117,6 +158,7 @@ def _build_submission_request(
         aliexpress_order_id=order.id,
         order_id=order.order_id,
         supplier_id=order.supplier_id,
+        attempt_key=order.attempt_key,
         items=tuple(
             AliExpressSubmissionItem(
                 order_item_id=item.order_item_id,
@@ -173,10 +215,20 @@ def _fail(
     order: AliExpressOrder,
     error: str,
     session,
+    state: Optional[str] = "submitting",
 ) -> FulfillmentResult:
-    """Persiste uma falha de submissão preservando a ordem e o snapshot."""
+    """Persiste um desfecho de submissão preservando ordem e snapshot.
+
+    ``state``:
+      * ``submitting`` — falha confirmada (retry síncrono seguro);
+      * ``pending_reconciliation`` — resultado ambíguo/desconhecido (8.0.5):
+        não volta a ``ready`` e exige reconciliação antes de novo envio.
+    """
+    order.state = state
     order.last_error = error
+    attempt_key = order.attempt_key or _attempt_key(order)
     order.attempt_count += 1
+    order.attempt_key = attempt_key
     order.last_attempt_at = utcnow()
     order.updated_at = utcnow()
     session.commit()
@@ -197,10 +249,19 @@ def submit_aliexpress_order(
 
     Locking (PostgreSQL): usa ``SELECT ... FOR UPDATE`` em dois estágios para
     serializar a chamada ao provider e impedir dupla submissão externa:
-       Estágio A: trava, checa estado/gate, transiciona ``ready -> submitting``
-                  e commit (submitting persistido ANTES do provider).
+       Estágio A: trava, checa estado/gate, gera ``attempt_key`` (8.0.5),
+                  transiciona ``ready -> submitting`` e commit (submitting e
+                  attempt_key persistidos ANTES do provider).
        Estágio B: re-trava, re-checa ``submitted`` (idempotência sob corrida),
                   chama o provider com o lock segurado e commit do resultado.
+
+    Desfechos (8.0.5):
+       * sucesso confirmado           -> ``submitted``;
+       * falha confirmada             -> ``submitting`` (retry síncrono);
+       * desconhecido/ambíguo         -> ``pending_reconciliation``: NÃO volta
+         a ``ready``, NÃO permite nova criação e exige reconciliação explícita
+         antes de novo envio.
+    Estados ``pending_reconciliation`` NÃO são elegíveis para submissão.
 
     Em SQLite o FOR UPDATE é inócuo; a proteção de concorrência é garantida e
     testada em PostgreSQL.
@@ -249,8 +310,11 @@ def submit_aliexpress_order(
             state=order.state,
         )
 
-    # Estágio A: transitiona para submitting e persiste antes do provider.
+    # Estágio A: transiciona para submitting e persiste antes do provider,
+    # incluindo a chave de tentativa/idempotência (8.0.5) — estável durante a
+    # reconciliação da mesma tentativa.
     order.state = "submitting"
+    order.attempt_key = _attempt_key(order)
     order.updated_at = now
     session.commit()
 
@@ -270,6 +334,14 @@ def submit_aliexpress_order(
             items=list(locked.items),
             state="submitted",
         )
+    if locked.state == "pending_reconciliation":
+        # Corrida com reconciliação/outro desfecho ambíguo: nunca chamar provider.
+        session.commit()
+        return FulfillmentResult(
+            aliexpress_order=locked,
+            items=list(locked.items),
+            state=locked.state,
+        )
 
     items = list(locked.items)
     try:
@@ -278,20 +350,56 @@ def submit_aliexpress_order(
         logger.info(
             "aliexpress submission: hard-off bloqueou envio de %s", ali_order.id
         )
-        return _fail(order=locked, error=ERROR_CODES["SUBMISSION_HARD_OFF"], session=session)
-    except AliExpressSubmissionFailed as exc:
+        return _fail(
+            order=locked, error=ERROR_CODES["SUBMISSION_HARD_OFF"], session=session
+        )
+    except AliExpressSubmissionFailed:
+        # Falha CONFIRMADA pelo provider: mantém submitting (retry síncrono).
         logger.warning(
-            "aliexpress submission: provider falhou p/ %s: %s", ali_order.id, exc
+            "aliexpress submission: provider falhou p/ %s code=%s",
+            ali_order.id, ERROR_CODES["SUBMISSION_FAILED"],
         )
-        return _fail(order=locked, error=ERROR_CODES["SUBMISSION_FAILED"], session=session)
+        return _fail(
+            order=locked, error=ERROR_CODES["SUBMISSION_FAILED"], session=session
+        )
+    except AliExpressSubmissionUnknown:
+        # Resultado AMBÍGUO (timeout/desconexão): pode ter criado remotamente.
+        logger.warning(
+            "aliexpress submission: resultado desconhecido p/ %s code=%s",
+            ali_order.id, ERROR_CODES["SUBMISSION_UNKNOWN"],
+        )
+        return _fail(
+            order=locked,
+            error=ERROR_CODES["SUBMISSION_UNKNOWN"],
+            state="pending_reconciliation",
+            session=session,
+        )
     except Exception:
-        logger.exception(
-            "aliexpress submission: erro interno p/ %s", ali_order.id
+        # Exceção inesperada durante a chamada: conservadoramente ambíguo.
+        # Nunca logar a exceção (o texto do provider pode conter segredos).
+        logger.error(
+            "aliexpress submission: erro interno p/ %s code=%s",
+            ali_order.id, ERROR_CODES["SUBMISSION_UNKNOWN"],
         )
-        return _fail(order=locked, error=ERROR_CODES["SUBMISSION_ERROR"], session=session)
+        return _fail(
+            order=locked,
+            error=ERROR_CODES["SUBMISSION_UNKNOWN"],
+            state="pending_reconciliation",
+            session=session,
+        )
 
     if result is None or not getattr(result, "external_order_id", ""):
-        return _fail(order=locked, error=ERROR_CODES["SUBMISSION_ERROR"], session=session)
+        # Provider não confirmou identidade externa: ambíguo, não "não criado".
+        logger.error(
+            "aliexpress submission: resposta sem identidade p/ %s code=%s",
+            ali_order.id, ERROR_CODES["SUBMISSION_UNKNOWN"],
+        )
+        return _fail(
+            order=locked,
+            error=ERROR_CODES["SUBMISSION_UNKNOWN"],
+            state="pending_reconciliation",
+            session=session,
+        )
 
     # Sucesso confirmado: persiste identidade externa e estados submitted.
     locked.state = "submitted"

@@ -77,6 +77,9 @@ ERROR_CODES = {
     "SUBMISSION_FAILED": "submission_failed",
     "SUBMISSION_ERROR": "submission_error",
     "SUBMISSION_REQUIRES_SUPPLIER": "submission_requires_supplier",
+    "SUBMISSION_UNKNOWN": "submission_unknown",
+    "RECONCILIATION_UNKNOWN": "reconciliation_unknown",
+    "RECONCILIATION_ERROR": "reconciliation_error",
 }
 
 
