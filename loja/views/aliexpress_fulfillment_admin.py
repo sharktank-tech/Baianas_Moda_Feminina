@@ -25,7 +25,7 @@ from flask import (
 from sqlalchemy import desc, func
 from sqlalchemy.orm import selectinload
 
-from loja import db, csrf
+from loja import db
 from loja.modules.models import AliExpressOrder, AliExpressOrderItem, Order, Supplier
 from loja.integrations.aliexpress import (
     ensure_aliexpress_fulfillment,
@@ -107,17 +107,27 @@ def detail(order_id):
 
 @fulfillment_admin_blueprint.route("/<uuid:order_id>/revalidar", methods=["POST"])
 @admin_required
-@csrf.exempt  # CSRF protection handled by template form
 def revalidate(order_id):
     """Revalida fulfillment: roda validações locais + credencial novamente.
 
     NÃO envia pedido ao AliExpress.
+    CSRF obrigatório (via template; sem @csrf.exempt).
+    Apenas estados revalidáveis (queued/blocked/ready) são reavaliados —
+    estados avançados não regridem.
     """
     ali_order = AliExpressOrder.query.options(
         selectinload(AliExpressOrder.items),
         selectinload(AliExpressOrder.supplier),
         selectinload(AliExpressOrder.order),
     ).filter_by(id=order_id).first_or_404()
+
+    # Fase 8.0.1: estados avançados não podem ser revalidados (sem regressão).
+    if ali_order.state not in ("queued", "blocked", "ready"):
+        flash(
+            f"Fulfillment em estado {ali_order.state} não pode ser revalidado.",
+            "warning",
+        )
+        return redirect(url_for("aliexpress_fulfillment_admin.detail", order_id=order_id))
 
     if not ali_order.order:
         flash("Pedido original não encontrado.", "danger")

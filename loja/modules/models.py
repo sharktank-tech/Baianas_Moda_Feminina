@@ -1601,8 +1601,8 @@ class AliExpressOrder(db.Model):
     state = db.Column(
         db.String(30),
         nullable=False,
-        default="pending",
-        server_default="pending",
+        default="queued",
+        server_default="queued",
     )
     idempotency_key = db.Column(db.String(64), unique=True)
     ali_status = db.Column(db.Text)
@@ -1663,8 +1663,8 @@ class AliExpressOrderItem(db.Model):
     )
     product_id = db.Column(
         UUID(as_uuid=True),
-        db.ForeignKey("products.id", ondelete="CASCADE"),
-        nullable=False,
+        db.ForeignKey("products.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     variant_id = db.Column(

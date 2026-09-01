@@ -40,6 +40,7 @@ from loja.integrations.aliexpress import (
     persist_credential,
 )
 from loja.integrations.aliexpress import admin_session
+from loja import db
 from loja.modules.models import Supplier
 from loja.integrations.aliexpress.errors import (
     AliExpressAPIError,
@@ -226,26 +227,43 @@ def callback():
     except (AliExpressAuthError, AliExpressTransportError) as exc:
         return _render_oauth_failure(exc)
 
-    # Persistir credencial criptografada (Fase 8.0) — upsert por seller_id.
-    # Resolve supplier pelo channel_type + seller_id.
-    try:
-        supplier = Supplier.query.filter_by(
-            channel_type="aliexpress", seller_id=token.seller_id
-        ).first()
-        if supplier:
-            persist_credential(
-                supplier_id=supplier.id,
-                seller_id=token.seller_id,
-                access_token=token.access_token,
-                refresh_token=token.refresh_token,
-                expires_in=token.expires_in,
-                refresh_expires_in=token.refresh_expires_in,
-            )
-    except Exception:
-        # Falha ao persistir NÃO bloqueia o fluxo OAuth (cookie admin ainda funciona)
-        current_app.logger.error(
-            "AliExpress credential persist: falhou (continuando sem credencial persistente)"
+    # Persistir credencial criptografada (Fase 8.0/8.0.1) — upsert por supplier.
+    # seller_id é OBRIGATÓRIO: sem ele não há como resolver o supplier, então
+    # nenhuma query de Supplier nem persistência acontece. Log sempre sanitizado
+    # (sem token, sem ciphertext, sem seller_id em si).
+    if not token.seller_id:
+        current_app.logger.warning(
+            "AliExpress OAuth: seller_id ausente — credencial persistente NÃO gravada"
         )
+    else:
+        try:
+            supplier = Supplier.query.filter_by(
+                channel_type="aliexpress", seller_id=token.seller_id
+            ).first()
+            if supplier:
+                persist_credential(
+                    supplier_id=supplier.id,
+                    seller_id=token.seller_id,
+                    access_token=token.access_token,
+                    refresh_token=token.refresh_token,
+                    expires_in=token.expires_in,
+                    refresh_expires_in=token.refresh_expires_in,
+                )
+                # Fase 8.0.1: commit explícito — a credencial deve sobreviver ao
+                # fim da request (persistência de verdade, não apenas flush).
+                db.session.commit()
+            else:
+                current_app.logger.info(
+                    "AliExpress OAuth: seller_id sem supplier AliExpress cadastrado "
+                    "(credencial persistente não gravada)"
+                )
+        except Exception:
+            # Falha ao persistir NÃO bloqueia o fluxo OAuth (cookie admin ainda
+            # funciona), mas desfaz a transação para não vazar meia escrita.
+            db.session.rollback()
+            current_app.logger.error(
+                "AliExpress credential persist: falhou (continuando sem credencial persistente)"
+            )
 
     # 2) DS smoke read-only usando o token SOMENTE em memória.
     client = AliExpressClient(app_key=app_key, app_secret=app_secret, access_token=token.access_token)

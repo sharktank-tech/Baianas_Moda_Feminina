@@ -16,7 +16,7 @@ import hashlib
 import os
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import timedelta
 from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -165,14 +165,17 @@ def persist_credential(
         else None
     )
 
+    # Fase 8.0.1: expires_in pode ser 0 (token já expirado) — a distinção é
+    # "None = sem prazo" vs "0 = expira imediatamente". Tudo em UTC naive
+    # (utcnow()/db.DateTime sem timezone), sem mistura aware/naive.
     access_expires_at = (
-        datetime.fromtimestamp(now.timestamp() + expires_in, tz=timezone.utc)
-        if expires_in
+        now + timedelta(seconds=expires_in)
+        if expires_in is not None
         else None
     )
     refresh_expires_at = (
-        datetime.fromtimestamp(now.timestamp() + refresh_expires_in, tz=timezone.utc)
-        if refresh_expires_in
+        now + timedelta(seconds=refresh_expires_in)
+        if refresh_expires_in is not None
         else None
     )
 
@@ -214,6 +217,11 @@ def get_fulfillment_access_token(supplier_id) -> str:
     if cred is None:
         raise CredentialNotFound(f"credencial não encontrada para supplier {supplier_id}")
 
+    if cred.status == "expired":
+        # Fase 8.0.1: status final de expiração deve ser CredentialExpired,
+        # não CredentialInvalid — comportamento estável em chamadas repetidas.
+        raise CredentialExpired("credencial expirada")
+
     if cred.status != "active":
         raise CredentialInvalid(f"credencial com status inválido: {cred.status}")
 
@@ -225,7 +233,16 @@ def get_fulfillment_access_token(supplier_id) -> str:
             db.session.flush()
             raise CredentialExpired("access token expirado")
 
-    return _decrypt_or_raise(cred.access_token_encrypted)
+    try:
+        return _decrypt_or_raise(cred.access_token_encrypted)
+    except CredentialInvalid:
+        # Ciphertext corrompido/tamperado: marca a credencial como invalid
+        # (estável) e re-levanta. O erro sanitizado nunca expõe o ciphertext.
+        cred.status = "invalid"
+        cred.last_error = "credential_invalid"
+        cred.updated_at = utcnow()
+        db.session.flush()
+        raise
 
 
 def mark_credential_error(supplier_id, error_code: str) -> None:

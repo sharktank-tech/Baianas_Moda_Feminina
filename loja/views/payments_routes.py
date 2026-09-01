@@ -784,7 +784,20 @@ def _sync_payment(payment_id):
     mapped_status = mp_status_to_order_status(mp_status)
 
     if mapped_status == "paid":
-        if order.status not in {"paid", "manual_review"}:
+        if order.status in {"refunded", "charged_back"}:
+            # Fase 8.0.1: approved tardio NUNCA reverte estorno — a ordem
+            # permanece refunded/charged_back e o fulfillment continua como
+            # cancelado/em cancelamento. O payment record acima já reflete o
+            # payload; não há mudança de estado do pedido.
+            current_app.logger.info(
+                "Pagamento %s approved tardio ignorado: pedido %s já %s.",
+                payment_id, order.id, order.status,
+            )
+        elif order.status == "paid":
+            # Webhook approved repetido: re-ensure idempotente (Fase 8.0.1).
+            # Mantém mesmas AliExpressOrder/idempotency_key/items.
+            ensure_aliexpress_fulfillment(order)
+        elif order.status not in {"manual_review"}:
             locked_products = {}
             locked_variants = {}
             review_reasons = []
