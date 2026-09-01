@@ -42,6 +42,7 @@ from loja.modules.models import AliExpressOrder, AliExpressOrderItem
 from loja.utils import utcnow
 
 from .fulfillment import ERROR_CODES, FulfillmentResult, _check_credential
+from .oauth_refresh import evaluate_credential_with_refresh
 
 logger = logging.getLogger(__name__)
 
@@ -134,12 +135,17 @@ def _build_submission_request(
 def _submission_gate(
     order: AliExpressOrder,
     items: list[AliExpressOrderItem],
+    refresher=None,
 ) -> Optional[str]:
     """Barreiras que impedem a submissão (nunca chegam ao provider).
 
     Credencial NUNCA supera erro de integridade de item: itens inválidos
     bloqueiam antes da checagem de auth. Retorna None se a ordem pode ser
     enviada ao provider.
+
+    ``refresher`` (Fase 8.0.4): quando informado, credencial expirada com
+    refresh token disponível tenta renovação síncrona; sem ele, comportamento
+    idêntico à Fase 8.0.3 (sem renovação automática).
     """
     if not items:
         return ERROR_CODES["ITEM_INTEGRITY_ERROR"]
@@ -157,7 +163,9 @@ def _submission_gate(
     if order.supplier_id is None:
         return ERROR_CODES["SUBMISSION_REQUIRES_SUPPLIER"]
 
-    return _check_credential(order.supplier_id)
+    if refresher is None:
+        return _check_credential(order.supplier_id)
+    return evaluate_credential_with_refresh(order.supplier_id, refresher)
 
 
 def _fail(
@@ -182,6 +190,7 @@ def _fail(
 def submit_aliexpress_order(
     ali_order: AliExpressOrder,
     submitter: Optional[AliExpressOrderSubmitter] = None,
+    refresher=None,
     session=None,
 ) -> FulfillmentResult:
     """Submete uma AliExpressOrder via máquina de estados idempotente.
@@ -229,7 +238,7 @@ def submit_aliexpress_order(
             state=order.state,
         )
 
-    reason = _submission_gate(order, list(order.items))
+    reason = _submission_gate(order, list(order.items), refresher=refresher)
     if reason is not None:
         order.last_error = reason
         order.updated_at = now

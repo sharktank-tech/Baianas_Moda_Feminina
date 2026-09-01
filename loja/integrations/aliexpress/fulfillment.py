@@ -55,6 +55,7 @@ from .credential_store import (
     CredentialExpired,
     CredentialInvalid,
 )
+from .oauth_refresh import evaluate_credential_with_refresh
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +241,10 @@ def _resolve_existing_ali_orders(order: Order) -> list[AliExpressOrder]:
     )
 
 
-def ensure_aliexpress_fulfillment(order: Order) -> List[FulfillmentResult]:
+def ensure_aliexpress_fulfillment(
+    order: Order,
+    refresher: Optional[AliExpressOAuthRefresher] = None,
+) -> List[FulfillmentResult]:
     """Consolida o fulfillment AliExpress de um pedido pago (Fase 8.0.2).
 
     SNAPSHOT CANÔNICO:
@@ -252,6 +256,15 @@ def ensure_aliexpress_fulfillment(order: Order) -> List[FulfillmentResult]:
         credencial. Catálogo só é usado na PRIMEIRA criação do snapshot.
       * Credencial ainda pode mudar o estado (ready <-> blocked) sem depender
         do catálogo atual.
+
+    REFRESH OAuth (Fase 8.0.4):
+      * ``refresher`` opcional. Quando informado, credencial expirada com
+        refresh token disponível pode tentar renovação síncrona; com sucesso, a
+        mesma AliExpressOrder volta para ``ready`` sem revalidar o catálogo.
+      * Sem refresher, comportamento idêntico à Fase 8.0.2/8.0.3 (sem
+        renovação automática; provider padrão de refresh é HARD-OFF).
+      * ``item_integrity_error``/bloqueio estrutural SEMPRE prevalece sobre
+        credencial: integridade -> credencial -> submissão.
 
     CONSOLIDAÇÃO (item 5):
       * Um único resultado final por AliExpressOrder: itens válidos + inválidos
@@ -517,7 +530,10 @@ def ensure_aliexpress_fulfillment(order: Order) -> List[FulfillmentResult]:
         # (item 3). Grupo só com itens inválidos permanece blocked pelo erro do
         # próprio item, sem misturar código de credencial.
         if has_valid_item and sid is not None:
-            credential_error = _check_credential(sid)
+            if refresher is None:
+                credential_error = _check_credential(sid)
+            else:
+                credential_error = evaluate_credential_with_refresh(sid, refresher)
             if credential_error:
                 error_codes.add(credential_error)
 
