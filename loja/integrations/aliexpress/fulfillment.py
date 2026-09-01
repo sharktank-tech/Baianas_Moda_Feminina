@@ -72,6 +72,10 @@ ERROR_CODES = {
     "SUPPLIER_SKU_MISSING": "supplier_sku_missing",
     "SUPPLIER_MISMATCH": "supplier_mismatch",
     "ITEM_INTEGRITY_ERROR": "item_integrity_error",
+    "SUBMISSION_HARD_OFF": "submission_hard_off",
+    "SUBMISSION_FAILED": "submission_failed",
+    "SUBMISSION_ERROR": "submission_error",
+    "SUBMISSION_REQUIRES_SUPPLIER": "submission_requires_supplier",
 }
 
 
@@ -79,7 +83,7 @@ ERROR_CODES = {
 class FulfillmentResult:
     aliexpress_order: AliExpressOrder
     items: List[AliExpressOrderItem]
-    state: str  # ready | blocked
+    state: str  # ready | submitting | submitted | blocked
 
 
 def _sha256_hex(value: str) -> str:
