@@ -41,7 +41,11 @@ ALTER TABLE aliexpress_orders
 -- ============================================================
 -- Verificação de schema public invariável
 -- ============================================================
--- Esta migration NÃO deve criar objetos no schema public.
+-- Esta migration NÃO cria objetos no schema public. O projeto real possui uma
+-- public.aliexpress_orders legada/preexistente, fora do domínio da PolloModas;
+-- sua mera existência não pode ser tratada como evidência de mutação por esta
+-- migration. Os objetos NOVOS introduzidos pelo fulfillment (credentials/items)
+-- continuam proibidos em public.
 DO $$
 DECLARE
     obj_count integer;
@@ -49,9 +53,8 @@ BEGIN
     SELECT count(*) INTO obj_count
     FROM information_schema.tables
     WHERE table_schema = 'public'
-      AND table_name IN ('aliexpress_orders', 'aliexpress_credentials',
-                         'aliexpress_order_items');
+      AND table_name IN ('aliexpress_credentials', 'aliexpress_order_items');
     IF obj_count > 0 THEN
-        RAISE EXCEPTION 'Migration 0009 criou objetos no schema public (proibido)';
+        RAISE EXCEPTION 'Migration 0009 criou objetos novos no schema public (proibido)';
     END IF;
 END $$;
