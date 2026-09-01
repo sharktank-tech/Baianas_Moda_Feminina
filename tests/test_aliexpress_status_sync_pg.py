@@ -31,6 +31,7 @@ from loja.integrations.aliexpress.status_sync import (
     sync_aliexpress_order_status,
     STATUS_CONFIRMED,
     STATUS_DELIVERED,
+    STATUS_SHIPPED,
 )
 from loja.integrations.aliexpress.submission import (
     AliExpressOrderSubmitter,
@@ -300,3 +301,79 @@ def test_two_concurrent_syncs_distinct_stages_pick_most_advanced(env):
         assert row.state == "delivered"
         assert row.delivered_at is not None
         assert row.ali_status == "delivered"
+
+
+def test_concurrent_confirmed_vs_shipped_milestone_staging(env):
+    """confirmed vs shipped concorrentes: fim shipped, SEM delivered_at."""
+    schema, app = env
+    supplier_id, order_id, ali_order_id = _materialize_submitted(app)
+
+    syncer_a = FixedSyncer(STATUS_CONFIRMED)
+    syncer_b = FixedSyncer(STATUS_SHIPPED)
+    results = []
+    errors = []
+    barrier = threading.Barrier(2)
+
+    t1 = threading.Thread(
+        target=_start_sync,
+        args=(app, ali_order_id, syncer_a, results, errors, barrier),
+    )
+    t2 = threading.Thread(
+        target=_start_sync,
+        args=(app, ali_order_id, syncer_b, results, errors, barrier),
+    )
+    t1.start()
+    t2.start()
+    t1.join(timeout=60)
+    t2.join(timeout=60)
+
+    assert errors == [], errors
+    assert results == ["confirmed", "shipped"] or results == ["shipped", "confirmed"]
+
+    from loja import db
+    from loja.modules.models import AliExpressOrder
+
+    with app.app_context():
+        row = db.session.get(AliExpressOrder, ali_order_id)
+        assert row.state == "shipped"
+        assert row.confirmed_at is not None
+        assert row.shipped_at is not None
+        assert row.delivered_at is None  # milestone futuro não é criado
+
+
+def test_concurrent_shipped_vs_delivered_milestone_staging(env):
+    """shipped vs delivered concorrentes: fim delivered, todos os milestones."""
+    schema, app = env
+    supplier_id, order_id, ali_order_id = _materialize_submitted(app)
+
+    syncer_a = FixedSyncer(STATUS_SHIPPED)
+    syncer_b = FixedSyncer(STATUS_DELIVERED)
+    results = []
+    errors = []
+    barrier = threading.Barrier(2)
+
+    t1 = threading.Thread(
+        target=_start_sync,
+        args=(app, ali_order_id, syncer_a, results, errors, barrier),
+    )
+    t2 = threading.Thread(
+        target=_start_sync,
+        args=(app, ali_order_id, syncer_b, results, errors, barrier),
+    )
+    t1.start()
+    t2.start()
+    t1.join(timeout=60)
+    t2.join(timeout=60)
+
+    assert errors == [], errors
+    assert results == ["shipped", "delivered"] or results == ["delivered", "shipped"]
+
+    from loja import db
+    from loja.modules.models import AliExpressOrder
+
+    with app.app_context():
+        row = db.session.get(AliExpressOrder, ali_order_id)
+        assert row.state == "delivered"
+        assert row.confirmed_at is not None
+        assert row.shipped_at is not None
+        assert row.delivered_at is not None

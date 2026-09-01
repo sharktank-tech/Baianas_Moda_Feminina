@@ -149,17 +149,27 @@ def get_default_order_status_syncer() -> AliExpressOrderStatusSyncer:
     return HardOffOrderStatusSyncer()
 
 
-def _fill_milestones(order: AliExpressOrder, now):
-    """Preenche timestamps dos milestons logísticos SÓ se ainda ausentes.
+def _fill_milestones(order: AliExpressOrder, target_state: str, now):
+    """Preenche timestamps dos milestons logísticos ALCANÇADOS pelo alvo.
 
-    Avanço direto tipo submitted -> delivered preenche confirmed_at/shipped_at
-    de forma coerente antes de delivered_at. Nunca sobrescreve existente.
+    Cada timestamp só existe quando o estágio alvo realmente chegou àquele
+    estágio logístico:
+
+        submitted  -> não preenche nenhum;
+        confirmed  -> garante confirmed_at;
+        shipped    -> garante confirmed_at + shipped_at;
+        delivered  -> garante confirmed_at + shipped_at + delivered_at;
+
+    Nunca sobrescreve timestamps existentes e nunca cria milestones futuros
+    (estágios ainda não alcançados permanecem NULL). O estágio alvo é
+    EXPLÍCITO: chamadas ambíguas (estado atual implícito) não ocorrem.
     """
-    if order.confirmed_at is None:
+    target_rank = _MONO_ORDER.get(target_state, _MONO_ORDER[STATUS_SUBMITTED])
+    if target_rank >= _MONO_ORDER[STATUS_CONFIRMED] and order.confirmed_at is None:
         order.confirmed_at = now
-    if order.shipped_at is None:
+    if target_rank >= _MONO_ORDER[STATUS_SHIPPED] and order.shipped_at is None:
         order.shipped_at = now
-    if order.delivered_at is None:
+    if target_rank >= _MONO_ORDER[STATUS_DELIVERED] and order.delivered_at is None:
         order.delivered_at = now
 
 
@@ -320,8 +330,9 @@ def sync_aliexpress_order_status(
     local_rank = _MONO_ORDER[order.state]
 
     if outcome == order.state:
-        # Idempotente: garante milestons ausentes, nunca sobrescreve.
-        _fill_milestones(order, now)
+        # Idempotente: repara apenas milestones que deveriam existir PARA ESTE
+        # estado (nunca cria milestones futuros), sem sobrescrever existentes.
+        _fill_milestones(order, order.state, now)
         order.ali_status = outcome
         order.last_error = None
         order.updated_at = now
@@ -343,9 +354,9 @@ def sync_aliexpress_order_status(
             state=order.state,
         )
 
-    # Avanço monotônico: preenche milestons intermediários ausentes e aplica.
+    # Avanço monotônico: preenche milestones dos estágios ATINGIDOS e aplica.
     order.state = outcome
-    _fill_milestones(order, now)
+    _fill_milestones(order, outcome, now)
     order.ali_status = outcome
     order.last_error = None
     order.updated_at = now

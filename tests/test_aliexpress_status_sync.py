@@ -520,6 +520,180 @@ class TestMilestones:
         assert (fresh.confirmed_at, fresh.shipped_at, fresh.delivered_at) == (c1, s1, d1)
 
 
+class TestMilestoneStaging:
+    """Milestones materializados por estágio (correção 8.0.6.1).
+
+    Cada timestamp só existe quando o estado realmente alcançou aquele estágio;
+    milestones futuros permanecem NULL. Cancelamento não cria milestones.
+    """
+
+    def test_apos_submissao_inicial_sem_milestones(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        ali = _submit_ok(db, ali)
+        assert ali.state == "submitted"
+        assert ali.confirmed_at is None
+        assert ali.shipped_at is None
+        assert ali.delivered_at is None
+
+    def test_submitted_mais_same_sem_milestones_futuros(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        ali = _submit_ok(db, ali)
+        result, fresh = _sync(db, ali, result=STATUS_SUBMITTED)
+        assert result.state == "submitted"
+        assert fresh.confirmed_at is None
+        assert fresh.shipped_at is None
+        assert fresh.delivered_at is None
+
+    def test_submitted_para_confirmed_sem_shipped_delivered(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        ali = _submit_ok(db, ali)
+        result, fresh = _sync(db, ali, result=STATUS_CONFIRMED)
+        assert result.state == "confirmed"
+        assert fresh.confirmed_at is not None
+        assert fresh.shipped_at is None
+        assert fresh.delivered_at is None
+
+    def test_confirmed_mais_same_preserva_sem_futuros(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        ali = _submit_ok(db, ali)
+        _, fresh = _sync(db, ali, result=STATUS_CONFIRMED)
+        confirmed = fresh.confirmed_at
+        result, fresh2 = _sync(db, fresh, result=STATUS_CONFIRMED)
+        assert result.state == "confirmed"
+        assert fresh2.confirmed_at == confirmed
+        assert fresh2.shipped_at is None
+        assert fresh2.delivered_at is None
+
+    def test_submitted_para_shipped_sem_delivered(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        ali = _submit_ok(db, ali)
+        result, fresh = _sync(db, ali, result=STATUS_SHIPPED)
+        assert result.state == "shipped"
+        assert fresh.confirmed_at is not None
+        assert fresh.shipped_at is not None
+        assert fresh.delivered_at is None
+
+    def test_shipped_mais_same_preserva_sem_delivered(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        ali = _submit_ok(db, ali)
+        _, fresh = _sync(db, ali, result=STATUS_SHIPPED)
+        confirmed, shipped = fresh.confirmed_at, fresh.shipped_at
+        result, fresh2 = _sync(db, fresh, result=STATUS_SHIPPED)
+        assert result.state == "shipped"
+        assert fresh2.confirmed_at == confirmed
+        assert fresh2.shipped_at == shipped
+        assert fresh2.delivered_at is None
+
+    def test_submitted_para_delivered_todos_milestones(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        ali = _submit_ok(db, ali)
+        result, fresh = _sync(db, ali, result=STATUS_DELIVERED)
+        assert result.state == "delivered"
+        assert fresh.confirmed_at is not None
+        assert fresh.shipped_at is not None
+        assert fresh.delivered_at is not None
+
+    def test_confirmed_para_delivered_nao_sobrescreve(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        ali = _submit_ok(db, ali)
+        _, fresh = _sync(db, ali, result=STATUS_CONFIRMED)
+        confirmed = fresh.confirmed_at
+        result, fresh2 = _sync(db, fresh, result=STATUS_DELIVERED)
+        assert result.state == "delivered"
+        assert fresh2.confirmed_at == confirmed
+        assert fresh2.shipped_at is not None
+        assert fresh2.delivered_at is not None
+
+    def test_submitted_para_cancelled_sem_milestones(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        ali = _submit_ok(db, ali)
+        result, fresh = _sync(db, ali, result=STATUS_CANCELLED)
+        assert result.state == "cancelled"
+        assert fresh.confirmed_at is None
+        assert fresh.shipped_at is None
+        assert fresh.delivered_at is None
+
+    def test_confirmed_para_cancelled_preserva_confirmed(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        ali = _submit_ok(db, ali)
+        _, fresh = _sync(db, ali, result=STATUS_CONFIRMED)
+        confirmed = fresh.confirmed_at
+        result, fresh2 = _sync(db, fresh, result=STATUS_CANCELLED)
+        assert result.state == "cancelled"
+        assert fresh2.confirmed_at == confirmed
+        assert fresh2.shipped_at is None
+        assert fresh2.delivered_at is None
+
+    def test_shipped_para_cancelled_preserva_atingidos(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        ali = _submit_ok(db, ali)
+        _, fresh = _sync(db, ali, result=STATUS_SHIPPED)
+        confirmed, shipped = fresh.confirmed_at, fresh.shipped_at
+        result, fresh2 = _sync(db, fresh, result=STATUS_CANCELLED)
+        assert result.state == "cancelled"
+        assert fresh2.confirmed_at == confirmed
+        assert fresh2.shipped_at == shipped
+        assert fresh2.delivered_at is None
+
+    def test_regressao_shipped_para_confirmed_nao_altera_nada(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        ali = _submit_ok(db, ali)
+        _, fresh = _sync(db, ali, result=STATUS_SHIPPED)
+        before = (fresh.confirmed_at, fresh.shipped_at, fresh.delivered_at)
+        result, fresh2 = _sync(db, fresh, result=STATUS_CONFIRMED)
+        assert result.state == "shipped"
+        assert (fresh2.confirmed_at, fresh2.shipped_at, fresh2.delivered_at) == before
+
+    def test_regressao_delivered_para_shipped_nao_altera_nada(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        ali = _submit_ok(db, ali)
+        result, fresh = _sync(db, ali, result=STATUS_DELIVERED)
+        assert result.state == "delivered"
+        before = (fresh.confirmed_at, fresh.shipped_at, fresh.delivered_at)
+        result2, fresh2 = _sync(db, fresh, result=STATUS_SHIPPED)
+        assert result2.state == "delivered"
+        assert (fresh2.confirmed_at, fresh2.shipped_at, fresh2.delivered_at) == before
+
+
 class TestCancelled:
     def test_cancelled_remoto_a_partir_de_submitted(
         self, db, make_user, ae_supplier, ae_product, sp_variant_factory
