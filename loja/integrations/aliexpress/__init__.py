@@ -119,6 +119,11 @@ from .status_sync import (
     STATUS_CANCELLED,
     STATUS_UNKNOWN,
 )
+from .ds_order_status import (
+    DS_ORDER_STATUS_METHOD,
+    AliExpressDSOrderStatusSyncer,
+    map_aliexpress_ds_status,
+)
 from .oauth_refresh import (
     AliExpressOAuthRefreshError,
     AliExpressOAuthRefresher,
@@ -231,6 +236,9 @@ __all__: Iterable[str] = [
     "get_default_oauth_refresher",
     "refresh_aliexpress_credential",
     "evaluate_credential_with_refresh",
+    "DS_ORDER_STATUS_METHOD",
+    "AliExpressDSOrderStatusSyncer",
+    "map_aliexpress_ds_status",
     "AliExpressSearchResult",
     "AliExpressSearchProduct",
     "AliExpressProductDetail",
