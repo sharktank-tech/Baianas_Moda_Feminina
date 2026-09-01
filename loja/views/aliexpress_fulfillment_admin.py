@@ -134,20 +134,23 @@ def revalidate(order_id):
         return redirect(url_for("aliexpress_fulfillment_admin.detail", order_id=order_id))
 
     try:
-        # Re-executar validações (idempotente)
-        results = ensure_aliexpress_fulfillment(ali_order.order)
+        # Re-executar validações (idempotente).
+        ensure_aliexpress_fulfillment(ali_order.order)
 
-        # Filtrar resultado para este supplier específico
-        for result in results:
-            if result.aliexpress_order.id == ali_order.id:
-                db.session.commit()
-                if result.state == "ready":
-                    flash("Fulfillment revalidado com sucesso — estado: READY.", "success")
-                else:
-                    flash(f"Fulfillment revalidado — estado: {result.state.upper()} ({result.aliexpress_order.last_error}).", "warning")
-                break
+        # Fase 8.0.2: não confiar no primeiro FulfillmentResult — após o ensure,
+        # reler o estado FINAL persistido da AliExpressOrder pelo ID original e
+        # commitar antes de basear o flash nele.
+        db.session.commit()
+        db.session.refresh(ali_order)
+
+        if ali_order.state == "ready":
+            flash("Fulfillment revalidado com sucesso — estado: READY.", "success")
         else:
-            flash("Fulfillment não encontrado no resultado da revalidação.", "danger")
+            flash(
+                f"Fulfillment revalidado — estado: {ali_order.state.upper()} "
+                f"({ali_order.last_error}).",
+                "warning",
+            )
 
     except CredentialNotConfigured:
         db.session.rollback()

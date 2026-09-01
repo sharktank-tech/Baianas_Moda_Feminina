@@ -1247,15 +1247,218 @@ class TestFulfillmentService:
     def test_item_integrity_cross_product_blocked(
         self, db, aliexpress_supplier, aliexpress_product, order_with_items, valid_credential_env
     ):
-        """Variante de produto diferente -> blocked (cross-product)."""
+        """Variante de OUTRO produto AliExpress -> blocked (cross-product real,
+        item 7). Nunca snapshota o SKU da Variant B."""
+        from loja.integrations.aliexpress.fulfillment import (
+            ensure_aliexpress_fulfillment,
+        )
+        from loja.modules.models import ProductVariant, SupplierProduct
+
+        # Product A (aliExpress) + Variant A.
+        sp_a = SupplierProduct(
+            id=uuid.uuid4(),
+            supplier_id=aliexpress_supplier.id,
+            product_id=aliexpress_product.id,
+            supplier_product_id="SP_A_X",
+            cost=Decimal("10.00"),
+            currency="USD",
+            is_active=True,
+        )
+        db.session.add(sp_a)
+        db.session.flush()
+        variant_a = ProductVariant(
+            id=uuid.uuid4(),
+            product_id=aliexpress_product.id,
+            supplier_product_id=sp_a.id,
+            supplier_sku_id="SKU_A_X",
+            sku=None,
+            color="Red",
+            size="M",
+            stock=10,
+            price=Decimal("29.90"),
+            is_active=True,
+        )
+        db.session.add(variant_a)
+
+        # Product B (aliExpress) + Variant B (com seu próprio SKU real).
+        product_b = Product(
+            id=uuid.uuid4(),
+            name="AE Produto B",
+            description="t",
+            price=Decimal("19.90"),
+            source="aliexpress",
+            external_id="ext_b_x",
+            is_draft=True,
+            is_active=False,
+        )
+        db.session.add(product_b)
+        db.session.flush()
+        sp_b = SupplierProduct(
+            id=uuid.uuid4(),
+            supplier_id=aliexpress_supplier.id,
+            product_id=product_b.id,
+            supplier_product_id="SP_B_X",
+            cost=Decimal("5.00"),
+            currency="USD",
+            is_active=True,
+        )
+        db.session.add(sp_b)
+        db.session.flush()
+        variant_b = ProductVariant(
+            id=uuid.uuid4(),
+            product_id=product_b.id,
+            supplier_product_id=sp_b.id,
+            supplier_sku_id="SKU_B_X",
+            sku=None,
+            color="Blue",
+            size="L",
+            stock=5,
+            price=Decimal("19.90"),
+            is_active=True,
+        )
+        db.session.add(variant_b)
+        db.session.commit()
+
+        # OrderItem: product_id = Product A, variant_id = Variant B (cross).
+        item = OrderItem(
+            id=uuid.uuid4(),
+            order_id=order_with_items.id,
+            product_id=aliexpress_product.id,
+            variant_id=variant_b.id,
+            product_name=aliexpress_product.name,
+            quantity=1,
+            unit_price=Decimal("29.90"),
+            line_total=Decimal("29.90"),
+        )
+        db.session.add(item)
+        db.session.commit()
+
+        order_with_items.status = "paid"
+        db.session.commit()
+
+        results = ensure_aliexpress_fulfillment(order_with_items)
+        assert results
+        assert results[0].state == "blocked"
+        ali_order = results[0].aliexpress_order
+        assert ali_order.last_error == "item_integrity_error"
+        # Nenhum snapshot criado: item inválido não congela SKU da Variant B.
+        assert AliExpressOrderItem.query.filter_by(order_item_id=item.id).first() is None
+
+    def test_unattributed_never_folds_into_promoted_supplier_order(
+        self, db, aliexpress_supplier, aliexpress_product, supplier_product_factory, order_with_items, valid_credential_env
+    ):
+        """Fase 8.0.2 — item 4/5: item sem supplier atribuível NUNCA é fundido
+        na ordem promovida de um supplier (não fundir). Cada um tem seu próprio
+        AliExpressOrder e resultado final."""
         from loja.integrations.aliexpress.credential_store import (
             persist_credential,
-            is_configured,
         )
         from loja.integrations.aliexpress.fulfillment import (
             ensure_aliexpress_fulfillment,
         )
-        assert is_configured()
+        from loja.modules.models import ProductVariant
+
+        # Item válido -> supplier.
+        sp, variant, supplier = supplier_product_factory(aliexpress_product)
+        persist_credential(
+            supplier_id=supplier.id,
+            seller_id=supplier.seller_id,
+            access_token="tok",
+            expires_in=3600,
+        )
+
+        # Item sem supplier atribuível -> unattributed.
+        lone = Product(
+            id=uuid.uuid4(),
+            name="AE Sem SP 2",
+            description="t",
+            price=Decimal("19.90"),
+            source="aliexpress",
+            external_id="ext_lone",
+            is_draft=True,
+            is_active=False,
+        )
+        db.session.add(lone)
+        db.session.commit()
+        lone_variant = ProductVariant(
+            id=uuid.uuid4(),
+            product_id=lone.id,
+            supplier_product_id=None,
+            supplier_sku_id=None,
+            sku=None,
+            color="Red",
+            size="M",
+            stock=10,
+            price=Decimal("19.90"),
+            is_active=True,
+        )
+        db.session.add(lone_variant)
+        db.session.commit()
+
+        item_ok = OrderItem(
+            id=uuid.uuid4(),
+            order_id=order_with_items.id,
+            product_id=aliexpress_product.id,
+            variant_id=variant.id,
+            product_name=aliexpress_product.name,
+            quantity=1,
+            unit_price=Decimal("29.90"),
+            line_total=Decimal("29.90"),
+        )
+        item_lone = OrderItem(
+            id=uuid.uuid4(),
+            order_id=order_with_items.id,
+            product_id=lone.id,
+            variant_id=lone_variant.id,
+            product_name=lone.name,
+            quantity=1,
+            unit_price=Decimal("19.90"),
+            line_total=Decimal("19.90"),
+        )
+        db.session.add_all([item_ok, item_lone])
+        db.session.commit()
+
+        order_with_items.status = "paid"
+        db.session.commit()
+
+        results = ensure_aliexpress_fulfillment(order_with_items)
+        # Dois resultados finais: um supplier (ready) e um unattributed (blocked).
+        assert len(results) == 2
+        states = {(r.state, r.aliexpress_order.supplier_id is None) for r in results}
+        assert ("ready", False) in states
+        assert ("blocked", True) in states
+
+        by_state = {r.state: r for r in results}
+        promoted = by_state["ready"].aliexpress_order
+        unattributed = by_state["blocked"].aliexpress_order
+        assert promoted.supplier_id == supplier.id
+        assert unattributed.supplier_id is None
+        assert promoted.id != unattributed.id
+
+        # O item sem supplier NÃO tem snapshot e não bloqueia a ordem pronta.
+        assert AliExpressOrderItem.query.filter_by(
+            order_item_id=item_lone.id
+        ).first() is None
+        assert (
+            AliExpressOrderItem.query.filter_by(order_item_id=item_ok.id)
+            .first().aliexpress_order_id
+            == promoted.id
+        )
+
+        # NUNCA funde: 2 AliExpressOrders para o pedido.
+        assert len(
+            AliExpressOrder.query.filter_by(order_id=order_with_items.id).all()
+        ) == 2
+
+    def test_item_integrity_cross_product_internal_still_ignored(
+        self, db, aliexpress_supplier, aliexpress_product, order_with_items, valid_credential_env
+    ):
+        """Item de produto INTERNO (cross-product) continua sendo ignorado —
+        produto interno NÃO gera fulfillment AliExpress (item 7)."""
+        from loja.integrations.aliexpress.fulfillment import (
+            ensure_aliexpress_fulfillment,
+        )
+        from loja.modules.models import ProductVariant
 
         # Criar um produto interno
         internal_product = Product(
@@ -1372,6 +1575,417 @@ class TestFulfillmentService:
         assert ali_item.variant_label == "Red / M"
         assert ali_item.product_id == aliexpress_product.id
         assert ali_item.state == "ready"
+
+    def test_snapshot_canonical_catalog_mutable_ready(
+        self, db, aliexpress_supplier, aliexpress_product, supplier_product_factory, order_with_items, valid_credential_env
+    ):
+        """Fase 8.0.2 — snapshot canônico: após snapshot, catálogo mutável NÃO
+        afeta o estado. Deativar SupplierProduct, remover supplier_sku_id e
+        mudar custo/moeda não revalidam contra o catálogo (segue READY)."""
+        from loja.integrations.aliexpress.credential_store import (
+            persist_credential,
+        )
+        from loja.integrations.aliexpress.fulfillment import (
+            ensure_aliexpress_fulfillment,
+        )
+        from loja.modules.models import ProductVariant
+
+        sp, variant, supplier = supplier_product_factory(aliexpress_product)
+        persist_credential(
+            supplier_id=supplier.id,
+            seller_id=supplier.seller_id,
+            access_token="tok",
+            expires_in=3600,
+        )
+        db.session.commit()
+
+        item = OrderItem(
+            id=uuid.uuid4(),
+            order_id=order_with_items.id,
+            product_id=aliexpress_product.id,
+            variant_id=variant.id,
+            product_name=aliexpress_product.name,
+            quantity=2,
+            unit_price=Decimal("29.90"),
+            line_total=Decimal("59.80"),
+        )
+        db.session.add(item)
+        db.session.commit()
+
+        order_with_items.status = "paid"
+        db.session.commit()
+
+        results = ensure_aliexpress_fulfillment(order_with_items)
+        assert results[0].state == "ready"
+
+        # Mutar o catálogo agressivamente: variante "quebrada" + sp inativo.
+        variant.supplier_sku_id = ""
+        variant.supplier_product_id = None
+        sp.is_active = False
+        sp.cost = Decimal("999.00")
+        db.session.commit()
+        db.session.expire_all()
+
+        re = ensure_aliexpress_fulfillment(order_with_items)
+        assert re[0].state == "ready"
+        ali_order = AliExpressOrder.query.filter_by(
+            order_id=order_with_items.id
+        ).first()
+        assert ali_order.state == "ready"
+        snap = AliExpressOrderItem.query.filter_by(order_item_id=item.id).first()
+        assert snap.state == "ready"
+        # Snapshot imutável: SKU/custo originais preservados.
+        assert snap.supplier_sku_external_id == "SKU001"
+        assert snap.supplier_product_external_id == "SP001"
+        assert snap.supplier_unit_cost == Decimal("10.00")
+
+        # Restaurar só o que for preciso para a próxima parte.
+        variant.supplier_sku_id = "SKU001"
+        db.session.commit()
+
+    def test_snapshot_canonical_product_deleted_ready(
+        self, db, aliexpress_supplier, aliexpress_product, supplier_product_factory, order_with_items, valid_credential_env
+    ):
+        """Fase 8.0.2 — snapshot canônico: remover o Product (e o SupplierProduct)
+        NÃO revalida via catálogo; a ordem segue READY com supplier do snapshot."""
+        from loja.integrations.aliexpress.credential_store import (
+            persist_credential,
+        )
+        from loja.integrations.aliexpress.fulfillment import (
+            ensure_aliexpress_fulfillment,
+        )
+        from loja.modules.models import ProductVariant, SupplierProduct
+
+        sp, variant, supplier = supplier_product_factory(aliexpress_product)
+        persist_credential(
+            supplier_id=supplier.id,
+            seller_id=supplier.seller_id,
+            access_token="tok",
+            expires_in=3600,
+        )
+        db.session.commit()
+
+        item = OrderItem(
+            id=uuid.uuid4(),
+            order_id=order_with_items.id,
+            product_id=aliexpress_product.id,
+            variant_id=variant.id,
+            product_name=aliexpress_product.name,
+            quantity=1,
+            unit_price=Decimal("29.90"),
+            line_total=Decimal("29.90"),
+        )
+        db.session.add(item)
+        db.session.commit()
+
+        order_with_items.status = "paid"
+        db.session.commit()
+
+        results = ensure_aliexpress_fulfillment(order_with_items)
+        assert results[0].state == "ready"
+        ali_order_id = results[0].aliexpress_order.id
+
+        # Remover Product + SupplierProduct + variante (catálogo sumiu).
+        supplier_product_id = variant.supplier_product_id
+        db.session.delete(sp)
+        db.session.flush()
+        db.session.delete(variant)
+        db.session.flush()
+        db.session.delete(aliexpress_product)
+        db.session.commit()
+        db.session.expire_all()
+
+        re = ensure_aliexpress_fulfillment(order_with_items)
+        assert re[0].aliexpress_order.id == ali_order_id
+        assert re[0].state == "ready"
+        db.session.commit()
+        db.session.refresh(re[0].aliexpress_order)
+        assert re[0].aliexpress_order.state == "ready"
+        assert re[0].aliexpress_order.supplier_id == supplier.id
+        snap = AliExpressOrderItem.query.filter_by(order_item_id=item.id).first()
+        assert snap is not None
+        assert snap.supplier_product_external_id == "SP001"
+
+    def test_credential_decides_state_independent_of_catalog(
+        self, db, aliexpress_supplier, aliexpress_product, supplier_product_factory, order_with_items, valid_credential_env
+    ):
+        """Fase 8.0.2 — item 3: a credencial decide o estado final mesmo com
+        snapshot canônico, sem depender do catálogo atual."""
+        from loja.integrations.aliexpress.credential_store import (
+            persist_credential,
+        )
+        from loja.integrations.aliexpress.fulfillment import (
+            ensure_aliexpress_fulfillment,
+        )
+
+        sp, variant, supplier = supplier_product_factory(aliexpress_product)
+
+        item = OrderItem(
+            id=uuid.uuid4(),
+            order_id=order_with_items.id,
+            product_id=aliexpress_product.id,
+            variant_id=variant.id,
+            product_name=aliexpress_product.name,
+            quantity=1,
+            unit_price=Decimal("29.90"),
+            line_total=Decimal("29.90"),
+        )
+        db.session.add(item)
+        db.session.commit()
+
+        order_with_items.status = "paid"
+        db.session.commit()
+
+        # 1) Sem credencial -> blocked (credential_missing).
+        r1 = ensure_aliexpress_fulfillment(order_with_items)
+        assert r1[0].state == "blocked"
+        assert "credential_missing" in r1[0].aliexpress_order.last_error
+
+        # 2) Adicionar credencial -> ready (sem tocar no catálogo).
+        persist_credential(
+            supplier_id=supplier.id,
+            seller_id=supplier.seller_id,
+            access_token="tok",
+            expires_in=3600,
+        )
+        db.session.commit()
+        r2 = ensure_aliexpress_fulfillment(order_with_items)
+        assert r2[0].state == "ready"
+        ali_order_id = r2[0].aliexpress_order.id
+
+        # 3) Credencial expirada (expires_in=0) -> blocked de novo.
+        persist_credential(
+            supplier_id=supplier.id,
+            seller_id=supplier.seller_id,
+            access_token="tok",
+            expires_in=0,
+        )
+        db.session.commit()
+        r3 = ensure_aliexpress_fulfillment(order_with_items)
+        assert r3[0].aliexpress_order.id == ali_order_id
+        assert r3[0].state == "blocked"
+        assert "credential_expired" in r3[0].aliexpress_order.last_error
+
+        # 4) Renovar credencial -> ready (mesmo AliExpressOrder).
+        persist_credential(
+            supplier_id=supplier.id,
+            seller_id=supplier.seller_id,
+            access_token="tok",
+            expires_in=3600,
+        )
+        db.session.commit()
+        r4 = ensure_aliexpress_fulfillment(order_with_items)
+        assert r4[0].aliexpress_order.id == ali_order_id
+        assert r4[0].state == "ready"
+
+        # Um único AliExpressOrder no pedido inteiro.
+        all_orders = AliExpressOrder.query.filter_by(
+            order_id=order_with_items.id
+        ).all()
+        assert len(all_orders) == 1
+
+    def test_unattributed_promoted_to_supplier_same_order(
+        self, db, aliexpress_supplier, aliexpress_product, supplier_product_factory, order_with_items, valid_credential_env
+    ):
+        """Fase 8.0.2 — item 4: AliExpressOrder unattributed é PROMOVIDO ao
+        supplier (mesmo id, supplier preenchido, idempotency_key trocada),
+        criando o snapshot; nunca duplica fulfillment."""
+        from loja.integrations.aliexpress.credential_store import (
+            persist_credential,
+        )
+        from loja.integrations.aliexpress.fulfillment import (
+            ensure_aliexpress_fulfillment,
+            _generate_idempotency_key,
+        )
+        from loja.modules.models import SupplierProduct, ProductVariant
+
+        # Produto ali + variante SEM supplier product -> inválido, sem supplier
+        # atribuível -> unattributed.
+        product = Product(
+            id=uuid.uuid4(),
+            name="AE Sem SP",
+            description="t",
+            price=Decimal("29.90"),
+            source="aliexpress",
+            external_id="ext_unattributed",
+            is_draft=True,
+            is_active=False,
+        )
+        db.session.add(product)
+        db.session.commit()
+        variant = ProductVariant(
+            id=uuid.uuid4(),
+            product_id=product.id,
+            supplier_product_id=None,
+            supplier_sku_id=None,
+            sku=None,
+            color="Red",
+            size="M",
+            stock=10,
+            price=Decimal("29.90"),
+            is_active=True,
+        )
+        db.session.add(variant)
+        db.session.commit()
+
+        item = OrderItem(
+            id=uuid.uuid4(),
+            order_id=order_with_items.id,
+            product_id=product.id,
+            variant_id=variant.id,
+            product_name=product.name,
+            quantity=1,
+            unit_price=Decimal("29.90"),
+            line_total=Decimal("29.90"),
+        )
+        db.session.add(item)
+        db.session.commit()
+
+        order_with_items.status = "paid"
+        db.session.commit()
+
+        r1 = ensure_aliexpress_fulfillment(order_with_items)
+        assert r1[0].state == "blocked"
+        unattributed = r1[0].aliexpress_order
+        unattributed_id = unattributed.id
+        assert unattributed.supplier_id is None
+        assert "supplier_product_missing" in unattributed.last_error
+
+        # "Corrigir o catálogo": vincular variante a um SupplierProduct válido.
+        sp = SupplierProduct(
+            id=uuid.uuid4(),
+            supplier_id=aliexpress_supplier.id,
+            product_id=product.id,
+            supplier_product_id="SP_PROMO",
+            cost=Decimal("10.00"),
+            currency="USD",
+            is_active=True,
+        )
+        db.session.add(sp)
+        db.session.commit()
+        variant.supplier_product_id = sp.id
+        variant.supplier_sku_id = "SKU_PROMO"
+        persist_credential(
+            supplier_id=aliexpress_supplier.id,
+            seller_id=aliexpress_supplier.seller_id,
+            access_token="tok",
+            expires_in=3600,
+        )
+        db.session.commit()
+
+        r2 = ensure_aliexpress_fulfillment(order_with_items)
+        assert len(r2) == 1
+        promoted = r2[0].aliexpress_order
+        assert promoted.id == unattributed_id  # mesmo AliExpressOrder
+        assert promoted.state == "ready"
+        assert promoted.supplier_id == aliexpress_supplier.id
+        assert (
+            promoted.idempotency_key
+            == _generate_idempotency_key(str(order_with_items.id), aliexpress_supplier.id)
+        )
+        snap = AliExpressOrderItem.query.filter_by(order_item_id=item.id).first()
+        assert snap is not None
+        assert snap.supplier_sku_external_id == "SKU_PROMO"
+        assert snap.supplier_product_external_id == "SP_PROMO"
+
+        # Nunca duplica fulfillment.
+        all_orders = AliExpressOrder.query.filter_by(
+            order_id=order_with_items.id
+        ).all()
+        assert len(all_orders) == 1
+
+    def test_one_result_per_order_valid_plus_invalid_same_supplier(
+        self, db, aliexpress_supplier, aliexpress_product, supplier_product_factory, order_with_items, valid_credential_env
+    ):
+        """Fase 8.0.2 — item 5: item válido + item inválido do MESMO supplier
+        consolidam em UM único AliExpressOrder/FulfillmentResult BLOCKED (erro
+        só códigos sanitizados). Corrigir B -> mesma ordem vira READY."""
+        from loja.integrations.aliexpress.credential_store import (
+            persist_credential,
+        )
+        from loja.integrations.aliexpress.fulfillment import (
+            ensure_aliexpress_fulfillment,
+        )
+
+        # Supplier 1: dois produtos, um variante boa e uma "quebrada".
+        sp_a, variant_a, supplier = supplier_product_factory(
+            aliexpress_product, sku_id="SKU_A", supplier_product_id="SP_A"
+        )
+        persist_credential(
+            supplier_id=supplier.id,
+            seller_id=supplier.seller_id,
+            access_token="tok",
+            expires_in=3600,
+        )
+        b_product = Product(
+            id=uuid.uuid4(),
+            name="AE B",
+            description="t",
+            price=Decimal("29.90"),
+            source="aliexpress",
+            external_id="ext_b",
+            is_draft=True,
+            is_active=False,
+        )
+        db.session.add(b_product)
+        db.session.commit()
+        sp_b, variant_b, _ = supplier_product_factory(
+            b_product, supplier=supplier, sku_id="SKU_B", supplier_product_id="SP_B"
+        )
+        # Item B inválido: variante de outro produto (cross-product).
+        item_a = OrderItem(
+            id=uuid.uuid4(),
+            order_id=order_with_items.id,
+            product_id=aliexpress_product.id,
+            variant_id=variant_a.id,
+            product_name=aliexpress_product.name,
+            quantity=1,
+            unit_price=Decimal("29.90"),
+            line_total=Decimal("29.90"),
+        )
+        # Item B aponta para product B mas variante B (cross-product -> integridade).
+        item_b = OrderItem(
+            id=uuid.uuid4(),
+            order_id=order_with_items.id,
+            product_id=aliexpress_product.id,
+            variant_id=variant_b.id,
+            product_name=aliexpress_product.name,
+            quantity=1,
+            unit_price=Decimal("29.90"),
+            line_total=Decimal("29.90"),
+        )
+        db.session.add_all([item_a, item_b])
+        db.session.commit()
+
+        order_with_items.status = "paid"
+        db.session.commit()
+
+        r = ensure_aliexpress_fulfillment(order_with_items)
+        # UM único resultado e UMA única AliExpressOrder.
+        assert len(r) == 1
+        assert r[0].state == "blocked"
+        assert "item_integrity_error" == r[0].aliexpress_order.last_error
+        ali_order_id = r[0].aliexpress_order.id
+        assert len(
+            AliExpressOrder.query.filter_by(order_id=order_with_items.id).all()
+        ) == 1
+        # Item B jamais snapshotado.
+        assert AliExpressOrderItem.query.filter_by(order_item_id=item_b.id).first() is None
+
+        # Corrigir B: item passa a apontar para o produto certo (B), variante B.
+        item_b.product_id = b_product.id
+        db.session.commit()
+
+        r2 = ensure_aliexpress_fulfillment(order_with_items)
+        assert len(r2) == 1
+        assert r2[0].aliexpress_order.id == ali_order_id
+        assert r2[0].state == "ready"
+        assert AliExpressOrderItem.query.filter_by(
+            order_item_id=item_a.id
+        ).first() is not None
+        assert AliExpressOrderItem.query.filter_by(
+            order_item_id=item_b.id
+        ).first() is not None
 
     def test_delete_product_preserves_snapshot_item(
         self, db, aliexpress_supplier, aliexpress_product, supplier_product_factory, order_with_items, valid_credential_env
@@ -1931,6 +2545,68 @@ class TestAdminFulfillmentQueue:
             f"/admin/integrations/aliexpress/pedidos/{ali_order_id}/revalidar",
         )
         assert response.status_code in (200, 302)
+
+    def test_revalidate_blocked_never_shows_ready(
+        self, client, admin_user, login, db, aliexpress_supplier, aliexpress_product, supplier_product_factory, order_with_items
+    ):
+        """Fase 8.0.2 — item 6: revalidate NÃO confia no primeiro
+        FulfillmentResult; relê o estado FINAL persistido antes do flash.
+        Blocked nunca mostra READY."""
+        login(admin_user.email, "senha123")
+        sp, variant, supplier = supplier_product_factory(aliexpress_product)
+
+        item = OrderItem(
+            id=uuid.uuid4(),
+            order_id=order_with_items.id,
+            product_id=aliexpress_product.id,
+            variant_id=variant.id,
+            product_name=aliexpress_product.name,
+            quantity=1,
+            unit_price=Decimal("29.90"),
+            line_total=Decimal("29.90"),
+        )
+        db.session.add(item)
+        db.session.commit()
+
+        # Sem credencial -> blocked.
+        order_with_items.status = "paid"
+        db.session.commit()
+
+        from loja.integrations.aliexpress.fulfillment import ensure_aliexpress_fulfillment
+        results = ensure_aliexpress_fulfillment(order_with_items)
+        assert results[0].state == "blocked"
+        ali_order_id = results[0].aliexpress_order.id
+        assert "credential_missing" in results[0].aliexpress_order.last_error
+
+        # Revalidar como admin (sem CSRF porque conftest desliga o WTF_CSRF).
+        response = client.post(
+            f"/admin/integrations/aliexpress/pedidos/{ali_order_id}/revalidar",
+        )
+        assert response.status_code in (200, 302)
+
+        # Estado persistido continua blocked (mesmo snapshot, sem READY).
+        from loja.modules.models import AliExpressOrder
+        ali_order = db.session.get(AliExpressOrder, ali_order_id)
+        assert ali_order.state == "blocked"
+
+        # Flash gerado APÓS reler o estado FINAL persistido: nunca "READY"
+        # para um fulfillment bloqueado (item 6).
+        flashes = []
+        with client.session_transaction() as sess:
+            flashes = sess.get("_flashes", [])
+        flash_text = " | ".join(str(msg) for _cat, msg in flashes)
+        assert "BLOCKED" in flash_text.upper()
+        assert "READY" not in flash_text.upper()
+
+        # Página de detalhe: estado do pedido (chip do cabeçalho/título) mostra
+        # BLOCKED — nunca READY para o fulfillment.
+        page = client.get(
+            f"/admin/integrations/aliexpress/pedidos/{ali_order_id}",
+            follow_redirects=True,
+        )
+        html = page.get_data(as_text=True)
+        assert "Fulfillment #" in html
+        assert "BLOCKED" in html
 
     def test_payment_pending_does_not_create_fulfillment_full_flow(
         self, db, aliexpress_supplier, aliexpress_product, supplier_product_factory

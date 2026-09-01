@@ -195,6 +195,74 @@ BEGIN
     END IF;
 END $$;
 
+-- Fase 8.0.2: robustez de reexecução. Uma revisão anterior da 0007 pode ter
+-- criado aliexpress_order_items.product_id com FK ON DELETE CASCADE. NÃO basta
+-- DROP NOT NULL — remove a FK antiga e recria como ON DELETE SET NULL, de modo
+-- que a exclusão do Product nunca apague o snapshot do item.
+DO $$
+DECLARE
+    con record;
+BEGIN
+    FOR con IN
+        SELECT conname FROM pg_constraint
+        WHERE contype = 'f'
+          AND conrelid = (
+              SELECT c.oid FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'pollomodas' AND c.relname = 'aliexpress_order_items'
+          )
+          AND confrelid = (
+              SELECT c.oid FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'pollomodas' AND c.relname = 'products'
+          )
+    LOOP
+        EXECUTE format(
+            'ALTER TABLE aliexpress_order_items DROP CONSTRAINT %I',
+            con.conname
+        );
+    END LOOP;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'fk_aliexpress_order_items_product'
+          AND conrelid = (
+              SELECT c.oid FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'pollomodas' AND c.relname = 'aliexpress_order_items'
+          )
+    ) THEN
+        ALTER TABLE aliexpress_order_items
+            ADD CONSTRAINT fk_aliexpress_order_items_product
+            FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL;
+    END IF;
+END $$;
+
+-- Fase 8.0.2: uma revisão anterior da 0007 pode ter criado colunas de
+-- data/hora como TIMESTAMPTZ. O projeto usa utcnow() UTC naive + db.DateTime
+-- (sem timezone). Converte explicitamente para TIMESTAMP WITHOUT TIME ZONE,
+-- preservando o instante (a conversão é ponto-a-ponto para o mesmo relógio).
+DO $$
+DECLARE
+    tbl text;
+    col record;
+BEGIN
+    FOREACH tbl IN ARRAY ARRAY['aliexpress_credentials', 'aliexpress_orders', 'aliexpress_order_items']
+    LOOP
+        FOR col IN
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = 'pollomodas'
+              AND table_name = tbl
+              AND data_type = 'timestamp with time zone'
+        LOOP
+            EXECUTE format(
+                'ALTER TABLE %I.%I ALTER COLUMN %I TYPE timestamp without time zone',
+                'pollomodas', tbl, col.column_name
+            );
+        END LOOP;
+    END LOOP;
+END $$;
+
 CREATE INDEX IF NOT EXISTS ix_aliexpress_order_items_ali_order
     ON aliexpress_order_items (aliexpress_order_id);
 

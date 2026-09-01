@@ -226,279 +226,317 @@ def _check_credential(supplier_id) -> Optional[str]:
     return None
 
 
-def _process_valid_group(
-    order: Order,
-    supplier_id: uuid.UUID,
-    items: list[tuple[OrderItem, Product, ProductVariant, SupplierProduct]],
-    now,
-) -> Optional[FulfillmentResult]:
-    """Cria/atualiza o AliExpressOrder de um supplier com itens válidos."""
-    if not isinstance(supplier_id, uuid.UUID):
-        logger.warning("fulfillment: supplier id inválido: %r", supplier_id)
-        return None
+def _resolve_existing_ali_orders(order: Order) -> list[AliExpressOrder]:
+    """Lock dos AliExpressOrders existentes do pedido (controle de unicidade).
 
-    supplier = Supplier.query.filter_by(id=supplier_id).first()
-    if not supplier:
-        logger.warning("fulfillment: supplier %s não encontrado", supplier_id)
-        return None
-
-    idempotency_key = _generate_idempotency_key(str(order.id), supplier_id)
-    ali_order = AliExpressOrder.query.filter_by(idempotency_key=idempotency_key).first()
-
-    if ali_order is None:
-        ali_order = AliExpressOrder(
-            id=uuid.uuid4(),
-            order_id=order.id,
-            supplier_id=supplier.id,
-            state="queued",
-            idempotency_key=idempotency_key,
-            queued_at=now,
-        )
-        db.session.add(ali_order)
-        db.session.flush()
-    elif ali_order.state not in REVALIDATABLE_STATES:
-        # Fase 8.0.1: estado avançado (submitting/submitted/…) não regride —
-        # nem por webhook repetido, nem por revalidação.
-        logger.info(
-            "fulfillment: order %s supplier %s em estado %r não revalidado",
-            order.id, supplier_id, ali_order.state,
-        )
-        return None
-    else:
-        ali_order.state = "queued"
-        ali_order.last_error = None
-        ali_order.updated_at = now
-
-    credential_error = _check_credential(supplier.id)
-
-    created_items: List[AliExpressOrderItem] = []
-
-    for item, product, variant, sp in items:
-        ali_item = AliExpressOrderItem.query.filter_by(
-            order_item_id=item.id
-        ).first()
-
-        if ali_item is None:
-            ali_item = AliExpressOrderItem(
-                id=uuid.uuid4(),
-                aliexpress_order_id=ali_order.id,
-                order_item_id=item.id,
-                product_id=product.id,
-                variant_id=variant.id if variant else None,
-                supplier_product_external_id=sp.supplier_product_id,
-                supplier_sku_external_id=variant.supplier_sku_id if variant else "",
-                quantity=item.quantity,
-                supplier_unit_cost=sp.cost,
-                supplier_currency=sp.currency,
-                variant_label=_variant_label(variant),
-                state="queued",
-            )
-            db.session.add(ali_item)
-        elif ali_item.aliexpress_order_id != ali_order.id:
-            # Fase 8.0.1: linha pertence a outro AliExpressOrder — não relinka
-            # silenciosamente; marca integridade para revisão manual.
-            ali_item.state = "manual_review"
-            ali_item.last_error = ERROR_CODES["ITEM_INTEGRITY_ERROR"]
-            ali_item.updated_at = now
-        else:
-            # Snapshot imutável (Fase 8.0.1): supplier_product_external_id,
-            # supplier_sku_external_id, quantity, supplier_unit_cost,
-            # supplier_currency, variant_label, product_id e variant_id NUNCA
-            # são reescritos em re-ensure. Só estado/erro/timestamp mudam.
-            ali_item.state = "queued"
-            ali_item.last_error = None
-            ali_item.updated_at = now
-
-        created_items.append(ali_item)
-
-    db.session.flush()
-
-    if credential_error:
-        ali_order.state = "blocked"
-        ali_order.last_error = credential_error
-    else:
-        all_valid = True
-        for ali_item in created_items:
-            if ali_item.state == "manual_review":
-                all_valid = False
-                continue
-            if (
-                not ali_item.supplier_product_external_id
-                or not ali_item.supplier_sku_external_id
-            ):
-                all_valid = False
-                ali_item.state = "blocked"
-                ali_item.last_error = ERROR_CODES["ITEM_INTEGRITY_ERROR"]
-            else:
-                ali_item.state = "ready"
-
-        if all_valid and created_items:
-            ali_order.state = "ready"
-            ali_order.ready_at = now
-            ali_order.last_error = None
-        else:
-            ali_order.state = "blocked"
-            ali_order.last_error = ERROR_CODES["ITEM_INTEGRITY_ERROR"]
-
-    ali_order.updated_at = now
-
-    result = FulfillmentResult(
-        aliexpress_order=ali_order,
-        items=created_items,
-        state=ali_order.state,
+    PostgreSQL: FOR UPDATE evita corrida em promoção unattributed->supplier.
+    SQLite: sem efeito (mas garante a consulta)."""
+    return (
+        AliExpressOrder.query.filter_by(order_id=order.id).with_for_update().all()
     )
-    logger.info(
-        "fulfillment: order %s supplier %s -> state=%s items=%d",
-        order.id, supplier_id, ali_order.state, len(created_items),
-    )
-    return result
-
-
-def _process_invalid_items(
-    order: Order,
-    invalid_items: list[tuple[OrderItem, Product, Optional[ProductVariant], str]],
-    now,
-) -> List[FulfillmentResult]:
-    """Itens AliExpress inválidos viram AliExpressOrder 'blocked' visível na fila.
-
-    Estratégia A: atribui a um único supplier AliExpress válido (SupplierProduct
-    ativo). Estratégia B: supplier_id=NULL com idempotency_key determinística
-    'unattributed'. Nunca inventa supplier/SKU e nunca cria item snapshot
-    (não há como congelar SKU inexistente)."""
-    results: List[FulfillmentResult] = []
-    if not invalid_items:
-        return results
-
-    blocks: dict[object, dict] = {}
-    for item, product, variant, error_code in invalid_items:
-        supplier_id = _infer_invalid_supplier(item, product, variant)
-        key: object = supplier_id if supplier_id is not None else "__unattributed__"
-        block = blocks.setdefault(key, {
-            "supplier_id": supplier_id,
-            "errors": set(),
-            "items": [],
-        })
-        block["errors"].add(error_code)
-        block["items"].append(item)
-
-    for key, block in blocks.items():
-        supplier_id = block["supplier_id"]
-        if supplier_id is not None:
-            idempotency_key = _generate_idempotency_key(str(order.id), supplier_id)
-        else:
-            idempotency_key = _generate_unattributed_idempotency_key(str(order.id))
-
-        ali_order = AliExpressOrder.query.filter_by(
-            idempotency_key=idempotency_key
-        ).first()
-
-        if ali_order is None:
-            ali_order = AliExpressOrder(
-                id=uuid.uuid4(),
-                order_id=order.id,
-                supplier_id=supplier_id,
-                state="blocked",
-                idempotency_key=idempotency_key,
-                queued_at=now,
-            )
-            db.session.add(ali_order)
-            db.session.flush()
-        elif ali_order.state not in REVALIDATABLE_STATES:
-            logger.info(
-                "fulfillment: order %s em estado %r não regride para blocked",
-                order.id, ali_order.state,
-            )
-            continue
-
-        ali_order.state = "blocked"
-        ali_order.last_error = ",".join(sorted(block["errors"]))
-        ali_order.updated_at = now
-
-        results.append(FulfillmentResult(
-            aliexpress_order=ali_order,
-            items=[],
-            state="blocked",
-        ))
-        logger.info(
-            "fulfillment: order %s itens inválidos -> state=blocked errors=%s",
-            order.id, ali_order.last_error,
-        )
-
-    return results
 
 
 def ensure_aliexpress_fulfillment(order: Order) -> List[FulfillmentResult]:
-    """Cria/atualiza fulfillment AliExpress para um pedido pago.
+    """Consolida o fulfillment AliExpress de um pedido pago (Fase 8.0.2).
 
-    IDEMPOTENTE: roda múltiplas vezes sem duplicar.
-    Deve ser chamado DENTRO da mesma transação do _sync_payment.
+    SNAPSHOT CANÔNICO:
+      * Após existir AliExpressOrderItem válido para um OrderItem, o SNAPSHOT é
+        a fonte da verdade — o catálogo (variante/supplier product/custo) NÃO é
+        consultado de novo para revalidar. supplier vem de AliExpressOrder.supplier_id;
+        supplier product/SKU/custo/moeda/quantidade/label vêm do snapshot.
+      * O estado final é decidido por: integridade interna do snapshot + estado +
+        credencial. Catálogo só é usado na PRIMEIRA criação do snapshot.
+      * Credencial ainda pode mudar o estado (ready <-> blocked) sem depender
+        do catálogo atual.
 
-    Fase 8.0.1:
-      * Itens AliExpress inválidos geram AliExpressOrder 'blocked' visível
-        na fila (estratégia A: supplier único; estratégia B: unattributed).
-      * Produtos internos (source != aliexpress) são ignorados ANTES da
-        validação — nunca geram blocked.
-      * Snapshot do item é imutável em re-ensure.
-      * Estados avançados (submitting, submitted, …) nunca regridem.
+    CONSOLIDAÇÃO (item 5):
+      * Um único resultado final por AliExpressOrder: itens válidos + inválidos
+        do MESMO supplier são consolidados; se qualquer item (ou credencial)
+        falhar -> final BLOCKED com código(s) sanitizado(s).
+
+    PROMOÇÃO (item 4):
+      * AliExpressOrder unattributed (sem snapshot, supplier NULL) que passa a
+        ter um único supplier resolvível é PROMOVIDO (mesmo id): preenche
+        supplier_id e troca idempotency_key p/ supplier-esp., criando os
+        snapshots. Sob lock/unicidade; nunca duplica fulfillment para o mesmo
+        problema.
+
+    Estados avançados (submitting/submitted/…) nunca regridem.
+
+    NÃO faz chamada HTTP para AliExpress (hard off nesta fase).
     """
-    results: List[FulfillmentResult] = []
-
-    # Fulfillment só é criado para pedidos pagos (chamado via _sync_payment).
     if order.status not in ("paid",):
         logger.info(
             "fulfillment: order %s status %r não gera fulfillment",
             order.id, order.status,
         )
-        return results
+        return []
 
-    valid_groups: dict[uuid.UUID, list] = {}
-    invalid_items: list[tuple[OrderItem, Product, Optional[ProductVariant], str]] = []
-
-    for item in order.items:
-        product = Product.query.filter_by(id=item.product_id).first()
-        if not product:
-            logger.warning(
-                "fulfillment: item %s product_id %s não encontrado",
-                item.id, item.product_id
-            )
-            continue
-
-        # Produtos internos fora do escopo do fulfillment AliExpress. Ignorados
-        # ANTES de qualquer validação (Fase 8.0.1): sem __invalid__, sem blocked.
-        if product.source != SOURCE_ALIEXPRESS:
-            continue
-
-        variant = None
-        if item.variant_id:
-            variant = ProductVariant.query.filter_by(id=item.variant_id).first()
-
-        is_valid, error_code, supplier, sp = _validate_aliexpress_item(
-            item, product, variant
-        )
-        if not is_valid:
-            invalid_items.append((item, product, variant, error_code))
-            continue
-
-        if supplier is None or sp is None:
-            invalid_items.append(
-                (item, product, variant, ERROR_CODES["ITEM_INTEGRITY_ERROR"])
-            )
-            continue
-
-        valid_groups.setdefault(supplier.id, []).append(
-            (item, product, variant, sp)
-        )
+    order_items = list(order.items)
+    if not order_items:
+        return []
 
     now = utcnow()
 
-    # 1) Grupos válidos (um AliExpressOrder por supplier, idempotente).
-    for supplier_id, items in valid_groups.items():
-        result = _process_valid_group(order, supplier_id, items, now)
-        if result is not None:
-            results.append(result)
+    # Lock dos AliExpressOrders existentes (unicidade).
+    existing_orders = _resolve_existing_ali_orders(order)
+    by_order_id = {o.id: o for o in existing_orders}
 
-    # 2) Itens inválidos -> blocked visível na fila.
-    results.extend(_process_invalid_items(order, invalid_items, now))
+    # Mapas de resolução.
+    sid_order_id: dict[uuid.UUID, uuid.UUID] = {}
+    unattributed_id: Optional[uuid.UUID] = None
+    for o in existing_orders:
+        if (
+            o.supplier_id is not None
+            and o.idempotency_key == _generate_idempotency_key(str(order.id), o.supplier_id)
+        ):
+            sid_order_id[o.supplier_id] = o.id
+        if o.idempotency_key == _generate_unattributed_idempotency_key(str(order.id)):
+            unattributed_id = o.id
+
+    # Snapshots já existentes (canônicos) dos OrderItems deste pedido.
+    snapshots: dict[uuid.UUID, AliExpressOrderItem] = {
+        a.order_item_id: a
+        for a in AliExpressOrderItem.query.filter(
+            AliExpressOrderItem.order_item_id.in_([it.id for it in order_items])
+        ).all()
+    }
+
+    # Cada entry: (group_key, outcome)
+    #   group_key: ("sid", ali_order_id) | ("sp", supplier_id) | ("unattributed",)
+    entries: list = []
+
+    for item in order_items:
+        snap = snapshots.get(item.id)
+        product = (
+            Product.query.filter_by(id=item.product_id).first()
+            if item.product_id else None
+        )
+
+        # --- Modo snapshot canônico ---
+        if snap is not None:
+            ao = snap.aliexpress_order
+            if ao.state not in REVALIDATABLE_STATES:
+                continue  # estado avançado: não regride nem revalida
+            if snap.supplier_product_external_id and snap.supplier_sku_external_id:
+                entries.append((("sid", ao.id), ("snapshot_ready", snap)))
+            else:
+                entries.append((
+                    ("sid", ao.id),
+                    ("snapshot_invalid", snap, ERROR_CODES["ITEM_INTEGRITY_ERROR"]),
+                ))
+            continue
+
+        # Sem snapshot: produto interno é ignorado (não gera fulfillment).
+        if product is None or product.source != SOURCE_ALIEXPRESS:
+            continue
+
+        # --- Primeira criação do snapshot (catálogo é consultado aqui) ---
+        variant = (
+            ProductVariant.query.filter_by(id=item.variant_id).first()
+            if item.variant_id else None
+        )
+        is_valid, error_code, supplier, sp = _validate_aliexpress_item(
+            item, product, variant
+        )
+
+        if is_valid and supplier is not None and sp is not None:
+            snapshot_data = {
+                "product_id": product.id,
+                "variant_id": variant.id,
+                "supplier_product_external_id": sp.supplier_product_id,
+                "supplier_sku_external_id": variant.supplier_sku_id,
+                "quantity": item.quantity,
+                "supplier_unit_cost": sp.cost,
+                "supplier_currency": sp.currency,
+                "variant_label": _variant_label(variant),
+            }
+            entries.append((("sp", supplier.id), ("new_valid", item, snapshot_data)))
+        else:
+            supplier_id = (
+                _infer_invalid_supplier(item, product, variant)
+                if product is not None else None
+            )
+            if supplier_id is not None:
+                entries.append((("sp", supplier_id), ("new_invalid", item, error_code)))
+            else:
+                entries.append((("unattributed",), ("new_invalid", item, error_code)))
+
+    # --- Resolver cada group_key para um AliExpressOrder concreto ---
+    resolution: dict = {}
+
+    # Se nesta rodada há item inválido SEM supplier atribuível, a ordem
+    # unattributed não é promovida: não fundir itens unattributed numa ordem de
+    # supplier (mesmo guard de "não fundir" quando já existe ordem supplier-esp.).
+    has_unattributed_entries = any(k[0] == "unattributed" for k, _ in entries)
+
+    def _resolve_group(key) -> Optional[AliExpressOrder]:
+        if key in resolution:
+            return resolution[key]
+
+        if key[0] == "sid":
+            ao = by_order_id.get(key[1])
+            resolution[key] = ao
+            return ao
+
+        if key[0] == "sp":
+            sid: uuid.UUID = key[1]
+            existing_id = sid_order_id.get(sid)
+            if existing_id is not None:
+                ao = by_order_id.get(existing_id)
+                if ao is not None and ao.state not in REVALIDATABLE_STATES:
+                    # Estado avançado: não regride nem cria item aqui.
+                    resolution[key] = None
+                    return None
+                resolution[key] = ao
+                return ao
+            if unattributed_id is not None and not has_unattributed_entries:
+                # Promoção (item 4): mesmo AliExpressOrder unattributed vira do
+                # supplier — preenche supplier_id + idempotency_key supplier-esp.
+                ao = by_order_id.get(unattributed_id)
+                if ao is not None:
+                    if ao.state not in REVALIDATABLE_STATES:
+                        resolution[key] = None
+                        return None
+                    ao.supplier_id = sid
+                    ao.idempotency_key = _generate_idempotency_key(str(order.id), sid)
+                    sid_order_id[sid] = ao.id
+                    resolution[key] = ao
+                    return ao
+            ao = AliExpressOrder(
+                id=uuid.uuid4(),
+                order_id=order.id,
+                supplier_id=sid,
+                state="queued",
+                idempotency_key=_generate_idempotency_key(str(order.id), sid),
+                queued_at=now,
+            )
+            db.session.add(ao)
+            db.session.flush()
+            sid_order_id[sid] = ao.id
+            resolution[key] = ao
+            return ao
+
+        # unattributed
+        if unattributed_id is not None:
+            ao = by_order_id.get(unattributed_id)
+            resolution[key] = ao
+            return ao
+        ao = AliExpressOrder(
+            id=uuid.uuid4(),
+            order_id=order.id,
+            supplier_id=None,
+            state="queued",
+            idempotency_key=_generate_unattributed_idempotency_key(str(order.id)),
+            queued_at=now,
+        )
+        db.session.add(ao)
+        db.session.flush()
+        resolution[key] = ao
+        return ao
+
+    # --- Agrupar outcomes por AliExpressOrder (1 resultado final por order) ---
+    groups: dict[uuid.UUID, dict] = {}
+    for key, outcome in entries:
+        ao = _resolve_group(key)
+        if ao is None:
+            continue
+        g = groups.get(ao.id)
+        if g is None:
+            g = {"ao": ao, "supplier_id": ao.supplier_id, "outcomes": []}
+            groups[ao.id] = g
+        if ao.supplier_id is not None:
+            g["supplier_id"] = ao.supplier_id
+        g["outcomes"].append(outcome)
+
+    results: List[FulfillmentResult] = []
+
+    for gkey, g in groups.items():
+        ao = g["ao"]
+        if ao.state not in REVALIDATABLE_STATES:
+            continue  # estado avançado não regride
+        sid = g["supplier_id"]
+
+        ao.state = "queued"
+        ao.last_error = None
+        ao.updated_at = now
+
+        error_codes: set = set()
+        created_items: List[AliExpressOrderItem] = []
+        has_valid_item = False
+
+        for outcome in g["outcomes"]:
+            kind = outcome[0]
+            if kind == "snapshot_ready":
+                snap = outcome[1]
+                snap.state = "ready"
+                snap.last_error = None
+                snap.updated_at = now
+                created_items.append(snap)
+                has_valid_item = True
+            elif kind == "snapshot_invalid":
+                snap, err = outcome[1], outcome[2]
+                snap.state = "blocked"
+                snap.last_error = err
+                snap.updated_at = now
+                error_codes.add(err)
+                created_items.append(snap)
+            elif kind == "new_valid":
+                item, data = outcome[1], outcome[2]
+                snap = AliExpressOrderItem.query.filter_by(order_item_id=item.id).first()
+                if snap is None:
+                    snap = AliExpressOrderItem(
+                        id=uuid.uuid4(),
+                        aliexpress_order_id=ao.id,
+                        order_item_id=item.id,
+                        product_id=data["product_id"],
+                        variant_id=data["variant_id"],
+                        supplier_product_external_id=data["supplier_product_external_id"],
+                        supplier_sku_external_id=data["supplier_sku_external_id"],
+                        quantity=data["quantity"],
+                        supplier_unit_cost=data["supplier_unit_cost"],
+                        supplier_currency=data["supplier_currency"],
+                        variant_label=data["variant_label"],
+                        state="queued",
+                    )
+                    db.session.add(snap)
+                snap.state = "ready"
+                snap.last_error = None
+                snap.updated_at = now
+                created_items.append(snap)
+                has_valid_item = True
+            elif kind == "new_invalid":
+                _item, err = outcome[1], outcome[2]
+                error_codes.add(err)
+
+        # Credencial só decide o estado quando há ao menos um snapshot válido
+        # (item 3). Grupo só com itens inválidos permanece blocked pelo erro do
+        # próprio item, sem misturar código de credencial.
+        if has_valid_item and sid is not None:
+            credential_error = _check_credential(sid)
+            if credential_error:
+                error_codes.add(credential_error)
+
+        db.session.flush()
+
+        if error_codes:
+            ao.state = "blocked"
+            ao.last_error = ",".join(sorted(error_codes))
+        else:
+            ao.state = "ready"
+            ao.ready_at = now
+            ao.last_error = None
+
+        ao.updated_at = now
+        results.append(FulfillmentResult(
+            aliexpress_order=ao,
+            items=created_items,
+            state=ao.state,
+        ))
+        logger.info(
+            "fulfillment: order %s -> state=%s items=%d error=%s",
+            order.id, ao.state, len(created_items), ao.last_error,
+        )
 
     return results
 
