@@ -14,7 +14,9 @@ Segurança/runtime:
 * exige exatamente um supplier AliExpress ativo com credencial ativa;
 * nunca loga product_id, sku_id, token, secret, payload ou atributos externos;
 * processa exatamente UM produto por execução no runtime serverless;
-* cliente operacional usa timeout de 5 s, abaixo do limite de 10 s da função;
+* cliente operacional usa timeout de 5 s;
+* o POST operacional pode pular a recomputação de cobertura e retornar logo
+  após o commit; a cobertura é lida no GET seguinte, em outra invocação;
 * cada produto é commitado isoladamente; falha não corrompe progresso anterior.
 """
 
@@ -61,7 +63,7 @@ class SkuIdentityEnrichmentResult:
     updated_variants: int
     unresolved_variants: int
     failed_products: int
-    coverage: SkuIdentityCoverage
+    coverage: Optional[SkuIdentityCoverage]
 
 
 def has_complete_sku_identity(attributes) -> bool:
@@ -144,12 +146,17 @@ def enrich_sku_identity_batch(
     client: Optional[AliExpressClient] = None,
     supplier_id=None,
     session=None,
+    include_coverage: bool = True,
 ) -> SkuIdentityEnrichmentResult:
     """Enriquece exatamente um produto ainda pendente por execução.
 
     O argumento ``batch_size`` é mantido por compatibilidade/testes, mas somente
     o valor 1 é aceito. Cada execução gera no máximo uma chamada lógica
     ``ds.product.get``. Não há retry/fallback automático.
+
+    ``include_coverage=False`` existe para o POST serverless operacional: após
+    persistir o produto, a função pode responder imediatamente. O GET seguinte
+    calcula a cobertura em uma invocação separada.
     """
     if batch_size != 1:
         raise SkuIdentityEnrichmentError("invalid_batch_size")
@@ -227,7 +234,7 @@ def enrich_sku_identity_batch(
             session.rollback()
             failed_products = 1
 
-    coverage = get_sku_identity_coverage(session=session)
+    coverage = get_sku_identity_coverage(session=session) if include_coverage else None
     return SkuIdentityEnrichmentResult(
         processed_products=processed_products,
         updated_variants=updated_variants,
