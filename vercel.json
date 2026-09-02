@@ -1,26 +1,22 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "builds": [
-    {
-      "src": "api/aliexpress-oauth-callback.js",
-      "use": "@vercel/node"
+  "functions": {
+    "api/app.py": {
+      "maxDuration": 60
     },
-    {
-      "src": "run.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxDuration": 60
-      }
+    "api/aliexpress-oauth-callback.js": {
+      "maxDuration": 10
     }
-  ],
-  "routes": [
+  },
+  "rewrites": [
     {
-      "src": "^/integrations/aliexpress/callback$",
-      "dest": "/api/aliexpress-oauth-callback.js"
+      "source": "/integrations/aliexpress/callback",
+      "destination": "/api/aliexpress-oauth-callback.js"
     },
     {
-      "src": "/(.*)",
-      "dest": "run.py"
+      "source": "/(.*)",
+      "destination": "/api/app.py"
     }
   ]
 }
