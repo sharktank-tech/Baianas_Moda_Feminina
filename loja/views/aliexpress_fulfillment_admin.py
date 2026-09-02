@@ -13,12 +13,17 @@ Segurança:
 
 from __future__ import annotations
 
+import os
+import uuid
+
 from flask import (
     Blueprint,
+    abort,
     current_app,
     flash,
     redirect,
     render_template,
+    render_template_string,
     request,
     url_for,
 )
@@ -35,6 +40,15 @@ from loja.integrations.aliexpress import (
     CredentialNotFound,
     CredentialExpired,
     CredentialInvalid,
+)
+from loja.integrations.aliexpress.credential_store import AliExpressCredential
+from loja.integrations.aliexpress.ds_order_status import (
+    DS_ORDER_STATUS_METHOD,
+    AliExpressDSOrderStatusSyncer,
+)
+from loja.integrations.aliexpress.status_sync import (
+    AliExpressOrderStatusRequest,
+    AliExpressOrderStatusSyncError,
 )
 from loja.utils.decorators import admin_required
 
@@ -57,7 +71,6 @@ def index():
         selectinload(AliExpressOrder.order).selectinload(Order.user),
     ).order_by(desc(AliExpressOrder.updated_at))
 
-    # Filtros opcionais
     state_filter = request.args.get("state")
     if state_filter:
         query = query.filter(AliExpressOrder.state == state_filter)
@@ -67,11 +80,7 @@ def index():
         query = query.filter(AliExpressOrder.supplier_id == supplier_filter)
 
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-
-    # Suppliers para filtro
     suppliers = Supplier.query.filter_by(channel_type="aliexpress").all()
-
-    # Estados possíveis para filtro
     states = [
         "queued", "blocked", "ready", "submitting", "submitted",
         "pending_reconciliation",
@@ -110,20 +119,13 @@ def detail(order_id):
 @fulfillment_admin_blueprint.route("/<uuid:order_id>/revalidar", methods=["POST"])
 @admin_required
 def revalidate(order_id):
-    """Revalida fulfillment: roda validações locais + credencial novamente.
-
-    NÃO envia pedido ao AliExpress.
-    CSRF obrigatório (via template; sem @csrf.exempt).
-    Apenas estados revalidáveis (queued/blocked/ready) são reavaliados —
-    estados avançados não regridem.
-    """
+    """Revalida fulfillment: roda validações locais + credencial novamente."""
     ali_order = AliExpressOrder.query.options(
         selectinload(AliExpressOrder.items),
         selectinload(AliExpressOrder.supplier),
         selectinload(AliExpressOrder.order),
     ).filter_by(id=order_id).first_or_404()
 
-    # Fase 8.0.1: estados avançados não podem ser revalidados (sem regressão).
     if ali_order.state not in ("queued", "blocked", "ready"):
         flash(
             f"Fulfillment em estado {ali_order.state} não pode ser revalidado.",
@@ -136,12 +138,7 @@ def revalidate(order_id):
         return redirect(url_for("aliexpress_fulfillment_admin.detail", order_id=order_id))
 
     try:
-        # Re-executar validações (idempotente).
         ensure_aliexpress_fulfillment(ali_order.order)
-
-        # Fase 8.0.2: não confiar no primeiro FulfillmentResult — após o ensure,
-        # reler o estado FINAL persistido da AliExpressOrder pelo ID original e
-        # commitar antes de basear o flash nele.
         db.session.commit()
         db.session.refresh(ali_order)
 
@@ -177,14 +174,7 @@ def revalidate(order_id):
 @fulfillment_admin_blueprint.route("/<uuid:order_id>/sincronizar-status", methods=["POST"])
 @admin_required
 def sync_status(order_id):
-    """Sincroniza status do fulfillment (Fase 8.0.6) — HARD-OFF.
-
-    Aciona o boundary ``sync_aliexpress_order_status`` com provider padrão
-    hard-off (nenhuma chamada externa) sobre uma ordem elegível (identidade
-    remota confiável: submitted/confirmed/shipped/delivered).
-    CSRF obrigatório (via template; sem @csrf.exempt).
-    Só flash de estado/código sanitizado; nunca exibe exception provider.
-    """
+    """Sincroniza status do fulfillment (Fase 8.0.6) — HARD-OFF."""
     ali_order = AliExpressOrder.query.options(
         selectinload(AliExpressOrder.items),
         selectinload(AliExpressOrder.supplier),
@@ -205,8 +195,6 @@ def sync_status(order_id):
         return redirect(url_for("aliexpress_fulfillment_admin.detail", order_id=order_id))
 
     try:
-        # Provider padrão é HARD-OFF; em testes, um pytest-injectable syncer
-        # pode ser substituído via monkeypatch de get_default_order_status_syncer.
         result = sync_aliexpress_order_status(ali_order)
         db.session.commit()
         state = (result.state if hasattr(result, "state") else ali_order.state) or ali_order.state
@@ -217,3 +205,111 @@ def sync_status(order_id):
         flash("Erro interno ao sincronizar status.", "danger")
 
     return redirect(url_for("aliexpress_fulfillment_admin.detail", order_id=order_id))
+
+
+# --------------------------------------------------------------------------
+# Fase 8.0.7B — probe remoto-only, temporário, Preview-only
+# --------------------------------------------------------------------------
+_REMOTE_PROBE_FORM = """
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<title>AliExpress DS status probe</title></head>
+<body style="font-family:sans-serif;max-width:760px;margin:40px auto;padding:0 16px">
+<h1>AliExpress DS status probe</h1>
+<p>Preview only · read-only · exatamente uma chamada · nenhum pedido local será criado.</p>
+<form method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>Número de referência / Order ID remoto</label><br>
+<input name="remote_order_id" autocomplete="off" inputmode="numeric" required
+style="width:100%;padding:10px;margin:8px 0 16px">
+<button type="submit">Executar probe read-only</button>
+</form></body></html>
+"""
+
+_REMOTE_PROBE_RESULT = """
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<title>AliExpress DS status probe</title></head>
+<body style="font-family:sans-serif;max-width:760px;margin:40px auto;padding:0 16px">
+<h1>Resultado sanitizado</h1>
+<p><strong>Status:</strong> {{ status }}</p>
+<p><strong>Método:</strong> {{ method }}</p>
+{% if outcome %}<p><strong>Outcome:</strong> {{ outcome }}</p>{% endif %}
+{% if request_id %}<p><strong>Request ID:</strong> {{ request_id }}</p>{% endif %}
+{% if error %}<p><strong>Erro:</strong> {{ error }}</p>{% endif %}
+<p>O número do pedido não foi persistido nem exibido nesta resposta.</p>
+</body></html>
+"""
+
+
+def _assert_remote_probe_preview():
+    if os.environ.get("VERCEL_ENV") != "preview":
+        abort(404)
+    if os.environ.get("VERCEL_GIT_COMMIT_REF") != "feature/aliexpress-fulfillment-core":
+        abort(404)
+
+
+def _single_active_aliexpress_supplier_id():
+    rows = AliExpressCredential.query.filter_by(status="active").all()
+    eligible = [
+        row for row in rows
+        if row.supplier is not None
+        and row.supplier.channel_type == "aliexpress"
+        and bool(row.supplier.seller_id)
+    ]
+    return eligible[0].supplier_id if len(eligible) == 1 else None
+
+
+@fulfillment_admin_blueprint.route(
+    "/remote-status-probe", methods=["GET", "POST"], strict_slashes=False
+)
+@admin_required
+def remote_status_probe():
+    """Uma consulta real DS, remote-only, sem persistência e somente Preview."""
+    _assert_remote_probe_preview()
+
+    if request.method == "GET":
+        return render_template_string(_REMOTE_PROBE_FORM)
+
+    remote_order_id = (request.form.get("remote_order_id") or "").strip()
+    supplier_id = _single_active_aliexpress_supplier_id()
+    if supplier_id is None:
+        db.session.rollback()
+        return render_template_string(
+            _REMOTE_PROBE_RESULT,
+            status="failure", method=DS_ORDER_STATUS_METHOD,
+            outcome=None, request_id=None,
+            error="credencial/supplier AliExpress ativo não é único",
+        ), 409
+
+    sentinel = uuid.UUID(int=0)
+    status_request = AliExpressOrderStatusRequest(
+        aliexpress_order_id=sentinel,
+        order_id=sentinel,
+        supplier_id=supplier_id,
+        ali_order_id=remote_order_id,
+        attempt_key=None,
+    )
+    syncer = AliExpressDSOrderStatusSyncer()
+
+    try:
+        result = syncer.sync(status_request)
+    except AliExpressOrderStatusSyncError as exc:
+        db.session.rollback()
+        return render_template_string(
+            _REMOTE_PROBE_RESULT,
+            status="failure", method=DS_ORDER_STATUS_METHOD,
+            outcome=None, request_id=None, error=str(exc),
+        ), 502
+    except Exception:
+        db.session.rollback()
+        return render_template_string(
+            _REMOTE_PROBE_RESULT,
+            status="failure", method=DS_ORDER_STATUS_METHOD,
+            outcome=None, request_id=None, error="erro interno sanitizado",
+        ), 500
+
+    db.session.rollback()
+    return render_template_string(
+        _REMOTE_PROBE_RESULT,
+        status="success", method=DS_ORDER_STATUS_METHOD,
+        outcome=result.outcome, request_id=syncer.last_request_id, error=None,
+    )
