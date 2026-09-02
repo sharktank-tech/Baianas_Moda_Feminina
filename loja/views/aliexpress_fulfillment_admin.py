@@ -207,8 +207,9 @@ _SKU_ENRICH_TEMPLATE = """
 {% if coverage.incomplete > 0 %}
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<button type="submit">Processar próximo lote (3 produtos)</button>
+<button type="submit">Processar próximo produto</button>
 </form>
+<p><small>Uma única chamada product.get por clique; timeout HTTP operacional de 5 s.</small></p>
 {% else %}<p><strong>Enriquecimento concluído.</strong></p>{% endif %}
 </body></html>
 """
@@ -232,7 +233,7 @@ def sku_identity_enrichment():
 
     if request.method == "POST":
         try:
-            result = enrich_sku_identity_batch(batch_size=3)
+            result = enrich_sku_identity_batch(batch_size=1)
         except SkuIdentityEnrichmentError as exc:
             db.session.rollback()
             error = str(exc)
