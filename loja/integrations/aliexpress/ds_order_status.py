@@ -1,27 +1,31 @@
-"""Adapter read-only DS de status de pedido AliExpress (Fase 8.0.7A) — DESABILITADO.
+"""Adapter read-only DS de status de pedido AliExpress (Fase 8.0.7B) — DESABILITADO.
 
 O PolloModas é DROPSHIPPER/BUYER: não usa seller-api nem
-``aliexpress.solution.order.get/info.get``. O método DS adotado é:
+``aliexpress.solution.order.get/info.get``. O método de pedido provado ao vivo é:
 
-    aliexpress.ds.trade.order.get   (business: order_id = AliExpress order id)
+    aliexpress.trade.ds.order.get
+    business: single_order_query={"order_id": <AliExpress order id>}
 
-que responde (entre outros) ``order_status``, ``logistics_status``,
-``logistics_info_list``, ``logistics_no`` e ``logistics_service``. Não existe
-fallback runtime para ``aliexpress.trade.ds.order.get``: a implementação é
-determinística em UM método.
+A API retorna ``result.order_status`` e ``result.logistics_status`` (além de
+informações de logística/pedido que este adapter deliberadamente ignora).
+Não existe fallback runtime para ``aliexpress.ds.trade.order.get``: a App Key
+real respondeu ``rsp_code=401`` nesse endpoint durante o probe 8.0.7B, enquanto
+``aliexpress.trade.ds.order.get`` respondeu com sucesso para um pedido histórico
+legítimo da conta autorizada. A implementação permanece determinística em UM
+método.
 
 ESTADO: este adapter NÃO é o default (``get_default_order_status_syncer()``
 segue retornando ``HardOffOrderStatusSyncer``) — nenhum HTTP real é executado
 em produção/dev a partir dele. Ele só roda quando construído explicitamente
-(testes) ou acionado pelo probe manual com opt-in ``ALIEXPRESS_ORDER_STATUS_PROBE=1``.
+(testes) ou acionado por probe manual explicitamente protegido.
 
 Mapeamento remoto -> canônico (função pura ``map_aliexpress_ds_status``):
     * PLACE_ORDER_SUCCESS, PAYMENT_PROCESSING, RISK_CONTROL -> submitted;
     * WAIT_SELLER_SEND_GOODS (order ou logistics)           -> confirmed;
     * SELLER_SEND_PART_GOODS                                -> no máximo confirmed;
-    * SELLER_SEND_GOODS (logistics) exempl.                 -> shipped;
+    * SELLER_SEND_GOODS (order/logistics)                   -> shipped;
     * WAIT_BUYER_ACCEPT_GOODS (order)                       -> shipped;
-    * BUYER_ACCEPT_GOODS (logistics)                        -> delivered;
+    * BUYER_ACCEPT_GOODS (order/logistics)                  -> delivered;
     * FUND_PROCESSING                                       -> NUNCA atua sozinho
       como primeira autoridade (só delivered se logistics == BUYER_ACCEPT_GOODS);
     * FINISH                                                -> conservador: nunca
@@ -33,7 +37,7 @@ Mapeamento remoto -> canônico (função pura ``map_aliexpress_ds_status``):
 
 Quando order_status e logistics_status divergem, é usada a evidência mais
 avançada SOMENTE quando semanticamente conclusiva (contida nas tabelas acima).
-O adapter NUNCA produz ``cancelled`` (não existe cancelamento outbound).
+O adapter NUNCA produz ``cancelled``.
 
 SEGURANÇA:
     * token exclusivamente via credential_store -> request.supplier_id;
@@ -45,8 +49,7 @@ SEGURANÇA:
       extraídos; logistics_info_list só é tolerado, nunca persistido;
     * ``rsp_code`` pode ser exposto apenas após sanitização e somente quando o
       payload não contém status úteis; ``rsp_msg`` nunca é propagado;
-    * ``logistics_no``/``logistics_service`` são registrados apenas como
-      entrada futura de tracking — NÃO criam Shipment/TrackingEvent aqui.
+    * ``logistics_no``/``logistics_service`` não criam Shipment/TrackingEvent.
 """
 
 from __future__ import annotations
@@ -80,7 +83,7 @@ from .status_sync import (
     AliExpressOrderStatusSyncer,
 )
 
-DS_ORDER_STATUS_METHOD = "aliexpress.ds.trade.order.get"
+DS_ORDER_STATUS_METHOD = "aliexpress.trade.ds.order.get"
 DEFAULT_TIMEOUT = 10.0
 
 _RANK = {
@@ -179,10 +182,8 @@ def _extract_statuses(payload: Any):
     """Extrai apenas order_status/logistics_status (e request_id sanitizado).
 
     O cliente já remove o wrapper específico do método. Aqui aceitamos
-    ``result`` ou campos diretos. ``rsp_code`` é metadado de negócio do método:
-    se houver status úteis, eles continuam sendo a autoridade; se NÃO houver,
-    o código sanitizado é devolvido na exceção para diagnóstico sem propagar
-    ``rsp_msg`` ou payload bruto.
+    ``result`` ou campos diretos. ``rsp_code`` é tratado defensivamente somente
+    para diagnóstico sanitizado de payloads sem status.
     """
     if not isinstance(payload, dict):
         raise AliExpressOrderStatusSyncError(
@@ -216,11 +217,12 @@ def _extract_statuses(payload: Any):
 
 
 class AliExpressDSOrderStatusSyncer(AliExpressOrderStatusSyncer):
-    """Implementação ativa-only-on-demand de status via aliexpress.ds.trade.order.get.
+    """Implementação ativa-only-on-demand via aliexpress.trade.ds.order.get.
 
     - identidade: ``request.ali_order_id`` (validada; inválida -> sem HTTP);
     - credencial: ``request.supplier_id`` -> credential_store (token em memória);
     - nunca usa ``attempt_key`` para consultar;
+    - request remoto: ``single_order_query={"order_id": ali_order_id}``;
     - resultado: outcome canônico; exceptions de erro sanitizadas.
     """
 
@@ -292,7 +294,10 @@ class AliExpressDSOrderStatusSyncer(AliExpressOrderStatusSyncer):
         client = self._build_client(token)
 
         try:
-            payload = client.call(self.METHOD, order_id=order_id)
+            payload = client.call(
+                self.METHOD,
+                single_order_query={"order_id": order_id},
+            )
         except AliExpressAuthError as exc:
             raise AliExpressOrderStatusSyncError(
                 f"erro de autenticação na consulta DS (code={exc.code})"
