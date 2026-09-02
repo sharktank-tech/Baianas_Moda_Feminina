@@ -43,6 +43,8 @@ SEGURANÇA:
     * boundary ``AliExpressOrderStatusRequest`` jamais carrega token;
     * somente order_status/logistics_status (e request_id sanitizado) são
       extraídos; logistics_info_list só é tolerado, nunca persistido;
+    * ``rsp_code`` pode ser exposto apenas após sanitização e somente quando o
+      payload não contém status úteis; ``rsp_msg`` nunca é propagado;
     * ``logistics_no``/``logistics_service`` são registrados apenas como
       entrada futura de tracking — NÃO criam Shipment/TrackingEvent aqui.
 """
@@ -88,7 +90,6 @@ _RANK = {
     STATUS_DELIVERED: 4,
 }
 
-#: order_status conclusivos (autoridade semântica própria).
 _ORDER_CONCLUSIVE = {
     "PLACE_ORDER_SUCCESS": STATUS_SUBMITTED,
     "PAYMENT_PROCESSING": STATUS_SUBMITTED,
@@ -100,7 +101,6 @@ _ORDER_CONCLUSIVE = {
     "BUYER_ACCEPT_GOODS": STATUS_DELIVERED,
 }
 
-#: logistics_status conclusivos (ex.: SELLER_SEND_GOODS/BUYER_ACCEPT_GOODS).
 _LOGISTICS_CONCLUSIVE = {
     "WAIT_SELLER_SEND_GOODS": STATUS_CONFIRMED,
     "SELLER_SEND_PART_GOODS": STATUS_CONFIRMED,
@@ -108,8 +108,6 @@ _LOGISTICS_CONCLUSIVE = {
     "BUYER_ACCEPT_GOODS": STATUS_DELIVERED,
 }
 
-#: order_status que sinalizam anormalidade/pendência: nunca viram avanço e
-#: nunca cancelamento — só unknown (não inventamos delivered/cancelled).
 _NEGATIVE_ORDER: Set[str] = {
     "IN_CANCEL",
     "IN_ISSUE",
@@ -119,6 +117,9 @@ _NEGATIVE_ORDER: Set[str] = {
 
 _ID_ALLOWED = frozenset(
     "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_"
+)
+_CODE_ALLOWED = frozenset(
+    "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_.-"
 )
 
 
@@ -157,21 +158,38 @@ def _sanitized_request_id(value: Any) -> Optional[str]:
     value = value.strip()
     if not (0 < len(value) <= 64):
         return None
-    if all(c in "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-" for c in value):
+    if all(c in _ID_ALLOWED for c in value):
         return value
     return None
+
+
+def _sanitized_rsp_code(value: Any) -> Optional[str]:
+    """Retorna apenas código curto e inofensivo; nunca rsp_msg/raw."""
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip()
+    if not (0 < len(text) <= 32):
+        return None
+    if not all(c in _CODE_ALLOWED for c in text):
+        return None
+    return text
 
 
 def _extract_statuses(payload: Any):
     """Extrai apenas order_status/logistics_status (e request_id sanitizado).
 
-    Aceita envelope com wrapper ``result`` (real) ou campos diretos (testes).
-    Levanta AliExpressOrderStatusSyncError sanitizado se inesperado/incompleto.
+    O cliente já remove o wrapper específico do método. Aqui aceitamos
+    ``result`` ou campos diretos. ``rsp_code`` é metadado de negócio do método:
+    se houver status úteis, eles continuam sendo a autoridade; se NÃO houver,
+    o código sanitizado é devolvido na exceção para diagnóstico sem propagar
+    ``rsp_msg`` ou payload bruto.
     """
     if not isinstance(payload, dict):
         raise AliExpressOrderStatusSyncError(
             "payload de status DS inesperado (não é objeto)"
         )
+
+    rsp_code = _sanitized_rsp_code(payload.get("rsp_code"))
     data: Dict[str, Any] = payload
     for _ in range(2):
         inner = data.get("result")
@@ -187,6 +205,10 @@ def _extract_statuses(payload: Any):
         request_id = _sanitized_request_id(payload.get("request_id"))
 
     if not (order_status or logistics_status):
+        if rsp_code is not None:
+            raise AliExpressOrderStatusSyncError(
+                f"consulta DS sem status (rsp_code={rsp_code})"
+            )
         raise AliExpressOrderStatusSyncError(
             "payload de status DS sem order_status/logistics_status"
         )
@@ -216,7 +238,6 @@ class AliExpressDSOrderStatusSyncer(AliExpressOrderStatusSyncer):
         self._timeout = timeout
         self.last_request_id: Optional[str] = None
 
-    # ----- setup ---------------------------------------------------------
     def _resolve_token(self, supplier_id) -> str:
         try:
             return get_fulfillment_access_token(supplier_id)
@@ -255,7 +276,6 @@ class AliExpressDSOrderStatusSyncer(AliExpressOrderStatusSyncer):
             timeout=self._timeout,
         )
 
-    # ----- interface -----------------------------------------------------
     def sync(
         self, request: AliExpressOrderStatusRequest
     ) -> AliExpressOrderStatusResult:
@@ -290,7 +310,6 @@ class AliExpressDSOrderStatusSyncer(AliExpressOrderStatusSyncer):
                 f"erro de API na consulta DS (code={exc.code})"
             ) from None
         except Exception:
-            # Nunca expor o texto da exceção (pode conter secrets do provider).
             raise AliExpressOrderStatusSyncError(
                 "erro inesperado na consulta DS"
             ) from None
