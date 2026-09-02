@@ -1,4 +1,4 @@
-"""Renovação de credencial OAuth AliExpress (Fase 8.0.4) — boundary com HARD-OFF.
+"""Renovação de credencial OAuth AliExpress (Fase 8.0.9) — GATED.
 
 DISTINÇÃO IMPORTANTE: este módulo trata apenas da RENOVAÇÃO (refresh) de
 credencial persistida. O fluxo OAuth de EXCHANGE/authorization da Open Platform
@@ -6,11 +6,15 @@ credencial persistida. O fluxo OAuth de EXCHANGE/authorization da Open Platform
 ``oauth.py`` — protocolos e responsabilidades separados.
 
 O domínio nunca fala HTTP de renovação diretamente. Toda renovação passa pelo
-boundary ``AliExpressOAuthRefresher``; a implementação ativa em produção/dev é
-``HardOffOAuthRefresher``, que falha de forma determinística (nenhuma chamada
-externa é feita). Sucesso real só ocorre com um refresher fake injetado nos
-testes. A criação real de pedidos permanece proibida nesta fase (ver
-submission.py).
+boundary ``AliExpressOAuthRefresher``. O provider padrão é fail-closed e segue
+``HardOffOAuthRefresher`` salvo quando a flag abaixo estiver EXATAMENTE ``1``:
+
+    ALIEXPRESS_OAUTH_REFRESH_ENABLED=1
+
+Somente nesse caso ``get_default_oauth_refresher()`` constrói o provider real
+Open Platform de ``/auth/token/refresh``. Construir o provider não faz rede;
+HTTP só acontece dentro de ``refresh()`` quando uma credencial realmente
+expirada precisa ser renovada.
 
 SEPARAÇÃO DE RESPONSABILIDADES:
     submission boundary -> pedido (AliExpressOrderSubmitter)
@@ -26,7 +30,7 @@ CONTRATOS:
     * Persistência atômica (token, expiração e rotação num único commit), sem
       estado parcial.
     * Rotação: se o provider devolver novo refresh_token, persiste o novo; se
-      não devolver, preserva o atual (contrato de integração).
+      não devolver, preserva o atual.
     * Falha: nunca apaga credencial/refresh_token; persiste apenas estado e
       erro sanitizado em ``AliExpressCredential.last_error``; nunca loga ou
       persiste tokens/secrets/headers/payload OAuth.
@@ -39,6 +43,7 @@ TEMPORAL:
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -61,6 +66,8 @@ from .credential_store import (
 )
 
 logger = logging.getLogger(__name__)
+
+OAUTH_REFRESH_ENABLE_ENV = "ALIEXPRESS_OAUTH_REFRESH_ENABLED"
 
 # Códigos sanitizados (nunca contêm tokens/secrets).
 OAUTH_CODES = {
@@ -86,7 +93,7 @@ class AliExpressOAuthRefreshUnavailable(AliExpressOAuthRefreshError):
 
 @dataclass(frozen=True)
 class AliExpressOAuthRefreshRequest:
-    """Dados mínimos para renovar — apenas o necessário pra o provider."""
+    """Dados mínimos para renovar — apenas o necessário pro provider."""
 
     supplier_id: uuid.UUID
     seller_id: str
@@ -95,7 +102,7 @@ class AliExpressOAuthRefreshRequest:
 
 @dataclass(frozen=True)
 class AliExpressOAuthRefreshResult:
-    """Resposta do provider (fake). refresh_token None = preservar o atual."""
+    """Resposta do provider. refresh_token None = preservar o atual."""
 
     access_token: str
     expires_in: Optional[int] = None
@@ -119,32 +126,40 @@ class AliExpressOAuthRefresher(ABC):
     def refresh(
         self, request: AliExpressOAuthRefreshRequest
     ) -> AliExpressOAuthRefreshResult:
-        """Renova o access token. Deve levantar
-        ``AliExpressOAuthRefreshRejected``/``...Unavailable`` em falha."""
+        """Renova o access token. Deve levantar erros sanitizados em falha."""
 
 
 class HardOffOAuthRefresher(AliExpressOAuthRefresher):
-    """Implementação ativa: NUNCA executa rede, falha determinística."""
+    """Implementação fail-closed: NUNCA executa rede."""
 
     def refresh(
         self, request: AliExpressOAuthRefreshRequest
     ) -> AliExpressOAuthRefreshResult:
         raise AliExpressOAuthRefreshUnavailable(
-            "renovação OAuth desabilitada (HARD-OFF 8.0.4): "
-            "nenhuma chamada externa é realizada"
+            "renovação OAuth desabilitada (HARD-OFF): nenhuma chamada externa é realizada"
         )
 
 
+def is_real_oauth_refresh_enabled() -> bool:
+    """Opt-in estrito: somente o valor literal ``1`` habilita HTTP real."""
+    return os.environ.get(OAUTH_REFRESH_ENABLE_ENV) == "1"
+
+
 def get_default_oauth_refresher() -> AliExpressOAuthRefresher:
-    """Provider padrão de produção/dev — sempre hard-off, sem config ambígua."""
-    return HardOffOAuthRefresher()
+    """Provider real somente sob opt-in explícito; default hard-off.
+
+    Import local evita ciclo: ``oauth_refresh_provider`` implementa o boundary
+    definido neste módulo. Construção é side-effect free.
+    """
+    if not is_real_oauth_refresh_enabled():
+        return HardOffOAuthRefresher()
+
+    from .oauth_refresh_provider import AliExpressOpenPlatformOAuthRefresher
+
+    return AliExpressOpenPlatformOAuthRefresher()
 
 
 def _is_usable(cred: AliExpressCredential) -> bool:
-    """Credencial utilizável? (status active + access_token não expirado).
-
-    Temporal determinística e centralizada: utcnow() naive UTC.
-    """
     if cred.status != "active":
         return False
     if cred.access_token_expires_at is not None:
@@ -154,13 +169,11 @@ def _is_usable(cred: AliExpressCredential) -> bool:
 
 
 def _decrypt_refresh_token(cred: AliExpressCredential, session) -> str:
-    """Descriptografa refresh_token (re-lança CredentialInvalid sanitizada)."""
     if not cred.refresh_token_encrypted:
         raise CredentialNotFound(f"sem refresh token p/ supplier {cred.supplier_id}")
     try:
         return _decrypt_or_raise(cred.refresh_token_encrypted)
     except CredentialInvalid:
-        # Ciphertext corrompido/tamperado: marca como invalid (estável).
         cred.status = "invalid"
         cred.last_error = OAUTH_CODES["CREDENTIAL_INVALID"]
         cred.updated_at = utcnow()
@@ -173,24 +186,13 @@ def refresh_aliexpress_credential(
     refresher: Optional[AliExpressOAuthRefresher] = None,
     session=None,
 ) -> AliExpressCredentialRefreshResult:
-    """Renova a credencial de forma síncrona, atômica e idempotente.
-
-    Locking (PostgreSQL): ``SELECT ... FOR UPDATE`` + ``populate_existing``
-    segue o padrão da Fase 8.0.3. Enquanto o lock é segurado, o provider é
-    chamado e o commit é atômico (token + expiração + rotação juntos). Quem
-    aguarda o lock relê o estado persistido: se outra execução já renovou,
-    reutiliza a credencial nova SEM chamar o provider novamente.
-
-    Em SQLite o FOR UPDATE é inócuo; a proteção é garantida e testada em
-    PostgreSQL.
-    """
+    """Renova a credencial de forma síncrona, atômica e idempotente."""
     if refresher is None:
         refresher = get_default_oauth_refresher()
     session = session or db.session
     now = utcnow()
 
     if not is_configured():
-        # Fail-closed: sem chave, nada de renovação possível.
         raise CredentialNotConfigured("ALIEXPRESS_CREDENTIAL_KEY não configurada")
 
     cred = (
@@ -203,12 +205,10 @@ def refresh_aliexpress_credential(
     if cred is None:
         raise CredentialNotFound(f"credencial não encontrada para supplier {supplier_id}")
 
-    # Idempotência: credencial já válida não chama o provider.
     if _is_usable(cred):
         return AliExpressCredentialRefreshResult(ok=True, refreshed=False)
 
     if cred.refresh_token_encrypted is None:
-        # Sem refresh token: continua bloqueado (credential_expired).
         return AliExpressCredentialRefreshResult(
             ok=False, error_code=OAUTH_CODES["CREDENTIAL_EXPIRED"]
         )
@@ -229,7 +229,6 @@ def refresh_aliexpress_credential(
             "aliexpress oauth: refresh rejeitado p/ %s code=%s",
             supplier_id, OAUTH_CODES["CREDENTIAL_REFRESH_REJECTED"],
         )
-        # Preserva credencial e refresh_token; apenas erro sanitizado.
         cred.last_error = OAUTH_CODES["CREDENTIAL_REFRESH_REJECTED"]
         cred.updated_at = now
         session.commit()
@@ -248,7 +247,6 @@ def refresh_aliexpress_credential(
             ok=False, error_code=OAUTH_CODES["CREDENTIAL_REFRESH_UNAVAILABLE"]
         )
     except Exception:
-        # Nunca logar a exceção (o texto do provider pode conter tokens).
         logger.error(
             "aliexpress oauth: erro interno refresh p/ %s code=%s",
             supplier_id, OAUTH_CODES["CREDENTIAL_REFRESH_UNAVAILABLE"],
@@ -268,7 +266,6 @@ def refresh_aliexpress_credential(
             ok=False, error_code=OAUTH_CODES["CREDENTIAL_REFRESH_UNAVAILABLE"]
         )
 
-    # Persistência atômica: token + expiração + rotação num único commit.
     fernet = _fernet()
     cred.access_token_encrypted = fernet.encrypt(
         result.access_token.encode("utf-8")
@@ -297,18 +294,7 @@ def evaluate_credential_with_refresh(
     supplier_id,
     refresher: Optional[AliExpressOAuthRefresher] = None,
 ) -> Optional[str]:
-    """Estado da credencial para o fluxo fulfillment/submission.
-
-    Retorna None (OK) ou código sanitizado:
-      * válida                          -> None
-      * ausente / env não configurada   -> credential_missing
-      * expirada + refresh disponível   -> tenta renovar via refresher
-      * expirada sem refresh token      -> credential_expired
-      * refresh rejeitado/indisponível  -> código sanitizado correspondente
-      * ciphertext inválido             -> credential_invalid
-
-    O refresh não modifica ordem/snapshot/catálogo — somente a credencial.
-    """
+    """Estado da credencial para fulfillment/submission com refresh opcional."""
     if refresher is None:
         refresher = get_default_oauth_refresher()
     try:
@@ -336,6 +322,8 @@ def evaluate_credential_with_refresh(
 
 
 __all__ = [
+    "OAUTH_REFRESH_ENABLE_ENV",
+    "is_real_oauth_refresh_enabled",
     "AliExpressOAuthRefresher",
     "AliExpressOAuthRefreshRequest",
     "AliExpressOAuthRefreshResult",
