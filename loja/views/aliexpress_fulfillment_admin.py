@@ -196,20 +196,17 @@ _SKU_ENRICH_TEMPLATE = """
 <p><strong>Total:</strong> {{ coverage.total }}</p>
 <p><strong>Completas:</strong> {{ coverage.complete }}</p>
 <p><strong>Pendentes:</strong> {{ coverage.incomplete }}</p>
-{% if result %}
-<hr>
-<p><strong>Produtos processados:</strong> {{ result.processed_products }}</p>
-<p><strong>Variantes atualizadas:</strong> {{ result.updated_variants }}</p>
-<p><strong>Variantes não resolvidas:</strong> {{ result.unresolved_variants }}</p>
-<p><strong>Produtos com falha:</strong> {{ result.failed_products }}</p>
-{% endif %}
-{% if error %}<p><strong>Erro:</strong> {{ error }}</p>{% endif %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for category, message in messages %}
+    <p><strong>{{ message }}</strong></p>
+  {% endfor %}
+{% endwith %}
 {% if coverage.incomplete > 0 %}
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <button type="submit">Processar próximo produto</button>
 </form>
-<p><small>Uma única chamada product.get por clique; timeout HTTP operacional de 5 s.</small></p>
+<p><small>POST: uma chamada product.get + commit. Cobertura é recalculada somente no GET após redirect.</small></p>
 {% else %}<p><strong>Enriquecimento concluído.</strong></p>{% endif %}
 </body></html>
 """
@@ -228,23 +225,38 @@ def _assert_sku_enrichment_preview():
 @admin_required
 def sku_identity_enrichment():
     _assert_sku_enrichment_preview()
-    result = None
-    error = None
 
     if request.method == "POST":
         try:
-            result = enrich_sku_identity_batch(batch_size=1)
-        except SkuIdentityEnrichmentError as exc:
+            result = enrich_sku_identity_batch(batch_size=1, include_coverage=False)
+            if result.failed_products:
+                flash("Produto não processado; falha sanitizada no provider.", "danger")
+            elif result.unresolved_variants:
+                flash(
+                    f"Produto processado, mas {result.unresolved_variants} variante(s) "
+                    "não foram resolvidas.",
+                    "warning",
+                )
+            elif result.processed_products:
+                flash(
+                    f"Produto processado; {result.updated_variants} variante(s) atualizadas.",
+                    "success",
+                )
+            else:
+                flash("Nenhum produto pendente encontrado.", "info")
+        except SkuIdentityEnrichmentError:
             db.session.rollback()
-            error = str(exc)
+            flash("Enriquecimento indisponível por configuração/credencial.", "danger")
         except Exception:
             db.session.rollback()
-            error = "internal_error"
+            flash("Erro interno sanitizado no enriquecimento.", "danger")
+
+        # PRG: termina a invocação de escrita imediatamente. O GET subsequente
+        # recalcula a cobertura em outra Serverless Function invocation.
+        return redirect(
+            url_for("aliexpress_fulfillment_admin.sku_identity_enrichment"),
+            code=303,
+        )
 
     coverage = get_sku_identity_coverage()
-    return render_template_string(
-        _SKU_ENRICH_TEMPLATE,
-        coverage=coverage,
-        result=result,
-        error=error,
-    )
+    return render_template_string(_SKU_ENRICH_TEMPLATE, coverage=coverage)
