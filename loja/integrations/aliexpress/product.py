@@ -154,7 +154,13 @@ def _normalize_attributes(items: Any) -> List[dict]:
 
 
 def _normalize_sku_attributes(sku: Mapping[str, Any]) -> List[dict]:
-    """Propriedades do SKU (tolera lista direta ou wrapper)."""
+    """Propriedades do SKU preservando identidade necessária ao placeorder.
+
+    Fase 8.0.10: além de ``name``/``value`` usados pelo storefront, preserva
+    ``sku_property_id`` e ``property_value_id`` quando o provider os informa.
+    Esses IDs formam o ``sku_attr`` exigido por ``aliexpress.trade.buy.placeorder``
+    (ex.: ``14:771;5:9``). Nenhum ID é inventado quando ausente.
+    """
     container = sku.get("ae_sku_property_dtos") or sku.get("aeop_s_k_u_propertys")
     items = _extract_sku_property_items(container)
     out: List[dict] = []
@@ -163,7 +169,22 @@ def _normalize_sku_attributes(sku: Mapping[str, Any]) -> List[dict]:
             continue
         name = attr.get("sku_property_name")
         value = attr.get("property_value_definition_name") or attr.get("sku_property_value")
-        out.append({"name": _as_str(name), "value": _as_str(value)})
+        normalized = {
+            "name": _as_str(name),
+            "value": _as_str(value),
+        }
+        property_id = _as_str(attr.get("sku_property_id"))
+        property_value_id = _as_str(
+            first_not_none(
+                attr.get("property_value_id"),
+                attr.get("property_value_id_long"),
+            )
+        )
+        if property_id:
+            normalized["sku_property_id"] = property_id
+        if property_value_id:
+            normalized["property_value_id"] = property_value_id
+        out.append(normalized)
     return out
 
 
@@ -257,22 +278,16 @@ def normalize_product_detail(payload: Mapping[str, Any], *, method: str) -> AliE
         description=_as_str(base.get("detail")),
         category_id=_as_str(base.get("category_id")),
         images=_normalize_images(multimedia),
-        video=None,  # só preencher se houver URL real; dados de mídia ficam em raw
+        video=None,
         skus=_normalize_skus(sku_items),
         attributes=_normalize_attributes(property_items),
-        available_stock=None,  # a API fornece estoque por SKU
-        sale_price=None,  # a API fornece preço por SKU
-        original_price=None,
         currency=_as_str(base.get("currency_code")),
-        taxes=None,
         raw=dict(result),
     )
 
 
-__all__: List[str] = [
+__all__ = [
     "build_product_detail_params",
     "normalize_product_detail",
     "first_not_none",
-    "AliExpressProductDetail",
-    "AliExpressProductSku",
 ]
