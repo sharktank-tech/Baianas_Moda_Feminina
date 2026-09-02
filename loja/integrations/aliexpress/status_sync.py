@@ -1,7 +1,7 @@
-"""Sincronização de status pós-submissão AliExpress (Fase 8.0.6) — HARD-OFF.
+"""Sincronização de status pós-submissão AliExpress (Fase 8.0.8) — GATED.
 
 Localiza o ciclo de vida do fornecedor a partir do estado remoto de uma
-ALiExpressOrder que JÁ possui identidade externa confiável (``ali_order_id``).
+AliExpressOrder que JÁ possui identidade externa confiável (``ali_order_id``).
 
 RESPONSABILIDADE ÚNICA:
     consultar semanticamente o estado de um AliExpressOrder já identificado
@@ -13,33 +13,30 @@ RESPONSABILIDADE ÚNICA:
 
         submitted/confirmed/shipped -> cancelled     (cancelled_at = now)
 
-    O domínio nunca fala HTTP via este módulo. A implementação ativa em
-    produção/dev é ``HardOffOrderStatusSyncer``, que falha de forma
-    determinística (nenhuma chamada externa). Sucesso real só ocorre com um
-    syncer fake/mock injetado nos testes. Nenhuma consulta HTTP AliExpress
-    real é executada nesta fase.
+    O domínio nunca fala HTTP diretamente via este módulo. O provider padrão
+    é fail-closed e permanece ``HardOffOrderStatusSyncer`` salvo quando a flag
+    explícita abaixo estiver EXATAMENTE habilitada:
+
+        ALIEXPRESS_ORDER_STATUS_SYNC_ENABLED=1
+
+    Só nesse caso ``get_default_order_status_syncer()`` constrói o adapter DS
+    read-only provado na Fase 8.0.7B (``aliexpress.trade.ds.order.get``).
+    Ausência da flag ou qualquer outro valor mantém ZERO HTTP por default.
 
 MÁQUINA MONOTÔNICA:
     Ordem canônica: submitted(1) < confirmed(2) < shipped(3) < delivered(4).
-    * resultado igual ou POSTERIOR  -> avança/persiste milestons;
+    * resultado igual ou POSTERIOR  -> avança/persiste milestones;
     * resultado ANTERIOR ao local   -> IGNORADO, sem regressão, sem reescrita
       de timestamps antigos;
     * mesmo estado                  -> idempotente (nunca sobrescreve timestamp
       já existente);
-    * ``delivered`` é terminal: NADA regride uma ordem entregue (cancelled
-      remoto de delivered vira transição inválida observada, nunca aplicada).
+    * ``delivered`` é terminal: NADA regride uma ordem entregue.
 
 ELEGIBILIDADE:
     Só consulta provider quem tem:
       * ``AliExpressOrder.ali_order_id`` preenchido;
       * state em submitted/confirmed/shipped/delivered.
-    ``pending_reconciliation`` NÃO é resolvida aqui (responsabilidade
-    exclusiva de reconciliation.py) nem há identidade externa confiável até
-    RECONCILE_FOUND concluir.
-
-CANCELAMENTO (8.0.6):
-    cancelled é apenas OBSERVADO do provider fake. Não existe nenhuma ação
-    outbound de cancelamento (``cancel_requested -> provider``) nesta fase.
+    ``pending_reconciliation`` NÃO é resolvida aqui.
 
 SEGURANÇA:
     Nunca persiste em ``last_error`` nem loga: exception bruta, body HTTP,
@@ -51,6 +48,7 @@ SEGURANÇA:
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -64,6 +62,7 @@ from .fulfillment import ERROR_CODES, FulfillmentResult
 
 logger = logging.getLogger(__name__)
 
+STATUS_SYNC_ENABLE_ENV = "ALIEXPRESS_ORDER_STATUS_SYNC_ENABLED"
 
 #: Desfechos semânticos do syncer (valores canônicos estáveis, sem secrets).
 STATUS_SUBMITTED = "submitted"
@@ -92,7 +91,7 @@ class AliExpressOrderStatusSyncError(Exception):
 
 
 class AliExpressOrderStatusSyncUnavailable(AliExpressOrderStatusSyncError):
-    """Sincronização indisponível (provider padrão HARD-OFF 8.0.6)."""
+    """Sincronização indisponível (provider padrão hard-off)."""
 
 
 @dataclass(frozen=True)
@@ -111,13 +110,13 @@ class AliExpressOrderStatusRequest:
 
 @dataclass(frozen=True)
 class AliExpressOrderStatusResult:
-    """Resposta do syncer (fake) — sem payload bruto, sem secrets.
+    """Resposta do syncer — sem payload bruto, sem secrets.
 
     ``outcome`` é canônico (STATUS_*). ``external_status`` é dado NÃO
     confiável do provider: usado apenas se sanitizado e nunca logado.
     """
 
-    outcome: str  # STATUS_SUBMITTED | STATUS_CONFIRMED | STATUS_SHIPPED | ...
+    outcome: str
     external_status: Optional[str] = None
 
 
@@ -133,37 +132,40 @@ class AliExpressOrderStatusSyncer(ABC):
 
 
 class HardOffOrderStatusSyncer(AliExpressOrderStatusSyncer):
-    """Implementação ativa: NUNCA executa rede, falha determinística."""
+    """Implementação fail-closed: NUNCA executa rede."""
 
     def sync(
         self, request: AliExpressOrderStatusRequest
     ) -> AliExpressOrderStatusResult:
         raise AliExpressOrderStatusSyncUnavailable(
-            "sincronização de status AliExpress desabilitada (HARD-OFF 8.0.6): "
+            "sincronização de status AliExpress desabilitada (HARD-OFF): "
             "nenhuma consulta externa é realizada"
         )
 
 
+def is_real_order_status_sync_enabled() -> bool:
+    """Opt-in estrito: somente o valor literal ``1`` habilita HTTP real."""
+    return os.environ.get(STATUS_SYNC_ENABLE_ENV) == "1"
+
+
 def get_default_order_status_syncer() -> AliExpressOrderStatusSyncer:
-    """Provider padrão de produção/dev — sempre hard-off, sem config ambígua."""
-    return HardOffOrderStatusSyncer()
+    """Retorna provider real somente sob opt-in explícito; default hard-off.
+
+    O import local evita ciclo de import: ``ds_order_status`` depende dos tipos
+    definidos neste módulo. Construir o adapter ainda NÃO faz HTTP; rede só
+    ocorre posteriormente, dentro de ``sync()``, e somente após as guards de
+    elegibilidade de ``sync_aliexpress_order_status``.
+    """
+    if not is_real_order_status_sync_enabled():
+        return HardOffOrderStatusSyncer()
+
+    from .ds_order_status import AliExpressDSOrderStatusSyncer
+
+    return AliExpressDSOrderStatusSyncer()
 
 
 def _fill_milestones(order: AliExpressOrder, target_state: str, now):
-    """Preenche timestamps dos milestons logísticos ALCANÇADOS pelo alvo.
-
-    Cada timestamp só existe quando o estágio alvo realmente chegou àquele
-    estágio logístico:
-
-        submitted  -> não preenche nenhum;
-        confirmed  -> garante confirmed_at;
-        shipped    -> garante confirmed_at + shipped_at;
-        delivered  -> garante confirmed_at + shipped_at + delivered_at;
-
-    Nunca sobrescreve timestamps existentes e nunca cria milestones futuros
-    (estágios ainda não alcançados permanecem NULL). O estágio alvo é
-    EXPLÍCITO: chamadas ambíguas (estado atual implícito) não ocorrem.
-    """
+    """Preenche timestamps dos milestones logísticos ALCANÇADOS pelo alvo."""
     target_rank = _MONO_ORDER.get(target_state, _MONO_ORDER[STATUS_SUBMITTED])
     if target_rank >= _MONO_ORDER[STATUS_CONFIRMED] and order.confirmed_at is None:
         order.confirmed_at = now
@@ -181,22 +183,16 @@ def sync_aliexpress_order_status(
     """Sincroniza status de uma AliExpressOrder com identidade remota confiável.
 
     Locking (PostgreSQL): ``SELECT ... FOR UPDATE`` + ``populate_existing()``
-    serializa syncs concorrentes da MESMA ordem — duas sincronizações não
-    regridem estado, não duplicam aplicação nem sobrescrevem timestamp
-    posterior; o resultado final é o estágio monotonicamente mais avançado
-    permitido.
+    serializa syncs concorrentes da MESMA ordem.
 
     Regras:
       * ``cancelled`` é terminal: idempotente sem provider;
       * sem ``ali_order_id`` OU estado inelegível -> NUNCA chama provider;
-      * ``pending_reconciliation`` NÃO é resolvida aqui (reconciliation.py);
-      * avanço confirmed/shipped/delivered preenche milestons (sem sobrescrever);
-      * regressão (remoto anterior ao local) -> IGNORADA;
-      * delivered é terminal: cancelled remoto sobre delivered é transição
-        inválida observada (nunca aplicada);
+      * ``pending_reconciliation`` NÃO é resolvida aqui;
+      * avanço confirmed/shipped/delivered preenche milestones;
+      * regressão remota é IGNORADA;
+      * delivered é terminal;
       * erro/unknown nunca regride o estado atual.
-
-    Em SQLite o FOR UPDATE é inócuo; a exclusão mútua é provada em PostgreSQL.
     """
     if syncer is None:
         syncer = get_default_order_status_syncer()
@@ -266,7 +262,6 @@ def sync_aliexpress_order_status(
             state=order.state,
         )
     except Exception:
-        # Nunca logar a exceção (o texto do provider pode conter segredos).
         logger.error(
             "aliexpress status sync: erro interno p/ %s code=%s",
             order.id, ERROR_CODES["STATUS_SYNC_ERROR"],
@@ -292,7 +287,6 @@ def sync_aliexpress_order_status(
 
     outcome = getattr(result, "outcome")
     if outcome == STATUS_CANCELLED:
-        # delivered é terminal: delivered -> cancelled NUNCA é aplicado.
         if order.state == STATUS_DELIVERED:
             order.last_error = ERROR_CODES["STATUS_SYNC_INVALID_TRANSITION"]
             order.updated_at = now
@@ -315,7 +309,6 @@ def sync_aliexpress_order_status(
         )
 
     if outcome == STATUS_UNKNOWN or outcome not in _MONO_ORDER:
-        # unknown nunca regride; nenhum valor canônico é persistido.
         order.last_error = ERROR_CODES["STATUS_SYNC_UNKNOWN"]
         order.updated_at = now
         session.commit()
@@ -325,13 +318,10 @@ def sync_aliexpress_order_status(
             state=order.state,
         )
 
-    # Desfecho logístico (submitted/confirmed/shipped/delivered).
     target_rank = _MONO_ORDER[outcome]
     local_rank = _MONO_ORDER[order.state]
 
     if outcome == order.state:
-        # Idempotente: repara apenas milestones que deveriam existir PARA ESTE
-        # estado (nunca cria milestones futuros), sem sobrescrever existentes.
         _fill_milestones(order, order.state, now)
         order.ali_status = outcome
         order.last_error = None
@@ -344,8 +334,6 @@ def sync_aliexpress_order_status(
         )
 
     if target_rank < local_rank:
-        # Regressão: estado local mais avançado vence, sem reescrita de
-        # timestamps e sem mudar ali_status/last_error.
         order.updated_at = now
         session.commit()
         return FulfillmentResult(
@@ -354,7 +342,6 @@ def sync_aliexpress_order_status(
             state=order.state,
         )
 
-    # Avanço monotônico: preenche milestones dos estágios ATINGIDOS e aplica.
     order.state = outcome
     _fill_milestones(order, outcome, now)
     order.ali_status = outcome
@@ -369,6 +356,8 @@ def sync_aliexpress_order_status(
 
 
 __all__ = [
+    "STATUS_SYNC_ENABLE_ENV",
+    "is_real_order_status_sync_enabled",
     "AliExpressOrderStatusSyncer",
     "AliExpressOrderStatusRequest",
     "AliExpressOrderStatusResult",
