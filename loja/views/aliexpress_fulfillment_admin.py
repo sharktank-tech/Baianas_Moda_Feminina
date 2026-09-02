@@ -41,10 +41,18 @@ from loja.integrations.aliexpress import (
     CredentialExpired,
     CredentialInvalid,
 )
+from loja.integrations.aliexpress.client import AliExpressClient
 from loja.integrations.aliexpress.credential_store import AliExpressCredential
 from loja.integrations.aliexpress.ds_order_status import (
     DS_ORDER_STATUS_METHOD,
     AliExpressDSOrderStatusSyncer,
+    map_aliexpress_ds_status,
+)
+from loja.integrations.aliexpress.errors import (
+    AliExpressAPIError,
+    AliExpressAuthError,
+    AliExpressRateLimitError,
+    AliExpressTransportError,
 )
 from loja.integrations.aliexpress.status_sync import (
     AliExpressOrderStatusRequest,
@@ -208,21 +216,27 @@ def sync_status(order_id):
 
 
 # --------------------------------------------------------------------------
-# Fase 8.0.7B — probe remoto-only, temporário, Preview-only
+# Fase 8.0.7B — probes remote-only, temporários, Preview-only
 # --------------------------------------------------------------------------
+_BUYER_ORDER_STATUS_METHOD = "aliexpress.trade.ds.order.get"
 _REMOTE_PROBE_FORM = """
 <!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <title>AliExpress DS status probe</title></head>
 <body style="font-family:sans-serif;max-width:760px;margin:40px auto;padding:0 16px">
-<h1>AliExpress DS status probe</h1>
-<p>Preview only · read-only · exatamente uma chamada · nenhum pedido local será criado.</p>
+<h1>AliExpress order status probes</h1>
+<p>Preview only · read-only · uma chamada por clique · nenhum pedido local será criado.</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Número de referência / Order ID remoto</label><br>
 <input name="remote_order_id" autocomplete="off" inputmode="numeric" required
 style="width:100%;padding:10px;margin:8px 0 16px">
-<button type="submit">Executar probe read-only</button>
-</form></body></html>
+<div style="display:flex;gap:12px;flex-wrap:wrap">
+<button type="submit" name="probe_kind" value="ds_trade">Testar ds.trade.order.get</button>
+<button type="submit" name="probe_kind" value="trade_ds">Testar buyer-order trade.ds.order.get</button>
+</div>
+</form>
+<p style="margin-top:24px">Os botões são diagnósticos independentes. Não existe fallback automático no adapter canônico.</p>
+</body></html>
 """
 
 _REMOTE_PROBE_RESULT = """
@@ -236,6 +250,7 @@ _REMOTE_PROBE_RESULT = """
 {% if request_id %}<p><strong>Request ID:</strong> {{ request_id }}</p>{% endif %}
 {% if error %}<p><strong>Erro:</strong> {{ error }}</p>{% endif %}
 <p>O número do pedido não foi persistido nem exibido nesta resposta.</p>
+<p><a href="{{ url_for('aliexpress_fulfillment_admin.remote_status_probe') }}">Voltar</a></p>
 </body></html>
 """
 
@@ -258,27 +273,121 @@ def _single_active_aliexpress_supplier_id():
     return eligible[0].supplier_id if len(eligible) == 1 else None
 
 
+def _sanitized_error_code(exc) -> str:
+    code = getattr(exc, "code", None)
+    if code is None:
+        return "unknown"
+    text = str(code).strip()
+    if 0 < len(text) <= 32 and all(c.isalnum() or c in "_.-" for c in text):
+        return text
+    return "invalid"
+
+
+def _run_buyer_order_diagnostic(supplier_id, remote_order_id):
+    """Uma chamada explícita ao buyer-order API; nunca é fallback runtime."""
+    app_key = os.environ.get("ALIEXPRESS_APP_KEY")
+    app_secret = os.environ.get("ALIEXPRESS_APP_SECRET")
+    if not app_key or not app_secret:
+        raise AliExpressOrderStatusSyncError(
+            "ALIEXPRESS_APP_KEY/ALIEXPRESS_APP_SECRET ausentes para diagnóstico"
+        )
+
+    try:
+        token = get_fulfillment_access_token(supplier_id)
+    except (CredentialNotConfigured, CredentialNotFound, CredentialExpired, CredentialInvalid):
+        raise AliExpressOrderStatusSyncError(
+            "credencial AliExpress indisponível para diagnóstico"
+        ) from None
+
+    client = AliExpressClient(
+        app_key=app_key,
+        app_secret=app_secret,
+        access_token=token,
+        timeout=10.0,
+    )
+    try:
+        payload = client.call(
+            _BUYER_ORDER_STATUS_METHOD,
+            single_order_query={"order_id": remote_order_id},
+        )
+    except AliExpressAuthError as exc:
+        raise AliExpressOrderStatusSyncError(
+            f"erro de autenticação buyer-order (code={_sanitized_error_code(exc)})"
+        ) from None
+    except AliExpressRateLimitError as exc:
+        raise AliExpressOrderStatusSyncError(
+            f"rate limit buyer-order (code={_sanitized_error_code(exc)})"
+        ) from None
+    except AliExpressAPIError as exc:
+        raise AliExpressOrderStatusSyncError(
+            f"erro de API buyer-order (code={_sanitized_error_code(exc)})"
+        ) from None
+    except AliExpressTransportError:
+        raise AliExpressOrderStatusSyncError(
+            "falha de transporte buyer-order"
+        ) from None
+    except Exception:
+        raise AliExpressOrderStatusSyncError(
+            "erro inesperado buyer-order"
+        ) from None
+
+    if not isinstance(payload, dict):
+        raise AliExpressOrderStatusSyncError("payload buyer-order inesperado")
+    data = payload.get("result") if isinstance(payload.get("result"), dict) else payload
+    order_status = str(data.get("order_status") or "").strip()
+    logistics_status = str(data.get("logistics_status") or "").strip()
+    if not (order_status or logistics_status):
+        raise AliExpressOrderStatusSyncError("payload buyer-order sem status")
+    return map_aliexpress_ds_status(order_status, logistics_status)
+
+
 @fulfillment_admin_blueprint.route(
     "/remote-status-probe", methods=["GET", "POST"], strict_slashes=False
 )
 @admin_required
 def remote_status_probe():
-    """Uma consulta real DS, remote-only, sem persistência e somente Preview."""
+    """Uma consulta real por clique, remote-only, sem persistência, Preview-only."""
     _assert_remote_probe_preview()
 
     if request.method == "GET":
         return render_template_string(_REMOTE_PROBE_FORM)
 
     remote_order_id = (request.form.get("remote_order_id") or "").strip()
+    probe_kind = (request.form.get("probe_kind") or "ds_trade").strip()
     supplier_id = _single_active_aliexpress_supplier_id()
     if supplier_id is None:
         db.session.rollback()
         return render_template_string(
             _REMOTE_PROBE_RESULT,
-            status="failure", method=DS_ORDER_STATUS_METHOD,
+            status="failure", method="n/a",
             outcome=None, request_id=None,
             error="credencial/supplier AliExpress ativo não é único",
         ), 409
+
+    if probe_kind == "trade_ds":
+        try:
+            outcome = _run_buyer_order_diagnostic(supplier_id, remote_order_id)
+        except AliExpressOrderStatusSyncError as exc:
+            db.session.rollback()
+            return render_template_string(
+                _REMOTE_PROBE_RESULT,
+                status="failure", method=_BUYER_ORDER_STATUS_METHOD,
+                outcome=None, request_id=None, error=str(exc),
+            ), 502
+        except Exception:
+            db.session.rollback()
+            return render_template_string(
+                _REMOTE_PROBE_RESULT,
+                status="failure", method=_BUYER_ORDER_STATUS_METHOD,
+                outcome=None, request_id=None, error="erro interno sanitizado",
+            ), 500
+
+        db.session.rollback()
+        return render_template_string(
+            _REMOTE_PROBE_RESULT,
+            status="success", method=_BUYER_ORDER_STATUS_METHOD,
+            outcome=outcome, request_id=None, error=None,
+        )
 
     sentinel = uuid.UUID(int=0)
     status_request = AliExpressOrderStatusRequest(
