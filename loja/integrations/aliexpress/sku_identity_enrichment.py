@@ -9,13 +9,13 @@ Não altera Product.price/cost/pricing_status/publicação, SupplierProduct,
 estoque, imagens, UUIDs, supplier_sku_id nem snapshots de fulfillment.
 Não executa nenhuma escrita remota: todas as chamadas AliExpress são read-only.
 
-Segurança:
+Segurança/runtime:
 * usa a credencial persistente criptografada da Fase 8;
 * exige exatamente um supplier AliExpress ativo com credencial ativa;
 * nunca loga product_id, sku_id, token, secret, payload ou atributos externos;
-* processa poucos produtos por lote para caber em runtime serverless;
-* cada produto é commitado isoladamente; falha de um produto não corrompe os
-  demais e é reportada apenas por contagem sanitizada.
+* processa exatamente UM produto por execução no runtime serverless;
+* cliente operacional usa timeout de 5 s, abaixo do limite de 10 s da função;
+* cada produto é commitado isoladamente; falha não corrompe progresso anterior.
 """
 
 from __future__ import annotations
@@ -40,6 +40,8 @@ from .errors import (
     AliExpressTransportError,
 )
 from .submission_snapshot import build_sku_attr
+
+ENRICH_HTTP_TIMEOUT = 5.0
 
 
 class SkuIdentityEnrichmentError(Exception):
@@ -75,7 +77,9 @@ def get_sku_identity_coverage(session=None) -> SkuIdentityCoverage:
         .filter(Product.source == "aliexpress")
         .all()
     )
-    complete = sum(1 for variant in variants if has_complete_sku_identity(variant.attributes))
+    complete = sum(
+        1 for variant in variants if has_complete_sku_identity(variant.attributes)
+    )
     total = len(variants)
     return SkuIdentityCoverage(
         total=total,
@@ -107,13 +111,13 @@ def _build_client(supplier_id) -> AliExpressClient:
     try:
         token = get_fulfillment_access_token(supplier_id)
     except Exception:
-        # Nunca propagar texto da credential store: pode conter IDs internos.
         raise SkuIdentityEnrichmentError("aliexpress_credential_unavailable") from None
 
     return AliExpressClient(
         app_key=app_key,
         app_secret=app_secret,
         access_token=token,
+        timeout=ENRICH_HTTP_TIMEOUT,
     )
 
 
@@ -136,17 +140,18 @@ def _variants_for_link(product: Product, supplier_product_id):
 
 def enrich_sku_identity_batch(
     *,
-    batch_size: int = 3,
+    batch_size: int = 1,
     client: Optional[AliExpressClient] = None,
     supplier_id=None,
     session=None,
 ) -> SkuIdentityEnrichmentResult:
-    """Enriquece no máximo ``batch_size`` produtos que ainda precisam de IDs.
+    """Enriquece exatamente um produto ainda pendente por execução.
 
-    Cada produto gera exatamente uma chamada lógica ``ds.product.get``.
-    Não há retry/fallback automático. Variantes já completas não são reescritas.
+    O argumento ``batch_size`` é mantido por compatibilidade/testes, mas somente
+    o valor 1 é aceito. Cada execução gera no máximo uma chamada lógica
+    ``ds.product.get``. Não há retry/fallback automático.
     """
-    if not isinstance(batch_size, int) or batch_size < 1 or batch_size > 5:
+    if batch_size != 1:
         raise SkuIdentityEnrichmentError("invalid_batch_size")
 
     session = session or db.session
@@ -165,15 +170,14 @@ def enrich_sku_identity_batch(
         .all()
     )
 
-    candidates = []
+    candidate = None
     for product in products:
         link = _supplier_link(product, supplier_id)
         if link is None:
             continue
         variants = _variants_for_link(product, link.id)
         if any(not has_complete_sku_identity(v.attributes) for v in variants):
-            candidates.append((product, link.id))
-        if len(candidates) >= batch_size:
+            candidate = (product, link.id)
             break
 
     processed_products = 0
@@ -181,7 +185,8 @@ def enrich_sku_identity_batch(
     unresolved_variants = 0
     failed_products = 0
 
-    for product, supplier_product_id in candidates:
+    if candidate is not None:
+        product, supplier_product_id = candidate
         try:
             detail = client.get_product(product_id=str(product.external_id))
             sku_by_id = {
@@ -200,16 +205,14 @@ def enrich_sku_identity_batch(
                 if not has_complete_sku_identity(attrs):
                     product_unresolved += 1
                     continue
-                # Atualiza somente o JSON de atributos; identidade/estoque/preço
-                # da variante permanecem congelados como estavam.
                 variant.attributes = attrs
                 variant.updated_at = utcnow()
                 product_updates += 1
 
             session.commit()
-            processed_products += 1
-            updated_variants += product_updates
-            unresolved_variants += product_unresolved
+            processed_products = 1
+            updated_variants = product_updates
+            unresolved_variants = product_unresolved
 
         except (
             AliExpressAPIError,
@@ -219,10 +222,10 @@ def enrich_sku_identity_batch(
             AliExpressConfigError,
         ):
             session.rollback()
-            failed_products += 1
+            failed_products = 1
         except Exception:
             session.rollback()
-            failed_products += 1
+            failed_products = 1
 
     coverage = get_sku_identity_coverage(session=session)
     return SkuIdentityEnrichmentResult(
@@ -235,6 +238,7 @@ def enrich_sku_identity_batch(
 
 
 __all__ = [
+    "ENRICH_HTTP_TIMEOUT",
     "SkuIdentityEnrichmentError",
     "SkuIdentityCoverage",
     "SkuIdentityEnrichmentResult",
