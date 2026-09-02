@@ -1,8 +1,9 @@
-"""Testes do adapter DS read-only de status AliExpress (Fase 8.0.7A) — DESABILITADO.
+"""Testes do adapter DS read-only de status AliExpress (Fase 8.0.7B) — DESABILITADO.
 
 Garante (zero rede real):
 - adapter nunca é o default (get_default_order_status_syncer() continua hard-off);
-- usa EXATAMENTE o método aliexpress.ds.trade.order.get com order_id=ali_order_id;
+- usa EXATAMENTE aliexpress.trade.ds.order.get com
+  single_order_query={"order_id": ali_order_id};
 - token obtido exclusivamente via credential_store a partir do supplier_id;
 - boundary request não carrega token/secret/session;
 - ali_order_id inválido -> NENHUM HTTP (erro sanitizado antes da chamada);
@@ -82,11 +83,11 @@ def _valid_credential_env(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _hardoff_no_network(monkeypatch):
-    """Zero HTTP real durante toda a Fase 8.0.7A."""
+    """Zero HTTP real durante toda a Fase 8.0.7B."""
 
     def _reject(*args, **kwargs):
         raise AssertionError(
-            "tentativa de conexão de rede durante teste da Fase 8.0.7A"
+            "tentativa de conexão de rede durante teste da Fase 8.0.7B"
         )
 
     monkeypatch.setattr(socket.socket, "connect", _reject)
@@ -242,8 +243,11 @@ class TestAdapterContract:
         )
         syncer = AliExpressDSOrderStatusSyncer(client=client)
         result = syncer.sync(_req(ds_supplier.id))
-        assert client.calls == [(DS_ORDER_STATUS_METHOD, {"order_id": ALI_ORDER_ID})]
-        assert DS_ORDER_STATUS_METHOD == "aliexpress.ds.trade.order.get"
+        assert client.calls == [(
+            DS_ORDER_STATUS_METHOD,
+            {"single_order_query": {"order_id": ALI_ORDER_ID}},
+        )]
+        assert DS_ORDER_STATUS_METHOD == "aliexpress.trade.ds.order.get"
         assert result.outcome == STATUS_SHIPPED
         assert result.external_status == STATUS_SHIPPED
 
