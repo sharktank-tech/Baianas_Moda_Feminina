@@ -178,15 +178,25 @@ def test_top_placeorder_dto_contract():
     """DTO placeorder: build_top_placeorder_dto aceita request com kwargs."""
     from loja.integrations.aliexpress.submission import (
         AliExpressSubmissionRequest,
+        AliExpressPlaceOrderItem,
     )
-    # Cria request minimal possível
+    # Cria request com shipping address e items válidos
+    item = AliExpressPlaceOrderItem(product_id="123456", sku_attr="14:771;200000124:100013888", product_count=1)
     r = AliExpressSubmissionRequest(
         aliexpress_order_id="test",
         order_id=None,
         supplier_id=None,
         attempt_key=None,
-        shipping_address={},
-        items=(),
+        shipping_address={
+            "contact_person": "Cliente",
+            "mobile_no": "11999999999",
+            "zip": "01001-000",
+            "address": "Rua Exemplo",
+            "city": "São Paulo",
+            "province": "SP",
+            "country": "BR",
+        },
+        items=(item,),
     )
     from loja.integrations.aliexpress.top_placeorder import (
         build_top_placeorder_params,
@@ -207,14 +217,24 @@ def test_top_placeorder_method_is_aliexpress():
     )
     from loja.integrations.aliexpress.submission import (
         AliExpressSubmissionRequest,
+        AliExpressPlaceOrderItem,
     )
+    item = AliExpressPlaceOrderItem(product_id="123456", sku_attr="14:771;200000124:100013888", product_count=1)
     r = AliExpressSubmissionRequest(
         aliexpress_order_id="test",
         order_id=None,
         supplier_id=None,
         attempt_key=None,
-        shipping_address={},
-        items=(),
+        shipping_address={
+            "contact_person": "Cliente",
+            "mobile_no": "11999999999",
+            "zip": "01001-000",
+            "address": "Rua Exemplo",
+            "city": "São Paulo",
+            "province": "SP",
+            "country": "BR",
+        },
+        items=(item,),
     )
     dto = build_top_placeorder_params(
         app_key="key",

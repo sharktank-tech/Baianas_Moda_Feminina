@@ -141,16 +141,27 @@ def build_placeorder_dto(request: "AliExpressSubmissionRequest") -> dict[str, An
     """Constrói o DTO canônico SOMENTE a partir ``request.shipping_address`` e
     ``request.items``.
 
-    Nenhum acesso a Order/Product/ProductVariant/AliExpressOrderItem/
-    SupplierProduct. Campos de endereço ausentes são omitidos; ``cpf``,
-    ``tax_number``, ``full_name``, ``passport`` etc. NÃO são inventados.
-
-    Item:
-      product_count  int >= 1        (product_count preservado como int)
-      product_id     int > 0         (convertido de string numérica válida)
-      sku_attr       str  congelada
-      logistics_service_name  somente quando presente/non-empty
+    Todas as validações são fail-closed: ausência ou erro em campo obrigatório
+    resulta em ``AliExpressConfigError`` antes de qualquer POST.
     """
+
+    if request is None:
+        raise AliExpressConfigError("placeorder_request_invalid")
+
+    if not isinstance(request.shipping_address, Mapping):
+        raise AliExpressConfigError("placeorder_request_invalid: shipping_address deve ser Mapping")
+
+    # Valida campos non-empty do shipping_address canônico
+    for field in _SHIPPING_FIELDS:
+        val = request.shipping_address.get(field)
+        if not val or not str(val).strip():
+            raise AliExpressConfigError(
+                "placeorder_request_invalid: shipping_address incomplete"
+            )
+
+    if not request.items:
+        raise AliExpressConfigError("placeorder_request_invalid: items vazios")
+
     shipping = {
         key: str(request.shipping_address[key])
         for key in _SHIPPING_FIELDS

@@ -160,12 +160,6 @@ class TopAliExpressOrderSubmitter(AliExpressOrderSubmitter):
             raise AliExpressSubmissionUnknown("placeorder_transport_error") from None
         except AliExpressAPIError:
             raise AliExpressSubmissionUnknown("placeorder_protocol_error") from None
-        except TransportTimeout:
-            raise AliExpressSubmissionUnknown("placeorder_timeout") from None
-        except TransportError:
-            raise AliExpressSubmissionUnknown("placeorder_transport_error") from None
-        except AliExpressAPIError:
-            raise AliExpressSubmissionUnknown("placeorder_protocol_error") from None
 
         return _classify_placeorder(response)
 
