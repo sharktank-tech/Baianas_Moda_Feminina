@@ -327,7 +327,10 @@ def parse_top_placeorder_response(payload: Any) -> "TopPlaceOrderResponse":
     if not isinstance(result, Mapping):
         raise AliExpressAPIError("resposta placeorder inesperada")
 
-    is_success = bool(result.get("is_success"))
+    raw_is_success = result.get("is_success")
+    if not isinstance(raw_is_success, bool):
+        raise AliExpressAPIError("resposta placeorder inesperada: is_success deve ser bool")
+    is_success = raw_is_success
     # Do DTO oficial, falha pode vir por error_code/error_msg quando is_success
     # é false; normaliza para o provider classificar (nunca exception).
     error_code = str(result.get("error_code") or "").strip() or None
