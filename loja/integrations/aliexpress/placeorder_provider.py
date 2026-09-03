@@ -142,8 +142,8 @@ class TopAliExpressOrderSubmitter(AliExpressOrderSubmitter):
         if request.supplier_id is None:
             raise AliExpressSubmissionFailed("placeorder_request_invalid")
 
-        app_key, app_secret = self._resolve_config()
         try:
+            app_key, app_secret = self._resolve_config()
             response: "TopPlaceOrderResponse" = call_top_placeorder(
                 app_key=app_key,
                 app_secret=app_secret,
@@ -154,6 +154,12 @@ class TopAliExpressOrderSubmitter(AliExpressOrderSubmitter):
         except AliExpressConfigError:
             # Falha LOCAL de validação/construção ANTES do HTTP: confirmada.
             raise AliExpressSubmissionFailed("placeorder_request_invalid") from None
+        except TransportTimeout:
+            raise AliExpressSubmissionUnknown("placeorder_timeout") from None
+        except TransportError:
+            raise AliExpressSubmissionUnknown("placeorder_transport_error") from None
+        except AliExpressAPIError:
+            raise AliExpressSubmissionUnknown("placeorder_protocol_error") from None
         except TransportTimeout:
             raise AliExpressSubmissionUnknown("placeorder_timeout") from None
         except TransportError:
