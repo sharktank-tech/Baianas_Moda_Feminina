@@ -206,15 +206,11 @@ def _validate_submission_snapshot(snapshot) -> Optional[str]:
     for entry in items:
         if not isinstance(entry, Mapping):
             return ERROR_CODES["SUBMISSION_SNAPSHOT_INVALID"]
-        if not str(entry.get("product_id") or "").strip():
+        if not _valid_product_id(entry.get("product_id")):
             return ERROR_CODES["SUBMISSION_SNAPSHOT_INVALID"]
         if not str(entry.get("sku_attr") or "").strip():
             return ERROR_CODES["SUBMISSION_SNAPSHOT_INVALID"]
-        try:
-            count = int(entry.get("product_count") or 0)
-        except (TypeError, ValueError):
-            return ERROR_CODES["SUBMISSION_SNAPSHOT_INVALID"]
-        if count < 1:
+        if not _valid_product_count(entry.get("product_count")):
             return ERROR_CODES["SUBMISSION_SNAPSHOT_INVALID"]
         if "logistics_service_name" in entry:
             service = str(entry.get("logistics_service_name") or "").strip()
@@ -222,6 +218,33 @@ def _validate_submission_snapshot(snapshot) -> Optional[str]:
                 return ERROR_CODES["SUBMISSION_SNAPSHOT_INVALID"]
 
     return None
+
+
+def _valid_product_id(value) -> bool:
+    """product_id deve ser inteiro decimal POSITIVO.
+
+    Válidos: 12345, "12345". Inválidos: bool, "", "ABC", "-1", "1.2", 0, negativo.
+    """
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value > 0
+    if isinstance(value, str):
+        s = value.strip()
+        return bool(s) and s.isdigit() and int(s) > 0
+    return False
+
+
+def _valid_product_count(value) -> bool:
+    """product_count deve ser INTEGER real >= 1.
+
+    Válido: 1. Inválidos: "1" (string), 1.0/1.5 (float), True/False, 0, negativo.
+    """
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and value >= 1
+    )
 
 
 def _preflight_submission_snapshot(session, aliexpress_order_id) -> Optional[str]:
@@ -251,7 +274,7 @@ def _build_submission_request(
         AliExpressPlaceOrderItem(
             product_id=str(entry["product_id"]),
             sku_attr=str(entry["sku_attr"]),
-            product_count=int(entry["product_count"]),
+            product_count=entry["product_count"],
             logistics_service_name=(
                 str(entry["logistics_service_name"]).strip()
                 if entry.get("logistics_service_name")
@@ -326,6 +349,36 @@ def _fail(
     order.attempt_count += 1
     order.attempt_key = attempt_key
     order.last_attempt_at = utcnow()
+    order.updated_at = utcnow()
+    session.commit()
+    return FulfillmentResult(
+        aliexpress_order=order,
+        items=list(order.items),
+        state=order.state,
+    )
+
+
+def _abort_pre_provider(
+    *,
+    order: AliExpressOrder,
+    error: str,
+    session,
+) -> FulfillmentResult:
+    """Aborta LOCAL antes do provider (8.0.11A / 8.0.10.2 hardening).
+
+    Usado quando o snapshot deixa de ser válido entre os estágios A e B. Como
+    nenhum HTTP foi executado, NÃO vai para ``pending_reconciliation``:
+      * volta a ``ready``;
+      * limpa o attempt_key gerado para a tentativa que nunca saiu;
+      * NÃO incrementa attempt_count;
+      * preserva order/items/snapshot;
+      * persiste last_error e commita.
+    NUNCA substitui _fail para desfechos pós-provider (aqueles incrementam
+    attempt_count e podem ir para pending_reconciliation).
+    """
+    order.state = "ready"
+    order.attempt_key = None
+    order.last_error = error
     order.updated_at = utcnow()
     session.commit()
     return FulfillmentResult(
@@ -453,6 +506,20 @@ def submit_aliexpress_order(
             aliexpress_order=locked,
             items=list(locked.items),
             state=locked.state,
+        )
+
+    # REVALIDAÇÃO do snapshot no Estágio B (8.0.11A): após re-lock, re-busca o
+    # snapshot pela MESMA session e valida IMEDIATAMENTE antes do provider — que
+    # poderá sumir/virar inválido entre os estágios. Como aqui NENHUM HTTP
+    # aconteceu, NÃO marcamos pending_reconciliation: voltamos para ``ready``,
+    # limpamos o attempt_key da tentativa que nunca saiu e NÃO incrementamos
+    # attempt_count (ao contrário de _fail).
+    stage_b_error = _preflight_submission_snapshot(session, ali_order.id)
+    if stage_b_error is not None:
+        return _abort_pre_provider(
+            order=locked,
+            error=stage_b_error,
+            session=session,
         )
 
     items = list(locked.items)
