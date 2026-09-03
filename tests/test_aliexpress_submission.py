@@ -27,11 +27,12 @@ from loja.integrations.aliexpress.fulfillment import (
 from loja.integrations.aliexpress.submission import (
     AliExpressOrderSubmitter,
     AliExpressSubmissionFailed,
-    AliExpressSubmissionRequest,
     AliExpressSubmissionResult,
+    AliExpressSubmissionUnknown,
     HardOffOrderSubmitter,
     submit_aliexpress_order,
 )
+from aliexpress_snapshot_utils import materialize_snapshot
 from loja.modules.getway_mercado_pago.payment_models import Order, OrderItem
 from loja.modules.models import (
     AliExpressOrder,
@@ -187,6 +188,66 @@ def _materialize_ready(
     total=Decimal("59.80"),
 ):
     """Cria pedido pago com item AliExpress e devolve o AliExpressOrder ready."""
+    user = make_user()
+    order = Order(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        checkout_type="product",
+        status="paid",
+        subtotal=Decimal("29.90"),
+        total=total,
+        stock_reserved=False,
+        customer_name="U",
+        customer_email=user.email,
+        customer_phone="11999999999",
+        zip_code="01001000",
+        street="Rua",
+        number="1",
+        complement="",
+        neighborhood="C",
+        city="SP",
+        state="SP",
+    )
+    db.session.add(order)
+    db.session.flush()
+    item = OrderItem(
+        id=uuid.uuid4(),
+        order_id=order.id,
+        product_id=product.id,
+        variant_id=variant.id,
+        product_name=product.name,
+        quantity=quantity,
+        unit_price=Decimal("29.90"),
+        line_total=Decimal("29.90") * quantity,
+    )
+    db.session.add(item)
+    db.session.commit()
+
+    results = ensure_aliexpress_fulfillment(order)
+    assert len(results) == 1
+    assert results[0].state == "ready"
+    db.session.commit()
+    ali_order = results[0].aliexpress_order
+    materialize_snapshot(ali_order, session=db.session)
+    return ali_order, order, item
+
+
+def _materialize_ready_without_snap(
+    db,
+    make_user,
+    supplier,
+    product,
+    variant,
+    *,
+    quantity=2,
+    total=Decimal("59.80"),
+):
+    """Igual a _materialize_ready, MAS sem materializar o submission snapshot.
+
+    Serve para provar o gate canônico: submission sem snapshot NÃO chama
+    provider, NÃO gera attempt_key e mantém ``ready``.
+    """
+    _persist_valid_credential(db, supplier)
     user = make_user()
     order = Order(
         id=uuid.uuid4(),
@@ -614,10 +675,143 @@ class TestSnapshotPayload:
         assert request is not None
         assert len(request.items) == 1
         payload = request.items[0]
-        assert payload.order_item_id == item.id
-        assert payload.supplier_product_external_id == "SP_HIST"
-        assert payload.supplier_sku_external_id == "SKU_HIST"
-        assert payload.quantity == 2
-        assert payload.supplier_unit_cost == Decimal("10.00")
-        assert payload.supplier_currency == "USD"
-        assert payload.variant_label == "Red / M"
+        # O payload canônico vem 100% do snapshot (product_id/sku_attr/count),
+        # nunca do catálogo mutado/removido neste instante.
+        assert payload.product_id == "SP_HIST"
+        assert payload.sku_attr == "14:771;200000124:100013888"
+        assert payload.product_count == 2
+        assert payload.logistics_service_name == "CAINIAO"
+        assert request.shipping_address["zip"] == "01001000"
+        assert request.shipping_address["address"] == "Rua 1 C"
+        assert request.shipping_address["city"] == "SP"
+        assert request.shipping_address["province"] == "SP"
+        assert request.shipping_address["contact_person"] == "U"
+        assert request.shipping_address["country"] == "BR"
+
+
+class TestSubmissionSnapshotPreflight:
+    """Fase 8.0.10.2 — gate canônico: submission exige snapshot válido."""
+
+    def test_submission_without_snapshot_blocks(self, db, make_user, ae_supplier,
+                                                ae_product, sp_variant_factory):
+        """Sem snapshot válido, submissão fica em ``ready``, não gera attempt_key
+        nem chama provider, e persiste ``submission_snapshot_missing``."""
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali_order, _, _ = _materialize_ready_without_snap(
+            db, make_user, ae_supplier, ae_product, variant
+        )
+        fake = FakeSubmitter()
+        result = submit_aliexpress_order(ali_order, submitter=fake)
+        assert result.state == "ready"
+        assert fake.calls == []
+        fresh = db.session.get(AliExpressOrder, ali_order.id)
+        assert fresh.attempt_key is None
+        assert fresh.attempt_count == 0
+        assert fresh.state == "ready"
+        assert "submission_snapshot_missing" in fresh.last_error
+
+    def test_valid_snapshot_allows_submission(self, db, make_user, ae_supplier,
+                                              ae_product, sp_variant_factory):
+        """Com snapshot válido, submissão é autorizada e o payload é canônico."""
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali_order, _, _ = _materialize_ready(
+            db, make_user, ae_supplier, ae_product, variant, quantity=2
+        )
+        fake = FakeSubmitter()
+        result = submit_aliexpress_order(ali_order, submitter=fake)
+        assert result.state == "submitted"
+        assert len(fake.calls) == 1
+
+    def test_provider_failure_when_valid_snapshot_allows_retry(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        """Falha confirmada com snapshot válido mantém submitting e permite retry."""
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali_order, _, _ = _materialize_ready(
+            db, make_user, ae_supplier, ae_product, variant
+        )
+        fake = FakeSubmitter(fail_times=1)
+        r1 = submit_aliexpress_order(ali_order, submitter=fake)
+        assert r1.state == "submitting"
+        assert ERROR_CODES["SUBMISSION_FAILED"] in r1.aliexpress_order.last_error
+        fake2 = FakeSubmitter()
+        r2 = submit_aliexpress_order(ali_order, submitter=fake2)
+        assert r2.state == "submitted"
+        assert len(fake2.calls) == 1
+
+    def _inject_invalid_snapshot(self, db, ali_order, **mutations):
+        """Muta o JSONB do snapshot para simular estrutura inválida."""
+        from loja.integrations.aliexpress.submission_snapshot import (
+            AliExpressSubmissionSnapshot,
+        )
+
+        snap = db.session.query(AliExpressSubmissionSnapshot).filter_by(
+            aliexpress_order_id=ali_order.id
+        ).first()
+        assert snap is not None
+        items = list(snap.items)
+        entry = dict(items[0])
+        entry.update(mutations)
+        items[0] = entry
+        snap.items = items
+        db.session.commit()
+        db.session.expire_all()
+        return ali_order
+
+    def test_invalid_logistics_service_blocks(self, db, make_user, ae_supplier,
+                                              ae_product, sp_variant_factory):
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali_order, _, _ = _materialize_ready(
+            db, make_user, ae_supplier, ae_product, variant
+        )
+        self._inject_invalid_snapshot(db, ali_order, logistics_service_name="   ")
+        fake = FakeSubmitter()
+        result = submit_aliexpress_order(ali_order, submitter=fake)
+        assert result.state == "ready"
+        assert fake.calls == []
+        assert "submission_snapshot_invalid" in result.aliexpress_order.last_error
+
+    def test_invalid_sku_attr_blocks(self, db, make_user, ae_supplier,
+                                     ae_product, sp_variant_factory):
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali_order, _, _ = _materialize_ready(
+            db, make_user, ae_supplier, ae_product, variant
+        )
+        self._inject_invalid_snapshot(db, ali_order, sku_attr="")
+        fake = FakeSubmitter()
+        result = submit_aliexpress_order(ali_order, submitter=fake)
+        assert result.state == "ready"
+        assert fake.calls == []
+        assert "submission_snapshot_invalid" in result.aliexpress_order.last_error
+
+    def test_invalid_product_count_blocks(self, db, make_user, ae_supplier,
+                                          ae_product, sp_variant_factory):
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali_order, _, _ = _materialize_ready(
+            db, make_user, ae_supplier, ae_product, variant
+        )
+        self._inject_invalid_snapshot(db, ali_order, product_count=0)
+        fake = FakeSubmitter()
+        result = submit_aliexpress_order(ali_order, submitter=fake)
+        assert result.state == "ready"
+        assert fake.calls == []
+        assert "submission_snapshot_invalid" in result.aliexpress_order.last_error
+
+    def test_invalid_product_id_blocks(self, db, make_user, ae_supplier,
+                                       ae_product, sp_variant_factory):
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali_order, _, _ = _materialize_ready(
+            db, make_user, ae_supplier, ae_product, variant
+        )
+        self._inject_invalid_snapshot(db, ali_order, product_id="")
+        fake = FakeSubmitter()
+        result = submit_aliexpress_order(ali_order, submitter=fake)
+        assert result.state == "ready"
+        assert fake.calls == []
+        assert "submission_snapshot_invalid" in result.aliexpress_order.last_error

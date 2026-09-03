@@ -68,6 +68,7 @@ from loja.modules.models import (
     SupplierProduct,
     TrackingEvent,
 )
+from aliexpress_snapshot_utils import materialize_snapshot
 
 ALI_ORDER_ID = "9000000000001"
 
@@ -512,6 +513,7 @@ def _materialize_and_submit(db, make_user, supplier, product, variant):
     assert results[0].state == "ready"
     db.session.commit()
     ali = AliExpressOrder.query.filter_by(order_id=order.id).first()
+    materialize_snapshot(ali, session=db.session)
     result = submit_aliexpress_order(
         ali, submitter=OkSubmitter(f"AE-807-{uuid.uuid4().hex[:10]}")
     )

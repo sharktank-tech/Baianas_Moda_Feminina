@@ -66,6 +66,7 @@ from loja.modules.models import (
     SupplierProduct,
 )
 from loja.utils import utcnow
+from aliexpress_snapshot_utils import materialize_snapshot
 
 
 @pytest.fixture(autouse=True)
@@ -638,6 +639,7 @@ class TestOAuthFulfillmentIntegration:
         from loja.integrations.aliexpress.submission import get_default_order_submitter
 
         assert isinstance(get_default_order_submitter(), HardOffOrderSubmitter)
+        materialize_snapshot(r1[0].aliexpress_order, session=db.session)
         result = submit_aliexpress_order(r1[0].aliexpress_order)
         assert result.state == "submitting"
         assert (
@@ -663,6 +665,7 @@ class TestOAuthSubmissionGate:
         db.session.commit()
 
         fake_sub = _FakeSubmitter()
+        materialize_snapshot(r[0].aliexpress_order, session=db.session)
         result = submit_aliexpress_order(
             r[0].aliexpress_order, submitter=fake_sub
         )
@@ -689,6 +692,7 @@ class TestOAuthSubmissionGate:
         db.session.commit()
 
         fake_sub = _FakeSubmitter()
+        materialize_snapshot(r2[0].aliexpress_order, session=db.session)
         result = submit_aliexpress_order(
             r2[0].aliexpress_order, submitter=fake_sub
         )

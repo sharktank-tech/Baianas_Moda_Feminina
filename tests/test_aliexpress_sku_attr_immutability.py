@@ -328,3 +328,43 @@ def test_I_no_pii_in_errors_and_repr(db, ae_setup):
     assert "tok" not in r.lower()
     assert str(res.snapshot.aliexpress_order_id) in r
 
+
+# --- Fase 8.0.10.2: logistics_service_name opcional (docs oficiais placeorder) ---
+
+def _logistics_snapshot(db, ae_setup, logistics):
+    order, item = _make_paid_order(db, ae_setup)
+    ensure_aliexpress_fulfillment(order)
+    db.session.commit()
+    ali_order = AliExpressOrder.query.filter_by(order_id=order.id).first()
+    mapping = {}
+    if logistics is not None:
+        mapping = {item.id: logistics}
+    res = materialize_submission_snapshot(
+        ali_order, logistics_service_by_order_item=mapping, session=db.session
+    )
+    db.session.commit()
+    return res.snapshot, item
+
+
+def test_K_logistics_omitted_is_absent(db, ae_setup):
+    """Contrato A: sem serviço logístico, a chave é OMITIDA (nunca None/vazio)."""
+    snap, _ = _logistics_snapshot(db, ae_setup, None)
+    assert len(snap.items) == 1
+    assert "logistics_service_name" not in snap.items[0]
+
+
+def test_K_logistics_explicit_is_frozen(db, ae_setup):
+    """Contrato B: serviço explícito é congelado no snapshot."""
+    snap, _ = _logistics_snapshot(db, ae_setup, "CAINIAO_ECONOMIC")
+    assert snap.items[0]["logistics_service_name"] == "CAINIAO_ECONOMIC"
+
+
+def test_K_logistics_empty_or_whitespace_is_omitted(db, ae_setup):
+    """Contrato C: "" ou whitespace é tratado como ausência e a chave é omitida."""
+    for value in ("", "   ", "\t"):
+        snap, _ = _logistics_snapshot(db, ae_setup, value)
+        assert "logistics_service_name" not in snap.items[0]
+        assert "product_id" in snap.items[0]
+        assert "sku_attr" in snap.items[0]
+        assert "product_count" in snap.items[0]
+

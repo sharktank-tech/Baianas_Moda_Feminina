@@ -57,6 +57,7 @@ from loja.modules.models import (
     Supplier,
     SupplierProduct,
 )
+from aliexpress_snapshot_utils import materialize_snapshot
 
 
 @pytest.fixture(autouse=True)
@@ -258,6 +259,7 @@ def _materialize_ready(db, make_user, supplier, product, variant):
     assert results[0].state == "ready"
     db.session.commit()
     ali = AliExpressOrder.query.filter_by(order_id=order.id).first()
+    materialize_snapshot(ali, session=db.session)
     return ali, order
 
 
@@ -574,6 +576,7 @@ class TestPrecedenceAndRegressions:
         db.session.commit()
         ali = AliExpressOrder.query.filter_by(order_id=order.id).first()
 
+        materialize_snapshot(ali, session=db.session)
         result = submit_aliexpress_order(
             ali, submitter=FakeSubmitter(external_order_id="AE-OAUTH-OK")
         )

@@ -40,6 +40,7 @@ from loja.modules.models import (
     Supplier,
     SupplierProduct,
 )
+from aliexpress_snapshot_utils import materialize_snapshot
 
 BASE_URL = "/admin/integrations/aliexpress/pedidos"
 
@@ -188,6 +189,7 @@ def _materialize_submitted_return(db, buyer, ae_env, submit=True):
     db.session.commit()
     ali = AliExpressOrder.query.filter_by(order_id=order.id).first()
     if submit:
+        materialize_snapshot(ali, session=db.session)
         sub = submit_aliexpress_order(ali, submitter=OkSubmitter())
         db.session.commit()
         assert sub.state == "submitted"
