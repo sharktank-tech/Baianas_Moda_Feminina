@@ -149,6 +149,10 @@ def sp_variant_factory(db):
             sku=None,
             color="Red",
             size="M",
+            attributes=[
+                {"name": "Color", "value": "Red", "sku_property_id": "14", "property_value_id": "771"},
+                {"name": "Size", "value": "M", "sku_property_id": "200000124", "property_value_id": "100013888"},
+            ],
             stock=10,
             price=Decimal("29.90"),
             is_active=True,

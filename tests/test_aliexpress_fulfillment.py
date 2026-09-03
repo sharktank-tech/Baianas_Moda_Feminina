@@ -206,6 +206,20 @@ def supplier_product_factory(db):
             sku=None,
             color="Red",
             size="M",
+            attributes=[
+                {
+                    "name": "Color",
+                    "value": "Red",
+                    "sku_property_id": "14",
+                    "property_value_id": "771",
+                },
+                {
+                    "name": "Size",
+                    "value": "M",
+                    "sku_property_id": "200000124",
+                    "property_value_id": "100013888",
+                },
+            ],
             stock=10,
             price=Decimal("29.90"),
             is_active=True,
@@ -854,6 +868,10 @@ class TestFulfillmentService:
             sku=None,
             color="Blue",
             size="S",
+            attributes=[
+                {"name": "Color", "value": "Blue", "sku_property_id": "14", "property_value_id": "771"},
+                {"name": "Size", "value": "S", "sku_property_id": "200000124", "property_value_id": "100013888"},
+            ],
             stock=10,
             price=Decimal("39.90"),
             is_active=True,
@@ -1274,6 +1292,10 @@ class TestFulfillmentService:
             sku=None,
             color="Red",
             size="M",
+            attributes=[
+                {"name": "Color", "value": "Red", "sku_property_id": "14", "property_value_id": "771"},
+                {"name": "Size", "value": "M", "sku_property_id": "200000124", "property_value_id": "100013888"},
+            ],
             stock=10,
             price=Decimal("29.90"),
             is_active=True,
@@ -1312,6 +1334,10 @@ class TestFulfillmentService:
             sku=None,
             color="Blue",
             size="L",
+            attributes=[
+                {"name": "Color", "value": "Red", "sku_property_id": "14", "property_value_id": "771"},
+                {"name": "Size", "value": "M", "sku_property_id": "200000124", "property_value_id": "100013888"},
+            ],
             stock=5,
             price=Decimal("19.90"),
             is_active=True,
@@ -1865,6 +1891,10 @@ class TestFulfillmentService:
         db.session.commit()
         variant.supplier_product_id = sp.id
         variant.supplier_sku_id = "SKU_PROMO"
+        variant.attributes = [
+            {"name": "Color", "value": "Red", "sku_property_id": "14", "property_value_id": "771"},
+            {"name": "Size", "value": "M", "sku_property_id": "200000124", "property_value_id": "100013888"},
+        ]
         persist_credential(
             supplier_id=aliexpress_supplier.id,
             seller_id=aliexpress_supplier.seller_id,
