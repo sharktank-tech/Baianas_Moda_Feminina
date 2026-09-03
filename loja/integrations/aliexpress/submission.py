@@ -53,10 +53,11 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Optional
+from typing import Mapping, Optional
 
 from loja import db
 from loja.modules.models import AliExpressOrder, AliExpressOrderItem
+from .submission_snapshot import AliExpressSubmissionSnapshot
 from loja.utils import utcnow
 
 from .fulfillment import ERROR_CODES, FulfillmentResult, _check_credential
@@ -92,7 +93,11 @@ def _attempt_key(order: AliExpressOrder) -> str:
 
 @dataclass(frozen=True)
 class AliExpressSubmissionItem:
-    """Item de submissão congelado a partir do snapshot persistido."""
+    """Item de submissão LEGACY (Fase 8.0.3), baseado em AliExpressOrderItem.
+
+    Mantido para compatibilidade de imports externos; o caminho usado pelo
+    provider (Fase 8.0.10.2) é 100% canônico via ``AliExpressPlaceOrderItem``.
+    """
 
     order_item_id: uuid.UUID
     supplier_product_external_id: str
@@ -104,14 +109,37 @@ class AliExpressSubmissionItem:
 
 
 @dataclass(frozen=True)
+class AliExpressPlaceOrderItem:
+    """Item canônico do futuro placeorder — fonte exclusiva: submission snapshot.
+
+    Mapeia 1:1 os campos persistidos em ``AliExpressSubmissionSnapshot.items``:
+       * ``product_id``  -> supplier product external id (congelado);
+       * ``sku_attr``    -> supplier_sku_attr congelado ``pid:vid;pid:vid``;
+       * ``product_count`` -> quantidade congelada;
+       * ``logistics_service_name`` -> OPCIONAL (omitido quando desconhecido).
+    """
+
+    product_id: str
+    sku_attr: str
+    product_count: int
+    logistics_service_name: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class AliExpressSubmissionRequest:
-    """Payload de submissão — fonte exclusiva: snapshot persistido."""
+    """Payload canônico do futuro placeorder — fonte exclusiva: submission snapshot.
+
+    ``shipping_address`` e ``items`` vêm inteiramente do snapshot persistido;
+    nenhum dado é reconstruído do catálogo (Order.address, ProductVariant,
+    AliExpressOrderItem) no instante da escrita.
+    """
 
     aliexpress_order_id: uuid.UUID
     order_id: Optional[uuid.UUID]
     supplier_id: Optional[uuid.UUID]
     attempt_key: Optional[str]
-    items: tuple[AliExpressSubmissionItem, ...]
+    shipping_address: Mapping[str, str]
+    items: tuple[AliExpressPlaceOrderItem, ...]
 
 
 @dataclass(frozen=True)
@@ -150,27 +178,95 @@ def get_default_order_submitter() -> AliExpressOrderSubmitter:
     return HardOffOrderSubmitter()
 
 
+def _validate_submission_snapshot(snapshot) -> Optional[str]:
+    """PRE-FLIGHT canônico: valida minimamente o submission snapshot.
+
+    Retorna None (válido) ou um código sanitizado. Nada é reconstruído do
+    catálogo; apenas a integridade estrutural do snapshot congelado é checada.
+
+    Contrato:
+      * shipping_address: Mapping não vazio;
+      * items: lista não vazia;
+      * cada item: product_id non-empty, sku_attr non-empty,
+        product_count inteiro >= 1;
+      * logistics_service_name: se a chave AUSENTE -> válido; se presente ->
+        string non-empty após strip.
+    """
+    if snapshot is None:
+        return ERROR_CODES["SUBMISSION_SNAPSHOT_MISSING"]
+
+    shipping = getattr(snapshot, "shipping_address", None)
+    if not isinstance(shipping, Mapping) or not shipping:
+        return ERROR_CODES["SUBMISSION_SNAPSHOT_INVALID"]
+
+    items = getattr(snapshot, "items", None)
+    if not isinstance(items, (list, tuple)) or not items:
+        return ERROR_CODES["SUBMISSION_SNAPSHOT_INVALID"]
+
+    for entry in items:
+        if not isinstance(entry, Mapping):
+            return ERROR_CODES["SUBMISSION_SNAPSHOT_INVALID"]
+        if not str(entry.get("product_id") or "").strip():
+            return ERROR_CODES["SUBMISSION_SNAPSHOT_INVALID"]
+        if not str(entry.get("sku_attr") or "").strip():
+            return ERROR_CODES["SUBMISSION_SNAPSHOT_INVALID"]
+        try:
+            count = int(entry.get("product_count") or 0)
+        except (TypeError, ValueError):
+            return ERROR_CODES["SUBMISSION_SNAPSHOT_INVALID"]
+        if count < 1:
+            return ERROR_CODES["SUBMISSION_SNAPSHOT_INVALID"]
+        if "logistics_service_name" in entry:
+            service = str(entry.get("logistics_service_name") or "").strip()
+            if not service:
+                return ERROR_CODES["SUBMISSION_SNAPSHOT_INVALID"]
+
+    return None
+
+
+def _preflight_submission_snapshot(session, aliexpress_order_id) -> Optional[str]:
+    """PRE-FLIGHT eficiente: busca o snapshot (mesma session) e valida.
+
+    Retorna None se um snapshot válido existe; caso contrário um código
+    sanitizado (``submission_snapshot_missing`` ou ``submission_snapshot_invalid``).
+    """
+    snapshot = (
+        session.query(AliExpressSubmissionSnapshot)
+        .filter_by(aliexpress_order_id=aliexpress_order_id)
+        .first()
+    )
+    return _validate_submission_snapshot(snapshot)
+
+
 def _build_submission_request(
     order: AliExpressOrder,
-    items: list[AliExpressOrderItem],
+    submission_snapshot,
 ) -> AliExpressSubmissionRequest:
+    """Monta o payload canônico SOMENTE a partir do submission snapshot.
+
+    ``shipping_address`` e ``items`` vêm exclusivamente do snapshot; não acessa
+    catálogo (Product/ProductVariant/SupplierProduct/Order.address).
+    """
+    items = tuple(
+        AliExpressPlaceOrderItem(
+            product_id=str(entry["product_id"]),
+            sku_attr=str(entry["sku_attr"]),
+            product_count=int(entry["product_count"]),
+            logistics_service_name=(
+                str(entry["logistics_service_name"]).strip()
+                if entry.get("logistics_service_name")
+                else None
+            ),
+        )
+        for entry in submission_snapshot.items
+    )
     return AliExpressSubmissionRequest(
         aliexpress_order_id=order.id,
         order_id=order.order_id,
         supplier_id=order.supplier_id,
         attempt_key=order.attempt_key,
-        items=tuple(
-            AliExpressSubmissionItem(
-                order_item_id=item.order_item_id,
-                supplier_product_external_id=item.supplier_product_external_id,
-                supplier_sku_external_id=item.supplier_sku_external_id,
-                quantity=item.quantity,
-                supplier_unit_cost=item.supplier_unit_cost,
-                supplier_currency=item.supplier_currency,
-                variant_label=item.variant_label,
-            )
-            for item in items
-        ),
+        shipping_address=dict(submission_snapshot.shipping_address),
+        items=items,
     )
 
 
@@ -310,6 +406,22 @@ def submit_aliexpress_order(
             state=order.state,
         )
 
+    # PRE-FLIGHT canônico (8.0.10.2): antes de gerar attempt_key/incrementar
+    # attempt_count/transicionar para submitting/chamar provider, deve existir
+    # exatamente um AliExpressSubmissionSnapshot VÁLIDO. Se ausente ou inválido:
+    # mantém ``ready``, NÃO gera attempt_key, NÃO chama provider, persiste
+    # last_error e retorna — nunca envolto em AliExpressSubmissionFailed.
+    preflight_error = _preflight_submission_snapshot(session, order.id)
+    if preflight_error is not None:
+        order.last_error = preflight_error
+        order.updated_at = now
+        session.commit()
+        return FulfillmentResult(
+            aliexpress_order=order,
+            items=list(order.items),
+            state=order.state,
+        )
+
     # Estágio A: transiciona para submitting e persiste antes do provider,
     # incluindo a chave de tentativa/idempotência (8.0.5) — estável durante a
     # reconciliação da mesma tentativa.
@@ -345,7 +457,12 @@ def submit_aliexpress_order(
 
     items = list(locked.items)
     try:
-        result = submitter.submit(_build_submission_request(locked, items))
+        snapshot = (
+            session.query(AliExpressSubmissionSnapshot)
+            .filter_by(aliexpress_order_id=ali_order.id)
+            .first()
+        )
+        result = submitter.submit(_build_submission_request(locked, snapshot))
     except SubmissionHardOffError:
         logger.info(
             "aliexpress submission: hard-off bloqueou envio de %s", ali_order.id

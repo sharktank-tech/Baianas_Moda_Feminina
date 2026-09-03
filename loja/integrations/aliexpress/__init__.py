@@ -83,6 +83,7 @@ from .submission import (
     AliExpressSubmissionFailed,
     AliExpressSubmissionItem,
     AliExpressSubmissionRequest,
+    AliExpressPlaceOrderItem,
     AliExpressSubmissionResult,
     AliExpressSubmissionUnknown,
     HardOffOrderSubmitter,
