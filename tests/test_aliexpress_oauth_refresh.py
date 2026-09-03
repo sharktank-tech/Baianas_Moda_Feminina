@@ -181,7 +181,7 @@ def sp_variant_factory(db):
         product,
         *,
         sku="SKU_OAUTH",
-        sp_id="SP_OAUTH",
+        sp_id="100000401",
         cost=Decimal("10.00"),
         currency="USD",
     ):
@@ -590,7 +590,7 @@ class TestOAuthFulfillmentIntegration:
         self, db, make_user, ae_supplier, ae_product, sp_variant_factory
     ):
         sp, variant = sp_variant_factory(
-            ae_supplier, ae_product, sku="SKU_ORIGINAL", sp_id="SP_ORIGINAL"
+            ae_supplier, ae_product, sku="SKU_ORIGINAL", sp_id="100000402"
         )
         _persist_credential(
             db, ae_supplier, refresh_token="RT_VALIDO", expires_in=0
@@ -618,7 +618,7 @@ class TestOAuthFulfillmentIntegration:
         assert len(items_2) == len(items_1)
         item_snap = items_2[0]
         assert item_snap.supplier_sku_external_id == "SKU_ORIGINAL"
-        assert item_snap.supplier_product_external_id == "SP_ORIGINAL"
+        assert item_snap.supplier_product_external_id == "100000402"
         assert item_snap.supplier_unit_cost == Decimal("10.00")
         assert len(fake.calls) == 1
 

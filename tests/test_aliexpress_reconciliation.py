@@ -159,7 +159,7 @@ def sp_variant_factory(db):
         product,
         *,
         sku="SKU_REC",
-        sp_id="SP_REC",
+        sp_id="100000001",
         cost=Decimal("10.00"),
         currency="USD",
     ):
@@ -441,7 +441,7 @@ class TestReconcileService:
         self, db, make_user, ae_supplier, ae_product, sp_variant_factory
     ):
         sp, variant = sp_variant_factory(
-            ae_supplier, ae_product, sku="SKU_SNAP", sp_id="SP_SNAP"
+            ae_supplier, ae_product, sku="SKU_SNAP", sp_id="100000101"
         )
         ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
         submit_aliexpress_order(
@@ -467,7 +467,7 @@ class TestReconcileService:
         after = _snapshot(db, r.aliexpress_order)
         assert [i.id for i in before] == [i.id for i in after]
         assert after[0].supplier_sku_external_id == "SKU_SNAP"
-        assert after[0].supplier_product_external_id == "SP_SNAP"
+        assert after[0].supplier_product_external_id == "100000101"
         assert after[0].supplier_unit_cost == Decimal("10.00")
 
     def test_reconcile_inconclusiva_unknown_continua_bloqueando_submit(
@@ -679,7 +679,7 @@ class TestPrecedenceAndRegressions:
         self, db, make_user, ae_supplier, ae_product, sp_variant_factory
     ):
         sp, variant = sp_variant_factory(
-            ae_supplier, ae_product, sku="SKU_CAT", sp_id="SP_CAT"
+            ae_supplier, ae_product, sku="SKU_CAT", sp_id="100000103"
         )
         ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
         before = _snapshot(db, ali)

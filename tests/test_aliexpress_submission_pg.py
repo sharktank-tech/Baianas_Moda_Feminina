@@ -155,7 +155,7 @@ def _materialize_ready(app):
             id=uuid.uuid4(),
             supplier_id=supplier.id,
             product_id=product.id,
-            supplier_product_id="SP_PG_803",
+            supplier_product_id="100000803",
             cost=Decimal("10.00"),
             currency="USD",
             is_active=True,

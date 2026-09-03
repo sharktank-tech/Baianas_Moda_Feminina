@@ -179,7 +179,7 @@ def _materialize_pending(app):
             id=uuid.uuid4(),
             supplier_id=supplier.id,
             product_id=product.id,
-            supplier_product_id="SP_PG_805",
+            supplier_product_id="100000805",
             cost=Decimal("10.00"),
             currency="USD",
             is_active=True,

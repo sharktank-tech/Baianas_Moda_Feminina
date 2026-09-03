@@ -430,9 +430,13 @@ def ae_product(db):
 
 @pytest.fixture()
 def sp_variant_factory(db):
+    counter = 0
+
     def _create(supplier, product):
+        nonlocal counter
+        counter += 1
         sku = f"SKU_DS_{uuid.uuid4().hex[:8]}"
-        sp_id = f"SP_DS_{uuid.uuid4().hex[:8]}"
+        sp_id = str(100002000 + counter)
         sp = SupplierProduct(
             id=uuid.uuid4(),
             supplier_id=supplier.id,

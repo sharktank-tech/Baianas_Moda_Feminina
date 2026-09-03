@@ -127,7 +127,7 @@ def sp_variant_factory(db):
         product,
         *,
         sku="SKU_HIST",
-        sp_id="SP_HIST",
+        sp_id="100000001",
         cost=Decimal("10.00"),
         currency="USD",
     ):
@@ -642,7 +642,7 @@ class TestSnapshotPayload:
         _persist_valid_credential(db, ae_supplier)
         sp, variant = sp_variant_factory(
             ae_supplier, ae_product,
-            sku="SKU_HIST", sp_id="SP_HIST",
+            sku="SKU_HIST", sp_id="100000001",
             cost=Decimal("10.00"), currency="USD",
         )
         ali_order, _, item = _materialize_ready(
@@ -677,7 +677,7 @@ class TestSnapshotPayload:
         payload = request.items[0]
         # O payload canônico vem 100% do snapshot (product_id/sku_attr/count),
         # nunca do catálogo mutado/removido neste instante.
-        assert payload.product_id == "SP_HIST"
+        assert payload.product_id == "100000001"
         assert payload.sku_attr == "14:771;200000124:100013888"
         assert payload.product_count == 2
         assert payload.logistics_service_name == "CAINIAO"
@@ -803,7 +803,7 @@ class TestSubmissionSnapshotPreflight:
         assert "submission_snapshot_invalid" in result.aliexpress_order.last_error
 
     def test_invalid_product_id_blocks(self, db, make_user, ae_supplier,
-                                       ae_product, sp_variant_factory):
+                                           ae_product, sp_variant_factory):
         _persist_valid_credential(db, ae_supplier)
         sp, variant = sp_variant_factory(ae_supplier, ae_product)
         ali_order, _, _ = _materialize_ready(
@@ -815,3 +815,106 @@ class TestSubmissionSnapshotPreflight:
         assert result.state == "ready"
         assert fake.calls == []
         assert "submission_snapshot_invalid" in result.aliexpress_order.last_error
+
+
+class TestStageBSnapshotRevalidation:
+    """Fase 8.0.11A — revalidação do snapshot no Estágio B.
+
+    O snapshot VÁLIDO passa Stage A, mas o provider NÃO é chamado se,
+    entre o commit de Stage A e a re-leitura de Stage B, o snapshot
+    desaparecer ou ficar inválido. Neste cenário NENHUM HTTP ocorreu,
+    então o aborto local NÃO vai para pending_reconciliation:
+      * order.state -> ready
+      * attempt_key -> None
+      * attempt_count NÃO incrementado
+      * last_error = submission_snapshot_missing/invalid
+      * provider.calls == 0
+      * itens permanecem em ready.
+    """
+
+    def test_stage_b_snapshot_disappears_blocks_provider(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        """Snapshot VÁLIDO em Stage A; desaparece entre Stage A e Stage B."""
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali_order, _, _ = _materialize_ready(
+            db, make_user, ae_supplier, ae_product, variant
+        )
+        fake = FakeSubmitter()
+        original_count = ali_order.attempt_count or 0
+
+        call_count = {"n": 0}
+
+        def _preflight_once(session, aliexpress_order_id):
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                # Simula snapshot desaparecido entre Stage A e Stage B.
+                return "submission_snapshot_missing"
+            return None
+
+        import loja.integrations.aliexpress.submission as _subm
+
+        original = _subm._preflight_submission_snapshot
+        _subm._preflight_submission_snapshot = _preflight_once
+        try:
+            result = submit_aliexpress_order(ali_order, submitter=fake)
+        finally:
+            _subm._preflight_submission_snapshot = original
+
+        assert fake.calls == [], "provider NUNCA deve ser chamado no Stage B abort"
+        assert result.state == "ready"
+        fresh = db.session.get(AliExpressOrder, ali_order.id)
+        assert fresh.state == "ready"
+        assert fresh.attempt_key is None, "attempt_key deve ser limpo no aborto local"
+        assert (
+            fresh.attempt_count == original_count
+        ), "attempt_count NÃO deve incrementar no aborto local"
+        assert "submission_snapshot_missing" in fresh.last_error
+        assert fresh.state != "pending_reconciliation"
+        # Itens permanecem em ready (Stage A só moveu order.state, não itens)
+        for item in fresh.items:
+            assert item.state == "ready"
+
+    def test_stage_b_snapshot_invalid_blocks_provider(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        """Snapshot VÁLIDO em Stage A; fica inválido entre Stage A e Stage B."""
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali_order, _, _ = _materialize_ready(
+            db, make_user, ae_supplier, ae_product, variant
+        )
+        fake = FakeSubmitter()
+        original_count = ali_order.attempt_count or 0
+
+        call_count = {"n": 0}
+
+        def _preflight_once(session, aliexpress_order_id):
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                # Simula snapshot corrompido entre Stage A e Stage B.
+                return "submission_snapshot_invalid"
+            return None
+
+        import loja.integrations.aliexpress.submission as _subm
+
+        original = _subm._preflight_submission_snapshot
+        _subm._preflight_submission_snapshot = _preflight_once
+        try:
+            result = submit_aliexpress_order(ali_order, submitter=fake)
+        finally:
+            _subm._preflight_submission_snapshot = original
+
+        assert fake.calls == [], "provider NUNCA deve ser chamado no Stage B abort"
+        assert result.state == "ready"
+        fresh = db.session.get(AliExpressOrder, ali_order.id)
+        assert fresh.state == "ready"
+        assert fresh.attempt_key is None, "attempt_key deve ser limpo no aborto local"
+        assert (
+            fresh.attempt_count == original_count
+        ), "attempt_count NÃO deve incrementar no aborto local"
+        assert "submission_snapshot_invalid" in fresh.last_error
+        assert fresh.state != "pending_reconciliation"
+        for item in fresh.items:
+            assert item.state == "ready"

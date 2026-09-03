@@ -61,7 +61,7 @@ def ae_setup(db, make_user):
     db.session.commit()
     sp = SupplierProduct(
         id=uuid.uuid4(), supplier_id=supplier.id, product_id=product.id,
-        supplier_product_id="SP_101", cost=Decimal("10.00"), currency="USD", is_active=True,
+        supplier_product_id="100000101", cost=Decimal("10.00"), currency="USD", is_active=True,
     )
     db.session.add(sp)
     db.session.flush()
@@ -160,7 +160,7 @@ def test_C_submission_uses_frozen_after_mutation(db, ae_setup):
     res = materialize_submission_snapshot(ali_order, logistics_service_by_order_item={item.id: "CAINIAO"}, session=db.session)
     assert res.created is True
     assert res.snapshot.items[0]["sku_attr"] == EXPECTED_SKU_ATTR
-    assert res.snapshot.items[0]["product_id"] == "SP_101"
+    assert res.snapshot.items[0]["product_id"] == "100000101"
 
 
 # D. variante removida (SET NULL) — snapshot still uses frozen
@@ -305,7 +305,7 @@ def test_I_no_pii_in_errors_and_repr(db, ae_setup):
     product2 = Product(id=uuid.uuid4(), name="Prod2", description="Test", price=Decimal("29.90"), source="aliexpress", external_id="EXT2", is_draft=True, is_active=False)
     db.session.add(product2)
     db.session.commit()
-    sp2 = SupplierProduct(id=uuid.uuid4(), supplier_id=supplier2.id, product_id=product2.id, supplier_product_id="SP2", cost=Decimal("10.00"), currency="USD", is_active=True)
+    sp2 = SupplierProduct(id=uuid.uuid4(), supplier_id=supplier2.id, product_id=product2.id, supplier_product_id="100000102", cost=Decimal("10.00"), currency="USD", is_active=True)
     db.session.add(sp2)
     db.session.flush()
     variant2 = ProductVariant(id=uuid.uuid4(), product_id=product2.id, supplier_product_id=sp2.id, supplier_sku_id="SKU2", sku=None, color="Red", size="M", attributes=list(VALID_ATTRS), stock=10, price=Decimal("29.90"), is_active=True)

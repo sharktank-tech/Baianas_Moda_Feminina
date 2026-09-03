@@ -175,10 +175,14 @@ def ae_product(db):
 
 @pytest.fixture()
 def sp_variant_factory(db):
+    counter = 0
+
     def _create(supplier, product, *, sku=None, sp_id=None, cost=Decimal("10.00"),
                 currency="USD"):
+        nonlocal counter
+        counter += 1
         sku = sku or f"SKU_SYNC_{uuid.uuid4().hex[:8]}"
-        sp_id = sp_id or f"SP_SYNC_{uuid.uuid4().hex[:8]}"
+        sp_id = sp_id or str(100001000 + counter)
         sp = SupplierProduct(
             id=uuid.uuid4(),
             supplier_id=supplier.id,
@@ -823,7 +827,7 @@ class TestSnapshotAndReconciliationCorrection:
         self, db, make_user, ae_supplier, ae_product, sp_variant_factory
     ):
         sp, variant = sp_variant_factory(
-            ae_supplier, ae_product, sku="SKU_SNAP806", sp_id="SP_SNAP806"
+            ae_supplier, ae_product, sku="SKU_SNAP806", sp_id="100000806"
         )
         ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
         before = _snapshot(db, ali)
@@ -833,7 +837,7 @@ class TestSnapshotAndReconciliationCorrection:
         after = _snapshot(db, fresh)
         assert [i.id for i in before] == [i.id for i in after]
         assert after[0].supplier_sku_external_id == "SKU_SNAP806"
-        assert after[0].supplier_product_external_id == "SP_SNAP806"
+        assert after[0].supplier_product_external_id == "100000806"
         assert after[0].supplier_unit_cost == Decimal("10.00")
 
     def test_reconcile_found_nao_grava_mais_confirmed_at(
