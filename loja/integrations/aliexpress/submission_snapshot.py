@@ -11,8 +11,9 @@ A tabela NÃO habilita HTTP. O provider real continuará separado e gated.
 Regras:
 * endereço vem exclusivamente do ``Order`` persistido;
 * produto/SKU/quantidade vêm exclusivamente de ``AliExpressOrderItem``;
-* ``sku_attr`` só é derivado de IDs de propriedade já persistidos em
-  ``ProductVariant.attributes`` — nunca de labels e nunca é inventado;
+* ``sku_attr`` é congelado em ``AliExpressOrderItem.supplier_sku_attr`` na
+  primeira materialização do fulfillment; este módulo NÃO lê
+  ``ProductVariant.attributes`` — usa exclusivamente o frozen value;
 * serviço logístico é decisão explícita por item; ausência bloqueia snapshot;
 * uma vez materializado, o snapshot não é reconstruído do catálogo;
 * PII nunca aparece em repr/log/exception.
@@ -135,7 +136,7 @@ def materialize_submission_snapshot(
     if order is None:
         raise SubmissionSnapshotError("aliexpress_order_missing")
 
-    existing = AliExpressSubmissionSnapshot.query.filter_by(
+    existing = session.query(AliExpressSubmissionSnapshot).filter_by(
         aliexpress_order_id=order.id
     ).first()
     if existing is not None:
@@ -151,9 +152,7 @@ def materialize_submission_snapshot(
     for item in list(order.items):
         if not item.supplier_product_external_id or not item.supplier_sku_external_id:
             raise SubmissionSnapshotError("submission_item_identity_incomplete")
-        if item.variant is None:
-            raise SubmissionSnapshotError("submission_variant_missing")
-        sku_attr = build_sku_attr(item.variant.attributes)
+        sku_attr = (item.supplier_sku_attr or "").strip() if getattr(item, "supplier_sku_attr", None) is not None else ""
         if not sku_attr:
             raise SubmissionSnapshotError("submission_sku_attr_missing")
         service = str(

@@ -57,6 +57,31 @@ from .credential_store import (
 )
 from .oauth_refresh import evaluate_credential_with_refresh
 
+# build_sku_attr é definido em submission_snapshot; import lazy para evitar ciclo
+def _build_sku_attr(attributes) -> Optional[str]:
+    """Wrapper canônico idêntico a submission_snapshot.build_sku_attr."""
+    try:
+        from .submission_snapshot import build_sku_attr as _shared
+
+        return _shared(attributes)
+    except Exception:
+        # Fallback puro (mesmo contrato) se import falhar em contexto de teste isolado
+        if not isinstance(attributes, (list, tuple)) or not attributes:
+            return None
+        pairs: list[tuple[int, int]] = []
+        for attr in attributes:
+            if not isinstance(attr, dict):
+                return None
+            pid = str(attr.get("sku_property_id") or "").strip()
+            vid = str(attr.get("property_value_id") or "").strip()
+            if not pid or not vid or not pid.isdigit() or not vid.isdigit():
+                return None
+            pairs.append((int(pid), int(vid)))
+        if not pairs:
+            return None
+        pairs.sort()
+        return ";".join(f"{pid}:{vid}" for pid, vid in pairs)
+
 logger = logging.getLogger(__name__)
 
 SOURCE_ALIEXPRESS = "aliexpress"
@@ -72,6 +97,7 @@ ERROR_CODES = {
     "SUPPLIER_PRODUCT_MISSING": "supplier_product_missing",
     "SUPPLIER_SKU_MISSING": "supplier_sku_missing",
     "SUPPLIER_MISMATCH": "supplier_mismatch",
+    "SUPPLIER_SKU_ATTR_MISSING": "supplier_sku_attr_missing",
     "ITEM_INTEGRITY_ERROR": "item_integrity_error",
     "SUBMISSION_HARD_OFF": "submission_hard_off",
     "SUBMISSION_FAILED": "submission_failed",
@@ -338,17 +364,28 @@ def ensure_aliexpress_fulfillment(
             if item.product_id else None
         )
 
-        # --- Modo snapshot canônico ---
+        # --- Modo snapshot canônico (Fase 8.0.10.1: nunca relê catálogo) ---
         if snap is not None:
             ao = snap.aliexpress_order
             if ao.state not in REVALIDATABLE_STATES:
                 continue  # estado avançado: não regride nem revalida
-            if snap.supplier_product_external_id and snap.supplier_sku_external_id:
+            if (
+                snap.supplier_product_external_id
+                and snap.supplier_sku_external_id
+                and snap.supplier_sku_attr
+                and str(snap.supplier_sku_attr).strip()
+            ):
                 entries.append((("sid", ao.id), ("snapshot_ready", snap)))
             else:
+                # Snapshot legado/incompleto: fail closed, sem lazy backfill
+                code = ERROR_CODES["ITEM_INTEGRITY_ERROR"]
+                if not snap.supplier_sku_attr or not str(snap.supplier_sku_attr).strip():
+                    # Distingue quando possível, mas preserva precedência de integridade
+                    if snap.supplier_product_external_id and snap.supplier_sku_external_id:
+                        code = ERROR_CODES["SUPPLIER_SKU_ATTR_MISSING"]
                 entries.append((
                     ("sid", ao.id),
-                    ("snapshot_invalid", snap, ERROR_CODES["ITEM_INTEGRITY_ERROR"]),
+                    ("snapshot_invalid", snap, code),
                 ))
             continue
 
@@ -366,11 +403,23 @@ def ensure_aliexpress_fulfillment(
         )
 
         if is_valid and supplier is not None and sp is not None:
+            # Congela identidade de compra somente na PRIMEIRA materialização
+            sku_attr = _build_sku_attr(getattr(variant, "attributes", None))
+            if not sku_attr:
+                # fail closed: não inventa IDs por labels, não cria snapshot válido
+                sku_error = ERROR_CODES["SUPPLIER_SKU_ATTR_MISSING"]
+                supplier_id = _infer_invalid_supplier(item, product, variant)
+                if supplier_id is not None:
+                    entries.append((("sp", supplier_id), ("new_invalid", item, sku_error)))
+                else:
+                    entries.append((("unattributed",), ("new_invalid", item, sku_error)))
+                continue
             snapshot_data = {
                 "product_id": product.id,
                 "variant_id": variant.id,
                 "supplier_product_external_id": sp.supplier_product_id,
                 "supplier_sku_external_id": variant.supplier_sku_id,
+                "supplier_sku_attr": sku_attr,
                 "quantity": item.quantity,
                 "supplier_unit_cost": sp.cost,
                 "supplier_currency": sp.currency,
@@ -518,6 +567,7 @@ def ensure_aliexpress_fulfillment(
                         variant_id=data["variant_id"],
                         supplier_product_external_id=data["supplier_product_external_id"],
                         supplier_sku_external_id=data["supplier_sku_external_id"],
+                        supplier_sku_attr=data["supplier_sku_attr"],
                         quantity=data["quantity"],
                         supplier_unit_cost=data["supplier_unit_cost"],
                         supplier_currency=data["supplier_currency"],

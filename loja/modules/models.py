@@ -1679,6 +1679,7 @@ class AliExpressOrderItem(db.Model):
     )
     supplier_product_external_id = db.Column(db.String(64), nullable=False)
     supplier_sku_external_id = db.Column(db.String(64), nullable=False)
+    supplier_sku_attr = db.Column(db.Text, nullable=True)
     quantity = db.Column(db.Integer, nullable=False)
     supplier_unit_cost = db.Column(db.Numeric(10, 2))
     supplier_currency = db.Column(db.String(3))
