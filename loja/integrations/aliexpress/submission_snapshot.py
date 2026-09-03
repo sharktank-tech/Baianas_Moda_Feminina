@@ -14,7 +14,8 @@ Regras:
 * ``sku_attr`` é congelado em ``AliExpressOrderItem.supplier_sku_attr`` na
   primeira materialização do fulfillment; este módulo NÃO lê
   ``ProductVariant.attributes`` — usa exclusivamente o frozen value;
-* serviço logístico é decisão explícita por item; ausência bloqueia snapshot;
+* ``logistics_service_name`` é OPCIONAL para o placeorder oficial: quando
+  desconhecido é omitido; quando explicitamente fornecido é congelado;
 * uma vez materializado, o snapshot não é reconstruído do catálogo;
 * PII nunca aparece em repr/log/exception.
 """
@@ -30,6 +31,8 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from loja import db
 from loja.modules.models import AliExpressOrder
 from loja.utils import utcnow
+
+from .sku_attr import build_sku_attr
 
 
 class SubmissionSnapshotError(Exception):
@@ -66,31 +69,6 @@ class SubmissionSnapshotResult:
     created: bool
 
 
-def build_sku_attr(attributes) -> Optional[str]:
-    """Converte IDs persistidos de propriedades em ``pid:vid;pid:vid``.
-
-    Labels visíveis (Color/Black etc.) NÃO são suficientes para compra.
-    Retorna None se qualquer atributo não trouxer identidade numérica.
-    """
-    if not isinstance(attributes, (list, tuple)) or not attributes:
-        return None
-
-    pairs = []
-    for attr in attributes:
-        if not isinstance(attr, Mapping):
-            return None
-        pid = str(attr.get("sku_property_id") or "").strip()
-        vid = str(attr.get("property_value_id") or "").strip()
-        if not pid or not vid or not pid.isdigit() or not vid.isdigit():
-            return None
-        pairs.append((int(pid), int(vid)))
-
-    if not pairs:
-        return None
-    pairs.sort()
-    return ";".join(f"{pid}:{vid}" for pid, vid in pairs)
-
-
 def _shipping_address(order) -> dict:
     required = {
         "contact_person": (order.customer_name or "").strip(),
@@ -116,14 +94,23 @@ def _shipping_address(order) -> dict:
 def materialize_submission_snapshot(
     ali_order: AliExpressOrder,
     *,
-    logistics_service_by_order_item: Mapping[uuid.UUID, str],
+    logistics_service_by_order_item: Optional[Mapping[uuid.UUID, str]] = None,
     session=None,
 ) -> SubmissionSnapshotResult:
     """Materializa UMA VEZ o payload canônico necessário ao futuro placeorder.
 
-    ``logistics_service_by_order_item`` deve usar UUID de ``OrderItem`` e nome
-    de serviço previamente escolhido/validado pelo fluxo de frete. O helper não
-    consulta API de frete nem escolhe automaticamente o serviço mais barato.
+    ``logistics_service_by_order_item`` é OPCIONAL. As docs oficiais de
+    ``aliexpress.trade.buy.placeorder`` tratam ``logistics_service_name`` como
+    opcional por item:
+      * se um valor non-empty for EXPLICITAMENTE fornecido para um item, o
+        snapshot inclui ``logistics_service_name`` (congelado);
+      * se ausente (ou vazio/whitespace), a chave é OMITIDA do dict — nunca
+        string vazia, nunca None, nunca um default inventado.
+
+    O serviço logístico é decisão explícita por item; este helper não consulta
+    API de frete nem escolhe automaticamente o serviço mais barato.
+
+    O snapshot é imutável: uma vez criado, novo mapping não altera ``items``.
     """
     session = session or db.session
     order = (
@@ -148,6 +135,7 @@ def materialize_submission_snapshot(
         raise SubmissionSnapshotError("source_order_missing")
 
     shipping = _shipping_address(order.order)
+    logistics_map = logistics_service_by_order_item or {}
     frozen_items = []
     for item in list(order.items):
         if not item.supplier_product_external_id or not item.supplier_sku_external_id:
@@ -155,20 +143,16 @@ def materialize_submission_snapshot(
         sku_attr = (item.supplier_sku_attr or "").strip() if getattr(item, "supplier_sku_attr", None) is not None else ""
         if not sku_attr:
             raise SubmissionSnapshotError("submission_sku_attr_missing")
-        service = str(
-            logistics_service_by_order_item.get(item.order_item_id) or ""
-        ).strip()
-        if not service:
-            raise SubmissionSnapshotError("submission_logistics_service_missing")
-        frozen_items.append(
-            {
-                "order_item_id": str(item.order_item_id),
-                "product_id": str(item.supplier_product_external_id),
-                "sku_attr": sku_attr,
-                "product_count": int(item.quantity),
-                "logistics_service_name": service,
-            }
-        )
+        service = str(logistics_map.get(item.order_item_id) or "").strip()
+        entry = {
+            "order_item_id": str(item.order_item_id),
+            "product_id": str(item.supplier_product_external_id),
+            "sku_attr": sku_attr,
+            "product_count": int(item.quantity),
+        }
+        if service:
+            entry["logistics_service_name"] = service
+        frozen_items.append(entry)
 
     if not frozen_items:
         raise SubmissionSnapshotError("submission_items_missing")

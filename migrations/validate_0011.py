@@ -50,9 +50,11 @@ def validate_schema(conn) -> list[str]:
     if is_nullable.upper() != "YES":
         errors.append(f"column nullable expected YES, got {is_nullable!r}")
 
-    # 2. CHECK constraint (optional)
+    # 2. CHECK constraint (structural) via pg_get_constraintdef.
+    # Validando por definição — sem INSERT artificial/destrutivo, que poderia
+    # "passar" por FK/NOT NULL em vez do CHECK quando não há linhas.
     cur.execute("""
-        SELECT conname
+        SELECT conname, pg_get_constraintdef(oid)
         FROM pg_constraint
         WHERE conname = 'ck_aliexpress_order_item_sku_attr_not_empty'
           AND conrelid = (
@@ -62,26 +64,17 @@ def validate_schema(conn) -> list[str]:
           )
     """)
     ck_row = cur.fetchone()
-    if ck_row is not None:
-        # constraint exists — verify it works
-        try:
-            cur.execute("""
-                INSERT INTO pollomodas.aliexpress_order_items
-                    (id, aliexpress_order_id, order_item_id,
-                     supplier_product_external_id, supplier_sku_external_id,
-                     supplier_sku_attr, quantity, state)
-                VALUES (
-                    gen_random_uuid(),
-                    (SELECT id FROM pollomodas.aliexpress_orders LIMIT 1),
-                    (SELECT id FROM pollomodas.order_items LIMIT 1),
-                    'SP_TEST', 'SKU_TEST', '', 1, 'queued'
-                )
-            """)
-            conn.rollback()
-            errors.append("CHECK constraint allowed empty string (expected rejection)")
-        except Exception:
-            conn.rollback()
-            # expected: CHECK rejected empty string
+    if ck_row is None:
+        errors.append("CHECK constraint 'ck_aliexpress_order_item_sku_attr_not_empty' NOT FOUND")
+    else:
+        conname, ckdef = ck_row
+        lowered = ckdef.lower()
+        if "supplier_sku_attr" not in lowered:
+            errors.append("CHECK definition does not reference supplier_sku_attr")
+        if "is null" not in lowered:
+            errors.append("CHECK definition does not allow NULL (IS NULL) — must allow NULL for legacy rows")
+        if "btrim" not in lowered:
+            errors.append("CHECK definition does not use btrim (non-empty semantics)")
 
     # 3. No prohibited AliExpress tables in public
     cur.execute("""

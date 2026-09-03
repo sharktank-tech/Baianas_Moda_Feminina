@@ -56,31 +56,7 @@ from .credential_store import (
     CredentialInvalid,
 )
 from .oauth_refresh import evaluate_credential_with_refresh
-
-# build_sku_attr é definido em submission_snapshot; import lazy para evitar ciclo
-def _build_sku_attr(attributes) -> Optional[str]:
-    """Wrapper canônico idêntico a submission_snapshot.build_sku_attr."""
-    try:
-        from .submission_snapshot import build_sku_attr as _shared
-
-        return _shared(attributes)
-    except Exception:
-        # Fallback puro (mesmo contrato) se import falhar em contexto de teste isolado
-        if not isinstance(attributes, (list, tuple)) or not attributes:
-            return None
-        pairs: list[tuple[int, int]] = []
-        for attr in attributes:
-            if not isinstance(attr, dict):
-                return None
-            pid = str(attr.get("sku_property_id") or "").strip()
-            vid = str(attr.get("property_value_id") or "").strip()
-            if not pid or not vid or not pid.isdigit() or not vid.isdigit():
-                return None
-            pairs.append((int(pid), int(vid)))
-        if not pairs:
-            return None
-        pairs.sort()
-        return ";".join(f"{pid}:{vid}" for pid, vid in pairs)
+from .sku_attr import build_sku_attr as _build_sku_attr
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +87,8 @@ ERROR_CODES = {
     "STATUS_SYNC_ERROR": "status_sync_error",
     "STATUS_SYNC_UNKNOWN": "status_sync_unknown",
     "STATUS_SYNC_INVALID_TRANSITION": "status_sync_invalid_transition",
+    "SUBMISSION_SNAPSHOT_MISSING": "submission_snapshot_missing",
+    "SUBMISSION_SNAPSHOT_INVALID": "submission_snapshot_invalid",
 }
 
 
