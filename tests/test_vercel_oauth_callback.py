@@ -85,31 +85,34 @@ def test_node_sets_http_only_cookies_with_attributes():
     assert "encodeURIComponent" in js
 
 
-def test_vercel_has_node_builder_for_callback():
+def test_vercel_functions_config():
+    """vercel.json declara functions (não builds legacy)."""
     v = _vercel()
     assert v["version"] == 2
-    builds = v["builds"]
-    assert builds[0] == {
-        "src": "api/aliexpress-oauth-callback.js",
-        "use": "@vercel/node",
-    }
-    assert builds[1]["src"] == "run.py"
-    assert builds[1]["use"] == "@vercel/python"
-    assert builds[1]["config"]["maxDuration"] == 60
+    funcs = v["functions"]
+    assert "api/app.py" in funcs
+    assert funcs["api/app.py"]["maxDuration"] == 60
+    assert "api/aliexpress-oauth-callback.js" in funcs
+    assert funcs["api/aliexpress-oauth-callback.js"]["maxDuration"] == 10
 
 
-def test_vercel_routes_callback_node_before_python_catchall():
+def test_vercel_rewrites_callback_before_catchall():
+    """Rewrites: callback -> Node; catch-all -> api/app.py."""
     v = _vercel()
-    routes = v["routes"]
-    # Ordem obrigatória: callback exato -> Node; catch-all Python depois.
-    assert routes[0]["src"] == "^/integrations/aliexpress/callback$"
-    assert routes[0]["dest"] == "/api/aliexpress-oauth-callback.js"
-    assert routes[1]["src"] == "/(.*)"
-    assert routes[1]["dest"] == "run.py"
+    rewrites = v["rewrites"]
+    # Primeiro rewrite: callback exato -> Node function
+    assert rewrites[0]["source"] == "/integrations/aliexpress/callback"
+    assert rewrites[0]["destination"] == "/api/aliexpress-oauth-callback.js"
+    # Último rewrite: catch-all -> Python Flask
+    assert rewrites[-1]["source"] == "/(.*)"
+    assert rewrites[-1]["destination"] == "/api/app.py"
 
 
-def test_vercel_node_route_is_exact_not_prefix():
-    # Rota exata (âncora ^$): /callback/complete NÃO é interceptada pelo Node.
+def test_vercel_callback_rewrite_is_exact_not_prefix():
+    """O path /callback/complete NÃO é interceptado (só /callback exato)."""
     v = _vercel()
-    assert "^" in v["routes"][0]["src"]
-    assert "$" in v["routes"][0]["src"]
+    cb_rewrite = v["rewrites"][0]
+    # source é exato (sem wildcard *, sem ^$ anchors — rewrites são exact match)
+    assert cb_rewrite["source"] == "/integrations/aliexpress/callback"
+    # /callback/complete não casa com /integrations/aliexpress/callback
+    assert "/complete" not in cb_rewrite["source"]
