@@ -428,21 +428,30 @@ def _abort_pre_provider(
 def _validate_remote_order_ids(external_order_ids) -> list[str]:
     """Valida e normaliza ``external_order_ids`` (8.0.11B, item 5).
 
-    Exige tuple/list com >= 1 ID, todos strings válidas e distintas.
+    Exige tuple/list com >= 1 ID, todos strings decimais positivas e distintas.
     Levanta ``RemoteOrderPersistenceAmbiguous`` com código FIXO sanitizado —
-    NUNCA inclui os IDs ou os valores inválidos na mensagem.
+    NÃO inclui os IDs ou os valores inválidos na mensagem.
+
+    Contrato equivalente ao parser TOP: string não-vazia, apenas dígitos,
+    valor > 0, comprimento <= 64. APENAS strip normaliza; NÃO converte
+    objetos arbitrários (int, bool, None, etc.) via str().
     """
     if not isinstance(external_order_ids, (tuple, list)):
         raise RemoteOrderPersistenceAmbiguous(REMOTE_ERROR_INVALID)
-    ids = [str(x) for x in external_order_ids]
-    if not ids:
+    if not external_order_ids:
         raise RemoteOrderPersistenceAmbiguous(REMOTE_ERROR_INVALID)
-    for rid in ids:
-        if not isinstance(rid, str) or not rid or len(rid) > 64:
+    ids: list[str] = []
+    for rid in external_order_ids:
+        if not isinstance(rid, str):
             raise RemoteOrderPersistenceAmbiguous(REMOTE_ERROR_INVALID)
+        s = rid.strip()
+        if not s or not s.isdigit() or int(s) <= 0 or len(s) > 64:
+            raise RemoteOrderPersistenceAmbiguous(REMOTE_ERROR_INVALID)
+        ids.append(s)
     if len(set(ids)) != len(ids):
         raise RemoteOrderPersistenceAmbiguous(REMOTE_ERROR_DUPLICATE)
     return ids
+
 
 
 def _persist_remote_orders(
@@ -479,16 +488,18 @@ def _persist_remote_orders(
             raise RemoteOrderPersistenceAmbiguous(REMOTE_ERROR_COLLISION)
 
     # 2. Idempotência: remote orders já existentes da MESMA ordem.
+    # Deve preservar ORDEM e POSIÇÃO (item 2 do freeze).
     existing_same = (
         session.query(AliExpressRemoteOrder)
         .filter_by(aliexpress_order_id=ali_order.id)
+        .order_by(AliExpressRemoteOrder.position)
         .all()
     )
-    existing_ids = {r.remote_order_id for r in existing_same}
-    incoming_set = set(ids)
+    existing_ordered = [r.remote_order_id for r in existing_same]
     if existing_same:
-        if existing_ids != incoming_set or len(existing_same) != len(ids):
-            # subset, superset, ou composição diferente -> ambiguidade local.
+        # Idempotência EXATA: mesma sequência, mesma posição.
+        if existing_ordered != ids:
+            # Ordem diferente, subset, superset, ou composição diferente.
             raise RemoteOrderPersistenceAmbiguous(REMOTE_ERROR_PERSISTENCE)
 
     # 3. Atualiza parent (ambos caminhos: fresh e replay exato).

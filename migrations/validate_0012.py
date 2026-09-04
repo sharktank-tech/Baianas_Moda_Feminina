@@ -215,6 +215,8 @@ def _apply_migration(cur, schema: str) -> None:
     # Alignment contract: o DDL referencia `pollomodas`; para provas em schema
     # descartável substituímos o schema alvo. Mantém UNIQUE INDEX, CHECKs e
     # backfill exatamente como em produção.
+    # Strip psql meta-commands (lines starting with backslash) for psycopg2 compatibility.
+    sql = "\n".join(line for line in sql.split("\n") if not line.lstrip().startswith("\\"))
     sql = sql.replace("pollomodas", schema)
     cur.execute(sql)
 
@@ -238,15 +240,12 @@ def prove_migration(conn) -> list[str]:
 
     errors: list[str] = []
     schema = "pollo_mig_%s" % secrets.token_hex(4)
-    savepoint = "prove_0012"
+    # Never touch conn.autocommit - use explicit BEGIN/COMMIT only
+    cur = conn.cursor()
     try:
-        conn.autocommit = False
-        conn.cursor().execute(psql.SQL("SAVEPOINT {}").format(psql.Identifier(savepoint)))
-        conn.cursor().execute(
+        cur.execute(
             psql.SQL("CREATE SCHEMA {}").format(psql.Identifier(schema))
         )
-        cur = conn.cursor()
-        cur.execute(f"SET search_path TO {schema}")
 
         # Minimal parent tables needed by the DDL FK + backfill.
         cur.execute(f"""
@@ -259,11 +258,13 @@ def prove_migration(conn) -> list[str]:
             )
         """)
 
-        # ---- FRESH ----
+        # ---- FRESH: apply migration on empty tables ----
+        cur.execute("BEGIN")
         _apply_migration(cur, schema)
-        conn.commit()
+        cur.execute("COMMIT")
 
-        # ---- UPGRADE com legacy ali_order_id ----
+        # ---- UPGRADE com legacy ali_order_id: insert legacy BEFORE applying migration ----
+        cur.execute("BEGIN")
         cur.execute(f"""
             INSERT INTO {schema}.aliexpress_orders
                 (id, state, ali_order_id, ali_status, attempt_key)
@@ -271,7 +272,9 @@ def prove_migration(conn) -> list[str]:
                 (gen_random_uuid(), 'submitted', 'LEGACY-1', 'submitted', 'k-legacy'),
                 (gen_random_uuid(), 'submitting', NULL, NULL, NULL)
         """)
-        conn.commit()
+        # Apply migration (runs backfill for legacy rows)
+        _apply_migration(cur, schema)
+        cur.execute("COMMIT")
         # Fresh aplica o backfill: LEGACY-1 já deve ter gerado filho.
         cur.execute(
             f"SELECT count(*) FROM {schema}.aliexpress_remote_orders "
@@ -295,8 +298,9 @@ def prove_migration(conn) -> list[str]:
             errors.append("backfill: ordem sem ali_order_id gerou filho remoto")
 
         # ---- RERUN (idempotência) ----
+        cur.execute("BEGIN")
         _apply_migration(cur, schema)
-        conn.commit()
+        cur.execute("COMMIT")
         cur.execute(
             f"SELECT count(*) FROM {schema}.aliexpress_remote_orders "
             f"WHERE remote_order_id = 'LEGACY-1'"
@@ -314,17 +318,25 @@ def prove_migration(conn) -> list[str]:
 
     except Exception as exc:  # noqa: BLE001
         errors.append(f"proof raised: {type(exc).__name__}: {exc}")
-        conn.rollback()
+        try:
+            cur.execute("ROLLBACK")
+        except Exception:
+            pass
     finally:
         try:
-            conn.cursor().execute(
+            cur2 = conn.cursor()
+            cur2.execute(
                 psql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(
                     psql.Identifier(schema)
                 )
             )
-            conn.commit()
+            cur2.execute("COMMIT")
         except Exception:  # noqa: BLE001
-            conn.rollback()
+            try:
+                cur2 = conn.cursor()
+                cur2.execute("ROLLBACK")
+            except Exception:
+                pass
 
     return errors
 

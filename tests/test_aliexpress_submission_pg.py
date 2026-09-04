@@ -47,6 +47,9 @@ pytestmark = pytest.mark.skipif(
 class CountingSubmitter(AliExpressOrderSubmitter):
     """Provider fake thread-safe: conta chamadas, nunca faz rede."""
 
+    _id_counter = 0
+    _counter_lock = threading.Lock()
+
     def __init__(self):
         self.call_count = 0
         self._lock = threading.Lock()
@@ -54,8 +57,11 @@ class CountingSubmitter(AliExpressOrderSubmitter):
     def submit(self, request):
         with self._lock:
             self.call_count += 1
+        with CountingSubmitter._counter_lock:
+            CountingSubmitter._id_counter += 1
+            ext_id = str(99000 + CountingSubmitter._id_counter)
         return AliExpressSubmissionResult(
-            external_order_ids=(f"AE-PG-{secrets.token_hex(4)}",)
+            external_order_ids=(ext_id,)
         )
 
 

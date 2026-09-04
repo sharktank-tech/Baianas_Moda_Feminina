@@ -73,10 +73,13 @@ def _hardoff_no_network(monkeypatch):
 class FakeSubmitter(AliExpressOrderSubmitter):
     """Provider de teste instrumentado (nunca faz rede)."""
 
+    _id_counter = 0
+
     def __init__(self, *, fail_times=0, external_order_id=None):
         self.calls = []
         self.fail_times = fail_times
-        self.external_order_id = external_order_id or f"AE-{uuid.uuid4().hex[:12]}"
+        FakeSubmitter._id_counter += 1
+        self.external_order_id = external_order_id or str(1000 + FakeSubmitter._id_counter)
         self.last_request: AliExpressSubmissionRequest | None = None
 
     def submit(self, request):
@@ -366,7 +369,7 @@ class TestFakeSubmissionFlow:
         assert r1.state == "submitted"
         external = r1.aliexpress_order.ali_order_id
 
-        fake2 = FakeSubmitter(external_order_id="AE-SECOND")
+        fake2 = FakeSubmitter(external_order_id="1002")
         r2 = submit_aliexpress_order(ali_order, submitter=fake2)
 
         assert r2.state == "submitted"
@@ -559,7 +562,7 @@ class TestFailureAndRetry:
             aliexpress_order_id=ali_id
         ).first()
 
-        fake = FakeSubmitter(fail_times=1, external_order_id="AE-EXTERNAL-1")
+        fake = FakeSubmitter(fail_times=1, external_order_id="1101")
         result = submit_aliexpress_order(ali_order, submitter=fake)
 
         assert result.state == "submitting"
@@ -599,7 +602,7 @@ class TestFailureAndRetry:
         ali_id = ali_order.id
         db.session.expire_all()
 
-        fake = FakeSubmitter(fail_times=1, external_order_id="AE-EXTERNAL-1")
+        fake = FakeSubmitter(fail_times=1, external_order_id="1101")
         r1 = submit_aliexpress_order(ali_order, submitter=fake)
         assert r1.state == "submitting"
         assert r1.aliexpress_order.last_error == ERROR_CODES["SUBMISSION_FAILED"]
@@ -629,11 +632,11 @@ class TestFailureAndRetry:
         assert r1.aliexpress_order.last_error == ERROR_CODES["SUBMISSION_HARD_OFF"]
 
         r2 = submit_aliexpress_order(
-            ali_order, submitter=FakeSubmitter(external_order_id="AE-EXTERNAL-HO")
+            ali_order, submitter=FakeSubmitter(external_order_id="1102")
         )
         assert r2.state == "submitted"
         assert r2.aliexpress_order.id == ali_id
-        assert r2.aliexpress_order.ali_order_id == "AE-EXTERNAL-HO"
+        assert r2.aliexpress_order.ali_order_id == "1102"
 
 
 class TestSnapshotPayload:
@@ -888,7 +891,7 @@ class TestStageBSnapshotRevalidation:
             .count()
             == 0
         ), "Stage B abort NUNCA deve criar SubmissionAttempt"
-        ok = FakeSubmitter(external_order_id="AE-STAGEB-RETRY")
+        ok = FakeSubmitter(external_order_id="1201")
         r2 = submit_aliexpress_order(ali_order, submitter=ok)
         assert r2.state == "submitted"
         assert len(ok.calls) == 1
@@ -943,7 +946,7 @@ class TestStageBSnapshotRevalidation:
             .count()
             == 0
         ), "Stage B abort NUNCA deve criar SubmissionAttempt"
-        ok = FakeSubmitter(external_order_id="AE-STAGEB-INVALID-RETRY")
+        ok = FakeSubmitter(external_order_id="1202")
         r2 = submit_aliexpress_order(ali_order, submitter=ok)
         assert r2.state == "submitted"
         assert len(ok.calls) == 1
@@ -959,7 +962,8 @@ class MultiIdSubmitter(AliExpressOrderSubmitter):
 
     def __init__(self, external_order_ids=()):
         self.calls = []
-        self.external_order_ids = tuple(external_order_ids)
+        # Ensure all IDs are valid numeric strings
+        self.external_order_ids = tuple(str(x) for x in external_order_ids)
 
     def submit(self, request):
         self.calls.append(request)
@@ -973,12 +977,12 @@ class MultiIdSubmitter(AliExpressOrderSubmitter):
 
 class TestAliExpressSubmissionResultCardinality:
     def test_singleton_exposes_external_order_id(self):
-        r = AliExpressSubmissionResult(external_order_ids=("AE-1",))
-        assert r.external_order_id == "AE-1"
+        r = AliExpressSubmissionResult(external_order_ids=("1",))
+        assert r.external_order_id == "1"
         assert r.external_status == "submitted"
 
     def test_n_multi_raises_on_external_order_id_property(self):
-        r = AliExpressSubmissionResult(external_order_ids=("AE-1", "AE-2"))
+        r = AliExpressSubmissionResult(external_order_ids=("1", "2"))
         with pytest.raises(ValueError):
             _ = r.external_order_id
 
@@ -997,20 +1001,20 @@ class TestRemoteOrderSingletonSubmission:
         ali, _, _ = _materialize_ready(
             db, make_user, ae_supplier, ae_product, variant
         )
-        fake = FakeSubmitter(external_order_id="AE-SINGLE")
+        fake = FakeSubmitter(external_order_id="1301")
         result = submit_aliexpress_order(ali, submitter=fake)
 
         assert result.state == "submitted"
         db.session.expire_all()
         fresh = db.session.get(AliExpressOrder, ali.id)
-        assert fresh.ali_order_id == "AE-SINGLE"
+        assert fresh.ali_order_id == "1301"
         assert fresh.state == "submitted"
         assert fresh.attempt_count == 1
         remotes = db.session.query(AliExpressRemoteOrder).filter_by(
             aliexpress_order_id=ali.id
         ).all()
         assert len(remotes) == 1
-        assert remotes[0].remote_order_id == "AE-SINGLE"
+        assert remotes[0].remote_order_id == "1301"
         assert remotes[0].position == 0
         assert remotes[0].attempt_key == fresh.attempt_key
         assert remotes[0].remote_status == "submitted"
@@ -1025,7 +1029,7 @@ class TestRemoteOrderMultiPersistence:
         ali, _, _ = _materialize_ready(
             db, make_user, ae_supplier, ae_product, variant
         )
-        ids = ("AE-M1", "AE-M2", "AE-M3")
+        ids = ("201", "202", "203")
         result = submit_aliexpress_order(
             ali, submitter=MultiIdSubmitter(ids)
         )
@@ -1038,7 +1042,7 @@ class TestRemoteOrderMultiPersistence:
         remotes = db.session.query(AliExpressRemoteOrder).filter_by(
             aliexpress_order_id=ali.id
         ).order_by(AliExpressRemoteOrder.position).all()
-        assert [r.remote_order_id for r in remotes] == list(ids)
+        assert [r.remote_order_id for r in remotes] == ["201", "202", "203"]
         assert [r.position for r in remotes] == [0, 1, 2]
 
     def test_duplicate_ids_raise_ambiguous_and_go_to_pending_reconciliation(
@@ -1050,7 +1054,7 @@ class TestRemoteOrderMultiPersistence:
             db, make_user, ae_supplier, ae_product, variant
         )
         result = submit_aliexpress_order(
-            ali, submitter=MultiIdSubmitter(("AE-DUP", "AE-DUP"))
+            ali, submitter=MultiIdSubmitter(("204", "204"))
         )
         assert result.state == "pending_reconciliation"
         db.session.expire_all()
@@ -1080,17 +1084,17 @@ class TestRemoteOrderCollision:
         ali1, _, _ = _materialize_ready(
             db, make_user, ae_supplier, ae_product, variant
         )
-        submit_aliexpress_order(ali1, submitter=FakeSubmitter(external_order_id="AE-COLLIDE"))
+        submit_aliexpress_order(ali1, submitter=FakeSubmitter(external_order_id="1401"))
         db.session.expire_all()
         ali1_fresh = db.session.get(AliExpressOrder, ali1.id)
-        assert ali1_fresh.ali_order_id == "AE-COLLIDE"
+        assert ali1_fresh.ali_order_id == "1401"
 
         # Segunda ordem tenta usar o mesmo remote ID -> colisão.
         ali2, _, _ = _materialize_ready(
             db, make_user, ae_supplier, ae_product, variant
         )
         result = submit_aliexpress_order(
-            ali2, submitter=FakeSubmitter(external_order_id="AE-COLLIDE")
+            ali2, submitter=FakeSubmitter(external_order_id="1401")
         )
         assert result.state == "pending_reconciliation"
         db.session.expire_all()
@@ -1099,7 +1103,7 @@ class TestRemoteOrderCollision:
         # A ordem original permanece intacta.
         assert (
             db.session.query(AliExpressRemoteOrder)
-            .filter_by(remote_order_id="AE-COLLIDE")
+            .filter_by(remote_order_id="1401")
             .one()
             .aliexpress_order_id
             == ali1.id
@@ -1115,7 +1119,7 @@ class TestSubmissionAttemptDurable:
         ali, _, _ = _materialize_ready(
             db, make_user, ae_supplier, ae_product, variant
         )
-        submit_aliexpress_order(ali, submitter=FakeSubmitter(external_order_id="AE-ATT"))
+        submit_aliexpress_order(ali, submitter=FakeSubmitter(external_order_id="1501"))
         db.session.expire_all()
         attempt = (
             db.session.query(AliExpressSubmissionAttempt)
@@ -1156,7 +1160,7 @@ class TestSubmissionAttemptDurable:
             db, make_user, ae_supplier, ae_product, variant
         )
         submit_aliexpress_order(
-            ali, submitter=FakeSubmitter(fail_times=1, external_order_id="AE-FAIL")
+            ali, submitter=FakeSubmitter(fail_times=1, external_order_id="1601")
         )
         db.session.expire_all()
         attempt = (
@@ -1196,7 +1200,7 @@ class TestAttemptBarrier:
         db.session.add(concurrent)
         db.session.commit()
 
-        fake = FakeSubmitter(external_order_id="AE-BARRIER")
+        fake = FakeSubmitter(external_order_id="1701")
         result = submit_aliexpress_order(ali, submitter=fake)
         assert result.state == "pending_reconciliation"
         assert fake.calls == [], "provider NUNCA deve ser chamado sob barrier"
@@ -1238,7 +1242,7 @@ class TestAttemptBarrier:
         db.session.add(stale)
         db.session.commit()
 
-        fake = FakeSubmitter(external_order_id="AE-SAMEKEY")
+        fake = FakeSubmitter(external_order_id="1801")
         result = submit_aliexpress_order(ali, submitter=fake)
         assert result.state == "pending_reconciliation"
         assert fake.calls == [], "provider NUNCA deve ser chamado sob barrier"
@@ -1328,7 +1332,7 @@ class TestPostHttpDbFailure:
 
         # Submitter que marca quando o provider é chamado.
         submitted = {"called": False}
-        counting = FakeSubmitter(external_order_id="AE-DBFAIL")
+        counting = FakeSubmitter(external_order_id="1901")
         orig_submit = counting.submit
 
         def _tracked_submit(req):
@@ -1388,7 +1392,7 @@ class TestPostHttpDbFailure:
         sp, variant = sp_variant_factory(ae_supplier, ae_product)
         ali, _, _ = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
 
-        counting = FakeSubmitter(external_order_id="AE-NOREPEAT")
+        counting = FakeSubmitter(external_order_id="2001")
         submitted = {"called": False}
         orig_submit = counting.submit
 
@@ -1475,7 +1479,7 @@ class TestRecoveryCommitFailure:
         )
         assert attempt.state == "in_flight"
         # E o provider NÃO é executado novamente: próxima submissão é barrada.
-        sub = FakeSubmitter(external_order_id="AE-REC-FAIL")
+        sub = FakeSubmitter(external_order_id="2101")
         r2 = submit_aliexpress_order(fresh, submitter=sub)
         assert sub.calls == []
         assert r2.state == "pending_reconciliation"
@@ -1554,8 +1558,8 @@ class TestRemoteOrderIdempotency:
     def test_exact_replay_does_not_duplicate(self, db):
         from loja.integrations.aliexpress.submission import _persist_remote_orders
 
-        order = self._submitting_order(db, "AE-EXACT-1", "AE-EXACT-2")
-        _persist_remote_orders(order, ("AE-EXACT-1", "AE-EXACT-2"),
+        order = self._submitting_order(db, "301", "302")
+        _persist_remote_orders(order, ("301", "302"),
                                "k-new", db.session)
         db.session.commit()
         assert (
@@ -1570,9 +1574,9 @@ class TestRemoteOrderIdempotency:
             REMOTE_ERROR_PERSISTENCE,
         )
 
-        order = self._submitting_order(db, "AE-SUB-1", "AE-SUB-2")
+        order = self._submitting_order(db, "303", "304")
         with pytest.raises(RemoteOrderPersistenceAmbiguous) as ei:
-            _persist_remote_orders(order, ("AE-SUB-1",), "k-sub", db.session)
+            _persist_remote_orders(order, ("303",), "k-sub", db.session)
         assert str(ei.value) == REMOTE_ERROR_PERSISTENCE
 
     def test_superset_mismatch_is_ambiguous(self, db):
@@ -1582,9 +1586,9 @@ class TestRemoteOrderIdempotency:
             REMOTE_ERROR_PERSISTENCE,
         )
 
-        order = self._submitting_order(db, "AE-SUP-1")
+        order = self._submitting_order(db, "305")
         with pytest.raises(RemoteOrderPersistenceAmbiguous) as ei:
-            _persist_remote_orders(order, ("AE-SUP-1", "AE-SUP-2"), "k-sup",
+            _persist_remote_orders(order, ("305", "306"), "k-sup",
                                    db.session)
         assert str(ei.value) == REMOTE_ERROR_PERSISTENCE
 
@@ -1595,7 +1599,9 @@ class TestSecuritySanitization:
     @staticmethod
     def _sentinel():
         # único por teste (o db fixture reparte tabelas entre testes).
-        return f"TOP-SECRET-REMOTE-ID-{uuid.uuid4().hex[:6]}"
+        # Deve ser ID numérico válido para passar validação 8.0.11B.
+        import time
+        return str(int(time.time() * 1000000) + id(object()))
 
     def test_remote_repr_does_not_leak_remote_id(self, db, make_user,
                                                  ae_supplier, ae_product,

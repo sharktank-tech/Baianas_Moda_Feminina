@@ -85,11 +85,13 @@ def _hardoff_no_network(monkeypatch):
 class FakeSubmitter(AliExpressOrderSubmitter):
     """Provider de submission scriptado: success | failed | unknown | raise."""
 
+    _id_counter = 0
     def __init__(self, *, result=None, exc=None, external_order_id=None):
         self.calls = []
         self.result = result
         self.exc = exc
-        self.external_order_id = external_order_id or "AE-805"
+        FakeSubmitter._id_counter += 1
+        self.external_order_id = external_order_id or str(8000 + FakeSubmitter._id_counter)
 
     def submit(self, request: AliExpressSubmissionRequest):
         self.calls.append(request)
@@ -277,10 +279,10 @@ class TestSubmissionMachine:
         ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
         assert ali.state == "ready"
 
-        fake = FakeSubmitter(external_order_id="AE-OK-1")
+        fake = FakeSubmitter(external_order_id="9001")
         result = submit_aliexpress_order(ali, submitter=fake)
         assert result.state == "submitted"
-        assert result.aliexpress_order.ali_order_id == "AE-OK-1"
+        assert result.aliexpress_order.ali_order_id == "9001"
         assert len(fake.calls) == 1
         assert fake.calls[0].attempt_key is not None
         db.session.expire_all()
@@ -315,7 +317,7 @@ class TestSubmissionMachine:
         submit_aliexpress_order(ali, submitter=first)
         db.session.commit()
 
-        second = FakeSubmitter(external_order_id="AE-FORBIDDEN")
+        second = FakeSubmitter(external_order_id="9002")
         result = submit_aliexpress_order(ali, submitter=second)
         assert second.calls == []
         assert result.state == "pending_reconciliation"
@@ -349,10 +351,10 @@ class TestSubmissionMachine:
         assert r1.aliexpress_order.last_error == ERROR_CODES["SUBMISSION_FAILED"]
         db.session.commit()
 
-        ok = FakeSubmitter(external_order_id="AE-RETRY")
+        ok = FakeSubmitter(external_order_id="9003")
         r2 = submit_aliexpress_order(ali, submitter=ok)
         assert r2.state == "submitted"
-        assert r2.aliexpress_order.ali_order_id == "AE-RETRY"
+        assert r2.aliexpress_order.ali_order_id == "9003"
 
 
 class TestReconcileService:
@@ -399,7 +401,7 @@ class TestReconcileService:
         )
         db.session.commit()
 
-        submitter = FakeSubmitter(external_order_id="AE-NOPE")
+        submitter = FakeSubmitter(external_order_id="9004")
         result = submit_aliexpress_order(ali, submitter=submitter)
         assert submitter.calls == []
         assert result.state == "submitted"
@@ -429,10 +431,10 @@ class TestReconcileService:
         assert ali2.ali_order_id is None
         assert ali2.id == ali.id
 
-        ok = FakeSubmitter(external_order_id="AE-RETRY-OK")
+        ok = FakeSubmitter(external_order_id="9005")
         r2 = submit_aliexpress_order(ali2, submitter=ok)
         assert r2.state == "submitted"
-        assert r2.aliexpress_order.ali_order_id == "AE-RETRY-OK"
+        assert r2.aliexpress_order.ali_order_id == "9005"
         assert r2.aliexpress_order.attempt_key != attempt1_key
         assert r2.aliexpress_order.id == ali.id
         assert len(_snapshot(db, r2.aliexpress_order)) == 1
@@ -462,7 +464,7 @@ class TestReconcileService:
                 AliExpressOrderReconciliationResult(outcome=RECONCILE_NOT_FOUND)
             ),
         )
-        r = submit_aliexpress_order(ali, submitter=FakeSubmitter(external_order_id="AE-SNAP"))
+        r = submit_aliexpress_order(ali, submitter=FakeSubmitter(external_order_id="9006"))
         assert r.state == "submitted"
         after = _snapshot(db, r.aliexpress_order)
         assert [i.id for i in before] == [i.id for i in after]
@@ -489,7 +491,7 @@ class TestReconcileService:
         assert r1.state == "pending_reconciliation"
         assert r1.aliexpress_order.last_error == ERROR_CODES["RECONCILIATION_UNKNOWN"]
 
-        submitter = FakeSubmitter(external_order_id="AE-BLOCKED")
+        submitter = FakeSubmitter(external_order_id="9007")
         r2 = submit_aliexpress_order(ali, submitter=submitter)
         assert submitter.calls == []
         assert r2.state == "pending_reconciliation"
@@ -529,15 +531,15 @@ class TestReconcileService:
     ):
         sp, variant = sp_variant_factory(ae_supplier, ae_product)
         ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
-        first = FakeSubmitter(external_order_id="AE-IDEM")
+        first = FakeSubmitter(external_order_id="9008")
         submit_aliexpress_order(ali, submitter=first)
         db.session.commit()
 
-        second = FakeSubmitter(external_order_id="AE-OUTRO")
+        second = FakeSubmitter(external_order_id="9009")
         result = submit_aliexpress_order(ali, submitter=second)
         assert second.calls == []
         assert result.state == "submitted"
-        assert result.aliexpress_order.ali_order_id == "AE-IDEM"
+        assert result.aliexpress_order.ali_order_id == "9008"
         assert AliExpressOrder.query.filter_by(order_id=order.id).count() == 1
 
 
@@ -578,7 +580,7 @@ class TestPrecedenceAndRegressions:
 
         materialize_snapshot(ali, session=db.session)
         result = submit_aliexpress_order(
-            ali, submitter=FakeSubmitter(external_order_id="AE-OAUTH-OK")
+            ali, submitter=FakeSubmitter(external_order_id="9010")
         )
         assert result.state == "submitted"
 
@@ -641,7 +643,7 @@ class TestPrecedenceAndRegressions:
         db.session.commit()
         ali = r1[0].aliexpress_order
 
-        submitter = FakeSubmitter(external_order_id="AE-NOPE")
+        submitter = FakeSubmitter(external_order_id="9004")
         rs = submit_aliexpress_order(ali, submitter=submitter)
         assert submitter.calls == []
         assert rs.state == "blocked"
@@ -696,7 +698,7 @@ class TestPrecedenceAndRegressions:
         r1 = ensure_aliexpress_fulfillment(order)
         assert r1[0].state == "ready"
         r2 = submit_aliexpress_order(
-            ali, submitter=FakeSubmitter(external_order_id="AE-CAT")
+            ali, submitter=FakeSubmitter(external_order_id="9011")
         )
         assert r2.state == "submitted"
         assert r2.aliexpress_order.supplier_id == ae_supplier.id

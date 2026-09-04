@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS aliexpress_remote_orders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     aliexpress_order_id UUID NOT NULL REFERENCES aliexpress_orders(id) ON DELETE CASCADE,
     remote_order_id VARCHAR(64) NOT NULL,
-    position INTEGER NOT NULL CHECK (position >= 0),
+    position INTEGER NOT NULL CONSTRAINT ck_position_nonneg CHECK (position >= 0),
     attempt_key VARCHAR(64) NULL,
     remote_status TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT now(),

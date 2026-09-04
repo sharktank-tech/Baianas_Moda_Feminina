@@ -118,9 +118,11 @@ class ScriptedSyncer(AliExpressOrderStatusSyncer):
 
 
 class OkSubmitter(AliExpressOrderSubmitter):
-    def __init__(self, external_order_id="AE-806"):
+    _id_counter = 0
+    def __init__(self, external_order_id=None):
         self.calls = []
-        self.external_order_id = external_order_id
+        OkSubmitter._id_counter += 1
+        self.external_order_id = external_order_id or str(5000 + OkSubmitter._id_counter)
 
     def submit(self, request):
         self.calls.append(request)
@@ -137,7 +139,7 @@ class MultiOkSubmitter(AliExpressOrderSubmitter):
 
     def __init__(self, external_order_ids):
         self.calls = []
-        self.external_order_ids = tuple(external_order_ids)
+        self.external_order_ids = tuple(str(x) for x in external_order_ids)
 
     def submit(self, request):
         self.calls.append(request)
@@ -147,8 +149,12 @@ class MultiOkSubmitter(AliExpressOrderSubmitter):
 
 
 class FoundReconciler(AliExpressOrderReconciler):
-    def __init__(self, external_order_id="REMOTE-806"):
+    _id_counter = 0
+    def __init__(self, external_order_id=None):
         self.external_order_id = external_order_id
+        if self.external_order_id is None:
+            FoundReconciler._id_counter += 1
+            self.external_order_id = str(6000 + FoundReconciler._id_counter)
 
     def reconcile(self, request):
         return AliExpressOrderReconciliationResult(
@@ -295,7 +301,7 @@ def _materialize_ready(db, make_user, supplier, product, variant):
 
 
 def _submit_ok(db, ali_order, external=None):
-    external = external or f"AE-SUCC-{uuid.uuid4().hex[:10]}"
+    # external is ignored; OkSubmitter generates valid numeric IDs
     result = submit_aliexpress_order(ali_order, submitter=OkSubmitter(external))
     db.session.commit()
     assert result.state == "submitted"
@@ -312,7 +318,7 @@ def _to_pending(db, ali_order):
 
 
 def _reconcile_found(db, ali_order, external=None):
-    external = external or f"REMOTE-{uuid.uuid4().hex[:10]}"
+    # external is ignored; FoundReconciler generates valid numeric IDs
     result = reconcile_aliexpress_order(
         ali_order, reconciler=FoundReconciler(external)
     )
@@ -388,7 +394,7 @@ class TestBoundaryAndEligibility:
         (fail-closed) e NUNCA chama o provider."""
         sp, variant = sp_variant_factory(ae_supplier, ae_product)
         ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
-        ok = MultiOkSubmitter(("AE-N1", "AE-N2", "AE-N3"))
+        ok = MultiOkSubmitter(("701", "702", "703"))
         result = submit_aliexpress_order(ali, submitter=ok)
         db.session.commit()
         assert result.state == "submitted"
