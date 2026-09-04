@@ -117,7 +117,7 @@ class OkSubmitter(AliExpressOrderSubmitter):
 
     def submit(self, request):
         self.calls.append(request)
-        return AliExpressSubmissionResult(external_order_id=self.external_order_id)
+        return AliExpressSubmissionResult(external_order_ids=(self.external_order_id,))
 
 
 def _envelope(order_status=None, logistics_status=None, *, request_id=None,

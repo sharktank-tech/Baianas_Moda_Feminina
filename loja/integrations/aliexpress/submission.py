@@ -56,7 +56,12 @@ from decimal import Decimal
 from typing import Mapping, Optional
 
 from loja import db
-from loja.modules.models import AliExpressOrder, AliExpressOrderItem
+from loja.modules.models import (
+    AliExpressOrder,
+    AliExpressOrderItem,
+    AliExpressRemoteOrder,
+    AliExpressSubmissionAttempt,
+)
 from .submission_snapshot import AliExpressSubmissionSnapshot
 from loja.utils import utcnow
 
@@ -77,6 +82,15 @@ class AliExpressSubmissionFailed(Exception):
 class AliExpressSubmissionUnknown(Exception):
     """Resultado desconhecido/ambíguo (timeout, desconexão) — a ordem pode ter
     sido criada remotamente; requer reconciliação antes de nova tentativa."""
+
+
+class RemoteOrderPersistenceAmbiguous(Exception):
+    """Erro de persistência pós-provider: remote ID já pertence a outra ordem,
+    falha de constraint, ou falha de DB.
+
+    NUNCA gera AliExpressSubmissionFailed.
+    Mapeia sempre para pending_reconciliation.
+    """
 
 
 def _attempt_key(order: AliExpressOrder) -> str:
@@ -144,10 +158,19 @@ class AliExpressSubmissionRequest:
 
 @dataclass(frozen=True)
 class AliExpressSubmissionResult:
-    """Resposta do provider (fake) — identidade externa confirmada."""
+    """Resposta do provider (fake) — identidades externas confirmadas."""
 
-    external_order_id: str
+    external_order_ids: tuple[str, ...]
     external_status: str = "submitted"
+
+    @property
+    def external_order_id(self) -> Optional[str]:
+        if len(self.external_order_ids) == 1:
+            return self.external_order_ids[0]
+        raise ValueError(
+            "external_order_id indefinido para cardinalidade "
+            f"N={len(self.external_order_ids)}"
+        )
 
 
 class AliExpressOrderSubmitter(ABC):
@@ -388,6 +411,127 @@ def _abort_pre_provider(
     )
 
 
+def _persist_remote_orders(
+    ali_order: AliExpressOrder,
+    external_order_ids: tuple[str, ...],
+    attempt_key: Optional[str],
+    session,
+) -> None:
+    """Persistência atômica de 0/1/N remote order IDs.
+
+    Contrato:
+    - valida tuple inteira primeiro;
+    - não persiste parcialmente;
+    - cria TODOS os AliExpressRemoteOrder;
+    - associa attempt_key;
+    - atualiza AliExpressOrder e itens na MESMA transação;
+    - commit único do resultado local.
+
+    Levanta RemoteOrderPersistenceAmbiguous em caso de colisão ou
+    falha de constraint — NUNCA gera AliExpressSubmissionFailed.
+    """
+    if not external_order_ids:
+        raise ValueError("external_order_ids cannot be empty")
+
+    # Verificar IDs válidos e distintos
+    if len(set(external_order_ids)) != len(external_order_ids):
+        raise RemoteOrderPersistenceAmbiguous(
+            f"duplicate remote order IDs: {external_order_ids}"
+        )
+
+    # Verificar colisões: remote IDs já associados a outra ordem
+    existing = (
+        session.query(AliExpressRemoteOrder)
+        .filter(AliExpressRemoteOrder.remote_order_id.in_(external_order_ids))
+        .all()
+    )
+    for rem in existing:
+        if rem.aliexpress_order_id != ali_order.id:
+            raise RemoteOrderPersistenceAmbiguous(
+                f"remote_order_id {rem.remote_order_id} já pertence "
+                f"a outra AliExpressOrder ({rem.aliexpress_order_id})"
+            )
+
+    # Persistência atômica
+    ali_order.state = "submitted"
+    ali_order.submitted_at = utcnow()
+    ali_order.attempt_count += 1
+    ali_order.last_attempt_at = utcnow()
+    ali_order.updated_at = utcnow()
+    ali_order.last_error = None
+
+    # Limpar ali_order_id se N>1, espelhar se singleton
+    if len(external_order_ids) == 1:
+        ali_order.ali_order_id = external_order_ids[0]
+    else:
+        ali_order.ali_order_id = None
+    ali_order.ali_status = "submitted"
+
+    # Criar todos os filhos
+    for position, remote_id in enumerate(external_order_ids):
+        remote_order = AliExpressRemoteOrder(
+            aliexpress_order_id=ali_order.id,
+            remote_order_id=remote_id,
+            position=position,
+            attempt_key=attempt_key,
+            remote_status="submitted",
+        )
+        session.add(remote_order)
+
+    # Marcar itens
+    for item in ali_order.items:
+        item.state = "submitted"
+        item.last_error = None
+        item.updated_at = utcnow()
+
+    # Atualizar attempt
+    attempt = (
+        session.query(AliExpressSubmissionAttempt)
+        .filter_by(
+            aliexpress_order_id=ali_order.id,
+            attempt_key=attempt_key,
+        )
+        .first()
+    )
+    if attempt:
+        attempt.state = "confirmed"
+        attempt.completed_at = utcnow()
+
+
+def _fail_on_remote_ambiguity(
+    ali_order: AliExpressOrder,
+    error: str,
+    attempt_key: Optional[str],
+    session,
+) -> FulfillmentResult:
+    """Trata erro de persistência pós-HTTP como ambiguidade.
+
+    NÃO gera AliExpressSubmissionFailed.
+    Mapeia sempre para pending_reconciliation.
+    """
+    attempt = (
+        session.query(AliExpressSubmissionAttempt)
+        .filter_by(
+            aliexpress_order_id=ali_order.id,
+            attempt_key=attempt_key,
+        )
+        .first()
+    )
+    if attempt:
+        attempt.state = "unknown"
+        attempt.completed_at = utcnow()
+        attempt.last_error = error
+    ali_order.state = "pending_reconciliation"
+    ali_order.last_error = error
+    ali_order.updated_at = utcnow()
+    session.commit()
+    return FulfillmentResult(
+        aliexpress_order=ali_order,
+        items=list(ali_order.items),
+        state="pending_reconciliation",
+    )
+
+
 def submit_aliexpress_order(
     ali_order: AliExpressOrder,
     submitter: Optional[AliExpressOrderSubmitter] = None,
@@ -483,6 +627,20 @@ def submit_aliexpress_order(
     order.updated_at = now
     session.commit()
 
+    # Criar barreira durável (8.0.11B): SubmissionAttempt em in_flight
+    attempt = AliExpressSubmissionAttempt(
+        aliexpress_order_id=order.id,
+        attempt_key=order.attempt_key,
+        state="in_flight",
+        started_at=now,
+        completed_at=None,
+        last_error=None,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(attempt)
+    session.commit()
+
     # Estágio B: serializa a chamada ao provider.
     locked = (
         session.query(AliExpressOrder)
@@ -506,6 +664,37 @@ def submit_aliexpress_order(
             aliexpress_order=locked,
             items=list(locked.items),
             state=locked.state,
+        )
+
+    # Attempt barrier (8.0.11B): se já existe attempt in_flight
+    # (sem completed_at) de OUTRA tentativa (diferente attempt_key),
+    # não chamar provider.
+    existing_attempt = (
+        session.query(AliExpressSubmissionAttempt)
+        .filter(
+            AliExpressSubmissionAttempt.aliexpress_order_id
+            == ali_order.id
+        )
+        .filter(
+            AliExpressSubmissionAttempt.attempt_key
+            != order.attempt_key
+        )
+        .filter(
+            AliExpressSubmissionAttempt.completed_at.is_(None)
+        )
+        .filter(
+            AliExpressSubmissionAttempt.state.in_(["in_flight"])
+        )
+        .first()
+    )
+    if existing_attempt is not None:
+        # Tentativa concorrente detectada.
+        # Não chamar provider. Manter como pending_reconciliation.
+        session.commit()
+        return FulfillmentResult(
+            aliexpress_order=locked,
+            items=list(locked.items),
+            state="pending_reconciliation",
         )
 
     # REVALIDAÇÃO do snapshot no Estágio B (8.0.11A): após re-lock, re-busca o
@@ -534,6 +723,11 @@ def submit_aliexpress_order(
         logger.info(
             "aliexpress submission: hard-off bloqueou envio de %s", ali_order.id
         )
+        # Marcar attempt como rejected
+        attempt.state = "rejected"
+        attempt.completed_at = utcnow()
+        attempt.last_error = ERROR_CODES["SUBMISSION_HARD_OFF"]
+        session.commit()
         return _fail(
             order=locked, error=ERROR_CODES["SUBMISSION_HARD_OFF"], session=session
         )
@@ -543,6 +737,11 @@ def submit_aliexpress_order(
             "aliexpress submission: provider falhou p/ %s code=%s",
             ali_order.id, ERROR_CODES["SUBMISSION_FAILED"],
         )
+        # Marcar attempt como rejected
+        attempt.state = "rejected"
+        attempt.completed_at = utcnow()
+        attempt.last_error = ERROR_CODES["SUBMISSION_FAILED"]
+        session.commit()
         return _fail(
             order=locked, error=ERROR_CODES["SUBMISSION_FAILED"], session=session
         )
@@ -552,11 +751,19 @@ def submit_aliexpress_order(
             "aliexpress submission: resultado desconhecido p/ %s code=%s",
             ali_order.id, ERROR_CODES["SUBMISSION_UNKNOWN"],
         )
-        return _fail(
-            order=locked,
-            error=ERROR_CODES["SUBMISSION_UNKNOWN"],
+        # Marcar attempt como unknown, order para pending_reconciliation
+        attempt.state = "unknown"
+        attempt.completed_at = utcnow()
+        order.attempt_count += 1
+        order.last_attempt_at = now
+        order.state = "pending_reconciliation"
+        order.last_error = ERROR_CODES["SUBMISSION_UNKNOWN"]
+        order.updated_at = now
+        session.commit()
+        return FulfillmentResult(
+            aliexpress_order=locked,
+            items=list(locked.items),
             state="pending_reconciliation",
-            session=session,
         )
     except Exception:
         # Exceção inesperada durante a chamada: conservadoramente ambíguo.
@@ -565,39 +772,74 @@ def submit_aliexpress_order(
             "aliexpress submission: erro interno p/ %s code=%s",
             ali_order.id, ERROR_CODES["SUBMISSION_UNKNOWN"],
         )
-        return _fail(
-            order=locked,
-            error=ERROR_CODES["SUBMISSION_UNKNOWN"],
+        attempt.state = "unknown"
+        attempt.completed_at = utcnow()
+        order.attempt_count += 1
+        order.last_attempt_at = now
+        order.state = "pending_reconciliation"
+        order.last_error = ERROR_CODES["SUBMISSION_UNKNOWN"]
+        order.updated_at = now
+        session.commit()
+        return FulfillmentResult(
+            aliexpress_order=locked,
+            items=list(locked.items),
             state="pending_reconciliation",
-            session=session,
         )
 
-    if result is None or not getattr(result, "external_order_id", ""):
+    # Validar resultado do provider (8.0.11B: tuple-based)
+    if result is None:
+        attempt.state = "unknown"
+        attempt.completed_at = utcnow()
+        order.attempt_count += 1
+        order.last_attempt_at = now
+        order.state = "pending_reconciliation"
+        order.last_error = ERROR_CODES["SUBMISSION_UNKNOWN"]
+        order.updated_at = now
+        session.commit()
+        return FulfillmentResult(
+            aliexpress_order=locked,
+            items=list(locked.items),
+            state="pending_reconciliation",
+        )
+
+    external_order_ids = getattr(result, "external_order_ids", None)
+    if not external_order_ids:
         # Provider não confirmou identidade externa: ambíguo, não "não criado".
         logger.error(
             "aliexpress submission: resposta sem identidade p/ %s code=%s",
             ali_order.id, ERROR_CODES["SUBMISSION_UNKNOWN"],
         )
-        return _fail(
-            order=locked,
-            error=ERROR_CODES["SUBMISSION_UNKNOWN"],
+        attempt.state = "unknown"
+        attempt.completed_at = utcnow()
+        order.attempt_count += 1
+        order.last_attempt_at = now
+        order.state = "pending_reconciliation"
+        order.last_error = ERROR_CODES["SUBMISSION_UNKNOWN"]
+        order.updated_at = now
+        session.commit()
+        return FulfillmentResult(
+            aliexpress_order=locked,
+            items=list(locked.items),
             state="pending_reconciliation",
+        )
+
+    # Sucesso confirmado: persistência atômica de 0/1/N remote order IDs
+    try:
+        _persist_remote_orders(
+            ali_order=locked,
+            external_order_ids=external_order_ids,
+            attempt_key=order.attempt_key,
+            session=session,
+        )
+    except RemoteOrderPersistenceAmbiguous as e:
+        # Erro de persistência pós-provider -> ambiguidade local
+        return _fail_on_remote_ambiguity(
+            ali_order=locked,
+            error=str(e),
+            attempt_key=order.attempt_key,
             session=session,
         )
 
-    # Sucesso confirmado: persiste identidade externa e estados submitted.
-    locked.state = "submitted"
-    locked.submitted_at = now
-    locked.ali_order_id = result.external_order_id
-    locked.ali_status = result.external_status
-    locked.last_error = None
-    locked.attempt_count += 1
-    locked.last_attempt_at = now
-    locked.updated_at = now
-    for item in locked.items:
-        item.state = "submitted"
-        item.last_error = None
-        item.updated_at = now
     session.commit()
     return FulfillmentResult(
         aliexpress_order=locked,

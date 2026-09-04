@@ -52,7 +52,7 @@ class OkSubmitter(AliExpressOrderSubmitter):
     def submit(self, request):
         self.calls += 1
         return AliExpressSubmissionResult(
-            external_order_id="AE-ADM-%s" % uuid.uuid4().hex[:10]
+            external_order_ids=("AE-ADM-%s" % uuid.uuid4().hex[:10],)
         )
 
 

@@ -83,7 +83,7 @@ class FakeSubmitter(AliExpressOrderSubmitter):
             self.fail_times -= 1
             raise AliExpressSubmissionFailed("falha transiente simulada")
         return AliExpressSubmissionResult(
-            external_order_id=self.external_order_id
+            external_order_ids=(self.external_order_id,)
         )
 
 

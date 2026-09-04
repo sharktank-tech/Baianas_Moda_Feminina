@@ -66,7 +66,7 @@ class CountingSubmitter(AliExpressOrderSubmitter):
             self.call_count += 1
         if self.outcome_override is AliExpressSubmissionUnknown:
             raise AliExpressSubmissionUnknown("timeout sem confirmação")
-        return AliExpressSubmissionResult(external_order_id=f"AE-PG-{secrets.token_hex(4)}")
+        return AliExpressSubmissionResult(external_order_ids=(f"AE-PG-{secrets.token_hex(4)}",))
 
 
 class CountingReconciler(AliExpressOrderReconciler):

@@ -99,7 +99,7 @@ class FakeSubmitter(AliExpressOrderSubmitter):
             raise AliExpressSubmissionUnknown("timeout sem confirmação")
         if self.exc is not None:
             raise self.exc("erro inesperado com segredo=SUPER_805")
-        return AliExpressSubmissionResult(external_order_id=self.external_order_id)
+        return AliExpressSubmissionResult(external_order_ids=(self.external_order_id,))
 
 
 class FakeReconciler(AliExpressOrderReconciler):

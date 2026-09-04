@@ -254,7 +254,7 @@ def test_parser_result_single_id():
     from loja.integrations.aliexpress.placeorder_provider import (
         AliExpressSubmissionResult,
     )
-    result = AliExpressSubmissionResult("submitted", "12345")
+    result = AliExpressSubmissionResult(("submitted",), "12345")
     assert result.external_order_id == "submitted"
     assert result.external_status == "12345"
 
@@ -283,7 +283,7 @@ def test_parser_result_status_codes():
         AliExpressSubmissionResult,
     )
     for status in ["12345", "success", "0", "pending"]:
-        result = AliExpressSubmissionResult("submitted", status)
+        result = AliExpressSubmissionResult(("submitted",), status)
         assert result.external_status == status
 
 

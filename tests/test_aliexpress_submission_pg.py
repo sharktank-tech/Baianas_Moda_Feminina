@@ -55,7 +55,7 @@ class CountingSubmitter(AliExpressOrderSubmitter):
         with self._lock:
             self.call_count += 1
         return AliExpressSubmissionResult(
-            external_order_id=f"AE-PG-{secrets.token_hex(4)}"
+            external_order_ids=(f"AE-PG-{secrets.token_hex(4)}",)
         )
 
 

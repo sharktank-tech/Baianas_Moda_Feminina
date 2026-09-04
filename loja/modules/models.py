@@ -1642,6 +1642,148 @@ class AliExpressOrder(db.Model):
 
 
 # ==========================================================
+# Tentativa de submissão AliExpress (barreira durável 8.0.11B)
+# ==========================================================
+class AliExpressSubmissionAttempt(db.Model):
+    __tablename__ = "aliexpress_submission_attempts"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    aliexpress_order_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("aliexpress_orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    attempt_key = db.Column(
+        db.String(64),
+        nullable=False,
+        unique=True,
+    )
+    state = db.Column(
+        db.String(20),
+        nullable=False,
+    )
+    started_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=utcnow,
+    )
+    completed_at = db.Column(
+        db.DateTime,
+        nullable=True,
+    )
+    last_error = db.Column(db.Text, nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=utcnow,
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "state IN "
+            "('in_flight','confirmed','rejected','unknown')",
+            name="ck_attempt_state",
+        ),
+    )
+
+    aliexpress_order = db.relationship(
+        "AliExpressOrder",
+        backref=db.backref("submission_attempts", cascade="all, delete-orphan"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<AliExpressSubmissionAttempt {self.id} "
+            f"order={self.aliexpress_order_id} "
+            f"state={self.state}>"
+        )
+
+
+# ==========================================================
+# Pedido remoto AliExpress (cardinalidade 0/1/N)
+# ==========================================================
+class AliExpressRemoteOrder(db.Model):
+    __tablename__ = "aliexpress_remote_orders"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    aliexpress_order_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("aliexpress_orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    remote_order_id = db.Column(
+        db.String(64),
+        nullable=False,
+    )
+    position = db.Column(
+        db.Integer,
+        nullable=False,
+    )
+    attempt_key = db.Column(
+        db.String(64),
+        nullable=True,
+    )
+    remote_status = db.Column(db.Text, nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=utcnow,
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "remote_order_id", name="uq_remote_order_id"
+        ),
+        db.UniqueConstraint(
+            "aliexpress_order_id", "position",
+            name="uq_order_position",
+        ),
+        db.CheckConstraint(
+            "position >= 0", name="ck_position_nonneg"
+        ),
+    )
+
+    aliexpress_order = db.relationship(
+        "AliExpressOrder",
+        backref=db.backref(
+            "remote_orders",
+            cascade="all, delete-orphan",
+            order_by="AliExpressRemoteOrder.position",
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<AliExpressRemoteOrder {self.id} "
+            f"order={self.aliexpress_order_id} "
+            f"remote={self.remote_order_id} "
+            f"pos={self.position}>"
+        )
+
+
+# ==========================================================
 # Item de fulfillment AliExpress (snapshot do SKU comprado)
 # ==========================================================
 class AliExpressOrderItem(db.Model):

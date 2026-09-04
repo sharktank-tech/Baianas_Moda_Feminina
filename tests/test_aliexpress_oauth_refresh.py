@@ -137,7 +137,7 @@ class _FakeSubmitter(AliExpressOrderSubmitter):
     def submit(self, request):
         self.calls.append(request)
         return AliExpressSubmissionResult(
-            external_order_id=f"AE-OAUTH-{request.aliexpress_order_id.hex[:12]}"
+            external_order_ids=(f"AE-OAUTH-{request.aliexpress_order_id.hex[:12]}",)
         )
 
 

@@ -165,16 +165,25 @@ class TopAliExpressOrderSubmitter(AliExpressOrderSubmitter):
 
 
 def _classify_placeorder(response: "TopPlaceOrderResponse") -> AliExpressSubmissionResult:
-    """Classificação conservadora da resposta normalizada (regra do PROVIDER)."""
+    """Classificação conservadora da resposta normalizada (regra do PROVIDER).
+
+    Nunca seleciona o primeiro ID de N>1.
+    IDs duplicados -> Unknown (ambíguo, nunca retry cego).
+    """
     if response.is_success:
-        if len(response.order_ids) == 1:
-            return AliExpressSubmissionResult(
-                external_order_id=response.order_ids[0],
-                external_status="submitted",
+        order_ids = response.order_ids
+        if len(order_ids) == 0:
+            raise AliExpressSubmissionUnknown(
+                "placeorder_success_without_order_id"
             )
-        if len(response.order_ids) == 0:
-            raise AliExpressSubmissionUnknown("placeorder_success_without_order_id")
-        raise AliExpressSubmissionUnknown("placeorder_multiple_remote_orders")
+        if len(order_ids) != len(set(order_ids)):
+            raise AliExpressSubmissionUnknown(
+                "placeorder_remote_identity_ambiguous"
+            )
+        return AliExpressSubmissionResult(
+            external_order_ids=order_ids,
+            external_status="submitted",
+        )
 
     if _is_confirmed_failure(response):
         return _raise_failed(response)

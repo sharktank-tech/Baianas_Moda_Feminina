@@ -88,8 +88,13 @@ from .submission import (
     AliExpressSubmissionUnknown,
     HardOffOrderSubmitter,
     SubmissionHardOffError,
+    RemoteOrderPersistenceAmbiguous,
     submit_aliexpress_order,
     get_default_order_submitter,
+)
+from loja.modules.models import (
+    AliExpressSubmissionAttempt,
+    AliExpressRemoteOrder,
 )
 from .reconciliation import (
     AliExpressOrderReconciler,
@@ -199,6 +204,9 @@ __all__: Iterable[str] = [
     "AliExpressSubmissionUnknown",
     "HardOffOrderSubmitter",
     "SubmissionHardOffError",
+    "RemoteOrderPersistenceAmbiguous",
+    "AliExpressSubmissionAttempt",
+    "AliExpressRemoteOrder",
     "submit_aliexpress_order",
     "get_default_order_submitter",
     "AliExpressOrderReconciler",
