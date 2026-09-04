@@ -117,9 +117,9 @@ class TopAliExpressOrderSubmitter(AliExpressOrderSubmitter):
         return app_key, app_secret
 
     def _resolved_token(self, request: "AliExpressSubmissionRequest") -> str:
-        if self._resolve_access_token is not None:
-            return self._resolve_access_token(request.supplier_id)
         try:
+            if self._resolve_access_token is not None:
+                return self._resolve_access_token(request.supplier_id)
             return get_fulfillment_access_token(request.supplier_id)
         except CredentialNotConfigured:
             raise AliExpressSubmissionFailed("placeorder_credential_not_configured") from None
