@@ -689,7 +689,10 @@ def submit_aliexpress_order(
     )
     if existing_attempt is not None:
         # Tentativa concorrente detectada.
-        # Não chamar provider. Manter como pending_reconciliation.
+        # Não chamar provider. Persistir pending_reconciliation.
+        locked.state = "pending_reconciliation"
+        locked.last_error = "attempt_in_progress"
+        locked.updated_at = utcnow()
         session.commit()
         return FulfillmentResult(
             aliexpress_order=locked,

@@ -287,6 +287,53 @@ def test_parser_result_status_codes():
         assert result.external_status == status
 
 
+def _classify(resp):
+    from loja.integrations.aliexpress.placeorder_provider import (
+        _classify_placeorder,
+    )
+    return _classify_placeorder(resp)
+
+
+def _top_success(order_ids):
+    from loja.integrations.aliexpress.top_placeorder import TopPlaceOrderResponse
+    return TopPlaceOrderResponse(
+        is_success=True,
+        order_ids=tuple(order_ids),
+        error_code=None,
+        error_sub_code=None,
+    )
+
+
+def test_classify_single_id_submitted():
+    """Duradouro: 1 id confirmado -> external_order_ids com 1 elemento."""
+    r = _classify(_top_success(["AE-1"]))
+    assert r.external_order_ids == ("AE-1",)
+    assert r.external_order_id == "AE-1"
+
+
+def test_classify_multi_id_preserves_all_ids():
+    """8.0.11B: N>1 preserva TODOS os ids, nunca seleciona o primeiro."""
+    r = _classify(_top_success(["AE-1", "AE-2", "AE-3"]))
+    assert r.external_order_ids == ("AE-1", "AE-2", "AE-3")
+
+
+def test_classify_duplicate_ids_ambiguous():
+    """8.0.11B: IDs duplicados -> Unknown (ambíguo, nunca retry cego)."""
+    from loja.integrations.aliexpress.submission import AliExpressSubmissionUnknown
+
+    with pytest.raises(AliExpressSubmissionUnknown) as exc:
+        _classify(_top_success(["AE-X", "AE-X"]))
+    assert "ambiguous" in exc.value.args[0]
+
+
+def test_classify_zero_ids_on_success_ambiguous():
+    """8.0.11B: sucesso sem nenhum id -> Unknown."""
+    from loja.integrations.aliexpress.submission import AliExpressSubmissionUnknown
+
+    with pytest.raises(AliExpressSubmissionUnknown):
+        _classify(_top_success([]))
+
+
 # ---------------------------------------------------------------------------
 # SECURITY / CREDENTIAL (4)
 # ---------------------------------------------------------------------------
