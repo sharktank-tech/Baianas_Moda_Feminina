@@ -132,6 +132,20 @@ class UnknownSubmitter(AliExpressOrderSubmitter):
         raise AliExpressSubmissionUnknown("timeout sem confirmação")
 
 
+class MultiOkSubmitter(AliExpressOrderSubmitter):
+    """Devolve N>1 identidades externas — ordens N>1 NUNCA espelham ali_order_id."""
+
+    def __init__(self, external_order_ids):
+        self.calls = []
+        self.external_order_ids = tuple(external_order_ids)
+
+    def submit(self, request):
+        self.calls.append(request)
+        return AliExpressSubmissionResult(
+            external_order_ids=self.external_order_ids
+        )
+
+
 class FoundReconciler(AliExpressOrderReconciler):
     def __init__(self, external_order_id="REMOTE-806"):
         self.external_order_id = external_order_id
@@ -366,6 +380,27 @@ class TestBoundaryAndEligibility:
         result = sync_aliexpress_order_status(ali, syncer=syncer)
         assert syncer.calls == []
         assert result.state == "ready"
+
+    def test_n_maior_1_sem_ali_order_id_nunca_consulta_provider(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        """Ordem N>1: ali_order_id é NULL (8.0.11B) -> status sync é inelegível
+        (fail-closed) e NUNCA chama o provider."""
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, order = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        ok = MultiOkSubmitter(("AE-N1", "AE-N2", "AE-N3"))
+        result = submit_aliexpress_order(ali, submitter=ok)
+        db.session.commit()
+        assert result.state == "submitted"
+        db.session.expire_all()
+        fresh = db.session.get(AliExpressOrder, ali.id)
+        assert fresh.ali_order_id is None, "N>1 NUNCA espelha ali_order_id"
+
+        syncer = ScriptedSyncer(result=STATUS_CONFIRMED)
+        sres = sync_aliexpress_order_status(fresh, syncer=syncer)
+        assert syncer.calls == [], "status sync NUNCA deve consultar provider p/ N>1"
+        db.session.commit()
+        assert sres.state == "submitted"
 
 
 class TestMonotonicMachine:

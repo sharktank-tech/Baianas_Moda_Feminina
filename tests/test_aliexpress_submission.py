@@ -879,6 +879,20 @@ class TestStageBSnapshotRevalidation:
         for item in fresh.items:
             assert item.state == "ready"
 
+        # 8.0.11B: Stage B abort NUNCA cria SubmissionAttempt (barreira é
+        # movida para DEPOIS do Stage B preflight) e um retry posterior,
+        # com snapshot ainda válido, funciona.
+        assert (
+            db.session.query(AliExpressSubmissionAttempt)
+            .filter_by(aliexpress_order_id=ali_order.id)
+            .count()
+            == 0
+        ), "Stage B abort NUNCA deve criar SubmissionAttempt"
+        ok = FakeSubmitter(external_order_id="AE-STAGEB-RETRY")
+        r2 = submit_aliexpress_order(ali_order, submitter=ok)
+        assert r2.state == "submitted"
+        assert len(ok.calls) == 1
+
     def test_stage_b_snapshot_invalid_blocks_provider(
         self, db, make_user, ae_supplier, ae_product, sp_variant_factory
     ):
@@ -921,6 +935,18 @@ class TestStageBSnapshotRevalidation:
         assert fresh.state != "pending_reconciliation"
         for item in fresh.items:
             assert item.state == "ready"
+
+        # 8.0.11B: Stage B abort NUNCA cria SubmissionAttempt; retry funciona.
+        assert (
+            db.session.query(AliExpressSubmissionAttempt)
+            .filter_by(aliexpress_order_id=ali_order.id)
+            .count()
+            == 0
+        ), "Stage B abort NUNCA deve criar SubmissionAttempt"
+        ok = FakeSubmitter(external_order_id="AE-STAGEB-INVALID-RETRY")
+        r2 = submit_aliexpress_order(ali_order, submitter=ok)
+        assert r2.state == "submitted"
+        assert len(ok.calls) == 1
 
 
 # ===========================================================================
@@ -1177,6 +1203,54 @@ class TestAttemptBarrier:
         db.session.expire_all()
         fresh = db.session.get(AliExpressOrder, ali.id)
         assert fresh.state == "pending_reconciliation"
+        # 8.0.11B: NENHUM novo attempt criado sob barrier (count inalterado).
+        assert (
+            db.session.query(AliExpressSubmissionAttempt)
+            .filter_by(aliexpress_order_id=ali.id)
+            .count()
+            == 1
+        ), "barrier NUNCA deve criar um novo SubmissionAttempt"
+        assert fresh.last_error == "attempt_in_progress"
+
+    def test_same_attempt_key_in_flight_blocks_provider(
+        self, db, make_user, ae_supplier, ae_product, sp_variant_factory
+    ):
+        """8.0.11B: MESMO attempt_key (retry de crash, attempt_count inalterado)
+        com attempt in_flight bloqueia provider e NÃO gera novo attempt — nunca
+        IntegrityError por attempt_key duplicado."""
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, _, _ = _materialize_ready(
+            db, make_user, ae_supplier, ae_product, variant
+        )
+        # Depois do crash, o retry gera o MESMO attempt_key (attempt_count 0).
+        from loja.utils import utcnow
+
+        stale = AliExpressSubmissionAttempt(
+            id=uuid.uuid4(),
+            aliexpress_order_id=ali.id,
+            attempt_key="same-crash-key",
+            state="in_flight",
+            started_at=utcnow(),
+            completed_at=None,
+            last_error=None,
+        )
+        db.session.add(stale)
+        db.session.commit()
+
+        fake = FakeSubmitter(external_order_id="AE-SAMEKEY")
+        result = submit_aliexpress_order(ali, submitter=fake)
+        assert result.state == "pending_reconciliation"
+        assert fake.calls == [], "provider NUNCA deve ser chamado sob barrier"
+        db.session.expire_all()
+        fresh = db.session.get(AliExpressOrder, ali.id)
+        assert fresh.state == "pending_reconciliation"
+        assert (
+            db.session.query(AliExpressSubmissionAttempt)
+            .filter_by(aliexpress_order_id=ali.id)
+            .count()
+            == 1
+        ), "barrier NUNCA deve criar novo attempt (não duplica attempt_key)"
 
     def test_completed_attempt_does_not_block_new_submission(
         self, db, make_user, ae_supplier, ae_product, sp_variant_factory
@@ -1230,3 +1304,371 @@ class TestRemoteOrderModelConstraints:
         with pytest.raises(IntegrityError):
             db.session.commit()
         db.session.rollback()
+
+
+# ===========================================================================
+# Fase 8.0.11B — hardening corretivo: falhas pós-HTTP, idempotência, sanitização
+# ===========================================================================
+
+
+class TestPostHttpDbFailure:
+    """Item 3: falha de DB na persistência pós-provider -> rollback + recuperação
+    em nova transação, SEM reexecutar o provider."""
+
+    def test_commit_failure_atomicamente_vai_para_pending(self, db, make_user,
+                                                        ae_supplier, ae_product,
+                                                        sp_variant_factory):
+        from sqlalchemy.exc import IntegrityError
+
+        from loja.integrations.aliexpress.submission import REMOTE_ERROR_PERSISTENCE
+
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, _, _ = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+
+        # Submitter que marca quando o provider é chamado.
+        submitted = {"called": False}
+        counting = FakeSubmitter(external_order_id="AE-DBFAIL")
+        orig_submit = counting.submit
+
+        def _tracked_submit(req):
+            submitted["called"] = True
+            return orig_submit(req)
+
+        counting.submit = _tracked_submit
+
+        real_commit = db.session.commit
+        failed = {"done": False}
+
+        def failing_commit():
+            # Falha a persistência pós-provider (na 1ª tentativa de commit
+            # após a chamada do provider); a recuperação commita normalmente.
+            if submitted["called"] and not failed["done"]:
+                failed["done"] = True
+                raise IntegrityError("statement", {}, Exception("simulated-db"))
+            return real_commit()
+
+        db.session.commit = failing_commit
+        try:
+            result = submit_aliexpress_order(ali, submitter=counting)
+        finally:
+            db.session.commit = real_commit
+
+        assert result.state == "pending_reconciliation"
+        db.session.expire_all()
+        fresh = db.session.get(AliExpressOrder, ali.id)
+        assert fresh.state == "pending_reconciliation"
+        assert fresh.last_error == REMOTE_ERROR_PERSISTENCE
+        assert (
+            db.session.query(AliExpressRemoteOrder)
+            .filter_by(aliexpress_order_id=ali.id).count()
+        ) == 0, "commit falhou -> NENHUM remote child persistido (atômico)"
+        attempt = (
+            db.session.query(AliExpressSubmissionAttempt)
+            .filter_by(aliexpress_order_id=ali.id).first()
+        )
+        assert attempt is not None
+        assert attempt.state == "unknown"
+        assert attempt.last_error == REMOTE_ERROR_PERSISTENCE
+        assert len(counting.calls) == 1, "provider NÃO pode ser reexecutado"
+
+    def test_integrity_failure_no_provider_repeat(self, db, make_user,
+                                                  ae_supplier, ae_product,
+                                                  sp_variant_factory, caplog):
+        """Após falha de persistência, o provider NÃO é reexecutado: o retorno é
+        a recuperação (pending_reconciliation), não nova chamada."""
+        import logging
+
+        from sqlalchemy.exc import IntegrityError
+
+        from loja.integrations.aliexpress.submission import REMOTE_ERROR_PERSISTENCE
+
+        caplog.set_level(logging.ERROR, logger="loja.integrations.aliexpress.submission")
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, _, _ = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+
+        counting = FakeSubmitter(external_order_id="AE-NOREPEAT")
+        submitted = {"called": False}
+        orig_submit = counting.submit
+
+        def _tracked_submit(req):
+            submitted["called"] = True
+            return orig_submit(req)
+
+        counting.submit = _tracked_submit
+
+        real_commit = db.session.commit
+        failed = {"done": False}
+
+        def failing_commit():
+            if submitted["called"] and not failed["done"]:
+                failed["done"] = True
+                raise IntegrityError("stmt", {}, Exception("simulated"))
+            return real_commit()
+
+        db.session.commit = failing_commit
+        try:
+            result = submit_aliexpress_order(ali, submitter=counting)
+        finally:
+            db.session.commit = real_commit
+
+        # O provider foi chamado EXATAMENTE uma vez (a recuperação NÃO repete).
+        assert len(counting.calls) == 1
+        assert result.state == "pending_reconciliation"
+
+
+class TestRecoveryCommitFailure:
+    """Item 3: se o commit de recuperação TAMBÉM falhar -> NÃO executa provider
+    novamente; o attempt stale in_flight continua como barreira."""
+
+    def test_recovery_failure_keeps_stale_barrier(self, db, make_user,
+                                                  ae_supplier, ae_product,
+                                                  sp_variant_factory):
+        from loja.integrations.aliexpress.submission import (
+            _recover_from_persist_failure,
+            REMOTE_ERROR_PERSISTENCE,
+        )
+        from loja.utils import utcnow
+
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, _, _ = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+
+        fresh = db.session.get(AliExpressOrder, ali.id)
+        fresh.state = "submitting"
+        fresh.attempt_key = "k-rec-fail"
+        stale = AliExpressSubmissionAttempt(
+            id=uuid.uuid4(),
+            aliexpress_order_id=fresh.id,
+            attempt_key="k-rec-fail",
+            state="in_flight",
+            started_at=utcnow(),
+            completed_at=None,
+            last_error=None,
+        )
+        db.session.add(stale)
+        db.session.commit()
+
+        real_commit = db.session.commit
+
+        def always_fail():
+            raise RuntimeError("recovery commit failed")
+
+        db.session.commit = always_fail
+        try:
+            result = _recover_from_persist_failure(
+                session=db.session,
+                ali_order_id=fresh.id,
+                attempt_key="k-rec-fail",
+                error_code=REMOTE_ERROR_PERSISTENCE,
+            )
+        finally:
+            db.session.commit = real_commit
+
+        assert result.state == "pending_reconciliation"
+        # O attempt permanece in_flight (commit de recuperação falhou).
+        db.session.expire_all()
+        attempt = (
+            db.session.query(AliExpressSubmissionAttempt)
+            .filter_by(attempt_key="k-rec-fail").first()
+        )
+        assert attempt.state == "in_flight"
+        # E o provider NÃO é executado novamente: próxima submissão é barrada.
+        sub = FakeSubmitter(external_order_id="AE-REC-FAIL")
+        r2 = submit_aliexpress_order(fresh, submitter=sub)
+        assert sub.calls == []
+        assert r2.state == "pending_reconciliation"
+
+
+class TestInjectedInvalidRemoteIds:
+    """Item 5: IDs inválidos/mistos vindos do provider (não confiar só no parser
+    TOP) -> attempt unknown, pending_reconciliation, zero children, sem retry
+    cego."""
+
+    def _run_invalid(self, db, make_user, ae_supplier, ae_product,
+                     sp_variant_factory, ids):
+        from loja.integrations.aliexpress.submission import REMOTE_ERROR_INVALID
+
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, _, _ = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        result = submit_aliexpress_order(
+            ali, submitter=MultiIdSubmitter(ids)
+        )
+        assert result.state == "pending_reconciliation"
+        db.session.expire_all()
+        fresh = db.session.get(AliExpressOrder, ali.id)
+        assert fresh.state == "pending_reconciliation"
+        assert fresh.last_error == REMOTE_ERROR_INVALID
+        assert (
+            db.session.query(AliExpressRemoteOrder)
+            .filter_by(aliexpress_order_id=ali.id).count()
+        ) == 0, "IDs inválidos -> ZERO children persistidos"
+        attempt = (
+            db.session.query(AliExpressSubmissionAttempt)
+            .filter_by(aliexpress_order_id=ali.id).first()
+        )
+        assert attempt is not None
+        assert attempt.state == "unknown"
+        assert attempt.last_error == REMOTE_ERROR_INVALID
+        return fresh
+
+    def test_empty_string_id(self, db, make_user, ae_supplier, ae_product,
+                             sp_variant_factory):
+        self._run_invalid(db, make_user, ae_supplier, ae_product,
+                          sp_variant_factory, ("",))
+
+    def test_overlong_id(self, db, make_user, ae_supplier, ae_product,
+                         sp_variant_factory):
+        self._run_invalid(db, make_user, ae_supplier, ae_product,
+                          sp_variant_factory, ("X" * 65,))
+
+    def test_mixed_valid_and_invalid_blocks_all(self, db, make_user,
+                                                ae_supplier, ae_product,
+                                                sp_variant_factory):
+        fresh = self._run_invalid(db, make_user, ae_supplier, ae_product,
+                                  sp_variant_factory, ("AE-VALID", ""))
+        assert fresh.ali_order_id is None
+
+
+class TestRemoteOrderIdempotency:
+    """Item 6: replay exato não duplica; subset/superset/mix -> ambiguous."""
+
+    def _submitting_order(self, db, *ids):
+        from loja.integrations.aliexpress.submission import _persist_remote_orders
+
+        order = AliExpressOrder(
+            id=uuid.uuid4(), state="submitting", attempt_key="k-root",
+        )
+        db.session.add(order)
+        db.session.flush()
+        for pos, rid in enumerate(ids):
+            db.session.add(AliExpressRemoteOrder(
+                id=uuid.uuid4(), aliexpress_order_id=order.id,
+                remote_order_id=rid, position=pos, attempt_key="k-root",
+            ))
+        db.session.commit()
+        return order
+
+    def test_exact_replay_does_not_duplicate(self, db):
+        from loja.integrations.aliexpress.submission import _persist_remote_orders
+
+        order = self._submitting_order(db, "AE-EXACT-1", "AE-EXACT-2")
+        _persist_remote_orders(order, ("AE-EXACT-1", "AE-EXACT-2"),
+                               "k-new", db.session)
+        db.session.commit()
+        assert (
+            db.session.query(AliExpressRemoteOrder)
+            .filter_by(aliexpress_order_id=order.id).count()
+        ) == 2, "replay exato NUNCA duplica remote rows"
+
+    def test_subset_mismatch_is_ambiguous(self, db):
+        from loja.integrations.aliexpress.submission import (
+            _persist_remote_orders,
+            RemoteOrderPersistenceAmbiguous,
+            REMOTE_ERROR_PERSISTENCE,
+        )
+
+        order = self._submitting_order(db, "AE-SUB-1", "AE-SUB-2")
+        with pytest.raises(RemoteOrderPersistenceAmbiguous) as ei:
+            _persist_remote_orders(order, ("AE-SUB-1",), "k-sub", db.session)
+        assert str(ei.value) == REMOTE_ERROR_PERSISTENCE
+
+    def test_superset_mismatch_is_ambiguous(self, db):
+        from loja.integrations.aliexpress.submission import (
+            _persist_remote_orders,
+            RemoteOrderPersistenceAmbiguous,
+            REMOTE_ERROR_PERSISTENCE,
+        )
+
+        order = self._submitting_order(db, "AE-SUP-1")
+        with pytest.raises(RemoteOrderPersistenceAmbiguous) as ei:
+            _persist_remote_orders(order, ("AE-SUP-1", "AE-SUP-2"), "k-sup",
+                                   db.session)
+        assert str(ei.value) == REMOTE_ERROR_PERSISTENCE
+
+
+class TestSecuritySanitization:
+    """Item 4: IDs remotos NUNCA vazam em repr/exceptions/last_error/logs."""
+
+    @staticmethod
+    def _sentinel():
+        # único por teste (o db fixture reparte tabelas entre testes).
+        return f"TOP-SECRET-REMOTE-ID-{uuid.uuid4().hex[:6]}"
+
+    def test_remote_repr_does_not_leak_remote_id(self, db, make_user,
+                                                 ae_supplier, ae_product,
+                                                 sp_variant_factory):
+        sentinel = self._sentinel()
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, _, _ = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        submit_aliexpress_order(ali, submitter=FakeSubmitter(external_order_id=sentinel))
+        db.session.expire_all()
+        remote = db.session.query(AliExpressRemoteOrder).filter_by(
+            aliexpress_order_id=ali.id).first()
+        assert remote is not None
+        assert sentinel not in repr(remote)
+
+    def test_collision_error_and_last_error_sanitized(self, db, make_user,
+                                                      ae_supplier, ae_product,
+                                                      sp_variant_factory,
+                                                      caplog):
+        import logging
+
+        from loja.integrations.aliexpress.submission import (
+            _persist_remote_orders,
+            RemoteOrderPersistenceAmbiguous,
+            REMOTE_ERROR_COLLISION,
+        )
+
+        sentinel = self._sentinel()
+        caplog.set_level(logging.ERROR, logger="loja.integrations.aliexpress")
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        # order 1 já detém o ID sentinela.
+        ali1, _, _ = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        submit_aliexpress_order(ali1, submitter=FakeSubmitter(external_order_id=sentinel))
+        db.session.expire_all()
+        ali1_fresh = db.session.get(AliExpressOrder, ali1.id)
+        assert ali1_fresh.ali_order_id == sentinel
+
+        # order 2 reusa o ID sentinela -> colisão.
+        ali2, _, _ = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+        s2 = db.session.get(AliExpressOrder, ali2.id)
+        s2.state = "submitting"
+        s2.attempt_key = "k-sec"
+        db.session.commit()
+
+        try:
+            _persist_remote_orders(s2, (sentinel,), "k-sec", db.session)
+        except RemoteOrderPersistenceAmbiguous as e:
+            assert str(e) == REMOTE_ERROR_COLLISION
+            assert sentinel not in str(e)
+        else:
+            raise AssertionError("colisão deveria lançar RemoteOrderPersistenceAmbiguous")
+        db.session.rollback()
+        assert sentinel not in caplog.text
+
+    def test_provider_exception_logs_do_not_leak(self, db, make_user,
+                                                 ae_supplier, ae_product,
+                                                 sp_variant_factory, caplog):
+        import logging
+
+        sentinel = self._sentinel()
+        caplog.set_level(logging.ERROR, logger="loja.integrations.aliexpress")
+        _persist_valid_credential(db, ae_supplier)
+        sp, variant = sp_variant_factory(ae_supplier, ae_product)
+        ali, _, _ = _materialize_ready(db, make_user, ae_supplier, ae_product, variant)
+
+        class LeakySubmitter(AliExpressOrderSubmitter):
+            def submit(self, request):
+                raise RuntimeError("payload leak")
+
+        result = submit_aliexpress_order(ali, submitter=LeakySubmitter())
+        assert result.state == "pending_reconciliation"
+        db.session.commit()
+        assert sentinel not in caplog.text
+        fresh = db.session.get(AliExpressOrder, ali.id)
+        assert fresh.last_error != "" and sentinel not in (fresh.last_error or "")

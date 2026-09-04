@@ -1778,7 +1778,6 @@ class AliExpressRemoteOrder(db.Model):
         return (
             f"<AliExpressRemoteOrder {self.id} "
             f"order={self.aliexpress_order_id} "
-            f"remote={self.remote_order_id} "
             f"pos={self.position}>"
         )
 

@@ -87,18 +87,16 @@ def validate_schema(conn) -> list[str]:
     if cur.fetchone() is None:
         errors.append("CHECK constraint 'ck_attempt_state' NOT FOUND")
 
-    # Unique constraint: attempt_key
+    # Unique index: attempt_key (criado como UNIQUE INDEX `ux_ase_attempt_key`
+    # na migration 0012 — LONGE de pg_constraint; vive em pg_indexes).
     cur.execute("""
-        SELECT conname FROM pg_constraint
-        WHERE conname = 'aliexpress_submission_attempts_attempt_key_key'
-          AND conrelid = (
-              SELECT c.oid FROM pg_class c
-              JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = 'pollomodas' AND c.relname = 'aliexpress_submission_attempts'
-          )
+        SELECT indexname FROM pg_indexes
+        WHERE schemaname = 'pollomodas'
+          AND tablename = 'aliexpress_submission_attempts'
+          AND indexname = 'ux_ase_attempt_key'
     """)
     if cur.fetchone() is None:
-        errors.append("UNIQUE constraint on attempt_key NOT FOUND")
+        errors.append("UNIQUE INDEX 'ux_ase_attempt_key' (attempt_key) NOT FOUND")
 
     # 2. aliexpress_remote_orders table
     cur.execute("""
@@ -209,6 +207,128 @@ def validate_schema(conn) -> list[str]:
     return errors
 
 
+def _apply_migration(cur, schema: str) -> None:
+    """Aplica migration 0012 num schema alvo (substitui `pollomodas`)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "0012_aliexpress_remote_orders.sql"), "r") as f:
+        sql = f.read()
+    # Alignment contract: o DDL referencia `pollomodas`; para provas em schema
+    # descartável substituímos o schema alvo. Mantém UNIQUE INDEX, CHECKs e
+    # backfill exatamente como em produção.
+    sql = sql.replace("pollomodas", schema)
+    cur.execute(sql)
+
+
+def prove_migration(conn) -> list[str]:
+    """Prova REAL (não apenas introspecção) de fresh/upgrade/rerun/backfill.
+
+    Cria um schema descartável, aplica a migration como em produção e verifica:
+      * fresh: tabelas criadas sem erro;
+      * upgrade com legacy ali_order_id: backfill cria EXATAMENTE um filho
+        remote pela ordem legada (position 0);
+      * rerun: a migration é idempotente (2ª aplicação não falha nem duplica);
+      * backfill correto: ordem com ali_order_id -> filho criado;
+      * zero rows: ordem sem ali_order_id NÃO gera filho.
+    Derruba o schema descartável ao final.
+    """
+    import secrets
+
+    import psycopg2
+    from psycopg2 import sql as psql
+
+    errors: list[str] = []
+    schema = "pollo_mig_%s" % secrets.token_hex(4)
+    savepoint = "prove_0012"
+    try:
+        conn.autocommit = False
+        conn.cursor().execute(psql.SQL("SAVEPOINT {}").format(psql.Identifier(savepoint)))
+        conn.cursor().execute(
+            psql.SQL("CREATE SCHEMA {}").format(psql.Identifier(schema))
+        )
+        cur = conn.cursor()
+        cur.execute(f"SET search_path TO {schema}")
+
+        # Minimal parent tables needed by the DDL FK + backfill.
+        cur.execute(f"""
+            CREATE TABLE {schema}.aliexpress_orders (
+                id UUID PRIMARY KEY,
+                state VARCHAR(20) NOT NULL DEFAULT 'submitting',
+                ali_order_id VARCHAR(64) NULL,
+                ali_status TEXT NULL,
+                attempt_key VARCHAR(64) NULL
+            )
+        """)
+
+        # ---- FRESH ----
+        _apply_migration(cur, schema)
+        conn.commit()
+
+        # ---- UPGRADE com legacy ali_order_id ----
+        cur.execute(f"""
+            INSERT INTO {schema}.aliexpress_orders
+                (id, state, ali_order_id, ali_status, attempt_key)
+            VALUES
+                (gen_random_uuid(), 'submitted', 'LEGACY-1', 'submitted', 'k-legacy'),
+                (gen_random_uuid(), 'submitting', NULL, NULL, NULL)
+        """)
+        conn.commit()
+        # Fresh aplica o backfill: LEGACY-1 já deve ter gerado filho.
+        cur.execute(
+            f"SELECT count(*) FROM {schema}.aliexpress_remote_orders "
+            f"WHERE remote_order_id = 'LEGACY-1'"
+        )
+        if cur.fetchone()[0] != 1:
+            errors.append("backfill: legacy orders não originaram exatamente 1 filho")
+        cur.execute(
+            f"SELECT count(*) FROM {schema}.aliexpress_remote_orders "
+            f"WHERE remote_order_id IS NULL"
+        )
+        if cur.fetchone()[0] != 0:
+            errors.append("backfill: remote_order_id NULL presente")
+        # zero rows para ordem sem ali_order_id
+        cur.execute(
+            f"SELECT count(*) FROM {schema}.aliexpress_remote_orders aro "
+            f"JOIN {schema}.aliexpress_orders ao ON ao.id = aro.aliexpress_order_id "
+            f"WHERE ao.ali_order_id IS NULL"
+        )
+        if cur.fetchone()[0] != 0:
+            errors.append("backfill: ordem sem ali_order_id gerou filho remoto")
+
+        # ---- RERUN (idempotência) ----
+        _apply_migration(cur, schema)
+        conn.commit()
+        cur.execute(
+            f"SELECT count(*) FROM {schema}.aliexpress_remote_orders "
+            f"WHERE remote_order_id = 'LEGACY-1'"
+        )
+        if cur.fetchone()[0] != 1:
+            errors.append("rerun: backfill duplicou filho remoto do legacy")
+
+        # Contrato único: UNIQUE INDEX ux_ase_attempt_key existe.
+        cur.execute(
+            f"SELECT count(*) FROM pg_indexes "
+            f"WHERE schemaname = '{schema}' AND indexname = 'ux_ase_attempt_key'"
+        )
+        if cur.fetchone()[0] != 1:
+            errors.append("rerun: UNIQUE INDEX ux_ase_attempt_key ausente")
+
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"proof raised: {type(exc).__name__}: {exc}")
+        conn.rollback()
+    finally:
+        try:
+            conn.cursor().execute(
+                psql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(
+                    psql.Identifier(schema)
+                )
+            )
+            conn.commit()
+        except Exception:  # noqa: BLE001
+            conn.rollback()
+
+    return errors
+
+
 def main() -> int:
     if not _check_pg_available():
         print("NOT RUN: no PostgreSQL DATABASE_URL available")
@@ -222,7 +342,14 @@ def main() -> int:
             for e in errors:
                 print(f"FAIL: {e}")
             return 1
-        print("OK: migration 0012 validated")
+        print("OK: migration 0012 schema validated")
+
+        proof_errors = prove_migration(conn)
+        if proof_errors:
+            for e in proof_errors:
+                print(f"PROOF FAIL: {e}")
+            return 1
+        print("OK: migration 0012 proof (fresh/upgrade/rerun/backfill/zero-rows) passed")
         return 0
     finally:
         conn.close()
