@@ -136,8 +136,9 @@ class _FakeSubmitter(AliExpressOrderSubmitter):
 
     def submit(self, request):
         self.calls.append(request)
+        self.external_order_id = str(uuid.uuid4().int)
         return AliExpressSubmissionResult(
-            external_order_ids=(f"AE-OAUTH-{request.aliexpress_order_id.hex[:12]}",)
+            external_order_ids=(self.external_order_id,)
         )
 
 
@@ -699,5 +700,5 @@ class TestOAuthSubmissionGate:
         assert result.state == "submitted"
         assert len(fake_sub.calls) == 1
         ali = AliExpressOrder.query.filter_by(order_id=order.id).first()
-        assert ali.ali_order_id.startswith("AE-OAUTH-")
+        assert ali.ali_order_id.isdigit() and len(ali.ali_order_id) <= 64
         assert fake_ref.calls[0].refresh_token == "RT_VALIDO"

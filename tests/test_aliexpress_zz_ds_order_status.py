@@ -111,9 +111,13 @@ class ScriptedDSClient:
 
 
 class OkSubmitter(AliExpressOrderSubmitter):
-    def __init__(self, external_order_id="AE-807"):
+    def __init__(self, external_order_id=None):
         self.calls = []
-        self.external_order_id = external_order_id
+        self.external_order_id = (
+            external_order_id
+            if external_order_id is not None
+            else str(uuid.uuid4().int)
+        )
 
     def submit(self, request):
         self.calls.append(request)
@@ -519,7 +523,7 @@ def _materialize_and_submit(db, make_user, supplier, product, variant):
     ali = AliExpressOrder.query.filter_by(order_id=order.id).first()
     materialize_snapshot(ali, session=db.session)
     result = submit_aliexpress_order(
-        ali, submitter=OkSubmitter(f"AE-807-{uuid.uuid4().hex[:10]}")
+        ali, submitter=OkSubmitter()
     )
     db.session.commit()
     assert result.state == STATUS_SUBMITTED

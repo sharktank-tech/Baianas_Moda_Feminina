@@ -46,13 +46,15 @@ BASE_URL = "/admin/integrations/aliexpress/pedidos"
 
 
 class OkSubmitter(AliExpressOrderSubmitter):
+    _id_counter = 94000
     def __init__(self):
         self.calls = 0
+        OkSubmitter._id_counter += 1
 
     def submit(self, request):
         self.calls += 1
         return AliExpressSubmissionResult(
-            external_order_ids=("AE-ADM-%s" % uuid.uuid4().hex[:10],)
+            external_order_ids=(str(OkSubmitter._id_counter),)
         )
 
 
