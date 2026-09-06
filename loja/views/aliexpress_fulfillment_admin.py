@@ -1,9 +1,11 @@
 """Fila administrativa de fulfillment AliExpress (Fase 8.0).
 
 Segurança:
-  * Todas as rotas exigem @admin_required + CSRF
+  * Todas as rotas exigem @admin_required + CSRF quando mutáveis
   * Nunca expõe tokens, ciphertext, supplier_sku_id, product_id externo ou payload bruto
   * Enriquecimento SKU operacional é Preview-only e mostra apenas contagens
+  * Fase 8.0.11H expõe somente estado sanitizado do circuit breaker; attempt_key
+    e remote_order_id nunca aparecem na fila de segurança
 """
 
 from __future__ import annotations
@@ -25,7 +27,13 @@ from sqlalchemy import desc
 from sqlalchemy.orm import selectinload
 
 from loja import db
-from loja.modules.models import AliExpressOrder, AliExpressOrderItem, Order, Supplier
+from loja.modules.models import (
+    AliExpressOrder,
+    AliExpressOrderItem,
+    AliExpressSubmissionAttempt,
+    Order,
+    Supplier,
+)
 from loja.integrations.aliexpress import (
     ensure_aliexpress_fulfillment,
     sync_aliexpress_order_status,
@@ -34,6 +42,7 @@ from loja.integrations.aliexpress import (
     CredentialExpired,
     CredentialInvalid,
 )
+from loja.integrations.aliexpress.controlled_canary import get_canary_circuit_status
 from loja.integrations.aliexpress.sku_identity_enrichment import (
     SkuIdentityEnrichmentError,
     enrich_sku_identity_batch,
@@ -75,6 +84,13 @@ def index():
         "cancel_requested", "cancelled", "failed", "manual_review", "pending",
     ]
 
+    # Fase 8.0.11H: leitura sanitizada do circuit breaker global. A tela recebe
+    # apenas contagens/booleans; nunca attempt_key, remote ID ou payload.
+    canary_status = get_canary_circuit_status(session=db.session)
+    pending_reconciliation_count = AliExpressOrder.query.filter_by(
+        state="pending_reconciliation"
+    ).count()
+
     return render_template(
         "admin/aliexpress/fulfillment_list.html",
         pagination=pagination,
@@ -82,6 +98,42 @@ def index():
         states=states,
         current_state=state_filter,
         current_supplier=supplier_filter,
+        canary_status=canary_status,
+        pending_reconciliation_count=pending_reconciliation_count,
+    )
+
+
+@fulfillment_admin_blueprint.route("/canary-safety", methods=["GET"])
+@admin_required
+def canary_safety():
+    """Fila GET-only de tentativas que mantêm o circuit breaker aberto.
+
+    Não executa provider, não reconcilia, não altera estado e não expõe
+    attempt_key/remote IDs. Um ``in_flight`` antigo continua visível para sempre
+    até resolução conclusiva; idade nunca libera o breaker.
+    """
+
+    status = get_canary_circuit_status(session=db.session)
+    blocking_rows = (
+        db.session.query(AliExpressOrder, AliExpressSubmissionAttempt)
+        .join(
+            AliExpressSubmissionAttempt,
+            AliExpressSubmissionAttempt.aliexpress_order_id == AliExpressOrder.id,
+        )
+        .filter(AliExpressSubmissionAttempt.state.in_(["in_flight", "unknown"]))
+        .order_by(desc(AliExpressSubmissionAttempt.started_at))
+        .limit(100)
+        .all()
+    )
+    pending_reconciliation_count = AliExpressOrder.query.filter_by(
+        state="pending_reconciliation"
+    ).count()
+
+    return render_template(
+        "admin/aliexpress/canary_safety.html",
+        canary_status=status,
+        blocking_rows=blocking_rows,
+        pending_reconciliation_count=pending_reconciliation_count,
     )
 
 
