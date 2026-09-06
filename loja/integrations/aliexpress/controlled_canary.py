@@ -1,10 +1,14 @@
 """Controlled live-canary guard for AliExpress placeorder (Fase 8.0.11H).
 
 This module does NOT enable AliExpress HTTP and does not select the real
-provider.  It is an additional fail-closed boundary that must wrap every
-future controlled live submission.
+provider. It is an additional fail-closed boundary that must wrap every future
+controlled live submission.
 
 Safety contract:
+* the controlled canary is OFF unless ``ALIEXPRESS_CONTROLLED_CANARY_ENABLED``
+  is exactly ``1``;
+* the canary is scoped to exactly one AliExpressOrder UUID through
+  ``ALIEXPRESS_CONTROLLED_CANARY_ORDER_ID``;
 * only one controlled canary submission may enter the submission pipeline at
   a time in PostgreSQL (session-level advisory lock held on a dedicated DB
   connection, therefore preserved across the internal ORM commits);
@@ -19,14 +23,15 @@ Safety contract:
 
 Why a PostgreSQL session advisory lock?
 ``submit_aliexpress_order`` intentionally commits the durable attempt before
-provider HTTP.  A transaction-scoped lock acquired by a wrapper would be
-released by those commits.  The dedicated session lock remains held across
+provider HTTP. A transaction-scoped lock acquired by a wrapper would be
+released by those commits. The dedicated session lock remains held across
 those commits; if the process dies, PostgreSQL releases the lock while the
 already committed ``in_flight`` attempt remains as the durable global blocker.
 """
 
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Optional
@@ -40,9 +45,11 @@ from .fulfillment import FulfillmentResult
 from .submission import AliExpressOrderSubmitter, submit_aliexpress_order
 
 
-# Fixed application lock id.  It is not a secret and carries no business data.
+# Fixed application lock id. It is not a secret and carries no business data.
 _CANARY_ADVISORY_LOCK_KEY = 80110110011
 _BLOCKING_ATTEMPT_STATES = ("in_flight", "unknown")
+_CANARY_ENABLED_ENV = "ALIEXPRESS_CONTROLLED_CANARY_ENABLED"
+_CANARY_ORDER_ID_ENV = "ALIEXPRESS_CONTROLLED_CANARY_ORDER_ID"
 
 
 class AliExpressCanaryCircuitOpen(Exception):
@@ -54,7 +61,7 @@ class AliExpressCanaryCircuitOpen(Exception):
 
 
 class AliExpressCanaryConfigurationError(Exception):
-    """Controlled canary was invoked without an explicit submitter."""
+    """Controlled canary is not safely configured."""
 
 
 @dataclass(frozen=True)
@@ -65,6 +72,36 @@ class CanaryCircuitStatus:
     blocking_count: int
     has_in_flight: bool
     has_unknown: bool
+
+
+def _canary_enabled() -> bool:
+    """Fail-closed gate: only exact string ``1`` enables the canary wrapper."""
+
+    return os.environ.get(_CANARY_ENABLED_ENV) == "1"
+
+
+def _canary_target_matches(order_id) -> bool:
+    """Require an exact, non-empty target order id match.
+
+    The configured UUID is treated only as an allow-list selector. It is never
+    emitted in exceptions or status objects.
+    """
+
+    configured = os.environ.get(_CANARY_ORDER_ID_ENV)
+    if not configured:
+        return False
+    return configured.strip() == str(order_id)
+
+
+def _assert_canary_armed_for(order_id) -> None:
+    """Require both the explicit canary gate and exact target-order allow-list."""
+
+    if not _canary_enabled():
+        raise AliExpressCanaryConfigurationError("controlled_canary_disabled")
+    if not _canary_target_matches(order_id):
+        raise AliExpressCanaryConfigurationError(
+            "controlled_canary_target_mismatch"
+        )
 
 
 @contextmanager
@@ -113,7 +150,7 @@ def get_canary_circuit_status(
 ) -> CanaryCircuitStatus:
     """Return the durable global circuit status without exposing identities.
 
-    ``unknown`` is always blocking. ``in_flight`` is always blocking.  There is
+    ``unknown`` is always blocking. ``in_flight`` is always blocking. There is
     intentionally no age-based expiry because an old ``in_flight`` row can be
     the only evidence that provider execution may have happened.
     """
@@ -159,14 +196,17 @@ def submit_controlled_canary_order(
     refresher=None,
     session=None,
 ) -> FulfillmentResult:
-    """Submit one order through the controlled-canary safety boundary.
+    """Submit exactly one allow-listed order through the canary boundary.
 
-    The caller MUST provide the submitter explicitly.  This prevents the guard
-    from becoming another hidden path that can select/enable a live provider.
+    Required independent conditions:
+      1. explicit submitter injected by caller;
+      2. ``ALIEXPRESS_CONTROLLED_CANARY_ENABLED == '1'``;
+      3. ``ALIEXPRESS_CONTROLLED_CANARY_ORDER_ID`` matches this order exactly;
+      4. no global in_flight/unknown blocker exists.
 
-    A blocker on the same order or on any other order aborts before entering
-    the core submission pipeline.  The exception is sanitized and the order is
-    not modified by this guard.
+    This function still does not enable ``ALIEXPRESS_PLACEORDER_ENABLED`` and
+    never chooses the real provider. Those are separate gates outside this
+    module.
     """
 
     if submitter is None:
@@ -174,10 +214,11 @@ def submit_controlled_canary_order(
             "controlled_canary_requires_explicit_submitter"
         )
 
+    _assert_canary_armed_for(ali_order.id)
     session = session or db.session
 
     with _global_canary_guard(session):
-        # Re-read after obtaining the global guard.  No IDs leave this boundary;
+        # Re-read after obtaining the global guard. No IDs leave this boundary;
         # the lookup only proves that the target still exists.
         order = (
             session.query(AliExpressOrder)
