@@ -18,6 +18,8 @@ Safety contract:
 * the blocker is never released by age/timeouts;
 * the caller must inject the submitter explicitly -- this module never chooses
   or enables the real provider;
+* optional ``pre_submit_guard`` executes inside the same global advisory-lock
+  critical section immediately before delegation to the core submission;
 * no attempt key, remote order id, token, credential, payload or PII is exposed
   by the circuit status/error.
 
@@ -34,7 +36,7 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from sqlalchemy import text
 
@@ -195,6 +197,7 @@ def submit_controlled_canary_order(
     submitter: Optional[AliExpressOrderSubmitter],
     refresher=None,
     session=None,
+    pre_submit_guard: Optional[Callable[..., None]] = None,
 ) -> FulfillmentResult:
     """Submit exactly one allow-listed order through the canary boundary.
 
@@ -203,6 +206,11 @@ def submit_controlled_canary_order(
       2. ``ALIEXPRESS_CONTROLLED_CANARY_ENABLED == '1'``;
       3. ``ALIEXPRESS_CONTROLLED_CANARY_ORDER_ID`` matches this order exactly;
       4. no global in_flight/unknown blocker exists.
+
+    ``pre_submit_guard`` is an optional stricter policy hook.  When supplied it
+    executes AFTER the global circuit check and WHILE the PostgreSQL advisory
+    lock is still held.  The hook may only validate/fail closed; it must not
+    perform provider I/O.
 
     This function still does not enable ``ALIEXPRESS_PLACEORDER_ENABLED`` and
     never chooses the real provider. Those are separate gates outside this
@@ -235,6 +243,9 @@ def submit_controlled_canary_order(
         status = get_canary_circuit_status(session=session)
         if status.open:
             raise AliExpressCanaryCircuitOpen("submission_circuit_open")
+
+        if pre_submit_guard is not None:
+            pre_submit_guard(order, session=session)
 
         return submit_aliexpress_order(
             order,
