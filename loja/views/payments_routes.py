@@ -1000,6 +1000,15 @@ def mercado_pago_webhook():
     return jsonify({"ok": True}), 200
 
 
+def _valid_payment_id(value):
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    if normalized.lower() in {"null", "none", "undefined"}:
+        return None
+    return normalized
+
+
 @payments_blueprint.route("/pagamentos/retorno/<result>")
 @login_required
 def payment_return(result):
@@ -1012,8 +1021,8 @@ def payment_return(result):
         )
 
     payment_id = (
-        request.args.get("payment_id")
-        or request.args.get("collection_id")
+        _valid_payment_id(request.args.get("payment_id"))
+        or _valid_payment_id(request.args.get("collection_id"))
     )
 
     if payment_id:
