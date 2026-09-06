@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}AliExpress Canary Safety{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-8">
+  <div class="mb-8 flex items-start justify-between gap-4">
+    <div>
+      <a href="{{ url_for('aliexpress_fulfillment_admin.index') }}" class="text-sm text-gray-500 hover:underline">&larr; Voltar à fila</a>
+      <h1 class="text-3xl font-bold text-gray-800 mt-2">Controlled Canary Safety</h1>
+      <p class="text-gray-500 mt-2 max-w-3xl">
+        Painel somente leitura para tentativas que bloqueiam submissões controladas.
+        Não executa retry, reconciliação, status sync ou chamada ao provider.
+      </p>
+    </div>
+    <span class="px-3 py-2 rounded-lg text-sm font-semibold border
+      {% if canary_status.open %}bg-red-50 text-red-700 border-red-200{% else %}bg-green-50 text-green-700 border-green-200{% endif %}">
+      Circuito {{ 'ABERTO' if canary_status.open else 'FECHADO' }}
+    </span>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Bloqueadores</div>
+      <div class="text-2xl font-bold mt-1">{{ canary_status.blocking_count }}</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Há in_flight</div>
+      <div class="text-2xl font-bold mt-1">{{ 'SIM' if canary_status.has_in_flight else 'NÃO' }}</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Há unknown</div>
+      <div class="text-2xl font-bold mt-1">{{ 'SIM' if canary_status.has_unknown else 'NÃO' }}</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Pending reconciliation</div>
+      <div class="text-2xl font-bold mt-1">{{ pending_reconciliation_count }}</div>
+    </div>
+  </div>
+
+  {% if canary_status.open %}
+  <div class="bg-red-50 border border-red-200 rounded-2xl p-5 mb-8">
+    <h2 class="font-bold text-red-800">Submissão controlada bloqueada</h2>
+    <p class="text-sm text-red-700 mt-2">
+      Não reenviar pedido, não liberar por idade e não executar retry manual enquanto qualquer tentativa abaixo permanecer in_flight ou unknown.
+      A resolução deve ser conclusiva e documentada antes de nova submissão.
+    </p>
+  </div>
+  {% else %}
+  <div class="bg-green-50 border border-green-200 rounded-2xl p-5 mb-8">
+    <h2 class="font-bold text-green-800">Nenhum bloqueador durável encontrado</h2>
+    <p class="text-sm text-green-700 mt-2">
+      Isto não habilita AliExpress placeorder. O gate de ambiente e o fluxo de canário continuam requisitos separados.
+    </p>
+  </div>
+  {% endif %}
+
+  <div class="bg-white rounded-2xl shadow overflow-hidden">
+    <div class="p-5 border-b border-gray-200">
+      <h2 class="font-semibold text-gray-800">Tentativas bloqueadoras</h2>
+      <p class="text-xs text-gray-500 mt-1">Sem attempt_key, remote_order_id, token ou payload.</p>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Pedido</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Estado local</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Tentativa</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Iniciada</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Concluída</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Erro sanitizado</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Ação</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for ali_order, attempt in blocking_rows %}
+          <tr>
+            <td class="px-4 py-3 text-sm">{{ (ali_order.id|string)[:8] }}…</td>
+            <td class="px-4 py-3 text-sm">{{ ali_order.state }}</td>
+            <td class="px-4 py-3 text-sm font-semibold {% if attempt.state == 'unknown' %}text-red-700{% else %}text-orange-700{% endif %}">{{ attempt.state }}</td>
+            <td class="px-4 py-3 text-sm">{{ attempt.started_at.strftime('%d/%m/%Y %H:%M') if attempt.started_at else '—' }}</td>
+            <td class="px-4 py-3 text-sm">{{ attempt.completed_at.strftime('%d/%m/%Y %H:%M') if attempt.completed_at else '—' }}</td>
+            <td class="px-4 py-3 text-sm">{{ attempt.last_error or ali_order.last_error or '—' }}</td>
+            <td class="px-4 py-3 text-sm">
+              <a href="{{ url_for('aliexpress_fulfillment_admin.detail', order_id=ali_order.id) }}" class="text-pink-600 hover:underline">Ver pedido</a>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">Nenhuma tentativa bloqueadora.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="mt-8 bg-yellow-50 border border-yellow-200 rounded-2xl p-5">
+    <h2 class="font-bold text-yellow-900">SOP de incidente ambíguo</h2>
+    <ol class="list-decimal ml-5 mt-3 space-y-2 text-sm text-yellow-900">
+      <li>Manter placeorder e automações de retry desligados.</li>
+      <li>Não alterar attempt_key e não criar nova AliExpressOrder para o mesmo fulfillment.</li>
+      <li>Investigar por fonte remota conclusiva. Ausência inconclusiva não autoriza retry.</li>
+      <li>Se a existência remota for confirmada, reconciliar como found e preservar o mesmo pedido local.</li>
+      <li>Retry só é permitido quando houver prova conclusiva de not_found.</li>
+      <li>Se não houver como concluir, manter bloqueado e resolver comercialmente/manual, sem segunda compra automática.</li>
+    </ol>
+  </div>
+</div>
+{% endblock %}
