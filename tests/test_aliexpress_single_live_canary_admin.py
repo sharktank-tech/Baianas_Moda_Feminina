@@ -69,9 +69,16 @@ def test_single_live_canary_page_is_fail_closed_and_sanitized(
     assert "disabled" in response.text
 
 
-def test_single_live_canary_post_is_csrf_protected(client, admin_user, login):
+def test_single_live_canary_post_is_csrf_protected(
+    app, client, admin_user, login, monkeypatch
+):
     row = _order()
     login(admin_user.email)
+
+    # The shared test app disables CSRF globally so most historical POST tests
+    # can exercise route behavior directly.  This test is specifically proving
+    # the production protection, therefore turn it back on for this request.
+    monkeypatch.setitem(app.config, "WTF_CSRF_ENABLED", True)
 
     response = client.post(f"{BASE_URL}/{row.id}/single-live-canary/submit")
 
