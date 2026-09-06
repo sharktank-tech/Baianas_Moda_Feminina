@@ -5,6 +5,8 @@ GET-only tests. No provider, no network and no mutation endpoint is introduced.
 
 import uuid
 
+import pytest
+
 from loja import db
 from loja.modules.models import AliExpressOrder, AliExpressSubmissionAttempt
 from loja.utils import utcnow
@@ -14,13 +16,26 @@ BASE_URL = "/admin/integrations/aliexpress/pedidos"
 SAFETY_URL = f"{BASE_URL}/canary-safety"
 
 
+def _clear_blocking_rows():
+    db.session.query(AliExpressSubmissionAttempt).delete()
+    db.session.query(AliExpressOrder).delete()
+    db.session.commit()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_blocking_tables(db):
+    _clear_blocking_rows()
+    yield
+    _clear_blocking_rows()
+
+
 def _blocking_attempt(*, state="unknown"):
     now = utcnow()
     order = AliExpressOrder(
         id=uuid.uuid4(),
         state="pending_reconciliation",
         idempotency_key=f"idem-{uuid.uuid4().hex}",
-        attempt_key="attempt-key-MUST-NOT-LEAK",
+        attempt_key=f"attempt-key-MUST-NOT-LEAK-{uuid.uuid4().hex[:8]}",
         attempt_count=1,
         queued_at=now,
         last_attempt_at=now,
