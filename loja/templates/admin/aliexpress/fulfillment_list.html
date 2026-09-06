@@ -6,12 +6,50 @@
 
 <div class="max-w-7xl mx-auto px-4 py-8">
 
-    <div class="mb-8">
-        <h1 class="text-3xl font-bold text-gray-800">Fila de Fulfillment AliExpress</h1>
-        <p class="text-gray-500 mt-2">
-            Acompanhe o estado de submissão dos pedidos AliExpress ao fornecedor.
-        </p>
+    <div class="mb-8 flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-800">Fila de Fulfillment AliExpress</h1>
+            <p class="text-gray-500 mt-2">
+                Acompanhe o estado de submissão dos pedidos AliExpress ao fornecedor.
+            </p>
+        </div>
+        <a href="{{ url_for('aliexpress_fulfillment_admin.canary_safety') }}"
+           class="inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm font-semibold border
+           {% if canary_status.open %}bg-red-50 text-red-700 border-red-200{% else %}bg-green-50 text-green-700 border-green-200{% endif %}">
+            Canary safety: {{ 'BLOQUEADO' if canary_status.open else 'SEM BLOQUEADOR' }}
+        </a>
     </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div class="bg-white rounded-2xl shadow p-5">
+            <div class="text-sm text-gray-500">Circuit breaker</div>
+            <div class="text-xl font-bold mt-1 {% if canary_status.open %}text-red-700{% else %}text-green-700{% endif %}">
+                {{ 'ABERTO' if canary_status.open else 'FECHADO' }}
+            </div>
+            <div class="text-xs text-gray-500 mt-1">{{ canary_status.blocking_count }} tentativa(s) bloqueadora(s)</div>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5">
+            <div class="text-sm text-gray-500">Pending reconciliation</div>
+            <div class="text-xl font-bold mt-1 {% if pending_reconciliation_count %}text-orange-700{% endif %}">
+                {{ pending_reconciliation_count }}
+            </div>
+            <div class="text-xs text-gray-500 mt-1">Nunca autoriza retry cego.</div>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-5">
+            <div class="text-sm text-gray-500">Controlled live canary</div>
+            <div class="text-sm font-semibold mt-2">Não habilitado por esta tela</div>
+            <div class="text-xs text-gray-500 mt-1">O gate de ambiente continua independente.</div>
+        </div>
+    </div>
+
+    {% if canary_status.open %}
+    <div class="bg-red-50 border border-red-200 rounded-2xl p-5 mb-6">
+        <div class="font-semibold text-red-800">Novas submissões controladas devem permanecer bloqueadas.</div>
+        <div class="text-sm text-red-700 mt-1">
+            Existe tentativa in_flight/unknown. Não liberar por idade e não repetir a compra até resolução conclusiva.
+        </div>
+    </div>
+    {% endif %}
 
     <!-- Filtros -->
     <div class="bg-white rounded-2xl shadow p-6 mb-6">
@@ -61,7 +99,7 @@
                 </thead>
                 <tbody class="divide-y divide-gray-200">
                     {% for ali_order in pagination.items %}
-                    <tr class="hover:bg-gray-50">
+                    <tr class="hover:bg-gray-50 {% if ali_order.state == 'pending_reconciliation' %}bg-orange-50{% endif %}">
                         <td class="px-4 py-3">
                             <a href="{{ url_for('aliexpress_fulfillment_admin.detail', order_id=ali_order.id) }}" class="text-sm font-medium text-pink-600 hover:underline">
                                 {% if ali_order.order %}
@@ -89,6 +127,7 @@
                                 {% if state == 'ready' %}text-green-700 bg-green-50 border-green-200
                                 {% elif state == 'blocked' %}text-red-700 bg-red-50 border-red-200
                                 {% elif state == 'queued' %}text-yellow-700 bg-yellow-50 border-yellow-200
+                                {% elif state == 'pending_reconciliation' %}text-orange-700 bg-orange-100 border-orange-300
                                 {% elif state in ['submitting', 'submitted', 'confirmed'] %}text-blue-700 bg-blue-50 border-blue-200
                                 {% elif state in ['shipped', 'delivered'] %}text-purple-700 bg-purple-50 border-purple-200
                                 {% elif state in ['cancelled', 'cancel_requested'] %}text-gray-700 bg-gray-50 border-gray-200
