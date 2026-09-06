@@ -6,14 +6,22 @@ fake submitter.  No AliExpress HTTP is performed.
 
 import threading
 
+import pytest
+
 from loja.integrations.aliexpress.single_live_canary import (
     AliExpressSingleLiveCanaryConsumed,
     submit_single_live_canary_order,
 )
 from tests.test_aliexpress_controlled_canary_pg import (
+    IS_POSTGRES,
     SlowCountingSubmitter,
     _materialize_ready,
     env,
+)
+
+pytestmark = pytest.mark.skipif(
+    not IS_POSTGRES,
+    reason="requer PostgreSQL (DATABASE_URL postgresql://)",
 )
 
 
