@@ -50,6 +50,11 @@ class _Submitter:
         raise AssertionError("submitter should not be reached directly")
 
 
+def _arm(monkeypatch, order_id="local-order"):
+    monkeypatch.setenv("ALIEXPRESS_CONTROLLED_CANARY_ENABLED", "1")
+    monkeypatch.setenv("ALIEXPRESS_CONTROLLED_CANARY_ORDER_ID", str(order_id))
+
+
 def test_controlled_canary_requires_explicit_submitter():
     order = SimpleNamespace(id="local-order")
     with pytest.raises(AliExpressCanaryConfigurationError) as exc:
@@ -57,10 +62,52 @@ def test_controlled_canary_requires_explicit_submitter():
     assert str(exc.value) == "controlled_canary_requires_explicit_submitter"
 
 
+def test_controlled_canary_is_disabled_by_default(monkeypatch):
+    order = SimpleNamespace(id="local-order")
+    monkeypatch.delenv("ALIEXPRESS_CONTROLLED_CANARY_ENABLED", raising=False)
+    monkeypatch.delenv("ALIEXPRESS_CONTROLLED_CANARY_ORDER_ID", raising=False)
+
+    with pytest.raises(AliExpressCanaryConfigurationError) as exc:
+        submit_controlled_canary_order(
+            order, submitter=_Submitter(), session=object()
+        )
+
+    assert str(exc.value) == "controlled_canary_disabled"
+
+
+def test_controlled_canary_requires_exact_enabled_value(monkeypatch):
+    order = SimpleNamespace(id="local-order")
+    monkeypatch.setenv("ALIEXPRESS_CONTROLLED_CANARY_ENABLED", "true")
+    monkeypatch.setenv("ALIEXPRESS_CONTROLLED_CANARY_ORDER_ID", "local-order")
+
+    with pytest.raises(AliExpressCanaryConfigurationError) as exc:
+        submit_controlled_canary_order(
+            order, submitter=_Submitter(), session=object()
+        )
+
+    assert str(exc.value) == "controlled_canary_disabled"
+
+
+def test_controlled_canary_requires_exact_target_order(monkeypatch):
+    order = SimpleNamespace(id="local-order")
+    monkeypatch.setenv("ALIEXPRESS_CONTROLLED_CANARY_ENABLED", "1")
+    monkeypatch.setenv("ALIEXPRESS_CONTROLLED_CANARY_ORDER_ID", "different-order")
+
+    with pytest.raises(AliExpressCanaryConfigurationError) as exc:
+        submit_controlled_canary_order(
+            order, submitter=_Submitter(), session=object()
+        )
+
+    assert str(exc.value) == "controlled_canary_target_mismatch"
+    assert "local-order" not in str(exc.value)
+    assert "different-order" not in str(exc.value)
+
+
 def test_open_global_circuit_blocks_before_core_submission(monkeypatch):
     order = SimpleNamespace(id="local-order")
     session = _FakeSession(order)
     core_calls = []
+    _arm(monkeypatch, order.id)
 
     monkeypatch.setattr(canary, "_global_canary_guard", _noop_guard)
     monkeypatch.setattr(
@@ -96,6 +143,7 @@ def test_closed_circuit_delegates_once_with_explicit_submitter(monkeypatch):
     submitter = _Submitter()
     sentinel = object()
     core_calls = []
+    _arm(monkeypatch, order.id)
 
     monkeypatch.setattr(canary, "_global_canary_guard", _noop_guard)
     monkeypatch.setattr(
