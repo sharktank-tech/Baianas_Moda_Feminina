@@ -17,6 +17,7 @@ import loja.views.payments_routes as payments_routes
         ("NULL", "null"),
         ("None", "null"),
         ("undefined", "null"),
+        (" null ", "null"),
         ("", "null"),
         (None, "null"),
     ],
@@ -52,6 +53,34 @@ def test_payment_return_ignores_non_payment_sentinels(
 
     assert response.status_code == 200
     assert sync_calls == []
+
+
+def test_payment_return_falls_back_to_valid_collection_id_after_null_payment_id(
+    client,
+    login,
+    make_user,
+    monkeypatch,
+):
+    user = make_user()
+    login(user.email)
+
+    sync_calls = []
+    monkeypatch.setattr(
+        payments_routes,
+        "_sync_payment",
+        lambda value: sync_calls.append(value),
+    )
+
+    response = client.get(
+        "/pagamentos/retorno/sucesso",
+        query_string={
+            "payment_id": "null",
+            "collection_id": "987654321",
+        },
+    )
+
+    assert response.status_code == 200
+    assert sync_calls == ["987654321"]
 
 
 def test_payment_return_syncs_real_payment_id(
