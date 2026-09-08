@@ -120,13 +120,7 @@ def create_preference(order):
             f"Mercado Pago retornou HTTP {status_code}: {message}"
         )
 
-    use_sandbox = bool(current_app.config.get("MERCADO_PAGO_USE_SANDBOX", False))
-    checkout_url = (
-        response.get("sandbox_init_point")
-        if use_sandbox
-        else response.get("init_point")
-    )
-    checkout_url = checkout_url or response.get("init_point")
+    checkout_url = response.get("init_point")
 
     if not checkout_url:
         raise PaymentGatewayError(
