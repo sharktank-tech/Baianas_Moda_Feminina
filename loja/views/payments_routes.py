@@ -725,7 +725,7 @@ def _sync_payment(payment_id):
     order = (
         Order.query
         .filter_by(id=order_id)
-        .with_for_update()
+        .with_for_update(of=Order)
         .first()
     )
     if not order:
