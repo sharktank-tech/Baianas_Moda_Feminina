@@ -132,41 +132,36 @@ A validação confirmou no log:
 - query não copiada para o JSON estruturado;
 - nenhum Access Token, webhook secret, e-mail, telefone, cartão ou endereço no evento estruturado.
 
-## Bloqueio atual de segurança do Preview
+## Isolamento do Preview — variável confirmada
 
-A branch `ops/mercadopago-observability` ainda não possui evidência de uma variável Vercel branch-specific:
+Em 2026-09-09 foi confirmada no Vercel a variável branch-specific:
 
 ```text
-POLLOMODAS_SCHEMA=pollomodas_preview
+POLLOMODAS_SCHEMA   Hidden   Secret   Preview (ops/mercadopago-observability)
 ```
 
-Além disso, uma leitura da homepage do Preview exibiu o catálogo real, enquanto `pollomodas_preview` não contém catálogo. Isso é evidência forte de que esse Preview está atualmente lendo o schema `pollomodas` por fallback.
+A variável foi criada exclusivamente para a branch `ops/mercadopago-observability`. Como variáveis de ambiente Vercel só passam a valer em novos deployments, este commit documental existe também para disparar um novo Preview e permitir validar o isolamento no runtime efetivo.
 
-Consequência:
+A existência da variável, isoladamente, não encerra o gate. O novo deployment ainda deve provar:
+
+- `READY`;
+- HTTP 200;
+- leitura do schema `pollomodas_preview`;
+- ausência de alteração em `pollomodas`;
+- logs estruturados sanitizados;
+- nenhuma chamada LIVE ao Mercado Pago.
+
+Até essa prova terminar, o estado permanece conservador:
 
 ```text
+OBSERVABILITY_PREVIEW_SCHEMA_ENV=PASS
+OBSERVABILITY_PREVIEW_RUNTIME_ISOLATION=PENDING_REDEPLOY_VALIDATION
 OBSERVABILITY_PREVIEW_SAFE_FOR_WRITES=false
 ```
 
-Até corrigir o environment da branch, são proibidos no Preview de observabilidade:
-
-- cadastro;
-- checkout;
-- criação de pedido;
-- chamada ao Mercado Pago;
-- qualquer outra operação de escrita.
-
-Somente GETs sem efeito colateral são permitidos.
-
 ## Próximo gate
 
-Configurar no Vercel, exclusivamente para a branch `ops/mercadopago-observability`:
-
-```text
-POLLOMODAS_SCHEMA=pollomodas_preview
-```
-
-A alteração deve valer apenas para novos Preview deployments. Depois disso é obrigatório gerar novo Preview, confirmar HTTP 200, confirmar que Production não mudou e validar logs sanitizados antes de considerar qualquer merge em `master`.
+Validar o novo Preview gerado após a configuração do environment branch-specific. Primeiro serão executadas apenas leituras sem efeito colateral. Somente após confirmar que o runtime efetivo usa `pollomodas_preview` poderá ser considerada uma escrita sintética e não financeira em Preview.
 
 ## Estado do checkpoint
 
@@ -178,7 +173,8 @@ OBSERVABILITY_CODE_IMPLEMENTED=true
 OBSERVABILITY_STRUCTURED_LOG_SMOKE=PASS
 OBSERVABILITY_LOG_SANITIZATION_SMOKE=PASS
 OBSERVABILITY_PREVIEW_BUILD=PASS
-OBSERVABILITY_PREVIEW_SCHEMA_ISOLATION=BLOCKED_ENV
+OBSERVABILITY_PREVIEW_SCHEMA_ENV=PASS
+OBSERVABILITY_PREVIEW_RUNTIME_ISOLATION=PENDING_REDEPLOY_VALIDATION
 OBSERVABILITY_PREVIEW_SAFE_FOR_WRITES=false
 REAL_PAYMENT_RETRY=false
 READY_FOR_PRODUCTION_MERGE=false
