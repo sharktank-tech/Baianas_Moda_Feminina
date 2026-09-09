@@ -9,26 +9,30 @@ from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import text
 import uuid
 
-# Em ambientes serverless (Vercel) o access log do Werkzeug registraria a query
-# string completa do callback OAuth (code/state) em cada request. Defesas:
+# Em ambientes serverless (Vercel), access logs podem registrar a query string
+# completa de callbacks. Isso é especialmente sensível em OAuth e pagamentos,
+# onde a URL pode carregar code/state, payment_id, merchant order id ou
+# external_reference. Defesas:
 #   1) desliga o access log do Werkzeug ANTES de servir requests; e
-#   2) mesmo que algo ainda emita o access log, sanitiza o self.path no momento
-#      da emissão (somente o caminho do callback OAuth), sem remover a query da
-#      request que a aplicação já processou em request.args.
-# Logs próprios da aplicação (OAuth/API, já sanitizados) permanecem.
+#   2) mesmo que algo ainda emita o access log, sanitiza self.path/requestline
+#      somente na emissão, preservando request.args para a aplicação.
+# Logs próprios da aplicação permanecem e usam telemetria sanitizada.
 def _sanitize_oauth_access_path(path: str) -> str:
     if not path:
         return path
 
     base = path.split("?", 1)[0]
-    if base == "/integrations/aliexpress/callback":
+    if (
+        base == "/integrations/aliexpress/callback"
+        or base.startswith("/pagamentos/")
+    ):
         return base
 
     return path
 
 
 def _sanitize_access_requestline(requestline: str) -> str:
-    # 'METHOD <path>?<query> HTTP/x.y' -> redige a query do callback OAuth.
+    # 'METHOD <path>?<query> HTTP/x.y' -> redige query de callbacks sensíveis.
     parts = requestline.split()
     if len(parts) == 3:
         method, path_, rest = parts
@@ -170,8 +174,8 @@ def _setup_database(app):
 
 
 def create_app():
-    # Antes de começar a servir requests: em Vercel, desliga o access log do
-    # Werkzeug (nunca registra ?code=/&state= do callback OAuth em log).
+    # Antes de começar a servir requests: em Vercel, desliga/endurece access
+    # logs para que callbacks sensíveis não persistam query strings.
     _harden_werkzeug_access_log()
 
     app = Flask(__name__)
