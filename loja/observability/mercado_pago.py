@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -21,6 +22,7 @@ _SENSITIVE_KEYS = {
     "surname",
     "token",
 }
+_CORRELATION_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 
 
 def stable_hash(value):
@@ -44,7 +46,7 @@ def request_correlation_id():
     if existing:
         return existing
     incoming = (request.headers.get("x-correlation-id") or "").strip()
-    correlation_id = incoming[:64] if incoming else new_correlation_id()
+    correlation_id = incoming if _CORRELATION_RE.fullmatch(incoming) else new_correlation_id()
     request._pollomodas_correlation_id = correlation_id
     return correlation_id
 
@@ -58,6 +60,13 @@ def runtime_context():
         "git_sha": os.environ.get("VERCEL_GIT_COMMIT_SHA"),
         "region": os.environ.get("VERCEL_REGION"),
     }
+
+
+def _safe_text(value, max_length=160):
+    if value is None:
+        return None
+    normalized = " ".join(str(value).split())
+    return normalized[:max_length]
 
 
 def _sanitize_value(key, value):
@@ -76,6 +85,8 @@ def _sanitize_value(key, value):
         "x_request_id",
     }:
         return stable_hash(value)
+    if lower == "provider_message":
+        return _safe_text(value)
     if isinstance(value, dict):
         return sanitize_fields(value)
     if isinstance(value, (list, tuple)):
@@ -91,10 +102,18 @@ def sanitize_fields(fields):
 
 
 def log_event(event, *, correlation_id=None, level="info", **fields):
+    supplied_correlation = str(correlation_id or "").strip()
+    if supplied_correlation and _CORRELATION_RE.fullmatch(supplied_correlation):
+        safe_correlation = supplied_correlation
+    elif supplied_correlation:
+        safe_correlation = stable_hash(supplied_correlation)
+    else:
+        safe_correlation = request_correlation_id()
+
     payload = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "event": str(event),
-        "correlation_id": correlation_id or request_correlation_id(),
+        "correlation_id": safe_correlation,
         **runtime_context(),
         **sanitize_fields(fields),
     }
