@@ -132,36 +132,68 @@ A validação confirmou no log:
 - query não copiada para o JSON estruturado;
 - nenhum Access Token, webhook secret, e-mail, telefone, cartão ou endereço no evento estruturado.
 
-## Isolamento do Preview — variável confirmada
+## Isolamento do Preview — validado por leitura
 
-Em 2026-09-09 foi confirmada no Vercel a variável branch-specific:
+Foi confirmada no Vercel a variável branch-specific:
 
 ```text
 POLLOMODAS_SCHEMA   Hidden   Secret   Preview (ops/mercadopago-observability)
 ```
 
-A variável foi criada exclusivamente para a branch `ops/mercadopago-observability`. Como variáveis de ambiente Vercel só passam a valer em novos deployments, este commit documental existe também para disparar um novo Preview e permitir validar o isolamento no runtime efetivo.
+O deployment `dpl_9am69iKVKR5ymreumd6JCwsggdgg` ficou `READY` e a homepage do Preview deixou de exibir o catálogo real de Production. A leitura é coerente com o baseline do Supabase:
 
-A existência da variável, isoladamente, não encerra o gate. O novo deployment ainda deve provar:
+```text
+pollomodas.products=20
+pollomodas_preview.products=0
+pollomodas.users=3
+pollomodas_preview.users=1
+pollomodas.orders=23
+pollomodas_preview.orders=0
+pollomodas.payments=0
+pollomodas_preview.payments=0
+```
 
-- `READY`;
-- HTTP 200;
-- leitura do schema `pollomodas_preview`;
-- ausência de alteração em `pollomodas`;
-- logs estruturados sanitizados;
-- nenhuma chamada LIVE ao Mercado Pago.
-
-Até essa prova terminar, o estado permanece conservador:
+Após os smokes de leitura, os mesmos contadores permaneceram inalterados. Portanto:
 
 ```text
 OBSERVABILITY_PREVIEW_SCHEMA_ENV=PASS
-OBSERVABILITY_PREVIEW_RUNTIME_ISOLATION=PENDING_REDEPLOY_VALIDATION
-OBSERVABILITY_PREVIEW_SAFE_FOR_WRITES=false
+OBSERVABILITY_PREVIEW_READ_ISOLATION=PASS
+PRODUCTION_UNCHANGED=true
 ```
+
+A prova literal de escrita pela aplicação nesta branch permanece pendente porque as ferramentas conectadas disponíveis nesta sessão permitem fetch autenticado do Preview, porém não POST arbitrário com sessão/CSRF. Isso não invalida a prova de leitura do `search_path`; apenas mantém o gate de escrita marcado separadamente.
+
+## Check de privacidade do access log
+
+Foi aplicado o commit `6764a36662e1c8374339b0c5b6c57e7a8f44b7d9` para ampliar a sanitização de `requestline` também às rotas `/pagamentos/*`. O deployment resultante é:
+
+```text
+deployment=dpl_Bft3PNkd6oUYzAcKCouPtBWq6Sec
+branch=ops/mercadopago-observability
+commit=6764a36662e1c8374339b0c5b6c57e7a8f44b7d9
+state=READY
+```
+
+O smoke com identificadores totalmente sintéticos confirmou que os eventos `mp_observability` continuam sanitizados e usam hashes. Porém a linha de access log emitida pelo serving layer do runtime ainda contém a query string original. Portanto a tentativa de redigir essa linha em nível da aplicação NÃO resolveu o log externo do serving layer.
+
+Conclusão conservadora:
+
+```text
+STRUCTURED_TELEMETRY_SANITIZATION=PASS
+VERCEL_SERVING_ACCESS_LOG_QUERY_REDACTION=NOT_CONTROLLED_BY_CURRENT_APP_PATCH
+```
+
+Esse achado não altera lógica de cobrança nem explica a ausência do objeto Payment. Ele é um item de privacidade/observabilidade separado. Nenhum segredo foi usado no smoke; somente IDs sintéticos. Não promover essa alegação para `PASS` até existir solução comprovada no runtime ou até aceitar formalmente que o access log de plataforma está fora do escopo do logger estruturado da aplicação.
 
 ## Próximo gate
 
-Validar o novo Preview gerado após a configuração do environment branch-specific. Primeiro serão executadas apenas leituras sem efeito colateral. Somente após confirmar que o runtime efetivo usa `pollomodas_preview` poderá ser considerada uma escrita sintética e não financeira em Preview.
+Antes de qualquer merge em `master`:
+
+1. revisar o diff completo da branch e confirmar que não existe alteração funcional de cobrança;
+2. decidir explicitamente o tratamento do access log de plataforma residual;
+3. obter, se necessário, uma prova de escrita sintética não financeira no `pollomodas_preview` por um cliente HTTP capaz de POST com CSRF/sessão;
+4. somente depois propor promoção da observabilidade para Production;
+5. `REAL_PAYMENT_RETRY` continua `false`.
 
 ## Estado do checkpoint
 
@@ -174,8 +206,9 @@ OBSERVABILITY_STRUCTURED_LOG_SMOKE=PASS
 OBSERVABILITY_LOG_SANITIZATION_SMOKE=PASS
 OBSERVABILITY_PREVIEW_BUILD=PASS
 OBSERVABILITY_PREVIEW_SCHEMA_ENV=PASS
-OBSERVABILITY_PREVIEW_RUNTIME_ISOLATION=PENDING_REDEPLOY_VALIDATION
-OBSERVABILITY_PREVIEW_SAFE_FOR_WRITES=false
+OBSERVABILITY_PREVIEW_READ_ISOLATION=PASS
+OBSERVABILITY_PREVIEW_WRITE_ISOLATION=PENDING_CLIENT_POST_CAPABILITY
+VERCEL_SERVING_ACCESS_LOG_QUERY_REDACTION=OPEN
 REAL_PAYMENT_RETRY=false
 READY_FOR_PRODUCTION_MERGE=false
 ```
