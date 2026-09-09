@@ -9,6 +9,8 @@ from mercadopago.webhook import (
     WebhookSignatureValidator,
 )
 
+from loja.observability.mercado_pago import log_event
+
 
 MONEY_PLACES = Decimal("0.01")
 
@@ -110,9 +112,32 @@ def create_preference(order):
         "x-idempotency-key": f"preference-{order.id}",
     }
 
+    log_event(
+        "provider.preference.create.requested",
+        order_id=order.id,
+        external_reference=order.id,
+        amount=money(order.total),
+        currency="BRL",
+        item_count=len(order.items),
+        notification_url_configured=bool(preference_data.get("notification_url")),
+        back_urls_configured=all(preference_data.get("back_urls", {}).values()),
+    )
+
     result = sdk.preference().create(preference_data, request_options)
     status_code = int(result.get("status") or 0)
     response = result.get("response") or {}
+
+    log_event(
+        "provider.preference.create.completed",
+        status_code=status_code,
+        order_id=order.id,
+        external_reference=response.get("external_reference") or order.id,
+        preference_id=response.get("id"),
+        collector_id=response.get("collector_id"),
+        site_id=response.get("site_id"),
+        has_init_point=bool(response.get("init_point")),
+        provider_message=response.get("message"),
+    )
 
     if status_code not in {200, 201} or not response.get("id"):
         message = response.get("message") or "Falha ao criar preferência."
@@ -135,9 +160,28 @@ def create_preference(order):
 
 
 def get_payment(payment_id):
+    log_event(
+        "provider.payment.get.requested",
+        payment_id=payment_id,
+    )
+
     result = get_sdk().payment().get(str(payment_id))
     status_code = int(result.get("status") or 0)
     response = result.get("response") or {}
+
+    log_event(
+        "provider.payment.get.completed",
+        status_code=status_code,
+        payment_id=response.get("id") or payment_id,
+        external_reference=response.get("external_reference"),
+        payment_status=response.get("status"),
+        status_detail=response.get("status_detail"),
+        payment_method_id=response.get("payment_method_id"),
+        payment_type_id=response.get("payment_type_id"),
+        transaction_amount=response.get("transaction_amount"),
+        currency=response.get("currency_id"),
+        provider_message=response.get("message"),
+    )
 
     if status_code != 200 or not response.get("id"):
         message = response.get("message") or "Pagamento não encontrado."

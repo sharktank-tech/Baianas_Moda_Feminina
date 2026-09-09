@@ -219,6 +219,11 @@ def create_app():
     from loja import cli
     app.cli.add_command(cli.create_admin)
 
+    # Instala somente telemetria sanitizada. Não altera regras de pagamento,
+    # credenciais, banco ou comportamento das rotas.
+    from loja.observability.install import install_mercado_pago_observability
+    install_mercado_pago_observability(app)
+
     # Bootstrap do schema dedicado (somente PostgreSQL) + hook de search_path.
     # Em Vercel (serverless) o bootstrap é pulado; o hook continua instalado.
     _setup_database(app)
