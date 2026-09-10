@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Second diagnostic canary — AliExpress{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8">
+  <div class="mb-6">
+    <a href="{{ url_for('aliexpress_fulfillment_admin.detail', order_id=ali_order.id) }}"
+       class="text-sm text-gray-500 hover:text-gray-800 underline">&larr; Voltar ao fulfillment</a>
+    <h1 class="text-3xl font-bold text-gray-800 mt-2">FASE 8.0.11K — Second diagnostic canary</h1>
+    <p class="text-gray-500 mt-2">
+      Esta tela não escolhe pedido automaticamente e não reabre o first-canary da FASE 8.0.11I.
+    </p>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    <div class="bg-white rounded-2xl shadow p-5">
+      <h2 class="font-semibold text-gray-800 mb-3">Preflight local</h2>
+      <dl class="space-y-2 text-sm">
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">Estado</dt><dd class="font-medium">{{ ali_order.state }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">attempt_count local</dt><dd class="font-medium">{{ ali_order.attempt_count }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">Durable attempts globais</dt><dd class="font-medium">{{ canary_preflight.prior_attempt_count }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">Circuit breaker</dt><dd class="font-medium">{{ 'ABERTO' if canary_preflight.circuit_open else 'FECHADO' }}</dd></div>
+      </dl>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow p-5">
+      <h2 class="font-semibold text-gray-800 mb-3">Gates</h2>
+      <dl class="space-y-2 text-sm">
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">Second diagnostic</dt><dd class="font-medium">{{ 'ON' if canary_preflight.second_gate_enabled else 'OFF' }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">First canary</dt><dd class="font-medium">{{ 'OFF' if canary_preflight.first_gate_disabled else 'ON — BLOQUEANTE' }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">Controlled canary</dt><dd class="font-medium">{{ 'ON' if canary_preflight.controlled_gate_enabled else 'OFF' }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">Target exato</dt><dd class="font-medium">{{ 'MATCH' if canary_preflight.target_matches else 'NO MATCH' }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">Placeorder</dt><dd class="font-medium">{{ 'ON' if canary_preflight.placeorder_enabled else 'OFF' }}</dd></div>
+      </dl>
+    </div>
+  </div>
+
+  <div class="rounded-2xl border p-5 mb-6 {% if canary_preflight.eligible %}bg-green-50 border-green-200{% else %}bg-yellow-50 border-yellow-200{% endif %}">
+    <p class="font-semibold {% if canary_preflight.eligible %}text-green-800{% else %}text-yellow-800{% endif %}">
+      {{ 'READY FOR SECOND DIAGNOSTIC CANARY' if canary_preflight.eligible else 'BLOCKED / NOT ARMED' }}
+    </p>
+    <p class="text-sm mt-2 text-gray-700">Código sanitizado: {{ canary_preflight.reason }}</p>
+  </div>
+
+  <div class="bg-red-50 border border-red-200 rounded-2xl p-5 mb-6 text-sm text-red-800 space-y-2">
+    <p><strong>Pré-condição:</strong> deve existir exatamente uma tentativa anterior, reconciliada como rejected, da mesma ordem.</p>
+    <p><strong>Segundo slot:</strong> qualquer segundo durable attempt consome esta fase definitivamente.</p>
+    <p><strong>Unknown:</strong> nunca reenviar; desarmar e reconciliar antes de qualquer decisão futura.</p>
+    <p><strong>Esta ação pode gerar compra real no AliExpress</strong> apenas quando todos os gates estiverem explicitamente ON.</p>
+  </div>
+
+  <form method="POST"
+        action="{{ url_for('aliexpress_single_live_canary_admin.second_diagnostic_submit', order_id=ali_order.id) }}"
+        onsubmit="return confirm('CONFIRMA EXATAMENTE UMA SEGUNDA TENTATIVA DIAGNÓSTICA REAL NO ALIEXPRESS? Não existe retry automático.');">
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+    <button type="submit"
+            class="px-5 py-3 rounded-lg font-semibold text-white {% if canary_preflight.eligible %}bg-red-600 hover:bg-red-700{% else %}bg-gray-400 cursor-not-allowed{% endif %}"
+            {% if not canary_preflight.eligible %}disabled{% endif %}>
+      Executar UMA segunda tentativa diagnóstica real
+    </button>
+  </form>
+
+  <p class="text-xs text-gray-500 mt-4">
+    A página não mostra token, credential, payload, attempt key nem IDs remotos.
+  </p>
+</div>
+{% endblock %}
