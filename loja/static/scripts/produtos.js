@@ -49,6 +49,10 @@
 
   /* ── Mini-slider no hover ────────────────────────── */
   function initSliders() {
+    // Mantém cada foto visível tempo suficiente para o usuário observar a peça
+    // sem deixar o card parecer parado. Antes a troca ocorria a cada 900 ms.
+    const SLIDE_INTERVAL_MS = 1800;
+
     document.querySelectorAll('.product-card').forEach(card => {
       const slides = card.querySelectorAll('.product-slide');
       if (slides.length <= 1) return;
@@ -63,11 +67,12 @@
       }
 
       card.addEventListener('mouseenter', () => {
-        timer = setInterval(() => showSlide(idx + 1), 900);
+        timer = setInterval(() => showSlide(idx + 1), SLIDE_INTERVAL_MS);
       });
 
       card.addEventListener('mouseleave', () => {
         clearInterval(timer);
+        timer = null;
         showSlide(0);
       });
     });

@@ -8,17 +8,15 @@
 
   <style>
     /*
-     * Desacelera somente a troca das imagens quando o mouse está
-     * sobre o card. A animação completa passa a durar 16 segundos.
+     * Suaviza a transição do mini-slider. O intervalo entre as trocas é
+     * controlado em produtos.js para manter cada foto visível por mais tempo.
      */
     .product-card:hover .product-slides.auto-slider {
-      animation-duration: 16s !important;
-      transition-duration: 1s !important;
+      transition-duration: .65s !important;
     }
 
     @media (prefers-reduced-motion: reduce) {
       .product-card:hover .product-slides.auto-slider {
-        animation: none !important;
         transition: none !important;
       }
     }
@@ -224,7 +222,7 @@
             {% set excerpt = product_description_excerpt(product.description, max_words=30) %}
             <p class="product-desc">{{ excerpt or product.name }}</p>
             <div class="product-footer">
-              <span class="product-price">R$ {{ "%.2f"|format(product.price) }}</span>
+              <span class="product-price">R$ {{ "%.2f"|format(product.price)|replace('.', ',') }}</span>
               <span class="product-cta">Ver →</span>
             </div>
           </div>
