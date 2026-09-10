@@ -26,6 +26,81 @@ def test_non_merchant_order_webhook_falls_through(monkeypatch):
     assert response.get_json() == {"fallback": True}
 
 
+def test_legacy_payment_ipn_is_acknowledged_without_processing(monkeypatch):
+    app = _app()
+    provider_calls = []
+    sync_calls = []
+
+    monkeypatch.setattr(
+        reconciliation,
+        "get_merchant_order",
+        lambda resource_id: provider_calls.append(resource_id),
+    )
+    monkeypatch.setattr(
+        reconciliation,
+        "_sync_payment_by_id",
+        lambda payment_id: sync_calls.append(payment_id),
+    )
+
+    @app.post("/pagamentos/webhook")
+    def fallback():
+        return {"fallback": True}, 200
+
+    response = app.test_client().post(
+        "/pagamentos/webhook?id=178286687710&topic=payment",
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {"ok": True}
+    assert provider_calls == []
+    assert sync_calls == []
+
+
+def test_legacy_merchant_order_ipn_is_acknowledged_without_processing(monkeypatch):
+    app = _app()
+    provider_calls = []
+    sync_calls = []
+
+    monkeypatch.setattr(
+        reconciliation,
+        "get_merchant_order",
+        lambda resource_id: provider_calls.append(resource_id),
+    )
+    monkeypatch.setattr(
+        reconciliation,
+        "_sync_payment_by_id",
+        lambda payment_id: sync_calls.append(payment_id),
+    )
+
+    @app.post("/pagamentos/webhook")
+    def fallback():
+        return {"fallback": True}, 200
+
+    response = app.test_client().post(
+        "/pagamentos/webhook?id=44327435803&topic=merchant_order",
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {"ok": True}
+    assert provider_calls == []
+    assert sync_calls == []
+
+
+def test_legacy_shape_requires_supported_topic_and_id():
+    app = _app()
+
+    @app.post("/pagamentos/webhook")
+    def fallback():
+        return {"fallback": True}, 200
+
+    response = app.test_client().post(
+        "/pagamentos/webhook?id=123&topic=unknown",
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {"fallback": True}
+
+
 def test_merchant_order_without_payments_returns_200(monkeypatch):
     app = _app()
     calls = []
@@ -52,7 +127,8 @@ def test_merchant_order_without_payments_returns_200(monkeypatch):
     )
 
     response = app.test_client().post(
-        "/pagamentos/webhook?topic=merchant_order&id=456",
+        "/pagamentos/webhook?type=merchant_order&data.id=456",
+        json={"type": "merchant_order", "data": {"id": "456"}},
     )
 
     assert response.status_code == 200
@@ -101,7 +177,7 @@ def test_topic_merchant_order_reconciles_each_unique_payment(monkeypatch):
     assert calls == ["101", "202"]
 
 
-def test_invalid_merchant_order_signature_is_rejected(monkeypatch):
+def test_invalid_modern_merchant_order_signature_is_rejected(monkeypatch):
     app = _app()
 
     def invalid(*args, **kwargs):
@@ -114,7 +190,8 @@ def test_invalid_merchant_order_signature_is_rejected(monkeypatch):
     )
 
     response = app.test_client().post(
-        "/pagamentos/webhook?topic=merchant_order&id=456",
+        "/pagamentos/webhook?type=merchant_order&data.id=456",
+        json={"type": "merchant_order", "data": {"id": "456"}},
     )
 
     assert response.status_code == 401
