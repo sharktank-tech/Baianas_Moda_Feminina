@@ -1,4 +1,4 @@
-"""Provider REAL (porém gated) do AliExpress placeorder — Fase 8.0.11A.
+"""Provider REAL (porém gated) do AliExpress placeorder — Fase 8.0.11A/8.0.11J.
 
 Este módulo implementa ``AliExpressOrderSubmitter`` chamando o protocolo TOP
 ``top_placeorder``. Ele é EXPLICITAMENTE DESABILITADO por padrão:
@@ -14,24 +14,25 @@ resolução de credencial, DTO, assinatura ou HTTP. Isso nos permite provar por
 teste: gate off -> zero acesso a credencial e zero HTTP.
 
 Classificação conservadora do resultado (a regra de negócio NÃO vive no parser):
-  * 1 id confirmado  -> AliExpressSubmissionResult(submitted);
-  * 0 ids            -> AliExpressSubmissionUnknown(placeorder_success_without_order_id);
-  * N>1 ids          -> AliExpressSubmissionUnknown(placeorder_multiple_remote_orders);
-  * is_success=false -> confirmed failure SOMENTE se determinístico (allowlist),
-                        caso contrário Unknown(placeorder_remote_error);
-  * timeout          -> Unknown(placeorder_timeout);
-  * rede/HTTP        -> Unknown(placeorder_transport_error);
-  * protocolo        -> Unknown(placeorder_protocol_error);
-  * request inválido (local, antes do HTTP) -> Failed(placeorder_request_invalid).
+  * 1+ ids confirmados -> AliExpressSubmissionResult(submitted);
+  * 0 ids              -> AliExpressSubmissionUnknown(placeorder_success_without_order_id);
+  * ids duplicados     -> AliExpressSubmissionUnknown(placeorder_remote_identity_ambiguous);
+  * is_success=false   -> confirmed failure SOMENTE se determinístico (allowlist),
+                          caso contrário Unknown(placeorder_remote_error);
+  * timeout            -> Unknown(placeorder_timeout);
+  * rede/HTTP          -> Unknown(placeorder_transport_error);
+  * protocolo          -> Unknown(placeorder_protocol_error);
+  * request inválido   -> Failed(placeorder_request_invalid).
 
-Em dúvida, prefere-se UNKNOWN. Nunca loga/expoe token, sign, app_secret/keys,
-payload, endereço ou remote order ids (as exceções usam apenas códigos
-sanitizados).
+FASE 8.0.11J adiciona telemetria estritamente sanitizada. Ela registra somente
+forma/cardinalidade/duração e códigos allow-listed; nunca registra token, sign,
+app_secret/key, payload, endereço, telefone ou remote order IDs.
 """
 
 from __future__ import annotations
 
 import os
+from time import perf_counter
 from typing import TYPE_CHECKING, Callable, Optional
 
 from .credential_store import (
@@ -42,6 +43,12 @@ from .credential_store import (
     get_fulfillment_access_token,
 )
 from .errors import AliExpressAPIError, AliExpressConfigError
+from .placeorder_diagnostics import (
+    log_placeorder_event,
+    record_unknown_outcome,
+    request_shape,
+    sanitize_unknown_code,
+)
 from .submission import (
     AliExpressOrderSubmitter,
     AliExpressSubmissionFailed,
@@ -59,9 +66,6 @@ if TYPE_CHECKING:  # pragma: no cover
 
 PLACEORDER_ENABLED_ENV = "ALIEXPRESS_PLACEORDER_ENABLED"
 
-# allowlist mínima e explicitamente documentada de repetições de erro
-# CONFIRMADAS (parâmetro/validação/auth explícita). Qualquer coisa fora disso,
-# ou em dúvida, vira Unknown.
 _CONFIRMED_FAILURE_CODES = {
     "INVALID_PARAMETER",
     "PARAMETER_ERROR",
@@ -80,18 +84,19 @@ _CONFIRMED_SUB_CODES = {
 
 
 def _placeorder_enabled() -> bool:
-    """Gate: permite o provider real SOMENTE quando o env é EXATAMENTE ``"1"``."""
     return os.environ.get(PLACEORDER_ENABLED_ENV) == "1"
 
 
+def _elapsed_ms(started: float) -> float:
+    return round((perf_counter() - started) * 1000.0, 2)
+
+
+def _unknown_code(exc: AliExpressSubmissionUnknown) -> str:
+    value = exc.args[0] if getattr(exc, "args", ()) else None
+    return sanitize_unknown_code(value)
+
+
 class TopAliExpressOrderSubmitter(AliExpressOrderSubmitter):
-    """Submitter real do placeorder via protocolo TOP.
-
-    Recebe DI: ``app_key``/``app_secret``, ``resolve_access_token(supplier_id)``
-    e ``post`` (função http injetável). NADA é resolvido no ``__init__`` — tudo
-    acontece em ``submit()`` DEPOIS do gate.
-    """
-
     def __init__(
         self,
         *,
@@ -131,16 +136,15 @@ class TopAliExpressOrderSubmitter(AliExpressOrderSubmitter):
             raise AliExpressSubmissionFailed("placeorder_credential_invalid") from None
 
     def submit(self, request: "AliExpressSubmissionRequest") -> AliExpressSubmissionResult:
-        # GATE obrigatório ANTES de tudo (defense-in-depth, além da factory).
         if not _placeorder_enabled():
-            raise SubmissionHardOffError(
-                "AliExpress placeorder desabilitado"
-            )
+            raise SubmissionHardOffError("AliExpress placeorder desabilitado")
+        if request is None or request.supplier_id is None:
+            raise AliExpressSubmissionFailed("placeorder_request_invalid")
 
-        if request is None:
-            raise AliExpressSubmissionFailed("placeorder_request_invalid")
-        if request.supplier_id is None:
-            raise AliExpressSubmissionFailed("placeorder_request_invalid")
+        shape = request_shape(request)
+        log_placeorder_event("request_ready", **shape)
+        started = perf_counter()
+        log_placeorder_event("provider_started", **shape)
 
         try:
             app_key, app_secret = self._resolve_config()
@@ -152,34 +156,70 @@ class TopAliExpressOrderSubmitter(AliExpressOrderSubmitter):
                 post=self._post,
             )
         except AliExpressConfigError:
-            # Falha LOCAL de validação/construção ANTES do HTTP: confirmada.
+            log_placeorder_event("provider_rejected", duration_ms=_elapsed_ms(started))
             raise AliExpressSubmissionFailed("placeorder_request_invalid") from None
         except TransportTimeout:
-            raise AliExpressSubmissionUnknown("placeorder_timeout") from None
+            code = record_unknown_outcome("placeorder_timeout")
+            log_placeorder_event(
+                "provider_unknown", outcome_code=code, duration_ms=_elapsed_ms(started)
+            )
+            raise AliExpressSubmissionUnknown(code) from None
         except TransportError:
-            raise AliExpressSubmissionUnknown("placeorder_transport_error") from None
+            code = record_unknown_outcome("placeorder_transport_error")
+            log_placeorder_event(
+                "provider_unknown", outcome_code=code, duration_ms=_elapsed_ms(started)
+            )
+            raise AliExpressSubmissionUnknown(code) from None
         except AliExpressAPIError:
-            raise AliExpressSubmissionUnknown("placeorder_protocol_error") from None
+            code = record_unknown_outcome("placeorder_protocol_error")
+            log_placeorder_event(
+                "provider_unknown", outcome_code=code, duration_ms=_elapsed_ms(started)
+            )
+            raise AliExpressSubmissionUnknown(code) from None
+        except Exception:
+            code = record_unknown_outcome("placeorder_unexpected_error")
+            log_placeorder_event(
+                "provider_unknown", outcome_code=code, duration_ms=_elapsed_ms(started)
+            )
+            raise
 
-        return _classify_placeorder(response)
+        try:
+            result = _classify_placeorder(response)
+        except AliExpressSubmissionUnknown as exc:
+            code = record_unknown_outcome(_unknown_code(exc))
+            log_placeorder_event(
+                "provider_unknown",
+                outcome_code=code,
+                duration_ms=_elapsed_ms(started),
+                is_success=bool(response.is_success),
+                remote_order_count=len(response.order_ids),
+            )
+            raise
+        except AliExpressSubmissionFailed:
+            log_placeorder_event(
+                "provider_rejected",
+                duration_ms=_elapsed_ms(started),
+                is_success=bool(response.is_success),
+                remote_order_count=len(response.order_ids),
+            )
+            raise
+
+        log_placeorder_event(
+            "provider_confirmed",
+            duration_ms=_elapsed_ms(started),
+            is_success=bool(response.is_success),
+            remote_order_count=len(response.order_ids),
+        )
+        return result
 
 
 def _classify_placeorder(response: "TopPlaceOrderResponse") -> AliExpressSubmissionResult:
-    """Classificação conservadora da resposta normalizada (regra do PROVIDER).
-
-    Nunca seleciona o primeiro ID de N>1.
-    IDs duplicados -> Unknown (ambíguo, nunca retry cego).
-    """
     if response.is_success:
         order_ids = response.order_ids
         if len(order_ids) == 0:
-            raise AliExpressSubmissionUnknown(
-                "placeorder_success_without_order_id"
-            )
+            raise AliExpressSubmissionUnknown("placeorder_success_without_order_id")
         if len(order_ids) != len(set(order_ids)):
-            raise AliExpressSubmissionUnknown(
-                "placeorder_remote_identity_ambiguous"
-            )
+            raise AliExpressSubmissionUnknown("placeorder_remote_identity_ambiguous")
         return AliExpressSubmissionResult(
             external_order_ids=order_ids,
             external_status="submitted",
@@ -198,15 +238,12 @@ def _is_confirmed_failure(response: "TopPlaceOrderResponse") -> bool:
         return True
     if sub_code in _CONFIRMED_SUB_CODES:
         return True
-    # error_response com code numérico de validação explícita (ex.: 400/402)
-    # também conta como confirmado.
     if code.isdigit() and code in {"400", "401", "402", "403", "412", "40000"}:
         return True
     return False
 
 
 def _raise_failed(response: "TopPlaceOrderResponse") -> AliExpressSubmissionResult:
-    # Código sanitizado — nunca o texto remoto bruto.
     code = response.error_code or response.error_sub_code or "placeorder_rejected"
     raise AliExpressSubmissionFailed(str(code))
 
@@ -218,16 +255,8 @@ def get_real_order_submitter(
     resolve_access_token: Optional[Callable[[object], str]] = None,
     post: Optional[Callable[[dict], str]] = None,
 ) -> TopAliExpressOrderSubmitter:
-    """Factory EXPLÍCITA do provider real.
-
-    Diferente da default (que é hard-off), esta factory é solicitada quando se
-    pretende ENVIAR de verdade: portanto, se o gate estiver OFF, FALHA FECHADO
-    (SubmissionHardOffError) em vez de retornar um provider inerte em silêncio.
-    """
     if not _placeorder_enabled():
-        raise SubmissionHardOffError(
-            "AliExpress placeorder desabilitado"
-        )
+        raise SubmissionHardOffError("AliExpress placeorder desabilitado")
     return TopAliExpressOrderSubmitter(
         app_key=app_key,
         app_secret=app_secret,
