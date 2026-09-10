@@ -1,14 +1,18 @@
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
 from flask import Flask
 
 from loja.modules.getway_mercado_pago import payment_service
 from loja.modules.getway_mercado_pago.payment_service import (
+    PaymentConfigurationError,
     calculate_shipping,
     create_preference,
+    get_merchant_order,
     money,
     mp_status_to_order_status,
+    public_url,
 )
 
 
@@ -35,6 +39,90 @@ def test_shipping_uses_flat_value_below_threshold():
     app = create_test_app()
     with app.app_context():
         assert calculate_shipping("100.00") == Decimal("18.90")
+
+
+def test_public_url_upgrades_protocol_relative_origin_to_https():
+    app = create_test_app()
+    app.config["APP_PUBLIC_URL"] = "//www.pollomodas.com.br"
+
+    with app.app_context():
+        result = public_url("/pagamentos/webhook")
+
+    assert result == "https://www.pollomodas.com.br/pagamentos/webhook"
+
+
+def test_public_url_rejects_insecure_non_local_origin():
+    app = create_test_app()
+    app.config["APP_PUBLIC_URL"] = "http://www.pollomodas.com.br"
+
+    with app.app_context(), pytest.raises(PaymentConfigurationError):
+        public_url("/pagamentos/webhook")
+
+
+def test_public_url_allows_http_for_local_development():
+    app = create_test_app()
+    app.config["APP_PUBLIC_URL"] = "http://127.0.0.1:5001"
+
+    with app.app_context():
+        result = public_url("/pagamentos/webhook")
+
+    assert result == "http://127.0.0.1:5001/pagamentos/webhook"
+
+
+def test_create_preference_uses_absolute_https_callbacks(monkeypatch):
+    app = create_test_app()
+    app.config.update(
+        APP_PUBLIC_URL="//www.pollomodas.com.br",
+        MERCADO_PAGO_USE_SANDBOX=False,
+    )
+
+    captured = {}
+    response = {
+        "id": "pref-test",
+        "init_point": "https://www.mercadopago.com.br/checkout/v1/redirect?pref_id=pref-test",
+    }
+
+    class FakePreference:
+        def create(self, preference_data, request_options):
+            captured.update(preference_data)
+            return {"status": 201, "response": response}
+
+    class FakeSDK:
+        def preference(self):
+            return FakePreference()
+
+    monkeypatch.setattr(payment_service, "get_sdk", lambda: FakeSDK())
+
+    order = SimpleNamespace(
+        id="order-123",
+        customer_name="Teste Comprador",
+        customer_email="buyer@testuser.com",
+        total=Decimal("99.90"),
+        user_id="user-123",
+        items=[object()],
+    )
+
+    with app.app_context():
+        preference = create_preference(order)
+
+    assert preference["checkout_url"] == response["init_point"]
+    assert captured["notification_url"] == (
+        "https://www.pollomodas.com.br/pagamentos/webhook"
+    )
+    assert captured["back_urls"] == {
+        "success": (
+            "https://www.pollomodas.com.br/pagamentos/retorno/sucesso"
+            "?order_id=order-123"
+        ),
+        "pending": (
+            "https://www.pollomodas.com.br/pagamentos/retorno/pendente"
+            "?order_id=order-123"
+        ),
+        "failure": (
+            "https://www.pollomodas.com.br/pagamentos/retorno/falha"
+            "?order_id=order-123"
+        ),
+    }
 
 
 def test_create_preference_uses_init_point_even_with_sandbox_flag(monkeypatch):
@@ -73,6 +161,36 @@ def test_create_preference_uses_init_point_even_with_sandbox_flag(monkeypatch):
         preference = create_preference(order)
 
     assert preference["checkout_url"] == response["init_point"]
+
+
+def test_get_merchant_order_uses_provider_resource(monkeypatch):
+    app = create_test_app()
+
+    class FakeMerchantOrder:
+        def get(self, merchant_order_id):
+            assert merchant_order_id == "12345"
+            return {
+                "status": 200,
+                "response": {
+                    "id": 12345,
+                    "status": "opened",
+                    "order_status": "payment_required",
+                    "paid_amount": 0,
+                    "payments": [],
+                },
+            }
+
+    class FakeSDK:
+        def merchant_order(self):
+            return FakeMerchantOrder()
+
+    monkeypatch.setattr(payment_service, "get_sdk", lambda: FakeSDK())
+
+    with app.app_context():
+        result = get_merchant_order("12345")
+
+    assert result["id"] == 12345
+    assert result["payments"] == []
 
 
 def test_status_mapping():
