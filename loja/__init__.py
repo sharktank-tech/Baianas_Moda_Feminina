@@ -219,10 +219,16 @@ def create_app():
     from loja import cli
     app.cli.add_command(cli.create_admin)
 
-    # Instala somente telemetria sanitizada. Não altera regras de pagamento,
-    # credenciais, banco ou comportamento das rotas.
+    # Telemetria sanitizada do fluxo Mercado Pago.
     from loja.observability.install import install_mercado_pago_observability
     install_mercado_pago_observability(app)
+
+    # Merchant Order é usada como fallback de reconciliação: quando houver
+    # payments associados, eles passam pelo mesmo _sync_payment idempotente.
+    from loja.modules.getway_mercado_pago.reconciliation import (
+        install_merchant_order_reconciliation,
+    )
+    install_merchant_order_reconciliation(app)
 
     # Bootstrap do schema dedicado (somente PostgreSQL) + hook de search_path.
     # Em Vercel (serverless) o bootstrap é pulado; o hook continua instalado.
