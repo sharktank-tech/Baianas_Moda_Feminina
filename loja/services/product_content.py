@@ -18,6 +18,7 @@ card, que já eram renderizados sem |safe.
 from __future__ import annotations
 
 import re
+from html import unescape
 from html.parser import HTMLParser
 from typing import Optional
 from urllib.parse import urlparse
@@ -168,13 +169,14 @@ def product_description_excerpt(
 ) -> str:
     """Extrato em texto puro (sem HTML) para <meta> e cards da listagem.
 
-    Remove todas as tags e normaliza espaços; depois corta em `max_words`
-    palavras. Nunca retorna HTML.
+    Remove todas as tags, decodifica entidades HTML (incluindo entidades
+    nomeadas como ``&ccedil;``/``&atilde;``) e normaliza espaços; depois corta em
+    `max_words` palavras. Nunca retorna HTML.
     """
     if not value:
         return ""
     text = _HTML_TAG_RE.sub(" ", str(value))
-    text = text.replace("&nbsp;", " ").replace("&amp;", "&")
+    text = unescape(text)
     text = _WS_RE.sub(" ", text).strip()
     if not text:
         return ""
