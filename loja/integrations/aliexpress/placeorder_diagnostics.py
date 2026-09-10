@@ -10,11 +10,16 @@ REGRAS DE SEGURANÇA:
 - nunca registrar remote order IDs;
 - códigos de outcome são exclusivamente allow-listed;
 - metadados numéricos/booleanos descrevem apenas forma, cardinalidade e tempo.
+
+O ``ContextVar`` abaixo carrega somente um código allow-listed durante a mesma
+execução lógica. Ele não contém identidade, token ou payload e é consumido pelo
+boundary controlado após o core persistir o estado ``unknown``.
 """
 
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
 from typing import Any, Mapping
 
 logger = logging.getLogger("loja.integrations.aliexpress.placeorder.diagnostics")
@@ -42,6 +47,11 @@ SAFE_EVENT_NAMES = frozenset(
     }
 )
 
+_CURRENT_UNKNOWN_OUTCOME: ContextVar[str | None] = ContextVar(
+    "aliexpress_placeorder_unknown_outcome",
+    default=None,
+)
+
 
 def sanitize_unknown_code(value: Any) -> str:
     """Retorna somente códigos conhecidos; qualquer valor estranho vira fixo."""
@@ -49,6 +59,25 @@ def sanitize_unknown_code(value: Any) -> str:
     if code in UNKNOWN_OUTCOME_CODES:
         return code
     return "placeorder_unexpected_error"
+
+
+def record_unknown_outcome(value: Any) -> str:
+    """Guarda no contexto atual somente o código sanitizado da tentativa."""
+    code = sanitize_unknown_code(value)
+    _CURRENT_UNKNOWN_OUTCOME.set(code)
+    return code
+
+
+def consume_unknown_outcome() -> str | None:
+    """Consome e limpa o outcome do contexto para impedir vazamento entre calls."""
+    code = _CURRENT_UNKNOWN_OUTCOME.get()
+    _CURRENT_UNKNOWN_OUTCOME.set(None)
+    return code
+
+
+def clear_unknown_outcome() -> None:
+    """Limpa explicitamente o contexto antes/depois de um boundary controlado."""
+    _CURRENT_UNKNOWN_OUTCOME.set(None)
 
 
 def request_shape(request: Any) -> dict[str, Any]:
@@ -118,6 +147,9 @@ def log_placeorder_event(event: str, **fields: Any) -> None:
 __all__ = [
     "UNKNOWN_OUTCOME_CODES",
     "sanitize_unknown_code",
+    "record_unknown_outcome",
+    "consume_unknown_outcome",
+    "clear_unknown_outcome",
     "request_shape",
     "log_placeorder_event",
 ]
