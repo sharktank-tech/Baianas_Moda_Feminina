@@ -8,11 +8,16 @@ from loja.modules.getway_mercado_pago.payment_service import (
     get_merchant_order,
     validate_webhook_signature,
 )
+from loja.observability.mercado_pago import log_event
 
 
 MERCHANT_ORDER_EVENT_TYPES = {
     "merchant_order",
     "topic_merchant_order_wh",
+}
+LEGACY_IPN_TOPICS = {
+    "payment",
+    "merchant_order",
 }
 
 
@@ -31,6 +36,28 @@ def _merchant_order_id(body):
         or (body.get("data") or {}).get("id")
         or request.args.get("id")
     )
+
+
+def _legacy_ipn_notification():
+    """Identifica somente o formato IPN legado observado em produção.
+
+    IPN legado chega como ?id=<resource>&topic=<topic> e não contém a assinatura
+    secreta usada pelos Webhooks atuais. Ele é tratado como sinal sem confiança:
+    respondemos 200 para interromper retries, mas NÃO consultamos provedor, NÃO
+    sincronizamos Payment e NÃO alteramos estado local. A fonte confiável segue
+    sendo o Webhook assinado (?data.id=...&type=...).
+    """
+    topic = (request.args.get("topic") or "").strip().lower()
+    resource_id = (request.args.get("id") or "").strip()
+
+    if topic not in LEGACY_IPN_TOPICS or not resource_id:
+        return None
+
+    # Não confundir uma notificação Webhook moderna com o formato legado.
+    if request.args.get("data.id") or request.args.get("type"):
+        return None
+
+    return topic, resource_id
 
 
 def _sync_payment_by_id(payment_id):
@@ -56,13 +83,12 @@ def _payment_ids(merchant_order):
 
 
 def install_merchant_order_reconciliation(app):
-    """Intercepta somente webhooks de Merchant Order e reconcilia Payments.
+    """Reconcilia Webhooks modernos e neutraliza o residual IPN legado.
 
-    O webhook de `payment` continua sendo tratado pela rota existente. Para
-    Merchant Order, a aplicação consulta o recurso diretamente no Mercado Pago;
-    se `payments` vier vazio responde 200 e mantém o pedido pendente. Quando há
-    IDs associados, cada Payment passa pelo mesmo `_sync_payment()` idempotente
-    já usado pelo webhook e pelas back_urls.
+    O webhook `payment` moderno continua sendo tratado pela rota existente.
+    Merchant Order moderna é consultada diretamente no Mercado Pago e seus
+    Payments seguem pelo `_sync_payment()` idempotente. Notificações IPN legadas
+    são reconhecidas apenas para retornar 200 sem qualquer efeito colateral.
     """
     if getattr(app, "_mp_merchant_order_reconciliation_installed", False):
         return
@@ -73,6 +99,16 @@ def install_merchant_order_reconciliation(app):
     def reconcile_merchant_order_webhook():
         if request.method != "POST" or request.path != "/pagamentos/webhook":
             return None
+
+        legacy_ipn = _legacy_ipn_notification()
+        if legacy_ipn is not None:
+            topic, resource_id = legacy_ipn
+            log_event(
+                "webhook.legacy_ipn.acknowledged",
+                legacy_topic=topic,
+                provider_resource_id=resource_id,
+            )
+            return jsonify({"ok": True}), 200
 
         body = request.get_json(silent=True) or {}
         event_type = _event_type(body)
