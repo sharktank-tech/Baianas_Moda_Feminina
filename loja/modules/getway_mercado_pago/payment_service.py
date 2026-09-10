@@ -1,5 +1,5 @@
 from decimal import Decimal, ROUND_HALF_UP
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import mercadopago
 from flask import current_app
@@ -43,11 +43,44 @@ def get_sdk():
     return mercadopago.SDK(access_token)
 
 
-def public_url(path):
-    base_url = (current_app.config.get("APP_PUBLIC_URL") or "").strip().rstrip("/")
-    if not base_url:
+def _public_origin():
+    """Retorna uma origem pública absoluta e segura para callbacks.
+
+    Corrige configurações legadas protocol-relative (//host) para HTTPS e
+    rejeita valores sem host, com path/query/fragment ou HTTP fora de ambiente
+    local. Assim nenhuma preference de produção volta a enviar back_urls ou
+    notification_url relativas ao Mercado Pago.
+    """
+    raw = (current_app.config.get("APP_PUBLIC_URL") or "").strip().rstrip("/")
+    if not raw:
         raise PaymentConfigurationError("APP_PUBLIC_URL não foi configurada.")
-    return urljoin(base_url + "/", path.lstrip("/"))
+
+    if raw.startswith("//"):
+        raw = "https:" + raw
+
+    parsed = urlsplit(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise PaymentConfigurationError(
+            "APP_PUBLIC_URL deve ser uma URL absoluta com http:// ou https://."
+        )
+
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        raise PaymentConfigurationError(
+            "APP_PUBLIC_URL deve conter somente a origem pública da loja."
+        )
+
+    hostname = (parsed.hostname or "").lower()
+    is_local = hostname in {"127.0.0.1", "localhost", "::1"}
+    if parsed.scheme != "https" and not is_local:
+        raise PaymentConfigurationError(
+            "APP_PUBLIC_URL pública deve usar https://."
+        )
+
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def public_url(path):
+    return urljoin(_public_origin() + "/", str(path or "").lstrip("/"))
 
 
 def calculate_shipping(subtotal):
@@ -185,6 +218,39 @@ def get_payment(payment_id):
 
     if status_code != 200 or not response.get("id"):
         message = response.get("message") or "Pagamento não encontrado."
+        raise PaymentGatewayError(
+            f"Mercado Pago retornou HTTP {status_code}: {message}"
+        )
+
+    return response
+
+
+def get_merchant_order(merchant_order_id):
+    """Consulta a Merchant Order no provedor antes de reconciliar payments."""
+    log_event(
+        "provider.merchant_order.get.requested",
+        merchant_order_id=merchant_order_id,
+    )
+
+    result = get_sdk().merchant_order().get(str(merchant_order_id))
+    status_code = int(result.get("status") or 0)
+    response = result.get("response") or {}
+    payments = response.get("payments") or []
+
+    log_event(
+        "provider.merchant_order.get.completed",
+        status_code=status_code,
+        merchant_order_id=response.get("id") or merchant_order_id,
+        external_reference=response.get("external_reference"),
+        order_status=response.get("order_status"),
+        merchant_order_status=response.get("status"),
+        paid_amount=response.get("paid_amount"),
+        payment_count=len(payments),
+        provider_message=response.get("message"),
+    )
+
+    if status_code != 200 or not response.get("id"):
+        message = response.get("message") or "Merchant Order não encontrada."
         raise PaymentGatewayError(
             f"Mercado Pago retornou HTTP {status_code}: {message}"
         )
