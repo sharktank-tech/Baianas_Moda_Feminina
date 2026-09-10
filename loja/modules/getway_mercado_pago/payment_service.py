@@ -134,7 +134,12 @@ def create_preference(order):
                 f"/pagamentos/retorno/falha?order_id={order.id}"
             ),
         },
-        "notification_url": public_url("/pagamentos/webhook"),
+        # O parâmetro documentado pelo Mercado Pago evita o envio simultâneo
+        # de IPN legado (?id=...&topic=...), que não pode ser autenticado pela
+        # chave secreta, mantendo esta URL exclusivamente no fluxo Webhooks.
+        "notification_url": public_url(
+            "/pagamentos/webhook?source_news=webhooks"
+        ),
         "auto_return": "approved",
         "statement_descriptor": "POLLO MODAS",
         "expires": False,
