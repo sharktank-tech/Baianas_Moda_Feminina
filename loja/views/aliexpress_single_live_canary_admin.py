@@ -1,9 +1,12 @@
-"""Admin-only boundary for the FIRST real AliExpress placeorder canary.
+"""Admin-only live-canary surfaces for AliExpress placeorder.
 
-The GET is read-only and requires an explicit AliExpressOrder UUID.  The POST
-is CSRF-protected by the application-wide Flask-WTF protection and delegates
-ONLY to ``submit_single_live_canary_order``.  No alternate real-provider path
-is exposed here.
+FASE 8.0.11I keeps the FIRST live canary one-shot intact.
+FASE 8.0.11K adds a SEPARATE second diagnostic canary for an explicitly
+reconciled first attempt.  Both GET endpoints are read-only; both POST
+endpoints are protected by the application-wide CSRF guard and delegate only
+to their respective fail-closed boundaries.
+
+No route automatically selects an order or exposes provider secrets/payloads.
 """
 
 from __future__ import annotations
@@ -16,6 +19,13 @@ from loja.modules.models import AliExpressOrder, AliExpressOrderItem, Order
 from loja.integrations.aliexpress.controlled_canary import (
     AliExpressCanaryCircuitOpen,
     AliExpressCanaryConfigurationError,
+)
+from loja.integrations.aliexpress.second_diagnostic_canary import (
+    AliExpressSecondDiagnosticCanaryConfigurationError,
+    AliExpressSecondDiagnosticCanaryConsumed,
+    AliExpressSecondDiagnosticCanaryPreflightError,
+    get_second_diagnostic_canary_preflight,
+    submit_second_diagnostic_canary_order,
 )
 from loja.integrations.aliexpress.single_live_canary import (
     AliExpressSingleLiveCanaryConfigurationError,
@@ -52,7 +62,7 @@ def _load_order(order_id):
 )
 @admin_required
 def preflight(order_id):
-    """Read-only preflight for one explicitly selected local order."""
+    """Read-only preflight for the first explicitly selected local order."""
 
     ali_order = _load_order(order_id)
     status = get_single_live_canary_preflight(ali_order, session=db.session)
@@ -68,12 +78,7 @@ def preflight(order_id):
 )
 @admin_required
 def submit(order_id):
-    """Execute at most the explicitly armed one-shot canary.
-
-    CSRF is enforced globally.  All failure messages are fixed/sanitized; the
-    exception text is never logged because provider/DB exceptions may carry
-    sensitive material in unforeseen cases.
-    """
+    """Execute at most the explicitly armed FIRST one-shot canary."""
 
     ali_order = _load_order(order_id)
     try:
@@ -116,6 +121,90 @@ def submit(order_id):
 
     return redirect(
         url_for("aliexpress_single_live_canary_admin.preflight", order_id=order_id),
+        code=303,
+    )
+
+
+@single_live_canary_admin_blueprint.route(
+    "/<uuid:order_id>/second-diagnostic-canary", methods=["GET"]
+)
+@admin_required
+def second_diagnostic_preflight(order_id):
+    """Read-only preflight for FASE 8.0.11K.
+
+    The endpoint never arms gates and never obtains the real provider.
+    """
+
+    ali_order = _load_order(order_id)
+    status = get_second_diagnostic_canary_preflight(ali_order, session=db.session)
+    return render_template(
+        "admin/aliexpress/second_diagnostic_canary.html",
+        ali_order=ali_order,
+        canary_preflight=status,
+    )
+
+
+@single_live_canary_admin_blueprint.route(
+    "/<uuid:order_id>/second-diagnostic-canary/submit", methods=["POST"]
+)
+@admin_required
+def second_diagnostic_submit(order_id):
+    """Execute at most the separately armed SECOND diagnostic attempt.
+
+    The route never retries.  Unknown remains pending_reconciliation and any
+    second durable attempt permanently consumes the FASE 8.0.11K slot.
+    """
+
+    ali_order = _load_order(order_id)
+    try:
+        result = submit_second_diagnostic_canary_order(ali_order, session=db.session)
+        state = getattr(result, "state", None) or "unknown"
+        if state == "submitted":
+            flash(
+                "Segundo canário diagnóstico confirmado localmente. Desarme todos os gates agora.",
+                "success",
+            )
+        elif state == "pending_reconciliation":
+            flash(
+                "Segundo canário ficou ambíguo. Desarme os gates e NÃO reenvie; nova reconciliação conclusiva é obrigatória.",
+                "danger",
+            )
+        else:
+            flash(
+                "Segundo canário encerrou sem confirmação de submissão. Desarme os gates e revise o estado durável.",
+                "warning",
+            )
+    except AliExpressSecondDiagnosticCanaryConsumed:
+        db.session.rollback()
+        flash(
+            "Segundo canário diagnóstico já consumido; qualquer nova submissão está bloqueada.",
+            "danger",
+        )
+    except (
+        AliExpressSecondDiagnosticCanaryConfigurationError,
+        AliExpressSecondDiagnosticCanaryPreflightError,
+        AliExpressCanaryConfigurationError,
+        AliExpressCanaryCircuitOpen,
+        SubmissionHardOffError,
+    ):
+        db.session.rollback()
+        flash(
+            "Segundo canário bloqueado pelo preflight/gates de segurança.",
+            "danger",
+        )
+    except Exception:
+        db.session.rollback()
+        current_app.logger.error("second diagnostic canary: erro sanitizado")
+        flash(
+            "Segundo canário interrompido por erro interno sanitizado. Não reenvie sem revisar o estado durável.",
+            "danger",
+        )
+
+    return redirect(
+        url_for(
+            "aliexpress_single_live_canary_admin.second_diagnostic_preflight",
+            order_id=order_id,
+        ),
         code=303,
     )
 
