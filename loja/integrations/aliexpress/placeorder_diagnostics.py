@@ -1,24 +1,30 @@
-"""Telemetria sanitizada do placeorder AliExpress — FASE 8.0.11J.
+"""Telemetria sanitizada do placeorder AliExpress — FASE 8.0.11J/8.0.11L.
 
-Este módulo existe para responder uma pergunta operacional específica: em qual
-etapa uma tentativa de ``aliexpress.trade.buy.placeorder`` terminou sem
-identidade remota confirmada?
+Este módulo existe para responder perguntas operacionais sobre uma tentativa de
+``aliexpress.trade.buy.placeorder`` sem registrar payload, PII ou credenciais.
 
 REGRAS DE SEGURANÇA:
 - nunca registrar app_key/app_secret/access_token/session/sign;
 - nunca registrar payload, endereço, nome, telefone ou CEP;
 - nunca registrar remote order IDs;
 - códigos de outcome são exclusivamente allow-listed;
+- códigos remotos só passam se tiverem formato estrito de machine-code;
+- mensagens remotas livres NUNCA são registradas;
 - metadados numéricos/booleanos descrevem apenas forma, cardinalidade e tempo.
 
-O ``ContextVar`` abaixo carrega somente um código allow-listed durante a mesma
-execução lógica. Ele não contém identidade, token ou payload e é consumido pelo
-boundary controlado após o core persistir o estado ``unknown``.
+O ``ContextVar`` abaixo carrega somente um código de outcome allow-listed durante
+a mesma execução lógica. Ele não contém identidade, token ou payload e é
+consumido pelo boundary controlado após o core persistir o estado ``unknown``.
+
+FASE 8.0.11L adiciona ``remote_error_code``/``remote_error_sub_code`` apenas aos
+logs sanitizados. Valores livres são descartados, não truncados, para evitar que
+texto remoto arbitrário seja promovido a telemetria confiável.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from contextvars import ContextVar
 from typing import Any, Mapping
 
@@ -47,6 +53,12 @@ SAFE_EVENT_NAMES = frozenset(
     }
 )
 
+# Machine-code estrito: cobre códigos TOP observados/esperados como
+# ``400``, ``INVALID_PARAMETER``, ``ISV.PARAMETER-ERROR`` e
+# ``isv.invalid-permission``. Espaço, ``=``, ``:``, barras, aspas e qualquer
+# outro caractere de texto livre são recusados integralmente.
+_REMOTE_CODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
 _CURRENT_UNKNOWN_OUTCOME: ContextVar[str | None] = ContextVar(
     "aliexpress_placeorder_unknown_outcome",
     default=None,
@@ -59,6 +71,36 @@ def sanitize_unknown_code(value: Any) -> str:
     if code in UNKNOWN_OUTCOME_CODES:
         return code
     return "placeorder_unexpected_error"
+
+
+def sanitize_remote_code(value: Any) -> str | None:
+    """Aceita somente um machine-code remoto curto e sem texto livre.
+
+    Não tenta "limpar" conteúdo potencialmente sensível. Se o valor não casar
+    integralmente com o formato seguro, ele é descartado.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    code = str(value).strip()
+    if not code or _REMOTE_CODE_RE.fullmatch(code) is None:
+        return None
+    return code
+
+
+def response_error_metadata(response: Any) -> dict[str, str]:
+    """Extrai somente códigos remotos seguros de uma resposta normalizada.
+
+    ``error_message``, ids remotos e qualquer outro atributo são deliberadamente
+    ignorados. O retorno pode ser expandido diretamente em ``log_placeorder_event``.
+    """
+    safe: dict[str, str] = {}
+    code = sanitize_remote_code(getattr(response, "error_code", None))
+    sub_code = sanitize_remote_code(getattr(response, "error_sub_code", None))
+    if code is not None:
+        safe["remote_error_code"] = code
+    if sub_code is not None:
+        safe["remote_error_sub_code"] = sub_code
+    return safe
 
 
 def record_unknown_outcome(value: Any) -> str:
@@ -114,7 +156,8 @@ def log_placeorder_event(event: str, **fields: Any) -> None:
     """Emite uma linha key=value com campos explicitamente sanitizados.
 
     Campos aceitos são reduzidos a tipos escalares seguros. Strings livres são
-    proibidas, exceto ``outcome_code`` que passa por allow-list.
+    proibidas. ``outcome_code`` passa por allow-list; os dois códigos remotos
+    passam pelo formato estrito de machine-code.
     """
     safe_event = event if event in SAFE_EVENT_NAMES else "provider_unknown"
     safe: dict[str, Any] = {"event": safe_event}
@@ -140,6 +183,11 @@ def log_placeorder_event(event: str, **fields: Any) -> None:
     if "outcome_code" in fields:
         safe["outcome_code"] = sanitize_unknown_code(fields.get("outcome_code"))
 
+    for key in ("remote_error_code", "remote_error_sub_code"):
+        code = sanitize_remote_code(fields.get(key))
+        if code is not None:
+            safe[key] = code
+
     rendered = " ".join(f"{key}={value}" for key, value in safe.items())
     logger.info("aliexpress_placeorder_diagnostic %s", rendered)
 
@@ -147,6 +195,8 @@ def log_placeorder_event(event: str, **fields: Any) -> None:
 __all__ = [
     "UNKNOWN_OUTCOME_CODES",
     "sanitize_unknown_code",
+    "sanitize_remote_code",
+    "response_error_metadata",
     "record_unknown_outcome",
     "consume_unknown_outcome",
     "clear_unknown_outcome",
