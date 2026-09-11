@@ -1,13 +1,15 @@
-"""Controlled live-canary guard for AliExpress placeorder (Fase 8.0.11H/8.0.11J).
+"""Controlled live-canary guard for AliExpress placeorder (Fase 8.0.11H/8.0.11J/8.0.11M).
 
 This module does NOT enable AliExpress HTTP and does not select the real
 provider. It is an additional fail-closed boundary that must wrap every future
 controlled live submission.
 
 FASE 8.0.11J preserves a sanitized provider outcome code on an ``unknown``
-submission attempt after the core commits. The parent AliExpressOrder keeps the
-canonical public ``submission_unknown`` error; no payload, credential, remote
-ID or PII is persisted by this diagnostic layer.
+submission attempt after the core commits. FASE 8.0.11M may append sanitized
+``remote_error_code``/``remote_error_sub_code`` machine-codes to the same
+attempt ``last_error``. The parent AliExpressOrder keeps the canonical public
+``submission_unknown`` error; no payload, credential, remote ID, remote message
+or PII is persisted by this diagnostic layer.
 """
 
 from __future__ import annotations
@@ -24,7 +26,13 @@ from loja.modules.models import AliExpressOrder, AliExpressSubmissionAttempt
 from loja.utils import utcnow
 
 from .fulfillment import FulfillmentResult
-from .placeorder_diagnostics import clear_unknown_outcome, consume_unknown_outcome
+from .placeorder_diagnostics import (
+    build_durable_unknown_error,
+    clear_remote_error_metadata,
+    clear_unknown_outcome,
+    consume_remote_error_metadata,
+    consume_unknown_outcome,
+)
 from .submission import AliExpressOrderSubmitter, submit_aliexpress_order
 
 
@@ -140,13 +148,9 @@ def get_canary_circuit_status(
 
 
 def _persist_unknown_diagnostic(order: AliExpressOrder, *, session) -> None:
-    """Persist the per-provider diagnostic code on the durable unknown attempt.
-
-    The code comes exclusively from a ContextVar populated by the real provider
-    through an allow-list. If no diagnostic exists, this function is a no-op.
-    It never changes the parent error/state and never creates a new attempt.
-    """
+    """Persist only sanitized diagnostics on the durable unknown attempt."""
     code = consume_unknown_outcome()
+    remote_metadata = consume_remote_error_metadata()
     if not code:
         return
 
@@ -162,7 +166,7 @@ def _persist_unknown_diagnostic(order: AliExpressOrder, *, session) -> None:
     if attempt is None:
         return
 
-    attempt.last_error = code
+    attempt.last_error = build_durable_unknown_error(code, remote_metadata)
     attempt.updated_at = utcnow()
     session.commit()
 
@@ -201,6 +205,7 @@ def submit_controlled_canary_order(
             pre_submit_guard(order, session=session)
 
         clear_unknown_outcome()
+        clear_remote_error_metadata()
         try:
             result = submit_aliexpress_order(
                 order,
@@ -212,9 +217,11 @@ def submit_controlled_canary_order(
                 _persist_unknown_diagnostic(order, session=session)
             else:
                 consume_unknown_outcome()
+                consume_remote_error_metadata()
             return result
         finally:
             clear_unknown_outcome()
+            clear_remote_error_metadata()
 
 
 __all__ = [
