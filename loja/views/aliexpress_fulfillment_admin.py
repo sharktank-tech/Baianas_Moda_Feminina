@@ -1,4 +1,4 @@
-"""Fila administrativa de fulfillment AliExpress (Fase 8.0).
+"""Fila administrativa de fulfillment AliExpress (Fase 8.0/8.0.11N).
 
 Segurança:
   * Todas as rotas exigem @admin_required + CSRF quando mutáveis
@@ -6,6 +6,9 @@ Segurança:
   * Enriquecimento SKU operacional é Preview-only e mostra apenas contagens
   * Fase 8.0.11H expõe somente estado sanitizado do circuit breaker; attempt_key
     e remote_order_id nunca aparecem na fila de segurança
+  * Fase 8.0.11N expõe no detalhe apenas um ledger sanitizado das tentativas:
+    estado, timestamps e diagnóstico durável que ainda passe pelo parser
+    fail-closed. IDs de tentativa/attempt_key nunca são enviados ao template.
 """
 
 from __future__ import annotations
@@ -43,6 +46,7 @@ from loja.integrations.aliexpress import (
     CredentialInvalid,
 )
 from loja.integrations.aliexpress.controlled_canary import get_canary_circuit_status
+from loja.integrations.aliexpress.placeorder_diagnostics import validate_durable_unknown_error
 from loja.integrations.aliexpress.sku_identity_enrichment import (
     SkuIdentityEnrichmentError,
     enrich_sku_identity_batch,
@@ -55,6 +59,24 @@ fulfillment_admin_blueprint = Blueprint(
     __name__,
     url_prefix="/admin/integrations/aliexpress/pedidos",
 )
+
+
+def _sanitized_attempt_ledger(order_id):
+    """Retorna somente campos operacionais seguros de tentativas duráveis."""
+    attempts = (
+        AliExpressSubmissionAttempt.query.filter_by(aliexpress_order_id=order_id)
+        .order_by(AliExpressSubmissionAttempt.started_at.asc())
+        .all()
+    )
+    return [
+        {
+            "state": attempt.state,
+            "started_at": attempt.started_at,
+            "completed_at": attempt.completed_at,
+            "diagnostic": validate_durable_unknown_error(attempt.last_error),
+        }
+        for attempt in attempts
+    ]
 
 
 @fulfillment_admin_blueprint.route("/", methods=["GET"], strict_slashes=False)
@@ -84,8 +106,6 @@ def index():
         "cancel_requested", "cancelled", "failed", "manual_review", "pending",
     ]
 
-    # Fase 8.0.11H: leitura sanitizada do circuit breaker global. A tela recebe
-    # apenas contagens/booleans; nunca attempt_key, remote ID ou payload.
     canary_status = get_canary_circuit_status(session=db.session)
     pending_reconciliation_count = AliExpressOrder.query.filter_by(
         state="pending_reconciliation"
@@ -106,13 +126,6 @@ def index():
 @fulfillment_admin_blueprint.route("/canary-safety", methods=["GET"])
 @admin_required
 def canary_safety():
-    """Fila GET-only de tentativas que mantêm o circuit breaker aberto.
-
-    Não executa provider, não reconcilia, não altera estado e não expõe
-    attempt_key/remote IDs. Um ``in_flight`` antigo continua visível para sempre
-    até resolução conclusiva; idade nunca libera o breaker.
-    """
-
     status = get_canary_circuit_status(session=db.session)
     blocking_rows = (
         db.session.query(AliExpressOrder, AliExpressSubmissionAttempt)
@@ -148,7 +161,11 @@ def detail(order_id):
         selectinload(AliExpressOrder.order).selectinload(Order.user),
     ).filter_by(id=order_id).first_or_404()
 
-    return render_template("admin/aliexpress/fulfillment_detail.html", ali_order=ali_order)
+    return render_template(
+        "admin/aliexpress/fulfillment_detail.html",
+        ali_order=ali_order,
+        attempt_ledger=_sanitized_attempt_ledger(order_id),
+    )
 
 
 @fulfillment_admin_blueprint.route("/<uuid:order_id>/revalidar", methods=["POST"])
@@ -236,9 +253,6 @@ def sync_status(order_id):
     return redirect(url_for("aliexpress_fulfillment_admin.detail", order_id=order_id))
 
 
-# --------------------------------------------------------------------------
-# Fase 8.0.10 — enriquecimento operacional SKU, Preview-only
-# --------------------------------------------------------------------------
 _SKU_ENRICH_TEMPLATE = """
 <!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <title>AliExpress SKU identity enrichment</title></head>
@@ -303,8 +317,6 @@ def sku_identity_enrichment():
             db.session.rollback()
             flash("Erro interno sanitizado no enriquecimento.", "danger")
 
-        # PRG: termina a invocação de escrita imediatamente. O GET subsequente
-        # recalcula a cobertura em outra Serverless Function invocation.
         return redirect(
             url_for("aliexpress_fulfillment_admin.sku_identity_enrichment"),
             code=303,
