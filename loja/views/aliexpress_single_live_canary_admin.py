@@ -226,20 +226,22 @@ def third_diagnostic_preflight(order_id):
 
     There is intentionally NO POST/submit route for the third canary in this
     phase. Evaluating the existing O-boundary can touch local credential state
-    through validation; a rollback immediately after evaluation guarantees the
-    admin GET remains persistence read-only. The order is then reloaded for
-    rendering.
+    through validation; rollback is guaranteed even if evaluation raises.
     """
 
     ali_order = _load_order(order_id)
-    status = get_third_diagnostic_canary_preflight(ali_order, session=db.session)
+    try:
+        status = get_third_diagnostic_canary_preflight(
+            ali_order,
+            session=db.session,
+        )
+    finally:
+        # Fail-closed read-only guarantee for this GET surface: even if
+        # credential validation performed an incidental flush, nothing from
+        # the preflight is allowed to persist.
+        db.session.rollback()
 
-    # Fail-closed read-only guarantee for this GET surface: even if credential
-    # validation performed an incidental flush, nothing from the preflight is
-    # allowed to persist.
-    db.session.rollback()
     ali_order = _load_order(order_id)
-
     return render_template(
         "admin/aliexpress/third_diagnostic_canary_preflight.html",
         ali_order=ali_order,
