@@ -1,4 +1,4 @@
-"""Provider REAL (porém gated) do AliExpress placeorder — Fase 8.0.11A/8.0.11J.
+"""Provider REAL (porém gated) do AliExpress placeorder — Fase 8.0.11A/8.0.11J/8.0.11L.
 
 Este módulo implementa ``AliExpressOrderSubmitter`` chamando o protocolo TOP
 ``top_placeorder``. Ele é EXPLICITAMENTE DESABILITADO por padrão:
@@ -27,6 +27,10 @@ Classificação conservadora do resultado (a regra de negócio NÃO vive no pars
 FASE 8.0.11J adiciona telemetria estritamente sanitizada. Ela registra somente
 forma/cardinalidade/duração e códigos allow-listed; nunca registra token, sign,
 app_secret/key, payload, endereço, telefone ou remote order IDs.
+
+FASE 8.0.11L preserva, apenas no LOG sanitizado, ``error_code`` e
+``error_sub_code`` quando eles têm formato estrito de machine-code. Mensagem
+remota livre continua proibida e nunca é persistida nem registrada.
 """
 
 from __future__ import annotations
@@ -47,6 +51,7 @@ from .placeorder_diagnostics import (
     log_placeorder_event,
     record_unknown_outcome,
     request_shape,
+    response_error_metadata,
     sanitize_unknown_code,
 )
 from .submission import (
@@ -183,6 +188,7 @@ class TopAliExpressOrderSubmitter(AliExpressOrderSubmitter):
             )
             raise
 
+        remote_error = response_error_metadata(response)
         try:
             result = _classify_placeorder(response)
         except AliExpressSubmissionUnknown as exc:
@@ -193,6 +199,7 @@ class TopAliExpressOrderSubmitter(AliExpressOrderSubmitter):
                 duration_ms=_elapsed_ms(started),
                 is_success=bool(response.is_success),
                 remote_order_count=len(response.order_ids),
+                **remote_error,
             )
             raise
         except AliExpressSubmissionFailed:
@@ -201,6 +208,7 @@ class TopAliExpressOrderSubmitter(AliExpressOrderSubmitter):
                 duration_ms=_elapsed_ms(started),
                 is_success=bool(response.is_success),
                 remote_order_count=len(response.order_ids),
+                **remote_error,
             )
             raise
 
