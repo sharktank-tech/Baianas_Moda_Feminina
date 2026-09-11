@@ -10,6 +10,7 @@ from loja.integrations.aliexpress.placeorder_diagnostics import (
     record_remote_error_metadata,
     response_error_metadata,
     sanitize_remote_code,
+    validate_durable_unknown_error,
 )
 from loja.integrations.aliexpress.top_placeorder import TopPlaceOrderResponse
 
@@ -111,6 +112,41 @@ def test_build_durable_unknown_error_drops_unsafe_remote_values():
         },
     )
     assert value == "placeorder_remote_error"
+
+
+def test_validate_durable_unknown_error_accepts_only_canonical_safe_shape():
+    assert validate_durable_unknown_error("placeorder_timeout") == "placeorder_timeout"
+    assert validate_durable_unknown_error(
+        "placeorder_remote_error|remote_error_code=400"
+    ) == "placeorder_remote_error|remote_error_code=400"
+    assert validate_durable_unknown_error(
+        "placeorder_remote_error"
+        "|remote_error_code=ISV.PARAMETER-ERROR"
+        "|remote_error_sub_code=isv.invalid-permission"
+    ) == (
+        "placeorder_remote_error"
+        "|remote_error_code=ISV.PARAMETER-ERROR"
+        "|remote_error_sub_code=isv.invalid-permission"
+    )
+
+
+def test_validate_durable_unknown_error_rejects_legacy_free_form_and_tampering():
+    unsafe_values = (
+        None,
+        True,
+        "",
+        " submission_unknown",
+        "submission_unknown",
+        "placeorder_remote_error|error_message=token-secret",
+        "placeorder_remote_error|remote_error_code=invalid parameter",
+        "placeorder_remote_error|remote_error_code=400|remote_error_code=401",
+        "placeorder_remote_error|unknown_key=400",
+        "placeorder_remote_error|remote_error_sub_code=isv.invalid-permission|remote_error_code=400",
+        "placeorder_remote_error|remote_error_code=token=secret",
+        "A" * 257,
+    )
+    for value in unsafe_values:
+        assert validate_durable_unknown_error(value) is None
 
 
 def test_log_event_includes_only_safe_remote_codes(caplog):
