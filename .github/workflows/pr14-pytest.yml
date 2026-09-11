@@ -3,7 +3,7 @@ name: PR14 pytest validation
 on:
   push:
     branches:
-      - safety/aliexpress-third-diagnostic-canary
+      - safety/aliexpress-third-post-hardoff-8.0.11s
 
 permissions:
   contents: read
