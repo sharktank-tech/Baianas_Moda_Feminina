@@ -64,9 +64,11 @@ def test_pre_submit_guard_runs_before_core(monkeypatch):
     def strict_guard(ali_order, *, session):
         events.append(("guard", ali_order, session))
 
+    sentinel = SimpleNamespace(state="submitted")
+
     def core(ali_order, *, submitter, refresher=None, session=None):
         events.append(("core", ali_order, session))
-        return "ok"
+        return sentinel
 
     monkeypatch.setattr(canary, "submit_aliexpress_order", core)
 
@@ -77,7 +79,7 @@ def test_pre_submit_guard_runs_before_core(monkeypatch):
         pre_submit_guard=strict_guard,
     )
 
-    assert result == "ok"
+    assert result is sentinel
     assert [event[0] for event in events] == ["guard", "core"]
     assert events[0][1:] == (order, session)
     assert events[1][1:] == (order, session)
