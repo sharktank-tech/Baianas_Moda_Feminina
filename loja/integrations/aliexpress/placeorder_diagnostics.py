@@ -1,4 +1,4 @@
-"""Telemetria sanitizada do placeorder AliExpress — FASE 8.0.11J/8.0.11L/8.0.11M.
+"""Telemetria sanitizada do placeorder AliExpress — FASE 8.0.11J/8.0.11L/8.0.11M/8.0.11N.
 
 Este módulo existe para responder perguntas operacionais sobre uma tentativa de
 ``aliexpress.trade.buy.placeorder`` sem registrar payload, PII ou credenciais.
@@ -19,6 +19,10 @@ FASE 8.0.11L adiciona ``remote_error_code``/``remote_error_sub_code`` aos logs
 sanitizados. FASE 8.0.11M permite preservar os mesmos machine-codes sanitizados
 no ``last_error`` da tentativa ``unknown`` para que o diagnóstico sobreviva à
 retenção dos logs, sem alterar o erro público do ``AliExpressOrder``.
+
+FASE 8.0.11N adiciona validação fail-closed do formato durável antes de ele ser
+retido por uma reconciliação conclusiva. Valores legados/livres nunca são
+carregados adiante apenas porque já estavam no banco.
 """
 
 from __future__ import annotations
@@ -54,6 +58,8 @@ SAFE_EVENT_NAMES = frozenset(
 )
 
 _REMOTE_CODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_DURABLE_REMOTE_KEYS = ("remote_error_code", "remote_error_sub_code")
+_MAX_DURABLE_ERROR_LENGTH = 256
 
 _CURRENT_UNKNOWN_OUTCOME: ContextVar[str | None] = ContextVar(
     "aliexpress_placeorder_unknown_outcome",
@@ -139,11 +145,53 @@ def build_durable_unknown_error(
     """
     parts = [sanitize_unknown_code(outcome_code)]
     metadata = remote_metadata or {}
-    for key in ("remote_error_code", "remote_error_sub_code"):
+    for key in _DURABLE_REMOTE_KEYS:
         value = sanitize_remote_code(metadata.get(key))
         if value is not None:
             parts.append(f"{key}={value}")
     return "|".join(parts)
+
+
+def validate_durable_unknown_error(value: Any) -> str | None:
+    """Valida e canoniza um diagnóstico durável já persistido.
+
+    Esta função é deliberadamente fail-closed. Ela aceita somente o formato que
+    ``build_durable_unknown_error`` produz: um outcome allow-listed seguido de
+    zero, um ou dois pares ``key=machine-code`` conhecidos, sem duplicatas.
+
+    Qualquer texto livre, chave desconhecida, duplicata, whitespace interno,
+    tamanho excessivo ou outcome desconhecido retorna ``None``. Isso permite que
+    consumidores históricos preservem telemetria segura sem propagar conteúdo
+    legado potencialmente sensível.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    raw = str(value)
+    if not raw or len(raw) > _MAX_DURABLE_ERROR_LENGTH or raw != raw.strip():
+        return None
+
+    parts = raw.split("|")
+    if not parts or parts[0] not in UNKNOWN_OUTCOME_CODES:
+        return None
+    if len(parts) > 1 + len(_DURABLE_REMOTE_KEYS):
+        return None
+
+    metadata: dict[str, str] = {}
+    for token in parts[1:]:
+        if "=" not in token:
+            return None
+        key, remote_value = token.split("=", 1)
+        if key not in _DURABLE_REMOTE_KEYS or key in metadata:
+            return None
+        safe_value = sanitize_remote_code(remote_value)
+        if safe_value is None or safe_value != remote_value:
+            return None
+        metadata[key] = safe_value
+
+    canonical = build_durable_unknown_error(parts[0], metadata)
+    if canonical != raw:
+        return None
+    return canonical
 
 
 def request_shape(request: Any) -> dict[str, Any]:
@@ -201,7 +249,7 @@ def log_placeorder_event(event: str, **fields: Any) -> None:
     if "outcome_code" in fields:
         safe["outcome_code"] = sanitize_unknown_code(fields.get("outcome_code"))
 
-    for key in ("remote_error_code", "remote_error_sub_code"):
+    for key in _DURABLE_REMOTE_KEYS:
         code = sanitize_remote_code(fields.get(key))
         if code is not None:
             safe[key] = code
@@ -222,6 +270,7 @@ __all__ = [
     "consume_unknown_outcome",
     "clear_unknown_outcome",
     "build_durable_unknown_error",
+    "validate_durable_unknown_error",
     "request_shape",
     "log_placeorder_event",
 ]
