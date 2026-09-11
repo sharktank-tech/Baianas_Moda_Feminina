@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - safety/aliexpress-third-diagnostic-canary
+      - fix/aliexpress-invalid-appkey-reconciliation-8.0.11t
 
 permissions:
   contents: read
