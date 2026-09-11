@@ -313,7 +313,7 @@ class TestEstadosElegiveisChamamAdapter:
         assert request.attempt_key == attempt_key
         out = capsys.readouterr().out
         assert "success" in out
-        assert "aliexpress.ds.trade.order.get" in out
+        assert ds_mod.DS_ORDER_STATUS_METHOD in out
         assert "shipped" in out
 
 
@@ -367,7 +367,7 @@ class TestSuccessOutputSanitizado:
         assert rc == 0
         out = capsys.readouterr().out
         assert "success" in out
-        assert "aliexpress.ds.trade.order.get" in out
+        assert ds_mod.DS_ORDER_STATUS_METHOD in out
         assert "delivered" in out
         assert "REQ-777_ok" in out
         for banned in (
