@@ -1,4 +1,4 @@
-"""Provider REAL (porém gated) do AliExpress placeorder — Fase 8.0.11A/8.0.11J/8.0.11L/8.0.11M/8.0.11Q.
+"""Provider REAL (porém gated) do AliExpress placeorder — Fase 8.0.11A/8.0.11J/8.0.11L/8.0.11M/8.0.11Q/8.0.11T.
 
 Este módulo implementa ``AliExpressOrderSubmitter`` chamando o protocolo TOP
 ``top_placeorder``. Ele é EXPLICITAMENTE DESABILITADO por padrão:
@@ -32,6 +32,12 @@ FASE 8.0.11Q alinha uma lacuna específica com o exemplo oficial do TOP para
 ``error_response``: ``code=50`` + ``sub_code=isv.invalid-parameter``. Somente o
 sub-code exato e documentado é promovido a falha confirmada; ``code=50`` por si
 só continua NÃO sendo prova suficiente e permanece ``unknown``.
+
+FASE 8.0.11T adiciona outra evidência oficial estrita de rejeição no gateway:
+``code=29`` + ``sub_code=isv.appkey-not-exists``. O par exato significa AppKey
+inválida/não reconhecida no TOP e é tratado como falha confirmada. ``code=29``
+isolado, o sub-code isolado ou qualquer combinação diferente continuam
+conservadoramente ``unknown``.
 """
 
 from __future__ import annotations
@@ -87,6 +93,9 @@ _CONFIRMED_SUB_CODES = {
     "invalid parameter",
     "session has expired",
     "isv.invalid-parameter",
+}
+_CONFIRMED_GATEWAY_ERROR_PAIRS = {
+    ("29", "isv.appkey-not-exists"),
 }
 
 
@@ -244,6 +253,8 @@ def _classify_placeorder(response: "TopPlaceOrderResponse") -> AliExpressSubmiss
 def _is_confirmed_failure(response: "TopPlaceOrderResponse") -> bool:
     code = (response.error_code or "").strip()
     sub_code = (response.error_sub_code or "").strip()
+    if (code, sub_code) in _CONFIRMED_GATEWAY_ERROR_PAIRS:
+        return True
     if code in _CONFIRMED_FAILURE_CODES:
         return True
     if sub_code in _CONFIRMED_SUB_CODES:
