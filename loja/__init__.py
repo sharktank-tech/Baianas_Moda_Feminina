@@ -196,6 +196,9 @@ def create_app():
     from loja.views.aliexpress_single_live_canary_admin import (
         single_live_canary_admin_blueprint,
     )
+    from loja.views.aliexpress_fourth_diagnostic_canary_admin import (
+        fourth_diagnostic_canary_admin_blueprint,
+    )
 
     app.register_blueprint(tracking_blueprint)
     app.register_blueprint(payments_blueprint)
@@ -205,6 +208,7 @@ def create_app():
     app.register_blueprint(aliexpress_admin_blueprint)
     app.register_blueprint(fulfillment_admin_blueprint)
     app.register_blueprint(single_live_canary_admin_blueprint)
+    app.register_blueprint(fourth_diagnostic_canary_admin_blueprint)
 
     from loja.modules.models import User             # corrigido: User
 
