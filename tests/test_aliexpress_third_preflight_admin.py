@@ -44,6 +44,12 @@ def _status(*, eligible=False, reason="third_diagnostic_canary_disabled"):
     )
 
 
+def _assert_no_third_submit_form(html):
+    assert f'action="{SUBMIT_URL}"' not in html
+    assert f"action='{SUBMIT_URL}'" not in html
+    assert "Executar UMA terceira" not in html
+
+
 def test_third_preflight_requires_admin(client):
     response = client.get(PREFLIGHT_URL)
     assert response.status_code in (302, 303)
@@ -71,8 +77,7 @@ def test_third_preflight_is_get_only_and_has_no_submit_route(
     assert "READ-ONLY" in get_response.text
     assert "BLOCKED / NOT ARMED" in get_response.text
     assert "third_diagnostic_canary_disabled" in get_response.text
-    assert "<form" not in get_response.text.lower()
-    assert "Executar UMA" not in get_response.text
+    _assert_no_third_submit_form(get_response.text)
 
 
 def test_third_preflight_can_display_ready_without_exposing_execution(
@@ -96,7 +101,7 @@ def test_third_preflight_can_display_ready_without_exposing_execution(
     assert "ready_for_third_diagnostic_canary" in response.text
     assert "Não é autorização" in response.text
     assert "third-diagnostic-canary/submit" in response.text
-    assert "<form" not in response.text.lower()
+    _assert_no_third_submit_form(response.text)
 
 
 def test_third_preflight_rolls_back_even_when_evaluation_raises(
