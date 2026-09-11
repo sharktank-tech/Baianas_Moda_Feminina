@@ -5,6 +5,7 @@ on:
     branches:
       - safety/aliexpress-third-diagnostic-canary
       - fix/aliexpress-invalid-appkey-reconciliation-8.0.11t
+      - fix/aliexpress-placeorder-sync-8.0.11u
 
 permissions:
   contents: read

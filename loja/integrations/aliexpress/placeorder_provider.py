@@ -1,7 +1,7 @@
-"""Provider REAL (porém gated) do AliExpress placeorder — Fase 8.0.11A/8.0.11J/8.0.11L/8.0.11M/8.0.11Q/8.0.11T.
+"""Provider REAL (porém gated) do AliExpress placeorder — Fase 8.0.11A/8.0.11J/8.0.11L/8.0.11M/8.0.11Q/8.0.11T/8.0.11U.
 
-Este módulo implementa ``AliExpressOrderSubmitter`` chamando o protocolo TOP
-``top_placeorder``. Ele é EXPLICITAMENTE DESABILITADO por padrão:
+Este módulo implementa ``AliExpressOrderSubmitter`` chamando o gateway migrado
+``/sync`` via ``sync_placeorder``. Ele é EXPLICITAMENTE DESABILITADO por padrão:
 
   * ``get_default_order_submitter()`` continua retornando ``HardOffOrderSubmitter``
     (inalterado);
@@ -38,6 +38,11 @@ FASE 8.0.11T adiciona outra evidência oficial estrita de rejeição no gateway:
 inválida/não reconhecida no TOP e é tratado como falha confirmada. ``code=29``
 isolado, o sub-code isolado ou qualquer combinação diferente continuam
 conservadoramente ``unknown``.
+
+FASE 8.0.11U migra SOMENTE o transporte real de criação para o mesmo gateway
+Open Platform ``https://api-sg.aliexpress.com/sync`` já usado pelos fluxos DS do
+projeto. O DTO, a classificação, o snapshot, o hard-off e a política zero-retry
+permanecem inalterados.
 """
 
 from __future__ import annotations
@@ -69,12 +74,17 @@ from .submission import (
     AliExpressSubmissionUnknown,
     SubmissionHardOffError,
 )
-from .top_placeorder import call_top_placeorder
+from .sync_placeorder import call_sync_placeorder
 from .transport import TransportError, TransportTimeout
 
 if TYPE_CHECKING:  # pragma: no cover
     from .top_placeorder import TopPlaceOrderResponse
 
+
+# Compatibilidade de import interno: o símbolo histórico continua existindo,
+# mas NÃO aponta mais para o router TOP legado. Isso evita consumidores quebrados
+# sem reintroduzir eco.taobao.com no runtime.
+call_top_placeorder = call_sync_placeorder
 
 PLACEORDER_ENABLED_ENV = "ALIEXPRESS_PLACEORDER_ENABLED"
 
@@ -113,6 +123,8 @@ def _unknown_code(exc: AliExpressSubmissionUnknown) -> str:
 
 
 class TopAliExpressOrderSubmitter(AliExpressOrderSubmitter):
+    """Nome preservado por compatibilidade; transporte real agora é /sync."""
+
     def __init__(
         self,
         *,
@@ -290,5 +302,6 @@ __all__ = [
     "PLACEORDER_ENABLED_ENV",
     "TopAliExpressOrderSubmitter",
     "get_real_order_submitter",
+    "call_top_placeorder",
     "_classify_placeorder",
 ]
