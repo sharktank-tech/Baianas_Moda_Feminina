@@ -1,15 +1,17 @@
-"""Reconciliação offline de diagnósticos duráveis do placeorder — FASE 8.0.11T.
+"""Reconciliação offline de diagnósticos duráveis do placeorder — FASE 8.0.11T/8.0.11W.
 
 Este módulo NÃO executa HTTP, não lê credenciais e não toca catálogo. Ele só
 classifica diagnósticos já persistidos que tenham passado pelo formato
 fail-closed de ``placeorder_diagnostics.validate_durable_unknown_error``.
 
-A regra é deliberadamente estreita: somente o par oficial TOP
-``remote_error_code=29`` + ``remote_error_sub_code=isv.appkey-not-exists`` é
-conclusivo para ``not_found``. Esse erro é uma rejeição de gateway por App Key
-inválida/não reconhecida, portanto a chamada não chega à execução normal do
-método de criação. Qualquer ausência, variação ou código desconhecido permanece
-inconclusivo (``None``).
+As regras são deliberadamente estreitas e exatas:
+
+* ``remote_error_code=29`` + ``remote_error_sub_code=isv.appkey-not-exists``;
+* ``remote_error_code=B_DROPSHIPPER_DELIVERY_ADDRESS_VALIDATE_FAIL``.
+
+Ambos representam rejeições conclusivas sem identidade remota confirmada para
+o fluxo controlado. Qualquer ausência, variação ou código desconhecido permanece
+inconclusivo (``None``). Não há heurística, substring matching ou fallback.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ DURABLE_RECONCILE_NOT_FOUND = "not_found"
 
 _INVALID_APPKEY_CODE = "29"
 _INVALID_APPKEY_SUB_CODE = "isv.appkey-not-exists"
+_DELIVERY_ADDRESS_VALIDATE_FAIL_CODE = "B_DROPSHIPPER_DELIVERY_ADDRESS_VALIDATE_FAIL"
 
 
 def classify_durable_unknown_for_reconciliation(value: Any) -> Optional[str]:
@@ -47,6 +50,13 @@ def classify_durable_unknown_for_reconciliation(value: Any) -> Optional[str]:
     if (
         metadata.get("remote_error_code") == _INVALID_APPKEY_CODE
         and metadata.get("remote_error_sub_code") == _INVALID_APPKEY_SUB_CODE
+    ):
+        return DURABLE_RECONCILE_NOT_FOUND
+
+    if (
+        metadata.get("remote_error_code")
+        == _DELIVERY_ADDRESS_VALIDATE_FAIL_CODE
+        and "remote_error_sub_code" not in metadata
     ):
         return DURABLE_RECONCILE_NOT_FOUND
 
