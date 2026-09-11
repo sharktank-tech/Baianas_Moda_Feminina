@@ -176,7 +176,7 @@ class TopAliExpressOrderSubmitter(AliExpressOrderSubmitter):
 
         try:
             app_key, app_secret = self._resolve_config()
-            response: "TopPlaceOrderResponse" = call_sync_placeorder(
+            response: "TopPlaceOrderResponse" = call_top_placeorder(
                 app_key=app_key,
                 app_secret=app_secret,
                 access_token=self._resolved_token(request),
