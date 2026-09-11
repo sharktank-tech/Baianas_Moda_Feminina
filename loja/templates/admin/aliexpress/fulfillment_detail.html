@@ -49,7 +49,6 @@
         </div>
     </div>
 
-    <!-- Header com estado e info do supplier -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <div class="bg-white rounded-2xl shadow p-6">
             <h2 class="text-lg font-semibold text-gray-800 mb-4">Estado do Fulfillment</h2>
@@ -143,7 +142,6 @@
         </div>
     </div>
 
-    <!-- Itens do fulfillment -->
     <div class="bg-white rounded-2xl shadow overflow-hidden">
         <div class="p-6 border-b border-gray-200">
             <h2 class="text-lg font-semibold text-gray-800">Itens do Fulfillment ({{ ali_order.items|length }})</h2>
@@ -201,7 +199,8 @@
         </div>
     </div>
 
-    <!-- Timestamps -->
+    {% include "admin/aliexpress/_attempt_diagnostic_ledger.html" %}
+
     <div class="mt-6 bg-white rounded-2xl shadow p-6">
         <h2 class="text-lg font-semibold text-gray-800 mb-4">Histórico</h2>
         <dl class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
