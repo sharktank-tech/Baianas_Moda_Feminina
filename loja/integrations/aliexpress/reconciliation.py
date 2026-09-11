@@ -1,4 +1,4 @@
-"""Reconciliação de submissão AliExpress (Fase 8.0.5/8.0.11H) — HARD-OFF.
+"""Reconciliação de submissão AliExpress (Fase 8.0.5/8.0.11H/8.0.11N) — HARD-OFF.
 
 Elimina a ambiguidade do estado ``submitting -> provider possivelmente aceitou
 -> processo falha antes do commit local``. A ordem em resultado ambíguo vai
@@ -10,6 +10,11 @@ da reconciliação também encerra a barreira durável da tentativa. ``found``
 marca a tentativa como ``confirmed``; ``not_found`` marca como ``rejected``;
 ``unknown``/erro permanece ``unknown`` e continua bloqueando o circuit breaker
 global do canário. Não existe liberação por idade.
+
+FASE 8.0.11N preserva, após uma reconciliação conclusiva, somente um diagnóstico
+anterior que ainda passe pelo parser fail-closed do formato durável 8.0.11M.
+Isso evita perder o motivo sanitizado depois de ``unknown -> rejected/confirmed``
+sem carregar adiante texto livre legado ou potencialmente sensível.
 
 SEPARAÇÃO (8.0.4/8.0.5):
     submission boundary -> pedido (AliExpressOrderSubmitter)
@@ -48,6 +53,7 @@ from loja.modules.models import (
 from loja.utils import utcnow
 
 from .fulfillment import ERROR_CODES, FulfillmentResult
+from .placeorder_diagnostics import validate_durable_unknown_error
 from .submission import _attempt_key
 
 logger = logging.getLogger(__name__)
@@ -74,7 +80,6 @@ class AliExpressOrderReconciliationRequest:
     attempt_key: Optional[str]
 
 
-#: Desfechos semânticos da reconciliação (string estáveis, sem secrets).
 RECONCILE_FOUND = "found"
 RECONCILE_NOT_FOUND = "not_found"
 RECONCILE_UNKNOWN = "unknown"
@@ -84,7 +89,7 @@ RECONCILE_UNKNOWN = "unknown"
 class AliExpressOrderReconciliationResult:
     """Resposta do reconciler (fake) — sem secrets."""
 
-    outcome: str  # RECONCILE_FOUND | RECONCILE_NOT_FOUND | RECONCILE_UNKNOWN
+    outcome: str
     external_order_id: Optional[str] = None
     external_status: Optional[str] = None
 
@@ -96,8 +101,7 @@ class AliExpressOrderReconciler(ABC):
     def reconcile(
         self, request: AliExpressOrderReconciliationRequest
     ) -> AliExpressOrderReconciliationResult:
-        """Responde se o pedido remoto existe (found/not_found), se ainda é
-        desconhecido (unknown) ou levanta ``AliExpressReconciliationError``."""
+        """Responde found/not_found/unknown ou levanta erro sanitizado."""
 
 
 class HardOffOrderReconciler(AliExpressOrderReconciler):
@@ -113,12 +117,10 @@ class HardOffOrderReconciler(AliExpressOrderReconciler):
 
 
 def get_default_order_reconciler() -> AliExpressOrderReconciler:
-    """Provider padrão de produção/dev — sempre hard-off, sem config ambígua."""
     return HardOffOrderReconciler()
 
 
 def _integrity_gate(items: list[AliExpressOrderItem]) -> Optional[str]:
-    """Integridade de snapshot tem precedência sobre reconciliação."""
     if not items:
         return ERROR_CODES["ITEM_INTEGRITY_ERROR"]
     for item in items:
@@ -134,12 +136,7 @@ def _integrity_gate(items: list[AliExpressOrderItem]) -> Optional[str]:
 
 
 def _resolve_attempt(order, *, state: str, now, session) -> None:
-    """Resolve a tentativa durável atual sem expor sua identidade.
-
-    A tentativa é localizada por ``order.id + order.attempt_key``. Ausência é
-    tolerada para compatibilidade com pedidos legados; quando existe, o estado
-    terminal é persistido na MESMA transação da reconciliação conclusiva.
-    """
+    """Resolve a tentativa atual preservando apenas diagnóstico durável seguro."""
     if not order.attempt_key:
         return
     attempt = (
@@ -152,9 +149,11 @@ def _resolve_attempt(order, *, state: str, now, session) -> None:
     )
     if attempt is None:
         return
+
+    safe_diagnostic = validate_durable_unknown_error(attempt.last_error)
     attempt.state = state
     attempt.completed_at = now
-    attempt.last_error = None
+    attempt.last_error = safe_diagnostic
     attempt.updated_at = now
 
 
@@ -163,28 +162,7 @@ def reconcile_aliexpress_order(
     reconciler: Optional[AliExpressOrderReconciler] = None,
     session=None,
 ) -> FulfillmentResult:
-    """Reconcilia uma AliExpressOrder em ``pending_reconciliation``.
-
-    Locking (PostgreSQL): ``SELECT ... FOR UPDATE`` + ``populate_existing()``
-    serializa a reconciliação da MESMA ordem — duas reconciliações concorrentes
-    não divergem e DEPOIS da primeira (found/not_found) a segunda re-lê o novo
-    estado e não chama o reconciler de novo.
-
-    Regras:
-      * ``submitted`` permanece idempotente (retorna submitted);
-      * apenas ``pending_reconciliation`` é reconciliável;
-      * ``item_integrity_error`` tem precedência: nunca chama o reconciler;
-      * ``found``  -> persiste ``ali_order_id``, termina ``submitted``, marca a
-                      tentativa durável como ``confirmed`` e NÃO chama o
-                      submitter novamente;
-      * ``not_found`` (conclusivo) -> volta a ``ready`` na MESMA AliExpressOrder,
-                      marca a tentativa como ``rejected`` e permite uma nova
-                      tentativa com nova attempt_key;
-      * ``unknown``/erro -> permanece ``pending_reconciliation`` e a tentativa
-                      permanece ``unknown``; nunca retry cego.
-
-    Em SQLite o FOR UPDATE é inócuo; a exclusão mútua é provada em PostgreSQL.
-    """
+    """Reconcilia uma AliExpressOrder em ``pending_reconciliation``."""
     if reconciler is None:
         reconciler = get_default_order_reconciler()
     session = session or db.session
@@ -245,11 +223,7 @@ def reconcile_aliexpress_order(
         order.last_error = ERROR_CODES["RECONCILIATION_ERROR"]
         order.updated_at = now
         session.commit()
-        return FulfillmentResult(
-            aliexpress_order=order,
-            items=list(order.items),
-            state=order.state,
-        )
+        return FulfillmentResult(aliexpress_order=order, items=list(order.items), state=order.state)
     except AliExpressReconciliationError:
         logger.warning(
             "aliexpress reconciliation: erro p/ %s code=%s",
@@ -258,11 +232,7 @@ def reconcile_aliexpress_order(
         order.last_error = ERROR_CODES["RECONCILIATION_ERROR"]
         order.updated_at = now
         session.commit()
-        return FulfillmentResult(
-            aliexpress_order=order,
-            items=list(order.items),
-            state=order.state,
-        )
+        return FulfillmentResult(aliexpress_order=order, items=list(order.items), state=order.state)
     except Exception:
         logger.error(
             "aliexpress reconciliation: erro interno p/ %s code=%s",
@@ -271,21 +241,13 @@ def reconcile_aliexpress_order(
         order.last_error = ERROR_CODES["RECONCILIATION_ERROR"]
         order.updated_at = now
         session.commit()
-        return FulfillmentResult(
-            aliexpress_order=order,
-            items=list(order.items),
-            state=order.state,
-        )
+        return FulfillmentResult(aliexpress_order=order, items=list(order.items), state=order.state)
 
     if result is None:
         order.last_error = ERROR_CODES["RECONCILIATION_ERROR"]
         order.updated_at = now
         session.commit()
-        return FulfillmentResult(
-            aliexpress_order=order,
-            items=list(order.items),
-            state=order.state,
-        )
+        return FulfillmentResult(aliexpress_order=order, items=list(order.items), state=order.state)
 
     outcome = getattr(result, "outcome", "")
     if outcome == RECONCILE_FOUND:
@@ -294,11 +256,7 @@ def reconcile_aliexpress_order(
             order.last_error = ERROR_CODES["RECONCILIATION_ERROR"]
             order.updated_at = now
             session.commit()
-            return FulfillmentResult(
-                aliexpress_order=order,
-                items=list(order.items),
-                state=order.state,
-            )
+            return FulfillmentResult(aliexpress_order=order, items=list(order.items), state=order.state)
         order.state = "submitted"
         order.ali_order_id = external_order_id
         order.ali_status = getattr(result, "external_status", None) or "submitted"
@@ -311,25 +269,15 @@ def reconcile_aliexpress_order(
             item.updated_at = now
         _resolve_attempt(order, state="confirmed", now=now, session=session)
         session.commit()
-        return FulfillmentResult(
-            aliexpress_order=order,
-            items=list(order.items),
-            state="submitted",
-        )
+        return FulfillmentResult(aliexpress_order=order, items=list(order.items), state="submitted")
 
     if outcome == RECONCILE_NOT_FOUND:
-        # Conclusivo: nenhum pedido criado remotamente. Retry seguro na MESMA
-        # ordem (snapshot preservado; nova tentativa gera nova attempt_key).
         order.state = "ready"
         order.last_error = None
         order.updated_at = now
         _resolve_attempt(order, state="rejected", now=now, session=session)
         session.commit()
-        return FulfillmentResult(
-            aliexpress_order=order,
-            items=list(order.items),
-            state="ready",
-        )
+        return FulfillmentResult(aliexpress_order=order, items=list(order.items), state="ready")
 
     order.last_error = ERROR_CODES["RECONCILIATION_UNKNOWN"]
     order.updated_at = now
