@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Third diagnostic canary preflight — AliExpress{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8">
+  <div class="mb-6">
+    <a href="{{ url_for('aliexpress_fulfillment_admin.detail', order_id=ali_order.id) }}"
+       class="text-sm text-gray-500 hover:text-gray-800 underline">&larr; Voltar ao fulfillment</a>
+    <h1 class="text-3xl font-bold text-gray-800 mt-2">FASE 8.0.11P — Third diagnostic preflight</h1>
+    <p class="text-gray-500 mt-2">
+      Superfície administrativa somente leitura. Esta fase não possui rota POST, botão de execução ou chamada ao provider.
+    </p>
+  </div>
+
+  <div class="rounded-2xl border border-blue-200 bg-blue-50 p-5 mb-6 text-sm text-blue-900">
+    <p><strong>READ-ONLY:</strong> esta página apenas avalia o boundary instalado na FASE 8.0.11O e desfaz a transação local ao final do preflight.</p>
+    <p class="mt-2"><strong>Não é autorização:</strong> READY aqui significa apenas que o estado local e os gates observados satisfazem o preflight. Não existe execução nesta fase.</p>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    <div class="bg-white rounded-2xl shadow p-5">
+      <h2 class="font-semibold text-gray-800 mb-3">Estado local</h2>
+      <dl class="space-y-2 text-sm">
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">Fulfillment</dt><dd class="font-medium">{{ ali_order.state }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">attempt_count local</dt><dd class="font-medium">{{ ali_order.attempt_count }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">Durable attempts globais</dt><dd class="font-medium">{{ canary_preflight.prior_attempt_count }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">Circuit breaker</dt><dd class="font-medium">{{ 'ABERTO' if canary_preflight.circuit_open else 'FECHADO' }}</dd></div>
+      </dl>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow p-5">
+      <h2 class="font-semibold text-gray-800 mb-3">Gates observados</h2>
+      <dl class="space-y-2 text-sm">
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">Third diagnostic</dt><dd class="font-medium">{{ 'ON' if canary_preflight.third_gate_enabled else 'OFF' }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">First canary</dt><dd class="font-medium">{{ 'OFF' if canary_preflight.first_gate_disabled else 'ON — BLOQUEANTE' }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">Second canary</dt><dd class="font-medium">{{ 'OFF' if canary_preflight.second_gate_disabled else 'ON — BLOQUEANTE' }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">Controlled canary</dt><dd class="font-medium">{{ 'ON' if canary_preflight.controlled_gate_enabled else 'OFF' }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">Target exato</dt><dd class="font-medium">{{ 'MATCH' if canary_preflight.target_matches else 'NO MATCH' }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-gray-500">Placeorder</dt><dd class="font-medium">{{ 'ON' if canary_preflight.placeorder_enabled else 'OFF' }}</dd></div>
+      </dl>
+    </div>
+  </div>
+
+  <div class="rounded-2xl border p-5 mb-6 {% if canary_preflight.eligible %}bg-green-50 border-green-200{% else %}bg-yellow-50 border-yellow-200{% endif %}">
+    <p class="font-semibold {% if canary_preflight.eligible %}text-green-800{% else %}text-yellow-800{% endif %}">
+      {{ 'READY — PREFLIGHT ONLY' if canary_preflight.eligible else 'BLOCKED / NOT ARMED' }}
+    </p>
+    <p class="text-sm mt-2 text-gray-700">Código sanitizado: {{ canary_preflight.reason }}</p>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow p-5 text-sm text-gray-700 space-y-2">
+    <p><strong>Pré-condição:</strong> exatamente duas tentativas duráveis anteriores, ambas reconciliadas como rejected e concluídas para a mesma ordem.</p>
+    <p><strong>Estado esperado:</strong> fulfillment ready, attempt_count=2, nenhuma identidade remota local e circuit breaker fechado.</p>
+    <p><strong>Execução:</strong> ausente nesta fase. Não existe endpoint <code>/third-diagnostic-canary/submit</code>.</p>
+    <p><strong>Dados sensíveis:</strong> token, credential, payload, attempt key e IDs remotos não são renderizados.</p>
+  </div>
+</div>
+{% endblock %}

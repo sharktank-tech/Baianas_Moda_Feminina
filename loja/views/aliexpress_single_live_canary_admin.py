@@ -2,9 +2,14 @@
 
 FASE 8.0.11I keeps the FIRST live canary one-shot intact.
 FASE 8.0.11K adds a SEPARATE second diagnostic canary for an explicitly
-reconciled first attempt.  Both GET endpoints are read-only; both POST
+reconciled first attempt. Both GET endpoints are read-only; both POST
 endpoints are protected by the application-wide CSRF guard and delegate only
 to their respective fail-closed boundaries.
+
+FASE 8.0.11P adds a THIRD-canary preflight surface that is GET-only. It has no
+submit route and imports no third-canary submit function. The route explicitly
+rolls back after evaluating the preflight so any incidental local credential
+state flush performed by validation cannot survive the read-only request.
 
 No route automatically selects an order or exposes provider secrets/payloads.
 """
@@ -33,6 +38,9 @@ from loja.integrations.aliexpress.single_live_canary import (
     AliExpressSingleLiveCanaryPreflightError,
     get_single_live_canary_preflight,
     submit_single_live_canary_order,
+)
+from loja.integrations.aliexpress.third_diagnostic_canary import (
+    get_third_diagnostic_canary_preflight,
 )
 from loja.integrations.aliexpress.submission import SubmissionHardOffError
 from loja.utils.decorators import admin_required
@@ -151,7 +159,7 @@ def second_diagnostic_preflight(order_id):
 def second_diagnostic_submit(order_id):
     """Execute at most the separately armed SECOND diagnostic attempt.
 
-    The route never retries.  Unknown remains pending_reconciliation and any
+    The route never retries. Unknown remains pending_reconciliation and any
     second durable attempt permanently consumes the FASE 8.0.11K slot.
     """
 
@@ -206,6 +214,38 @@ def second_diagnostic_submit(order_id):
             order_id=order_id,
         ),
         code=303,
+    )
+
+
+@single_live_canary_admin_blueprint.route(
+    "/<uuid:order_id>/third-diagnostic-canary", methods=["GET"]
+)
+@admin_required
+def third_diagnostic_preflight(order_id):
+    """GET-only operational preflight for FASE 8.0.11P.
+
+    There is intentionally NO POST/submit route for the third canary in this
+    phase. Evaluating the existing O-boundary can touch local credential state
+    through validation; rollback is guaranteed even if evaluation raises.
+    """
+
+    ali_order = _load_order(order_id)
+    try:
+        status = get_third_diagnostic_canary_preflight(
+            ali_order,
+            session=db.session,
+        )
+    finally:
+        # Fail-closed read-only guarantee for this GET surface: even if
+        # credential validation performed an incidental flush, nothing from
+        # the preflight is allowed to persist.
+        db.session.rollback()
+
+    ali_order = _load_order(order_id)
+    return render_template(
+        "admin/aliexpress/third_diagnostic_canary_preflight.html",
+        ali_order=ali_order,
+        canary_preflight=status,
     )
 
 
