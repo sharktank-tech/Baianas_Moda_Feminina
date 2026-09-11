@@ -1,4 +1,4 @@
-"""Provider REAL (porém gated) do AliExpress placeorder — Fase 8.0.11A/8.0.11J/8.0.11L/8.0.11M.
+"""Provider REAL (porém gated) do AliExpress placeorder — Fase 8.0.11A/8.0.11J/8.0.11L/8.0.11M/8.0.11Q.
 
 Este módulo implementa ``AliExpressOrderSubmitter`` chamando o protocolo TOP
 ``top_placeorder``. Ele é EXPLICITAMENTE DESABILITADO por padrão:
@@ -27,6 +27,11 @@ FASE 8.0.11L registra ``error_code``/``error_sub_code`` somente quando passam
 pelo sanitizer estrito. FASE 8.0.11M também os mantém no ContextVar sanitizado
 para persistência controlada na tentativa ``unknown``; mensagem remota livre,
 payload, PII, credenciais e remote order ids continuam proibidos.
+
+FASE 8.0.11Q alinha uma lacuna específica com o exemplo oficial do TOP para
+``error_response``: ``code=50`` + ``sub_code=isv.invalid-parameter``. Somente o
+sub-code exato e documentado é promovido a falha confirmada; ``code=50`` por si
+só continua NÃO sendo prova suficiente e permanece ``unknown``.
 """
 
 from __future__ import annotations
@@ -81,6 +86,7 @@ _CONFIRMED_SUB_CODES = {
     "validation_error",
     "invalid parameter",
     "session has expired",
+    "isv.invalid-parameter",
 }
 
 
