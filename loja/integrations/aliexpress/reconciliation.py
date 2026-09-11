@@ -1,4 +1,4 @@
-"""Reconciliação de submissão AliExpress (Fase 8.0.5/8.0.11H/8.0.11N) — HARD-OFF.
+"""Reconciliação de submissão AliExpress (Fase 8.0.5/8.0.11H/8.0.11N/8.0.11T) — HARD-OFF.
 
 Elimina a ambiguidade do estado ``submitting -> provider possivelmente aceitou
 -> processo falha antes do commit local``. A ordem em resultado ambíguo vai
@@ -16,6 +16,12 @@ anterior que ainda passe pelo parser fail-closed do formato durável 8.0.11M.
 Isso evita perder o motivo sanitizado depois de ``unknown -> rejected/confirmed``
 sem carregar adiante texto livre legado ou potencialmente sensível.
 
+FASE 8.0.11T permite uma reconciliação OFFLINE e conclusiva somente quando o
+diagnóstico durável validado prova rejeição de gateway antes da execução normal
+do método. Atualmente a única evidência aceita é o par TOP oficial
+``code=29`` + ``sub_code=isv.appkey-not-exists``. Não há HTTP, OAuth, catálogo
+ou heurística nesse caminho; qualquer variação continua ``unknown``.
+
 SEPARAÇÃO (8.0.4/8.0.5):
     submission boundary -> pedido (AliExpressOrderSubmitter)
     OAuth boundary      -> credencial (AliExpressOAuthRefresher)
@@ -32,8 +38,9 @@ RESPOSTAS SEMÂNTICAS DO RECONCILER:
     * erro       -> exceção de reconciliação (permanece bloqueado; erro
                     sanitizado em last_error)
 
-Nesta fase o provider de reconciliação é sempre HARD-OFF (fake/mock nos
-testes); nenhuma consulta ao AliExpress real acontece.
+O provider remoto de reconciliação continua HARD-OFF. A FASE 8.0.11T não
+habilita consulta externa: apenas consome uma evidência durável local e
+estritamente validada quando ela já é conclusiva por si só.
 """
 
 from __future__ import annotations
@@ -54,6 +61,10 @@ from loja.utils import utcnow
 
 from .fulfillment import ERROR_CODES, FulfillmentResult
 from .placeorder_diagnostics import validate_durable_unknown_error
+from .reconciliation_diagnostics import (
+    DURABLE_RECONCILE_NOT_FOUND,
+    classify_durable_unknown_for_reconciliation,
+)
 from .submission import _attempt_key
 
 logger = logging.getLogger(__name__)
@@ -135,11 +146,10 @@ def _integrity_gate(items: list[AliExpressOrderItem]) -> Optional[str]:
     return None
 
 
-def _resolve_attempt(order, *, state: str, now, session) -> None:
-    """Resolve a tentativa atual preservando apenas diagnóstico durável seguro."""
+def _current_attempt(order, *, session):
     if not order.attempt_key:
-        return
-    attempt = (
+        return None
+    return (
         session.query(AliExpressSubmissionAttempt)
         .filter_by(
             aliexpress_order_id=order.id,
@@ -147,6 +157,11 @@ def _resolve_attempt(order, *, state: str, now, session) -> None:
         )
         .first()
     )
+
+
+def _resolve_attempt(order, *, state: str, now, session) -> None:
+    """Resolve a tentativa atual preservando apenas diagnóstico durável seguro."""
+    attempt = _current_attempt(order, session=session)
     if attempt is None:
         return
 
@@ -155,6 +170,18 @@ def _resolve_attempt(order, *, state: str, now, session) -> None:
     attempt.completed_at = now
     attempt.last_error = safe_diagnostic
     attempt.updated_at = now
+
+
+def _offline_durable_result(order, *, session):
+    """Classifica evidência durável conclusiva sem qualquer acesso externo."""
+    attempt = _current_attempt(order, session=session)
+    if attempt is None or attempt.state != "unknown":
+        return None
+
+    outcome = classify_durable_unknown_for_reconciliation(attempt.last_error)
+    if outcome == DURABLE_RECONCILE_NOT_FOUND:
+        return AliExpressOrderReconciliationResult(outcome=RECONCILE_NOT_FOUND)
+    return None
 
 
 def reconcile_aliexpress_order(
@@ -206,42 +233,45 @@ def reconcile_aliexpress_order(
             state="blocked",
         )
 
-    request = AliExpressOrderReconciliationRequest(
-        aliexpress_order_id=order.id,
-        order_id=order.order_id,
-        supplier_id=order.supplier_id,
-        attempt_key=order.attempt_key or _attempt_key(order),
-    )
+    result = _offline_durable_result(order, session=session)
 
-    try:
-        result = reconciler.reconcile(request)
-    except AliExpressReconciliationUnavailable:
-        logger.warning(
-            "aliexpress reconciliation: indisponível p/ %s code=%s",
-            order.id, ERROR_CODES["RECONCILIATION_ERROR"],
+    if result is None:
+        request = AliExpressOrderReconciliationRequest(
+            aliexpress_order_id=order.id,
+            order_id=order.order_id,
+            supplier_id=order.supplier_id,
+            attempt_key=order.attempt_key or _attempt_key(order),
         )
-        order.last_error = ERROR_CODES["RECONCILIATION_ERROR"]
-        order.updated_at = now
-        session.commit()
-        return FulfillmentResult(aliexpress_order=order, items=list(order.items), state=order.state)
-    except AliExpressReconciliationError:
-        logger.warning(
-            "aliexpress reconciliation: erro p/ %s code=%s",
-            order.id, ERROR_CODES["RECONCILIATION_ERROR"],
-        )
-        order.last_error = ERROR_CODES["RECONCILIATION_ERROR"]
-        order.updated_at = now
-        session.commit()
-        return FulfillmentResult(aliexpress_order=order, items=list(order.items), state=order.state)
-    except Exception:
-        logger.error(
-            "aliexpress reconciliation: erro interno p/ %s code=%s",
-            order.id, ERROR_CODES["RECONCILIATION_ERROR"],
-        )
-        order.last_error = ERROR_CODES["RECONCILIATION_ERROR"]
-        order.updated_at = now
-        session.commit()
-        return FulfillmentResult(aliexpress_order=order, items=list(order.items), state=order.state)
+
+        try:
+            result = reconciler.reconcile(request)
+        except AliExpressReconciliationUnavailable:
+            logger.warning(
+                "aliexpress reconciliation: indisponível p/ %s code=%s",
+                order.id, ERROR_CODES["RECONCILIATION_ERROR"],
+            )
+            order.last_error = ERROR_CODES["RECONCILIATION_ERROR"]
+            order.updated_at = now
+            session.commit()
+            return FulfillmentResult(aliexpress_order=order, items=list(order.items), state=order.state)
+        except AliExpressReconciliationError:
+            logger.warning(
+                "aliexpress reconciliation: erro p/ %s code=%s",
+                order.id, ERROR_CODES["RECONCILIATION_ERROR"],
+            )
+            order.last_error = ERROR_CODES["RECONCILIATION_ERROR"]
+            order.updated_at = now
+            session.commit()
+            return FulfillmentResult(aliexpress_order=order, items=list(order.items), state=order.state)
+        except Exception:
+            logger.error(
+                "aliexpress reconciliation: erro interno p/ %s code=%s",
+                order.id, ERROR_CODES["RECONCILIATION_ERROR"],
+            )
+            order.last_error = ERROR_CODES["RECONCILIATION_ERROR"]
+            order.updated_at = now
+            session.commit()
+            return FulfillmentResult(aliexpress_order=order, items=list(order.items), state=order.state)
 
     if result is None:
         order.last_error = ERROR_CODES["RECONCILIATION_ERROR"]
