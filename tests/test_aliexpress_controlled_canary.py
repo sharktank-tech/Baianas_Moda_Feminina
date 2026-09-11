@@ -141,7 +141,7 @@ def test_closed_circuit_delegates_once_with_explicit_submitter(monkeypatch):
     order = SimpleNamespace(id="local-order")
     session = _FakeSession(order)
     submitter = _Submitter()
-    sentinel = object()
+    sentinel = SimpleNamespace(state="submitted")
     core_calls = []
     _arm(monkeypatch, order.id)
 
