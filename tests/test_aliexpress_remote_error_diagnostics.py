@@ -3,7 +3,11 @@ from __future__ import annotations
 import logging
 
 from loja.integrations.aliexpress.placeorder_diagnostics import (
+    build_durable_unknown_error,
+    clear_remote_error_metadata,
+    consume_remote_error_metadata,
     log_placeorder_event,
+    record_remote_error_metadata,
     response_error_metadata,
     sanitize_remote_code,
 )
@@ -58,6 +62,55 @@ def test_response_error_metadata_drops_unsafe_remote_codes():
     )
 
     assert response_error_metadata(response) == {}
+
+
+def test_remote_error_metadata_context_is_sanitized_and_consumed_once():
+    clear_remote_error_metadata()
+    response = TopPlaceOrderResponse(
+        is_success=False,
+        error_code="ISV.PARAMETER-ERROR",
+        error_sub_code="isv.invalid-permission",
+        error_message="token=secret",
+    )
+
+    assert record_remote_error_metadata(response) == {
+        "remote_error_code": "ISV.PARAMETER-ERROR",
+        "remote_error_sub_code": "isv.invalid-permission",
+    }
+    assert consume_remote_error_metadata() == {
+        "remote_error_code": "ISV.PARAMETER-ERROR",
+        "remote_error_sub_code": "isv.invalid-permission",
+    }
+    assert consume_remote_error_metadata() == {}
+
+
+def test_build_durable_unknown_error_keeps_only_safe_machine_codes():
+    value = build_durable_unknown_error(
+        "placeorder_remote_error",
+        {
+            "remote_error_code": "ISV.PARAMETER-ERROR",
+            "remote_error_sub_code": "isv.invalid-permission",
+            "error_message": "token=secret customer@example.com",
+        },
+    )
+    assert value == (
+        "placeorder_remote_error"
+        "|remote_error_code=ISV.PARAMETER-ERROR"
+        "|remote_error_sub_code=isv.invalid-permission"
+    )
+    assert "secret" not in value
+    assert "customer@example.com" not in value
+
+
+def test_build_durable_unknown_error_drops_unsafe_remote_values():
+    value = build_durable_unknown_error(
+        "placeorder_remote_error",
+        {
+            "remote_error_code": "token=super-secret",
+            "remote_error_sub_code": "invalid parameter",
+        },
+    )
+    assert value == "placeorder_remote_error"
 
 
 def test_log_event_includes_only_safe_remote_codes(caplog):

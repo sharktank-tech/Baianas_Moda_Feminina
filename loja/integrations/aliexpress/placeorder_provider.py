@@ -1,4 +1,4 @@
-"""Provider REAL (porém gated) do AliExpress placeorder — Fase 8.0.11A/8.0.11J/8.0.11L.
+"""Provider REAL (porém gated) do AliExpress placeorder — Fase 8.0.11A/8.0.11J/8.0.11L/8.0.11M.
 
 Este módulo implementa ``AliExpressOrderSubmitter`` chamando o protocolo TOP
 ``top_placeorder``. Ele é EXPLICITAMENTE DESABILITADO por padrão:
@@ -9,11 +9,10 @@ Este módulo implementa ``AliExpressOrderSubmitter`` chamando o protocolo TOP
     real, e ainda assim ele exige o gate ``ALIEXPRESS_PLACEORDER_ENABLED == "1"``
     exato para NÃO falhar fechado.
 
-O gate é re-checado DENTRO de ``submit()`` (defense-in-depth) ANTES de qualquer
-resolução de credencial, DTO, assinatura ou HTTP. Isso nos permite provar por
-teste: gate off -> zero acesso a credencial e zero HTTP.
+O gate é re-checado DENTRO de ``submit()`` antes de qualquer resolução de
+credencial, DTO, assinatura ou HTTP.
 
-Classificação conservadora do resultado (a regra de negócio NÃO vive no parser):
+Classificação conservadora do resultado:
   * 1+ ids confirmados -> AliExpressSubmissionResult(submitted);
   * 0 ids              -> AliExpressSubmissionUnknown(placeorder_success_without_order_id);
   * ids duplicados     -> AliExpressSubmissionUnknown(placeorder_remote_identity_ambiguous);
@@ -24,13 +23,10 @@ Classificação conservadora do resultado (a regra de negócio NÃO vive no pars
   * protocolo          -> Unknown(placeorder_protocol_error);
   * request inválido   -> Failed(placeorder_request_invalid).
 
-FASE 8.0.11J adiciona telemetria estritamente sanitizada. Ela registra somente
-forma/cardinalidade/duração e códigos allow-listed; nunca registra token, sign,
-app_secret/key, payload, endereço, telefone ou remote order IDs.
-
-FASE 8.0.11L preserva, apenas no LOG sanitizado, ``error_code`` e
-``error_sub_code`` quando eles têm formato estrito de machine-code. Mensagem
-remota livre continua proibida e nunca é persistida nem registrada.
+FASE 8.0.11L registra ``error_code``/``error_sub_code`` somente quando passam
+pelo sanitizer estrito. FASE 8.0.11M também os mantém no ContextVar sanitizado
+para persistência controlada na tentativa ``unknown``; mensagem remota livre,
+payload, PII, credenciais e remote order ids continuam proibidos.
 """
 
 from __future__ import annotations
@@ -49,9 +45,9 @@ from .credential_store import (
 from .errors import AliExpressAPIError, AliExpressConfigError
 from .placeorder_diagnostics import (
     log_placeorder_event,
+    record_remote_error_metadata,
     record_unknown_outcome,
     request_shape,
-    response_error_metadata,
     sanitize_unknown_code,
 )
 from .submission import (
@@ -188,7 +184,7 @@ class TopAliExpressOrderSubmitter(AliExpressOrderSubmitter):
             )
             raise
 
-        remote_error = response_error_metadata(response)
+        remote_error = record_remote_error_metadata(response)
         try:
             result = _classify_placeorder(response)
         except AliExpressSubmissionUnknown as exc:
