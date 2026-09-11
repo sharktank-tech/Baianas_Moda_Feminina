@@ -7,15 +7,16 @@
   <div class="mb-6">
     <a href="{{ url_for('aliexpress_fulfillment_admin.detail', order_id=ali_order.id) }}"
        class="text-sm text-gray-500 hover:text-gray-800 underline">&larr; Voltar ao fulfillment</a>
-    <h1 class="text-3xl font-bold text-gray-800 mt-2">FASE 8.0.11P — Third diagnostic preflight</h1>
+    <h1 class="text-3xl font-bold text-gray-800 mt-2">FASE 8.0.11S — Third diagnostic POST surface</h1>
     <p class="text-gray-500 mt-2">
-      Superfície administrativa somente leitura. Esta fase não possui rota POST, botão de execução ou chamada ao provider.
+      Superfície POST preparada, porém protegida por uma autorização final independente e HARD-OFF por padrão.
     </p>
   </div>
 
   <div class="rounded-2xl border border-blue-200 bg-blue-50 p-5 mb-6 text-sm text-blue-900">
-    <p><strong>READ-ONLY:</strong> esta página apenas avalia o boundary instalado na FASE 8.0.11O e desfaz a transação local ao final do preflight.</p>
-    <p class="mt-2"><strong>Não é autorização:</strong> READY aqui significa apenas que o estado local e os gates observados satisfazem o preflight. Não existe execução nesta fase.</p>
+    <p><strong>PREPARADO ≠ AUTORIZADO:</strong> esta página continua usando o preflight do boundary instalado na FASE 8.0.11O e desfaz qualquer efeito local incidental ao final do GET.</p>
+    <p class="mt-2"><strong>Trava final independente:</strong> mesmo que todos os gates anteriores estejam ON, o POST não pode delegar ao submit enquanto a autorização final da FASE 8.0.11S permanecer HARD-OFF.</p>
+    <p class="mt-2"><strong>Nenhum gate é armado pela aplicação.</strong> A terceira chamada real continua exigindo uma autorização explícita separada.</p>
   </div>
 
   <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -30,7 +31,7 @@
     </div>
 
     <div class="bg-white rounded-2xl shadow p-5">
-      <h2 class="font-semibold text-gray-800 mb-3">Gates observados</h2>
+      <h2 class="font-semibold text-gray-800 mb-3">Gates existentes</h2>
       <dl class="space-y-2 text-sm">
         <div class="flex justify-between gap-4"><dt class="text-gray-500">Third diagnostic</dt><dd class="font-medium">{{ 'ON' if canary_preflight.third_gate_enabled else 'OFF' }}</dd></div>
         <div class="flex justify-between gap-4"><dt class="text-gray-500">First canary</dt><dd class="font-medium">{{ 'OFF' if canary_preflight.first_gate_disabled else 'ON — BLOQUEANTE' }}</dd></div>
@@ -44,16 +45,41 @@
 
   <div class="rounded-2xl border p-5 mb-6 {% if canary_preflight.eligible %}bg-green-50 border-green-200{% else %}bg-yellow-50 border-yellow-200{% endif %}">
     <p class="font-semibold {% if canary_preflight.eligible %}text-green-800{% else %}text-yellow-800{% endif %}">
-      {{ 'READY — PREFLIGHT ONLY' if canary_preflight.eligible else 'BLOCKED / NOT ARMED' }}
+      {{ 'READY — EXISTING PREFLIGHT ONLY' if canary_preflight.eligible else 'BLOCKED / NOT ARMED' }}
     </p>
     <p class="text-sm mt-2 text-gray-700">Código sanitizado: {{ canary_preflight.reason }}</p>
   </div>
 
-  <div class="bg-white rounded-2xl shadow p-5 text-sm text-gray-700 space-y-2">
+  <div class="rounded-2xl border p-5 mb-6 {% if execution_status.enabled %}bg-red-50 border-red-300{% else %}bg-gray-50 border-gray-300{% endif %}">
+    <p class="font-semibold {% if execution_status.enabled %}text-red-800{% else %}text-gray-800{% endif %}">
+      Final execution layer: {{ 'AUTHORIZED' if execution_status.enabled else 'HARD-OFF' }}
+    </p>
+    <p class="text-sm mt-2 text-gray-700">Código sanitizado: {{ execution_status.reason }}</p>
+    <p class="text-sm mt-2 text-gray-700">
+      Esta camada é adicional e independente dos gates existentes; todos os gates antigos podem estar ON e, ainda assim, o POST deve falhar fechado aqui.
+    </p>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow p-5 text-sm text-gray-700 space-y-2 mb-6">
     <p><strong>Pré-condição:</strong> exatamente duas tentativas duráveis anteriores, ambas reconciliadas como rejected e concluídas para a mesma ordem.</p>
     <p><strong>Estado esperado:</strong> fulfillment ready, attempt_count=2, nenhuma identidade remota local e circuit breaker fechado.</p>
-    <p><strong>Execução:</strong> ausente nesta fase. Não existe endpoint <code>/third-diagnostic-canary/submit</code>.</p>
+    <p><strong>POST:</strong> existe apenas para validar a superfície operacional; com a trava final OFF, deve redirecionar como bloqueado sem delegar ao provider.</p>
     <p><strong>Dados sensíveis:</strong> token, credential, payload, attempt key e IDs remotos não são renderizados.</p>
   </div>
+
+  <form method="POST"
+        action="{{ url_for('aliexpress_single_live_canary_admin.third_diagnostic_submit', order_id=ali_order.id) }}"
+        onsubmit="return confirm('CONFIRMA A SOLICITAÇÃO DE EXECUÇÃO DO TERCEIRO CANÁRIO? A FASE 8.0.11S continua HARD-OFF por padrão e não arma nenhum gate.');">
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+    <button type="submit"
+            class="px-5 py-3 rounded-lg font-semibold text-white {% if canary_preflight.eligible and execution_status.enabled %}bg-red-600 hover:bg-red-700{% else %}bg-gray-400 cursor-not-allowed{% endif %}"
+            {% if not (canary_preflight.eligible and execution_status.enabled) %}disabled{% endif %}>
+      Solicitar UMA terceira tentativa diagnóstica
+    </button>
+  </form>
+
+  <p class="text-xs text-gray-500 mt-4">
+    O botão só se torna operacional após uma autorização final separada; esta fase não fornece mecanismo para armá-la.
+  </p>
 </div>
 {% endblock %}

@@ -6,10 +6,10 @@ reconciled first attempt. Both GET endpoints are read-only; both POST
 endpoints are protected by the application-wide CSRF guard and delegate only
 to their respective fail-closed boundaries.
 
-FASE 8.0.11P adds a THIRD-canary preflight surface that is GET-only. It has no
-submit route and imports no third-canary submit function. The route explicitly
-rolls back after evaluating the preflight so any incidental local credential
-state flush performed by validation cannot survive the read-only request.
+FASE 8.0.11P adds a THIRD-canary preflight surface. FASE 8.0.11S prepares its
+POST surface behind an additional independent final execution hard-off gate.
+The POST is admin-only, remains covered by the application-wide CSRF guard and
+cannot reach the third-canary submit boundary while the S gate is OFF.
 
 No route automatically selects an order or exposes provider secrets/payloads.
 """
@@ -40,7 +40,15 @@ from loja.integrations.aliexpress.single_live_canary import (
     submit_single_live_canary_order,
 )
 from loja.integrations.aliexpress.third_diagnostic_canary import (
+    AliExpressThirdDiagnosticCanaryConfigurationError,
+    AliExpressThirdDiagnosticCanaryConsumed,
+    AliExpressThirdDiagnosticCanaryPreflightError,
     get_third_diagnostic_canary_preflight,
+)
+from loja.integrations.aliexpress.third_diagnostic_execution import (
+    AliExpressThirdDiagnosticExecutionHardOff,
+    execute_third_diagnostic_canary_order,
+    get_third_diagnostic_execution_status,
 )
 from loja.integrations.aliexpress.submission import SubmissionHardOffError
 from loja.utils.decorators import admin_required
@@ -222,11 +230,11 @@ def second_diagnostic_submit(order_id):
 )
 @admin_required
 def third_diagnostic_preflight(order_id):
-    """GET-only operational preflight for FASE 8.0.11P.
+    """Read-only operational preflight plus S execution-layer status.
 
-    There is intentionally NO POST/submit route for the third canary in this
-    phase. Evaluating the existing O-boundary can touch local credential state
-    through validation; rollback is guaranteed even if evaluation raises.
+    Evaluating the O-boundary can touch local credential state through
+    validation; rollback is guaranteed even if evaluation raises. The S status
+    is environment-only and cannot arm itself.
     """
 
     ali_order = _load_order(order_id)
@@ -236,16 +244,90 @@ def third_diagnostic_preflight(order_id):
             session=db.session,
         )
     finally:
-        # Fail-closed read-only guarantee for this GET surface: even if
-        # credential validation performed an incidental flush, nothing from
-        # the preflight is allowed to persist.
         db.session.rollback()
 
+    execution_status = get_third_diagnostic_execution_status()
     ali_order = _load_order(order_id)
     return render_template(
         "admin/aliexpress/third_diagnostic_canary_preflight.html",
         ali_order=ali_order,
         canary_preflight=status,
+        execution_status=execution_status,
+    )
+
+
+@single_live_canary_admin_blueprint.route(
+    "/<uuid:order_id>/third-diagnostic-canary/submit", methods=["POST"]
+)
+@admin_required
+def third_diagnostic_submit(order_id):
+    """Prepared FASE 8.0.11S POST, hard-off by an independent final gate.
+
+    This route never arms any gate. While the S execution authorization is OFF,
+    it fails before delegating to the third-canary submit boundary, so no real
+    provider resolution or HTTP can occur through this surface.
+    """
+
+    ali_order = _load_order(order_id)
+    try:
+        result = execute_third_diagnostic_canary_order(
+            ali_order,
+            session=db.session,
+        )
+        state = getattr(result, "state", None) or "unknown"
+        if state == "submitted":
+            flash(
+                "Terceiro canário confirmado localmente. Desarme TODOS os gates imediatamente.",
+                "success",
+            )
+        elif state == "pending_reconciliation":
+            flash(
+                "Terceiro canário ficou ambíguo. Desarme TODOS os gates e NÃO reenvie; reconciliação conclusiva é obrigatória.",
+                "danger",
+            )
+        else:
+            flash(
+                "Terceiro canário encerrou sem confirmação de submissão. Desarme TODOS os gates e revise o estado durável.",
+                "warning",
+            )
+    except AliExpressThirdDiagnosticExecutionHardOff:
+        db.session.rollback()
+        flash(
+            "FASE 8.0.11S: execução final permanece HARD-OFF; nenhuma chamada ao AliExpress foi autorizada.",
+            "danger",
+        )
+    except AliExpressThirdDiagnosticCanaryConsumed:
+        db.session.rollback()
+        flash(
+            "Terceiro canário diagnóstico já consumido; qualquer nova submissão está bloqueada.",
+            "danger",
+        )
+    except (
+        AliExpressThirdDiagnosticCanaryConfigurationError,
+        AliExpressThirdDiagnosticCanaryPreflightError,
+        AliExpressCanaryConfigurationError,
+        AliExpressCanaryCircuitOpen,
+        SubmissionHardOffError,
+    ):
+        db.session.rollback()
+        flash(
+            "Terceiro canário bloqueado pelo preflight/gates de segurança.",
+            "danger",
+        )
+    except Exception:
+        db.session.rollback()
+        current_app.logger.error("third diagnostic canary: erro sanitizado")
+        flash(
+            "Terceiro canário interrompido por erro interno sanitizado. Não reenvie sem revisar o estado durável.",
+            "danger",
+        )
+
+    return redirect(
+        url_for(
+            "aliexpress_single_live_canary_admin.third_diagnostic_preflight",
+            order_id=order_id,
+        ),
+        code=303,
     )
 
 

@@ -1,7 +1,7 @@
-"""FASE 8.0.11P — admin GET-only preflight for the third AliExpress canary.
+"""FASE 8.0.11S — admin POST surface for the third AliExpress canary.
 
-No test enables provider HTTP. The phase intentionally exposes no POST submit
-route for a third attempt.
+No test enables provider HTTP. The POST exists, is admin/CSRF protected and is
+blocked by an independent final execution hard-off by default.
 """
 
 from types import SimpleNamespace
@@ -9,8 +9,12 @@ import uuid
 
 import pytest
 
+from loja.integrations.aliexpress import third_diagnostic_execution as execution_mod
 from loja.integrations.aliexpress.third_diagnostic_canary import (
     ThirdDiagnosticCanaryPreflight,
+)
+from loja.integrations.aliexpress.third_diagnostic_execution import (
+    ThirdDiagnosticExecutionStatus,
 )
 from loja.views import aliexpress_single_live_canary_admin as admin_mod
 
@@ -44,10 +48,15 @@ def _status(*, eligible=False, reason="third_diagnostic_canary_disabled"):
     )
 
 
-def _assert_no_third_submit_form(html):
-    assert f'action="{SUBMIT_URL}"' not in html
-    assert f"action='{SUBMIT_URL}'" not in html
-    assert "Executar UMA terceira" not in html
+def _execution_status(*, enabled=False):
+    return ThirdDiagnosticExecutionStatus(
+        enabled=enabled,
+        reason=(
+            "third_diagnostic_execution_authorized"
+            if enabled
+            else "third_diagnostic_execution_hard_off"
+        ),
+    )
 
 
 def test_third_preflight_requires_admin(client):
@@ -56,31 +65,13 @@ def test_third_preflight_requires_admin(client):
     assert response.headers["Location"].endswith("/login")
 
 
-def test_third_preflight_is_get_only_and_has_no_submit_route(
-    client, admin_user, login, monkeypatch
-):
-    login(admin_user.email)
-    monkeypatch.setattr(admin_mod, "_load_order", lambda order_id: _order())
-    monkeypatch.setattr(
-        admin_mod,
-        "get_third_diagnostic_canary_preflight",
-        lambda ali_order, *, session: _status(),
-    )
-
-    get_response = client.get(PREFLIGHT_URL)
-    post_same_path = client.post(PREFLIGHT_URL)
-    post_submit_path = client.post(SUBMIT_URL)
-
-    assert get_response.status_code == 200
-    assert post_same_path.status_code == 405
-    assert post_submit_path.status_code == 404
-    assert "READ-ONLY" in get_response.text
-    assert "BLOCKED / NOT ARMED" in get_response.text
-    assert "third_diagnostic_canary_disabled" in get_response.text
-    _assert_no_third_submit_form(get_response.text)
+def test_third_submit_requires_admin(client):
+    response = client.post(SUBMIT_URL)
+    assert response.status_code in (302, 303)
+    assert response.headers["Location"].endswith("/login")
 
 
-def test_third_preflight_can_display_ready_without_exposing_execution(
+def test_third_preflight_displays_independent_hard_off(
     client, admin_user, login, monkeypatch
 ):
     login(admin_user.email)
@@ -93,15 +84,78 @@ def test_third_preflight_can_display_ready_without_exposing_execution(
             reason="ready_for_third_diagnostic_canary",
         ),
     )
+    monkeypatch.setattr(
+        admin_mod,
+        "get_third_diagnostic_execution_status",
+        lambda: _execution_status(enabled=False),
+    )
 
     response = client.get(PREFLIGHT_URL)
 
     assert response.status_code == 200
-    assert "READY — PREFLIGHT ONLY" in response.text
-    assert "ready_for_third_diagnostic_canary" in response.text
-    assert "Não é autorização" in response.text
-    assert "third-diagnostic-canary/submit" in response.text
-    _assert_no_third_submit_form(response.text)
+    assert "READY — EXISTING PREFLIGHT ONLY" in response.text
+    assert "Final execution layer: HARD-OFF" in response.text
+    assert "third_diagnostic_execution_hard_off" in response.text
+    assert f'action="{SUBMIT_URL}"' in response.text
+    assert "disabled" in response.text
+    assert "Nenhum gate é armado pela aplicação" in response.text
+
+
+def test_third_submit_is_post_only(client, admin_user, login):
+    login(admin_user.email)
+    response = client.get(SUBMIT_URL)
+    assert response.status_code == 405
+
+
+def test_third_submit_hard_off_never_reaches_third_boundary(
+    client, admin_user, login, monkeypatch
+):
+    login(admin_user.email)
+    monkeypatch.setattr(admin_mod, "_load_order", lambda order_id: _order())
+    monkeypatch.delenv(
+        "ALIEXPRESS_THIRD_DIAGNOSTIC_EXECUTION_ENABLED", raising=False
+    )
+
+    calls = {"count": 0}
+
+    def _must_not_delegate(*args, **kwargs):
+        calls["count"] += 1
+        raise AssertionError("third diagnostic boundary must remain unreachable")
+
+    monkeypatch.setattr(
+        execution_mod,
+        "submit_third_diagnostic_canary_order",
+        _must_not_delegate,
+    )
+
+    response = client.post(SUBMIT_URL)
+
+    assert response.status_code == 303
+    assert response.headers["Location"].endswith(
+        f"/{ORDER_ID}/third-diagnostic-canary"
+    )
+    assert calls["count"] == 0
+
+
+def test_third_submit_is_covered_by_application_csrf(
+    client, app, admin_user, login, monkeypatch
+):
+    login(admin_user.email)
+    monkeypatch.setattr(admin_mod, "_load_order", lambda order_id: _order())
+    monkeypatch.setattr(
+        admin_mod,
+        "execute_third_diagnostic_canary_order",
+        lambda *args, **kwargs: pytest.fail("CSRF must reject before view execution"),
+    )
+
+    previous = app.config.get("WTF_CSRF_ENABLED")
+    app.config["WTF_CSRF_ENABLED"] = True
+    try:
+        response = client.post(SUBMIT_URL)
+    finally:
+        app.config["WTF_CSRF_ENABLED"] = previous
+
+    assert response.status_code == 400
 
 
 def test_third_preflight_rolls_back_even_when_evaluation_raises(
@@ -126,3 +180,29 @@ def test_third_preflight_rolls_back_even_when_evaluation_raises(
         client.get(PREFLIGHT_URL)
 
     assert rollback_calls["count"] == 1
+
+
+def test_third_preflight_hides_sensitive_execution_data(
+    client, admin_user, login, monkeypatch
+):
+    login(admin_user.email)
+    monkeypatch.setattr(admin_mod, "_load_order", lambda order_id: _order())
+    monkeypatch.setattr(
+        admin_mod,
+        "get_third_diagnostic_canary_preflight",
+        lambda ali_order, *, session: _status(),
+    )
+    monkeypatch.setattr(
+        admin_mod,
+        "get_third_diagnostic_execution_status",
+        lambda: _execution_status(),
+    )
+
+    response = client.get(PREFLIGHT_URL)
+
+    assert response.status_code == 200
+    lowered = response.text.lower()
+    assert "attempt-key-must-not-leak" not in lowered
+    assert "remote_order_id" not in lowered
+    assert "access_token" not in lowered
+    assert "app_secret" not in lowered
