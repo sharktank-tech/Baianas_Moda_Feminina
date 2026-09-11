@@ -6,6 +6,7 @@ on:
       - safety/aliexpress-third-diagnostic-canary
       - fix/aliexpress-invalid-appkey-reconciliation-8.0.11t
       - fix/aliexpress-placeorder-sync-8.0.11u
+      - safety/aliexpress-fourth-diagnostic-canary-8.0.11v
 
 permissions:
   contents: read
