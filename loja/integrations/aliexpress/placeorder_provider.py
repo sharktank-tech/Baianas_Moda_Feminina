@@ -81,6 +81,11 @@ if TYPE_CHECKING:  # pragma: no cover
     from .top_placeorder import TopPlaceOrderResponse
 
 
+# Compatibilidade de import interno: o símbolo histórico continua existindo,
+# mas NÃO aponta mais para o router TOP legado. Isso evita consumidores quebrados
+# sem reintroduzir eco.taobao.com no runtime.
+call_top_placeorder = call_sync_placeorder
+
 PLACEORDER_ENABLED_ENV = "ALIEXPRESS_PLACEORDER_ENABLED"
 
 _CONFIRMED_FAILURE_CODES = {
@@ -297,5 +302,6 @@ __all__ = [
     "PLACEORDER_ENABLED_ENV",
     "TopAliExpressOrderSubmitter",
     "get_real_order_submitter",
+    "call_top_placeorder",
     "_classify_placeorder",
 ]
