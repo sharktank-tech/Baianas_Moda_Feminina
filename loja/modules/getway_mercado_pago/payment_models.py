@@ -1,6 +1,9 @@
 import uuid
 
+from flask import has_request_context, request
+from sqlalchemy import event
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Session
 
 from loja import db
 from loja.utils import utcnow
@@ -408,4 +411,79 @@ class Payment(db.Model):
         return (
             f"<Payment {self.provider_payment_id} "
             f"status={self.status} amount={self.amount}>"
+        )
+
+
+def _order_requires_aliexpress_phone(session, order):
+    """Retorna True quando o pedido novo contém ao menos um produto AliExpress."""
+    unresolved_product_ids = set()
+
+    for item in list(order.items):
+        product = getattr(item, "product", None)
+        if product is not None:
+            if getattr(product, "source", None) == "aliexpress":
+                return True
+            continue
+        if item.product_id is not None:
+            unresolved_product_ids.add(item.product_id)
+
+    if not unresolved_product_ids:
+        return False
+
+    # Import tardio evita ciclo entre models.py e payment_models.py.
+    from loja.modules.models import Product
+
+    return (
+        session.query(Product.id)
+        .filter(
+            Product.id.in_(unresolved_product_ids),
+            Product.source == "aliexpress",
+        )
+        .first()
+        is not None
+    )
+
+
+def _normalize_order_phone_for_checkout(order, *, requires_aliexpress):
+    """Normaliza celular BR somente quando o fulfillment AliExpress exige."""
+    if not requires_aliexpress:
+        return order.customer_phone
+
+    from loja.integrations.aliexpress.submission_snapshot import (
+        SubmissionSnapshotError,
+        _normalize_br_mobile,
+    )
+
+    try:
+        normalized = _normalize_br_mobile(order.customer_phone)
+    except SubmissionSnapshotError as error:
+        raise ValueError(
+            "Informe um celular brasileiro válido com DDD."
+        ) from error
+
+    order.customer_phone = normalized
+    return normalized
+
+
+@event.listens_for(Session, "before_flush")
+def _guard_aliexpress_checkout_phone(session, flush_context, instances):
+    """Falha fechado antes do pagamento quando o checkout AliExpress tem celular inválido.
+
+    O endpoint de pagamento já envolve reserva de estoque, criação do Order e
+    ``flush`` na mesma transação. Se este guard falhar, o handler existente faz
+    ``rollback()``, desfazendo a reserva integralmente antes de qualquer chamada
+    a ``create_preference``/Mercado Pago.
+    """
+    if not has_request_context():
+        return
+    if request.endpoint != "payments.create_mercado_pago_payment":
+        return
+
+    for obj in tuple(session.new):
+        if not isinstance(obj, Order):
+            continue
+        requires_aliexpress = _order_requires_aliexpress_phone(session, obj)
+        _normalize_order_phone_for_checkout(
+            obj,
+            requires_aliexpress=requires_aliexpress,
         )
