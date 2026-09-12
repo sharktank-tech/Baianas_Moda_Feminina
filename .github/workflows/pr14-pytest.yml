@@ -9,6 +9,7 @@ on:
       - fix/aliexpress-address-reconciliation-8.0.11w
       - fix/aliexpress-brazil-address-8.0.11x
       - fix/aliexpress-snapshot-revision-8.0.11y
+      - fix/aliexpress-br-tax-id-8.0.12a
 
 permissions:
   contents: read
