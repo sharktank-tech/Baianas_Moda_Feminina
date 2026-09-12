@@ -94,7 +94,8 @@ def test_normalize_br_cpf_rejects_invalid_without_echo(raw):
     with pytest.raises(SubmissionSnapshotError) as exc:
         _normalize_br_cpf(raw)
     assert exc.value.args == ("shipping_cpf_invalid",)
-    assert raw not in str(exc.value)
+    if raw:
+        assert raw not in str(exc.value)
 
 
 def test_cpf_revision_archives_old_snapshot_and_changes_only_cpf(db, make_user):
