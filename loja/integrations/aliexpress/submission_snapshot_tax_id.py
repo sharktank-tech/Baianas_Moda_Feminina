@@ -4,16 +4,19 @@ Nenhuma função deste módulo faz HTTP, cria SubmissionAttempt, altera
 ``attempt_count`` ou cria slot de retry. O CPF é aceito SOMENTE de forma
 explícita pelo caller, validado localmente e persistido apenas no
 ``shipping_address`` do snapshot de submissão.
+
+FASE 8.0.12C centraliza a validação de CPF em ``loja.utils.br_tax_id`` para que
+checkout e fulfillment usem exatamente a mesma regra de normalização/checksum.
 """
 
 from __future__ import annotations
 
 import copy
-import re
 
 from sqlalchemy import func
 
 from loja import db
+from loja.utils.br_tax_id import BrazilianTaxIdError, normalize_br_cpf
 from .submission_snapshot import (
     AliExpressSubmissionSnapshot,
     AliExpressSubmissionSnapshotRevision,
@@ -24,36 +27,12 @@ from .submission_snapshot import (
 )
 
 
-def _digits(value) -> str:
-    return re.sub(r"\D", "", str(value or ""))
-
-
 def _normalize_br_cpf(value) -> str:
-    """Normaliza CPF para 11 dígitos e valida os dois dígitos verificadores.
-
-    Não gera, completa ou corrige CPF. Sequências repetidas são inválidas.
-    Exceções contêm apenas código sanitizado, nunca o documento recebido.
-    """
-    digits = _digits(value)
-    if len(digits) != 11 or len(set(digits)) == 1:
-        raise SubmissionSnapshotError("shipping_cpf_invalid")
-
-    numbers = [int(ch) for ch in digits]
-
-    total = sum(numbers[i] * (10 - i) for i in range(9))
-    check1 = (total * 10) % 11
-    if check1 == 10:
-        check1 = 0
-
-    total = sum(numbers[i] * (11 - i) for i in range(10))
-    check2 = (total * 10) % 11
-    if check2 == 10:
-        check2 = 0
-
-    if numbers[9] != check1 or numbers[10] != check2:
-        raise SubmissionSnapshotError("shipping_cpf_invalid")
-
-    return digits
+    """Compatibilidade: expõe a API histórica com erro sanitizado AliExpress."""
+    try:
+        return normalize_br_cpf(value)
+    except BrazilianTaxIdError as error:
+        raise SubmissionSnapshotError("shipping_cpf_invalid") from error
 
 
 def revise_submission_snapshot_cpf(
