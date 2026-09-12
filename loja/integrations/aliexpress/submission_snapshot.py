@@ -1,27 +1,19 @@
-"""Snapshot canônico de escrita para o futuro AliExpress placeorder (Fase 8.0.10).
+"""Snapshot canônico de escrita para o futuro AliExpress placeorder.
 
-Motivação:
-``aliexpress.trade.buy.placeorder`` não pode ler endereço, atributos SKU ou
-serviço logístico de tabelas mutáveis no instante da escrita. Este módulo cria
-uma camada 1:1 imutável por ``AliExpressOrder`` contendo somente os dados que o
-provider de criação poderá consumir.
+FASE 8.0.11X endurece o endereço brasileiro sem habilitar HTTP:
+* telefone é normalizado para número móvel nacional de 11 dígitos;
+* ``phone_country`` é congelado separadamente como ``+55``;
+* ``full_name`` é congelado explicitamente;
+* ``address`` contém rua + número;
+* ``address2`` preserva complemento + bairro quando presentes.
 
-A tabela NÃO habilita HTTP. O provider real continuará separado e gated.
-
-Regras:
-* endereço vem exclusivamente do ``Order`` persistido;
-* produto/SKU/quantidade vêm exclusivamente de ``AliExpressOrderItem``;
-* ``sku_attr`` é congelado em ``AliExpressOrderItem.supplier_sku_attr`` na
-  primeira materialização do fulfillment; este módulo NÃO lê
-  ``ProductVariant.attributes`` — usa exclusivamente o frozen value;
-* ``logistics_service_name`` é OPCIONAL para o placeorder oficial: quando
-  desconhecido é omitido; quando explicitamente fornecido é congelado;
-* uma vez materializado, o snapshot não é reconstruído do catálogo;
-* PII nunca aparece em repr/log/exception.
+O snapshot continua imutável depois de materializado e PII nunca aparece em
+repr/log/exception.
 """
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 from typing import Mapping, Optional
@@ -69,25 +61,54 @@ class SubmissionSnapshotResult:
     created: bool
 
 
+def _digits(value) -> str:
+    return re.sub(r"\D", "", str(value or ""))
+
+
+def _normalize_br_mobile(value) -> str:
+    """Retorna celular BR nacional ``DD9XXXXXXXX`` ou falha fechado.
+
+    Aceita entrada nacional com 11 dígitos e, por compatibilidade com formulários
+    que incluem DDI, 13 dígitos iniciados por ``55``. Não corrige/inventa dígitos.
+    """
+    digits = _digits(value)
+    if len(digits) == 13 and digits.startswith("55"):
+        digits = digits[2:]
+
+    if not re.fullmatch(r"[1-9][0-9]9[0-9]{8}", digits):
+        raise SubmissionSnapshotError("shipping_mobile_invalid")
+    return digits
+
+
 def _shipping_address(order) -> dict:
+    full_name = (order.customer_name or "").strip()
+    street = (order.street or "").strip()
+    number = (order.number or "").strip()
+    complement = (order.complement or "").strip()
+    neighborhood = (order.neighborhood or "").strip()
+
+    address = " ".join(p for p in (street, number) if p)
+    address2 = " - ".join(p for p in (complement, neighborhood) if p)
+
     required = {
-        "contact_person": (order.customer_name or "").strip(),
-        "mobile_no": (order.customer_phone or "").strip(),
+        "contact_person": full_name,
+        "full_name": full_name,
+        "mobile_no": _normalize_br_mobile(order.customer_phone),
+        "phone_country": "+55",
         "zip": (order.zip_code or "").strip(),
-        "address": " ".join(
-            p for p in [
-                (order.street or "").strip(),
-                (order.number or "").strip(),
-                (order.complement or "").strip(),
-                (order.neighborhood or "").strip(),
-            ] if p
-        ),
+        "address": address,
         "city": (order.city or "").strip(),
-        "province": (order.state or "").strip(),
+        "province": (order.state or "").strip().upper(),
         "country": "BR",
     }
     if any(not value for value in required.values()):
         raise SubmissionSnapshotError("shipping_address_incomplete")
+
+    # O AliExpress aceita address2 como extensão. Omitimos quando vazio; nunca
+    # inventamos complemento/bairro nem duplicamos o address principal.
+    if address2:
+        required["address2"] = address2
+
     return required
 
 
@@ -97,20 +118,10 @@ def materialize_submission_snapshot(
     logistics_service_by_order_item: Optional[Mapping[uuid.UUID, str]] = None,
     session=None,
 ) -> SubmissionSnapshotResult:
-    """Materializa UMA VEZ o payload canônico necessário ao futuro placeorder.
+    """Materializa UMA VEZ o payload canônico necessário ao placeorder.
 
-    ``logistics_service_by_order_item`` é OPCIONAL. As docs oficiais de
-    ``aliexpress.trade.buy.placeorder`` tratam ``logistics_service_name`` como
-    opcional por item:
-      * se um valor non-empty for EXPLICITAMENTE fornecido para um item, o
-        snapshot inclui ``logistics_service_name`` (congelado);
-      * se ausente (ou vazio/whitespace), a chave é OMITIDA do dict — nunca
-        string vazia, nunca None, nunca um default inventado.
-
-    O serviço logístico é decisão explícita por item; este helper não consulta
-    API de frete nem escolhe automaticamente o serviço mais barato.
-
-    O snapshot é imutável: uma vez criado, novo mapping não altera ``items``.
+    ``logistics_service_by_order_item`` é opcional. O snapshot é imutável: uma
+    vez criado, mudanças posteriores no pedido ou catálogo não o reescrevem.
     """
     session = session or db.session
     order = (
@@ -140,7 +151,11 @@ def materialize_submission_snapshot(
     for item in list(order.items):
         if not item.supplier_product_external_id or not item.supplier_sku_external_id:
             raise SubmissionSnapshotError("submission_item_identity_incomplete")
-        sku_attr = (item.supplier_sku_attr or "").strip() if getattr(item, "supplier_sku_attr", None) is not None else ""
+        sku_attr = (
+            (item.supplier_sku_attr or "").strip()
+            if getattr(item, "supplier_sku_attr", None) is not None
+            else ""
+        )
         if not sku_attr:
             raise SubmissionSnapshotError("submission_sku_attr_missing")
         service = str(logistics_map.get(item.order_item_id) or "").strip()
@@ -173,4 +188,6 @@ __all__ = [
     "SubmissionSnapshotResult",
     "build_sku_attr",
     "materialize_submission_snapshot",
+    "_normalize_br_mobile",
+    "_shipping_address",
 ]
