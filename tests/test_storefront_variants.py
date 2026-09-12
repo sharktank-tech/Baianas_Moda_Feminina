@@ -992,6 +992,7 @@ def test_real_checkout_persists_variant_id_and_uses_product_price(
             "selected_size": "M",
             "nome": "Cliente Teste",
             "email": user.email,
+            "telefone": "+55 (63) 99876-5432",
             "cep": "01310100",
             "estado": "SP",
             "endereco": "Rua Teste",

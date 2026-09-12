@@ -1,4 +1,4 @@
-"""FASE 8.0.11U/8.0.11W — contrato do placeorder migrado para /sync.
+"""FASE 8.0.11U/8.0.11W/8.0.11X — contrato do placeorder em /sync.
 
 Todos os testes são locais, com transporte injetado. Zero HTTP real.
 """
@@ -11,9 +11,7 @@ import uuid
 import pytest
 
 from loja.integrations.aliexpress.errors import AliExpressAPIError
-from loja.integrations.aliexpress.placeorder_provider import (
-    TopAliExpressOrderSubmitter,
-)
+from loja.integrations.aliexpress.placeorder_provider import TopAliExpressOrderSubmitter
 from loja.integrations.aliexpress.sign import sign_sync
 from loja.integrations.aliexpress.submission import (
     AliExpressPlaceOrderItem,
@@ -31,21 +29,23 @@ from loja.integrations.aliexpress.sync_placeorder import (
 )
 
 
-def _request():
+def _request(*, extra_shipping=None):
+    shipping = {
+        "contact_person": "Cliente",
+        "mobile_no": "11999999999",
+        "zip": "01001000",
+        "address": "Rua Exemplo 123",
+        "city": "São Paulo",
+        "province": "SP",
+        "country": "BR",
+    }
+    shipping.update(extra_shipping or {})
     return AliExpressSubmissionRequest(
         aliexpress_order_id=uuid.uuid4(),
         order_id=uuid.uuid4(),
         supplier_id=uuid.uuid4(),
         attempt_key="attempt-u",
-        shipping_address={
-            "contact_person": "Cliente",
-            "mobile_no": "11999999999",
-            "zip": "01001000",
-            "address": "Rua Exemplo",
-            "city": "São Paulo",
-            "province": "SP",
-            "country": "BR",
-        },
+        shipping_address=shipping,
         items=(
             AliExpressPlaceOrderItem(
                 product_id="123456789",
@@ -78,6 +78,45 @@ def test_sync_params_contract():
     dto = json.loads(params[SYNC_PLACEORDER_BUSINESS_PARAM])
     assert dto["product_items"][0]["product_id"] == 123456789
     assert dto["product_items"][0]["product_count"] == 1
+
+
+def test_sync_preserves_supported_optional_shipping_fields_only():
+    params = build_sync_placeorder_params(
+        app_key="app-key",
+        access_token="token",
+        request=_request(
+            extra_shipping={
+                "address2": "Apto 10 - Centro",
+                "full_name": "Cliente Teste",
+                "phone_country": "+55",
+                "cpf": "must-not-pass-this-phase",
+                "tax_number": "must-not-pass-this-phase",
+            }
+        ),
+        timestamp="1789150000000",
+    )
+    dto = json.loads(params[SYNC_PLACEORDER_BUSINESS_PARAM])
+    shipping = dto["logistics_address"]
+    assert shipping["address2"] == "Apto 10 - Centro"
+    assert shipping["full_name"] == "Cliente Teste"
+    assert shipping["phone_country"] == "+55"
+    assert "cpf" not in shipping
+    assert "tax_number" not in shipping
+
+
+def test_sync_omits_blank_optional_shipping_fields():
+    params = build_sync_placeorder_params(
+        app_key="app-key",
+        access_token="token",
+        request=_request(
+            extra_shipping={"address2": " ", "full_name": "", "phone_country": None}
+        ),
+        timestamp="1789150000000",
+    )
+    shipping = json.loads(params[SYNC_PLACEORDER_BUSINESS_PARAM])["logistics_address"]
+    assert "address2" not in shipping
+    assert "full_name" not in shipping
+    assert "phone_country" not in shipping
 
 
 def test_sync_sign_matches_existing_signer():
