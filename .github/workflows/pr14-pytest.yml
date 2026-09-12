@@ -12,6 +12,7 @@ on:
       - fix/aliexpress-br-tax-id-8.0.12a
       - fix/aliexpress-cpf-admin-8.0.12b
       - feat/checkout-cpf-8.0.12c
+      - feat/aliexpress-production-fulfillment-8.1.0
 
 permissions:
   contents: read
