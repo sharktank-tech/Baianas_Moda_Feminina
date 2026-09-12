@@ -1,4 +1,4 @@
-"""Provider REAL (porém gated) do AliExpress placeorder — Fase 8.0.11A/8.0.11J/8.0.11L/8.0.11M/8.0.11Q/8.0.11T/8.0.11U.
+"""Provider REAL (porém gated) do AliExpress placeorder — Fase 8.0.11A/8.0.11J/8.0.11L/8.0.11M/8.0.11Q/8.0.11T/8.0.11U/8.0.11W.
 
 Este módulo implementa ``AliExpressOrderSubmitter`` chamando o gateway migrado
 ``/sync`` via ``sync_placeorder``. Ele é EXPLICITAMENTE DESABILITADO por padrão:
@@ -43,6 +43,11 @@ FASE 8.0.11U migra SOMENTE o transporte real de criação para o mesmo gateway
 Open Platform ``https://api-sg.aliexpress.com/sync`` já usado pelos fluxos DS do
 projeto. O DTO, a classificação, o snapshot, o hard-off e a política zero-retry
 permanecem inalterados.
+
+FASE 8.0.11W adiciona somente o código oficial exato
+``B_DROPSHIPPER_DELIVERY_ADDRESS_VALIDATE_FAIL`` à allowlist de rejeições
+conclusivas de negócio. Não há matching parcial nem generalização para outros
+erros de endereço.
 """
 
 from __future__ import annotations
@@ -81,9 +86,6 @@ if TYPE_CHECKING:  # pragma: no cover
     from .top_placeorder import TopPlaceOrderResponse
 
 
-# Compatibilidade de import interno: o símbolo histórico continua existindo,
-# mas NÃO aponta mais para o router TOP legado. Isso evita consumidores quebrados
-# sem reintroduzir eco.taobao.com no runtime.
 call_top_placeorder = call_sync_placeorder
 
 PLACEORDER_ENABLED_ENV = "ALIEXPRESS_PLACEORDER_ENABLED"
@@ -97,6 +99,7 @@ _CONFIRMED_FAILURE_CODES = {
     "ISV.INVALID-PARAMETER",
     "isv.parameter-error",
     "isv.invalid-permission",
+    "B_DROPSHIPPER_DELIVERY_ADDRESS_VALIDATE_FAIL",
 }
 _CONFIRMED_SUB_CODES = {
     "validation_error",
