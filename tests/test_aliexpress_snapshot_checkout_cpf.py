@@ -94,14 +94,15 @@ def test_freeze_checkout_cpf_adds_only_canonical_value(db, make_user):
     assert "52998224725" not in repr(snapshot)
 
 
-def test_freeze_checkout_cpf_blocks_missing_value_without_echo(db, make_user):
+def test_freeze_checkout_cpf_preserves_legacy_missing_value(db, make_user):
     _, ali_order = _source_order(db, make_user, cpf=None)
     snapshot = _snapshot(ali_order)
+    before = dict(snapshot.shipping_address)
 
-    with pytest.raises(SubmissionSnapshotError) as exc:
-        _freeze_checkout_cpf(db.session, snapshot)
+    _freeze_checkout_cpf(db.session, snapshot)
 
-    assert exc.value.args == ("shipping_cpf_invalid",)
+    assert snapshot.shipping_address == before
+    assert "cpf" not in snapshot.shipping_address
 
 
 def test_freeze_checkout_cpf_blocks_invalid_value_without_echo(db, make_user):
