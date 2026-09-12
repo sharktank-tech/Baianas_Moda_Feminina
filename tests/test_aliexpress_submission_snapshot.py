@@ -80,8 +80,8 @@ def test_normalize_br_mobile_accepts_national_or_plus55(raw, expected):
     [
         None,
         "",
-        "55123456789",  # 11 dígitos iniciados por DDI: nacional incompleto
-        "+55 11 8765-4321",  # telefone fixo / móvel sem nono dígito
+        "55123456789",
+        "+55 11 8765-4321",
         "0011987654321",
     ],
 )
@@ -115,8 +115,8 @@ def test_shipping_address_separates_brazil_fields():
         "mobile_no": "11987654321",
         "phone_country": "+55",
         "zip": "01001000",
-        "address": "Rua Teste 123",
-        "address2": "Apto 10 - Centro",
+        "address": "Rua Teste 123 Centro",
+        "address2": "Apto 10",
         "city": "São Paulo",
         "province": "SP",
         "country": "BR",
@@ -124,8 +124,9 @@ def test_shipping_address_separates_brazil_fields():
 
 
 def test_shipping_address_omits_empty_address2():
-    shipping = _shipping_address(_order(complement="", neighborhood=""))
+    shipping = _shipping_address(_order(complement=""))
     assert "address2" not in shipping
+    assert shipping["address"] == "Rua Teste 123 Centro"
 
 
 def test_shipping_address_rejects_invalid_mobile_before_snapshot():
