@@ -1,8 +1,9 @@
-"""Placeorder AliExpress no gateway migrado ``/sync`` — FASE 8.0.11U/8.0.11W/8.0.11X.
+"""Placeorder AliExpress no gateway migrado ``/sync`` — FASE 8.0.11U/8.0.11W/8.0.11X/8.0.12C.
 
 O DTO canônico continua vindo do snapshot persistido. A 8.0.11W mantém o parser
 fail-closed para respostas contraditórias; a 8.0.11X preserva no DTO apenas os
-campos opcionais de endereço já congelados no snapshot. Nada é reconstruído do
+campos opcionais de endereço já congelados no snapshot. A 8.0.12C inclui CPF
+somente quando ele já existe no snapshot congelado. Nada é reconstruído do
 catálogo e nenhum valor é inventado.
 
 Garantias:
@@ -38,6 +39,7 @@ _OPTIONAL_SHIPPING_FIELDS = (
     "address2",
     "full_name",
     "phone_country",
+    "cpf",
 )
 
 
