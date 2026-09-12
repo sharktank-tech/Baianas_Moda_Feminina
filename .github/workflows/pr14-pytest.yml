@@ -7,6 +7,7 @@ on:
       - fix/aliexpress-invalid-appkey-reconciliation-8.0.11t
       - fix/aliexpress-placeorder-sync-8.0.11u
       - fix/aliexpress-address-reconciliation-8.0.11w
+      - fix/aliexpress-brazil-address-8.0.11x
 
 permissions:
   contents: read
