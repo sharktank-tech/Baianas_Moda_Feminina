@@ -153,6 +153,10 @@ from .top_freight import (
 )
 from .transport import RequestsTransport, Transport, TransportError, TransportTimeout
 
+# Registra o listener fail-closed que congela CPF válido nos snapshots novos.
+# Import deliberadamente tardio evita interferir nos imports dos models/boundaries.
+from . import snapshot_checkout_tax_id as _snapshot_checkout_tax_id  # noqa: F401,E402
+
 
 def create_client_from_env(
     *,
