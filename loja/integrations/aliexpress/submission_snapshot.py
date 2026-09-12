@@ -4,8 +4,8 @@ FASE 8.0.11X endurece o endereço brasileiro sem habilitar HTTP:
 * telefone é normalizado para número móvel nacional de 11 dígitos;
 * ``phone_country`` é congelado separadamente como ``+55``;
 * ``full_name`` é congelado explicitamente;
-* ``address`` contém rua + número;
-* ``address2`` preserva complemento + bairro quando presentes.
+* ``address`` contém rua + número + bairro;
+* ``address2`` preserva somente o complemento quando presente.
 
 O snapshot continua imutável depois de materializado e PII nunca aparece em
 repr/log/exception.
@@ -87,8 +87,9 @@ def _shipping_address(order) -> dict:
     complement = (order.complement or "").strip()
     neighborhood = (order.neighborhood or "").strip()
 
-    address = " ".join(p for p in (street, number) if p)
-    address2 = " - ".join(p for p in (complement, neighborhood) if p)
+    # Compatibilidade com o contrato histórico: o bairro permanece no endereço
+    # principal. O complemento, que pode ser longo, vai para address2.
+    address = " ".join(p for p in (street, number, neighborhood) if p)
 
     required = {
         "contact_person": full_name,
@@ -105,9 +106,9 @@ def _shipping_address(order) -> dict:
         raise SubmissionSnapshotError("shipping_address_incomplete")
 
     # O AliExpress aceita address2 como extensão. Omitimos quando vazio; nunca
-    # inventamos complemento/bairro nem duplicamos o address principal.
-    if address2:
-        required["address2"] = address2
+    # inventamos complemento nem o duplicamos no address principal.
+    if complement:
+        required["address2"] = complement
 
     return required
 
