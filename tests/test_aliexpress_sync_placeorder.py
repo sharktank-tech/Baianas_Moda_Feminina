@@ -1,4 +1,4 @@
-"""FASE 8.0.11U — contrato do placeorder migrado para /sync.
+"""FASE 8.0.11U/8.0.11W — contrato do placeorder migrado para /sync.
 
 Todos os testes são locais, com transporte injetado. Zero HTTP real.
 """
@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import json
 import uuid
-from unittest import mock
 
 import pytest
 
+from loja.integrations.aliexpress.errors import AliExpressAPIError
 from loja.integrations.aliexpress.placeorder_provider import (
     TopAliExpressOrderSubmitter,
 )
@@ -18,6 +18,7 @@ from loja.integrations.aliexpress.sign import sign_sync
 from loja.integrations.aliexpress.submission import (
     AliExpressPlaceOrderItem,
     AliExpressSubmissionRequest,
+    AliExpressSubmissionUnknown,
 )
 from loja.integrations.aliexpress.sync_placeorder import (
     SYNC_PLACEORDER_BUSINESS_PARAM,
@@ -117,6 +118,49 @@ def test_parse_sync_error_response_preserves_codes():
     assert result.error_sub_code == "isv.invalid-parameter"
 
 
+def test_parse_sync_failure_with_empty_order_list_remains_business_failure():
+    result = parse_sync_placeorder_response(
+        {
+            "aliexpress_trade_buy_placeorder_response": {
+                "result": {
+                    "is_success": False,
+                    "error_code": "B_DROPSHIPPER_DELIVERY_ADDRESS_VALIDATE_FAIL",
+                    "order_list": {"number": []},
+                }
+            }
+        }
+    )
+    assert result.is_success is False
+    assert result.order_ids == ()
+    assert result.error_code == "B_DROPSHIPPER_DELIVERY_ADDRESS_VALIDATE_FAIL"
+
+
+@pytest.mark.parametrize(
+    "order_list",
+    [
+        {"number": [12345]},
+        {"number": 12345},
+        [12345],
+        "12345",
+    ],
+)
+def test_parse_sync_failure_with_remote_identity_fails_closed(order_list):
+    with pytest.raises(AliExpressAPIError) as exc:
+        parse_sync_placeorder_response(
+            {
+                "aliexpress_trade_buy_placeorder_response": {
+                    "result": {
+                        "is_success": False,
+                        "error_code": "B_DROPSHIPPER_DELIVERY_ADDRESS_VALIDATE_FAIL",
+                        "order_list": order_list,
+                    }
+                }
+            }
+        )
+    assert str(exc.value) == "resposta placeorder contraditoria"
+    assert "12345" not in str(exc.value)
+
+
 def test_call_sync_placeorder_is_exactly_one_logical_post():
     calls = []
 
@@ -176,6 +220,33 @@ def test_provider_uses_sync_transport_with_injected_post(monkeypatch):
     assert calls[0]["method"] == SYNC_PLACEORDER_METHOD
     assert calls[0]["sign_method"] == "sha256"
     assert result.external_order_ids == ("24680",)
+
+
+def test_provider_contradictory_failure_identity_becomes_unknown(monkeypatch):
+    monkeypatch.setenv("ALIEXPRESS_PLACEORDER_ENABLED", "1")
+
+    def post(params):
+        return json.dumps(
+            {
+                "aliexpress_trade_buy_placeorder_response": {
+                    "result": {
+                        "is_success": False,
+                        "error_code": "B_DROPSHIPPER_DELIVERY_ADDRESS_VALIDATE_FAIL",
+                        "order_list": {"number": [24680]},
+                    }
+                }
+            }
+        )
+
+    provider = TopAliExpressOrderSubmitter(
+        app_key="key",
+        app_secret="secret",
+        resolve_access_token=lambda supplier_id: "token",
+        post=post,
+    )
+    with pytest.raises(AliExpressSubmissionUnknown) as exc:
+        provider.submit(_request())
+    assert exc.value.args[0] == "placeorder_protocol_error"
 
 
 def test_default_provider_still_requires_hardoff_gate(monkeypatch):
