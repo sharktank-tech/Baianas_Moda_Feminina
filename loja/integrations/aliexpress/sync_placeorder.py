@@ -1,7 +1,16 @@
-"""Placeorder AliExpress no gateway migrado ``/sync`` — FASE 8.0.11U/8.0.11X.
+"""Placeorder AliExpress no gateway migrado ``/sync`` — FASE 8.0.11U/8.0.11W/8.0.11X.
 
-A 8.0.11X preserva no DTO apenas campos opcionais de endereço já congelados no
-snapshot. Nada é reconstruído do catálogo e nenhum valor é inventado.
+O DTO canônico continua vindo do snapshot persistido. A 8.0.11W mantém o parser
+fail-closed para respostas contraditórias; a 8.0.11X preserva no DTO apenas os
+campos opcionais de endereço já congelados no snapshot. Nada é reconstruído do
+catálogo e nenhum valor é inventado.
+
+Garantias:
+- zero retry / zero sleep;
+- transporte injetável nos testes;
+- nenhum log de app_key, token/session, app_secret, sign, payload ou remote ids;
+- ``is_success=false`` com qualquer evidência de identidade remota falha fechado
+  como protocolo ambíguo, nunca como rejeição segura.
 """
 
 from __future__ import annotations
@@ -25,8 +34,6 @@ SYNC_PLACEORDER_METHOD = "aliexpress.trade.buy.placeorder"
 SYNC_PLACEORDER_BUSINESS_PARAM = "param_place_order_request4_open_api_d_t_o"
 _SYNC_TIMEOUT = 10.0
 
-# Campos opcionais aceitos pelo contrato oficial e suportados pelo snapshot
-# canônico desta fase. CPF/tax_number/location ids NÃO são adicionados aqui.
 _OPTIONAL_SHIPPING_FIELDS = (
     "address2",
     "full_name",
@@ -102,8 +109,38 @@ def _extract_protocol_payload(data: Any) -> Mapping[str, Any]:
     raise AliExpressAPIError("resposta placeorder inesperada")
 
 
+def _has_remote_identity_evidence(raw_order_list: Any) -> bool:
+    if raw_order_list is None:
+        return False
+    if isinstance(raw_order_list, list):
+        return bool(raw_order_list)
+    if isinstance(raw_order_list, Mapping):
+        numbers = raw_order_list.get("number")
+        if numbers is None:
+            return False
+        if isinstance(numbers, list):
+            return bool(numbers)
+        return True
+    return True
+
+
+def _reject_contradictory_failure_identity(normalized: Mapping[str, Any]) -> None:
+    wrapper = normalized.get("aliexpress_trade_buy_placeorder_response")
+    if not isinstance(wrapper, Mapping):
+        return
+    result = wrapper.get("result")
+    if not isinstance(result, Mapping):
+        return
+    if result.get("is_success") is not False:
+        return
+    if _has_remote_identity_evidence(result.get("order_list")):
+        raise AliExpressAPIError("resposta placeorder contraditoria")
+
+
 def parse_sync_placeorder_response(payload: Any) -> TopPlaceOrderResponse:
-    return parse_top_placeorder_response(_extract_protocol_payload(payload))
+    normalized = _extract_protocol_payload(payload)
+    _reject_contradictory_failure_identity(normalized)
+    return parse_top_placeorder_response(normalized)
 
 
 def call_sync_placeorder(
