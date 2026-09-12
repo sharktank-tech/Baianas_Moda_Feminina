@@ -62,11 +62,17 @@ def _attach_item(order, product):
     return item
 
 
+def _mark_product_aliexpress(db, product):
+    product.source = "aliexpress"
+    product.is_draft = False
+    product.pricing_status = "priced"
+    db.session.commit()
+    return product
+
+
 def test_aliexpress_checkout_without_phone_is_blocked(db, make_user, make_product):
     user = make_user()
-    product = make_product()
-    product.source = "aliexpress"
-    db.session.commit()
+    product = _mark_product_aliexpress(db, make_product())
 
     order = _order(user, phone=None)
     _attach_item(order, product)
@@ -78,9 +84,7 @@ def test_aliexpress_checkout_without_phone_is_blocked(db, make_user, make_produc
 
 def test_aliexpress_checkout_with_malformed_phone_is_blocked(db, make_user, make_product):
     user = make_user()
-    product = make_product()
-    product.source = "aliexpress"
-    db.session.commit()
+    product = _mark_product_aliexpress(db, make_product())
 
     order = _order(user, phone="55 12 3456-789")
     _attach_item(order, product)
@@ -92,9 +96,7 @@ def test_aliexpress_checkout_with_malformed_phone_is_blocked(db, make_user, make
 
 def test_aliexpress_checkout_plus55_is_persisted_as_national(db, make_user, make_product):
     user = make_user()
-    product = make_product()
-    product.source = "aliexpress"
-    db.session.commit()
+    product = _mark_product_aliexpress(db, make_product())
 
     order = _order(user, phone="+55 (63) 99876-5432")
     _attach_item(order, product)
@@ -109,8 +111,7 @@ def test_aliexpress_checkout_plus55_is_persisted_as_national(db, make_user, make
 def test_non_aliexpress_checkout_keeps_phone_optional(db, make_user, make_product):
     user = make_user()
     product = make_product()
-    product.source = None
-    db.session.commit()
+    assert product.source == "internal"
 
     order = _order(user, phone=None)
     _attach_item(order, product)
