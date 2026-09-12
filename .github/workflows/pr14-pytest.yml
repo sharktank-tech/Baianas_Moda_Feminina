@@ -10,6 +10,7 @@ on:
       - fix/aliexpress-brazil-address-8.0.11x
       - fix/aliexpress-snapshot-revision-8.0.11y
       - fix/aliexpress-br-tax-id-8.0.12a
+      - fix/aliexpress-cpf-admin-8.0.12b
 
 permissions:
   contents: read

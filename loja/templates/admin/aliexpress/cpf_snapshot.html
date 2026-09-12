@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+
+{% block title %}CPF snapshot AliExpress{% endblock %}
+
+{% block content %}
+<section class="admin-section">
+  <h1>FASE 8.0.12B — CPF do snapshot AliExpress</h1>
+  <p>Correção offline e auditável. Esta página não cria tentativa e não chama a AliExpress.</p>
+
+  <dl>
+    <dt>Fulfillment</dt><dd>{{ cpf_status.state }}</dd>
+    <dt>attempt_count</dt><dd>{{ cpf_status.attempt_count }}</dd>
+    <dt>CPF no snapshot</dt><dd>{{ 'PRESENTE' if cpf_status.has_cpf else 'AUSENTE' }}</dd>
+    <dt>Revisões auditáveis</dt><dd>{{ cpf_status.revision_count }}</dd>
+    <dt>Identidade remota</dt><dd>{{ 'PRESENTE' if cpf_status.has_remote_identity else 'AUSENTE' }}</dd>
+  </dl>
+
+  {% if not cpf_status.has_cpf %}
+  <form method="post" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="cpf">CPF do destinatário</label>
+    <input
+      id="cpf"
+      name="cpf"
+      type="password"
+      inputmode="numeric"
+      autocomplete="off"
+      required
+      minlength="11"
+      maxlength="14"
+    >
+    <button type="submit">Aplicar CPF ao snapshot</button>
+  </form>
+  {% else %}
+  <p>CPF já presente no snapshot. Nenhum valor sensível é exibido nesta página.</p>
+  {% endif %}
+</section>
+{% endblock %}
