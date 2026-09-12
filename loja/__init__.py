@@ -208,6 +208,11 @@ def create_app():
     app.register_blueprint(single_live_canary_admin_blueprint)
     app.register_blueprint(cpf_snapshot_admin_blueprint)
 
+    # FASE 8.0.12C: acrescenta o campo CPF somente nas páginas de checkout.
+    # Segurança não depende da UI: o backend valida antes do Mercado Pago.
+    from loja.checkout_cpf_ui import install_checkout_cpf_ui
+    install_checkout_cpf_ui(app)
+
     from loja.modules.models import User             # corrigido: User
 
     @login_manager.user_loader
