@@ -125,6 +125,9 @@ class Order(db.Model):
     customer_name = db.Column(db.String(160), nullable=False)
     customer_email = db.Column(db.String(160), nullable=False)
     customer_phone = db.Column(db.String(30))
+    # FASE 8.0.12C: nullable para preservar pedidos legados; novos checkouts
+    # AliExpress normalizam/validam antes de qualquer chamada ao Mercado Pago.
+    customer_cpf = db.Column(db.String(11), nullable=True)
 
     zip_code = db.Column(db.String(8), nullable=False)
     street = db.Column(db.String(255), nullable=False)
@@ -218,6 +221,10 @@ class Order(db.Model):
         db.CheckConstraint(
             "total >= 0",
             name="ck_orders_total_nonnegative",
+        ),
+        db.CheckConstraint(
+            "customer_cpf IS NULL OR length(customer_cpf) = 11",
+            name="ck_orders_customer_cpf_length",
         ),
         db.Index(
             "ix_orders_user_created",
@@ -465,9 +472,31 @@ def _normalize_order_phone_for_checkout(order, *, requires_aliexpress):
     return normalized
 
 
+def _normalize_order_cpf_for_checkout(order, *, requires_aliexpress, raw_cpf=None):
+    """Normaliza CPF de checkout AliExpress sem ecoar PII em erros.
+
+    Pedidos não AliExpress permanecem retrocompatíveis. Para AliExpress, o CPF
+    precisa existir e ter checksum válido antes do flush que antecede a criação
+    da preferência no Mercado Pago.
+    """
+    if not requires_aliexpress:
+        return order.customer_cpf
+
+    from loja.utils.br_tax_id import BrazilianTaxIdError, normalize_br_cpf
+
+    candidate = raw_cpf if raw_cpf is not None else order.customer_cpf
+    try:
+        normalized = normalize_br_cpf(candidate)
+    except BrazilianTaxIdError as error:
+        raise ValueError("Informe um CPF válido.") from error
+
+    order.customer_cpf = normalized
+    return normalized
+
+
 @event.listens_for(Session, "before_flush")
 def _guard_aliexpress_checkout_phone(session, flush_context, instances):
-    """Falha fechado antes do pagamento quando o checkout AliExpress tem celular inválido.
+    """Falha fechado antes do pagamento quando dados AliExpress são inválidos.
 
     O endpoint de pagamento já envolve reserva de estoque, criação do Order e
     ``flush`` na mesma transação. Se este guard falhar, o handler existente faz
@@ -486,4 +515,9 @@ def _guard_aliexpress_checkout_phone(session, flush_context, instances):
         _normalize_order_phone_for_checkout(
             obj,
             requires_aliexpress=requires_aliexpress,
+        )
+        _normalize_order_cpf_for_checkout(
+            obj,
+            requires_aliexpress=requires_aliexpress,
+            raw_cpf=request.form.get("cpf"),
         )

@@ -11,6 +11,7 @@ on:
       - fix/aliexpress-snapshot-revision-8.0.11y
       - fix/aliexpress-br-tax-id-8.0.12a
       - fix/aliexpress-cpf-admin-8.0.12b
+      - feat/checkout-cpf-8.0.12c
 
 permissions:
   contents: read

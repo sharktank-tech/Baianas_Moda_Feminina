@@ -64,7 +64,30 @@ def app():
 
 @pytest.fixture()
 def client(app):
-    return app.test_client()
+    client = app.test_client()
+    original_post = client.post
+
+    def _post_with_checkout_cpf(*args, **kwargs):
+        """Simula o campo obrigatório que a UI 8.0.12C sempre envia.
+
+        Testes legados que montam manualmente o POST de pagamento e não conhecem
+        o novo campo recebem um CPF fictício válido. Para testar ausência real,
+        basta enviar explicitamente ``cpf=""``; nesse caso nada é preenchido.
+        """
+        path = args[0] if args else kwargs.get("path")
+        data = kwargs.get("data")
+        if (
+            path == "/pagamentos/mercado-pago"
+            and isinstance(data, dict)
+            and "cpf" not in data
+        ):
+            data = dict(data)
+            data["cpf"] = "52998224725"
+            kwargs["data"] = data
+        return original_post(*args, **kwargs)
+
+    client.post = _post_with_checkout_cpf
+    return client
 
 
 @pytest.fixture()

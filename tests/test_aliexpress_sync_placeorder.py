@@ -1,4 +1,4 @@
-"""FASE 8.0.11U/8.0.11W/8.0.11X — contrato do placeorder em /sync.
+"""FASE 8.0.11U/8.0.11W/8.0.11X/8.0.12C — contrato do placeorder em /sync.
 
 Todos os testes são locais, com transporte injetado. Zero HTTP real.
 """
@@ -89,7 +89,7 @@ def test_sync_preserves_supported_optional_shipping_fields_only():
                 "address2": "Apto 10 - Centro",
                 "full_name": "Cliente Teste",
                 "phone_country": "+55",
-                "cpf": "must-not-pass-this-phase",
+                "cpf": "52998224725",
                 "tax_number": "must-not-pass-this-phase",
             }
         ),
@@ -100,7 +100,7 @@ def test_sync_preserves_supported_optional_shipping_fields_only():
     assert shipping["address2"] == "Apto 10 - Centro"
     assert shipping["full_name"] == "Cliente Teste"
     assert shipping["phone_country"] == "+55"
-    assert "cpf" not in shipping
+    assert shipping["cpf"] == "52998224725"
     assert "tax_number" not in shipping
 
 
