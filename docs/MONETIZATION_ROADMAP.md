@@ -50,7 +50,7 @@ Ativação operacional permanece fora do escopo automático: ligar gates em prod
 
 ## FASE 8.2.0 — Margem líquida e proteção contra venda com prejuízo
 
-**Status:** em andamento — checkpoints A–I entregues; integração da rota administrativa pendente.
+**Status:** concluída — checkpoints A–J entregues.
 
 Objetivo: sair da margem baseada apenas em landed cost e calcular unit economics reais.
 
@@ -157,6 +157,18 @@ Critérios de saída da fase completa:
 - produto não é publicado abaixo da margem líquida mínima definida;
 - nenhum custo desconhecido é silenciosamente tratado como zero;
 - dashboard mostra receita bruta, custo, margem de contribuição e margem líquida operacional definida pelo projeto.
+
+### Checkpoint 8.2.0-J — dashboard administrativo read-only ✅
+
+Integrado na master via rota `GET /admin/unit-economics` (somente leitura), sem migration e sem alteração em produção.
+
+Entregue:
+
+- agregação read-only por produto: receita bruta, custo (landed), margem de contribuição e margem líquida operacional;
+- custos desconhecidos permanecem `unknown` e nunca viram zero; avaliação incompleta não define margens;
+- reproduz o mesmo contrato fail-closed do avaliador pré-publicação (politica explícita, sem defaults implícitos);
+- painel sanitizado: nunca expõe supplier_sku_id, external ids, tokens ou payload bruto;
+- rota protegida por `@admin_required`, exclusivamente GET.
 
 ## FASE 8.3.0 — Pós-venda, rastreio e exceções
 

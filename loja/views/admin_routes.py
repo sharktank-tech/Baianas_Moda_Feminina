@@ -27,6 +27,11 @@ from loja.modules.models import (
     Supplier, Promotion, Coupon,
 )
 from loja.services.publication import PublicationBlocked, publish_product
+from loja.services.publication_unit_economics_dashboard import (
+    build_unit_economics_dashboard,
+    dashboard_totals,
+)
+from loja.services.unit_economics_policy import load_unit_economics_cost_policy
 
 admin_blueprint = Blueprint(
     "admin",
@@ -304,6 +309,30 @@ def admin_dashboard():
         nav_links=footer["nav_links"],
         category_links=footer["categories"],
         legal_links=footer["legal_links"],
+    )
+
+
+# -------------------------------------------------------------------
+# Dashboard de unit economics (FASE 8.2.0, somente leitura)
+# -------------------------------------------------------------------
+
+@admin_blueprint.route("/admin/unit-economics", methods=["GET"])
+@admin_required
+def unit_economics_dashboard():
+
+    products = Product.query.options(
+        selectinload(Product.supplier_links)
+    ).all()
+    rows = build_unit_economics_dashboard(
+        products,
+        policy=load_unit_economics_cost_policy(),
+    )
+    totals = dashboard_totals(rows)
+
+    return render_template(
+        "admin/unit_economics_dashboard.html",
+        rows=rows,
+        totals=totals,
     )
 
 
