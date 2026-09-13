@@ -30,39 +30,42 @@ Entregue:
 
 ## FASE 8.1.0 — Fulfillment AliExpress de produção
 
-**Status:** em andamento.
+**Status:** implementação técnica concluída; ativação operacional pendente.
 
 Objetivo: substituir o caminho operacional HARD-OFF/canário por um pipeline de produção explicitamente controlado para pedidos pagos.
 
-### Checkpoint 8.1.0-A — política de dupla trava
+Entregue:
 
-Em implementação/validação:
+- dupla trava para seleção do provider real;
+- preflight read-only de pedido pago, integridade, snapshot e ledger;
+- orquestrador one-shot sem retry automático;
+- terceiro gate independente para auto-dispatch pós-pagamento;
+- circuit breaker global antes da seleção do provider;
+- `unknown` / `pending_reconciliation` bloqueiam novas submissões automáticas;
+- observabilidade admin somente leitura para gates, breaker e estados do fulfillment;
+- nenhuma tela administrativa habilita gates ou provider;
+- nenhuma autorização de merge implica chamada ao provider.
 
-- `ALIEXPRESS_PRODUCTION_FULFILLMENT_ENABLED=1` autoriza a camada de produção;
-- `ALIEXPRESS_PLACEORDER_ENABLED=1` continua sendo exigido pelo boundary HTTP;
-- provider real só pode ser selecionado quando os dois gates são exatamente `1`;
-- qualquer estado parcial/ausente seleciona `HardOffOrderSubmitter`;
-- este checkpoint NÃO conecta automaticamente o provider ao webhook/pedido pago;
-- este checkpoint NÃO faz HTTP real.
-
-Critérios de saída da fase completa:
-
-- somente pedidos `paid` e íntegros entram no fulfillment;
-- provider real habilitado por configuração de produção, sem depender de canários one-shot;
-- idempotência por tentativa e circuit breaker preservados;
-- resultado `unknown` nunca gera reenvio automático;
-- reconciliação obrigatória para ambiguidades;
-- compra confirmada gera identidade remota persistida;
-- falhas confirmadas ficam operáveis sem duplicar compra;
-- observabilidade sem PII/segredos.
+Ativação operacional permanece fora do escopo automático: ligar gates em produção e qualquer nova chamada real ao AliExpress exigem autorização explícita própria.
 
 ## FASE 8.2.0 — Margem líquida e proteção contra venda com prejuízo
 
-**Status:** futura.
+**Status:** em andamento.
 
 Objetivo: sair da margem baseada apenas em landed cost e calcular unit economics reais.
 
-Incluir, quando conhecidos e configurados:
+### Checkpoint 8.2.0-A — semântica canônica de unit economics
+
+Em implementação/validação:
+
+- avaliador puro/read-only;
+- custos classificados explicitamente como `known`, `not_applicable` ou `unknown`;
+- `unknown` nunca é convertido silenciosamente para zero;
+- margem de contribuição e margem operacional só são definitivas quando todos os componentes relevantes são conhecidos ou explicitamente não aplicáveis;
+- nenhuma alteração automática de preço/publicação neste checkpoint;
+- nenhuma migration e nenhuma escrita de produção neste checkpoint.
+
+Componentes previstos para integração posterior, quando conhecidos e configurados:
 
 - custo do fornecedor;
 - frete do fornecedor;
@@ -73,7 +76,7 @@ Incluir, quando conhecidos e configurados:
 - custo de aquisição por pedido/canal para análise gerencial;
 - reserva operacional para reembolso/chargeback, se adotada.
 
-Critérios de saída:
+Critérios de saída da fase completa:
 
 - produto não é publicado abaixo da margem líquida mínima definida;
 - nenhum custo desconhecido é silenciosamente tratado como zero;
