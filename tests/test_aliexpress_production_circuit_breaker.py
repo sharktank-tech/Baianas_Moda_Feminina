@@ -3,6 +3,8 @@
 import uuid
 from datetime import timedelta
 
+import pytest
+
 from loja import db
 from loja.integrations.aliexpress.production_circuit_breaker import (
     CIRCUIT_OPEN_CONFIG_INVALID,
@@ -15,6 +17,60 @@ from loja.integrations.aliexpress.production_circuit_breaker import (
 )
 from loja.modules.models import AliExpressOrder, AliExpressSubmissionAttempt
 from loja.utils import utcnow
+
+
+@pytest.fixture(autouse=True)
+def _isolated_breaker_ledger(app):
+    """Isola o ledger global sem depender da ordem da suíte completa.
+
+    Outros módulos deixam registros no banco de teste por desenho. O breaker é
+    global e deve enxergá-los em produção, mas estes testes precisam controlar
+    integralmente o cenário. Preservamos o baseline, neutralizamos seus sinais
+    durante o caso e restauramos tudo ao final.
+    """
+    with app.app_context():
+        baseline_orders = {
+            row.id: (row.state, row.last_error)
+            for row in AliExpressOrder.query.all()
+        }
+        baseline_attempts = {
+            row.id: (row.state, row.completed_at, row.last_error)
+            for row in AliExpressSubmissionAttempt.query.all()
+        }
+
+        old = utcnow() - timedelta(days=2)
+        for row in AliExpressOrder.query.all():
+            if row.state == "pending_reconciliation":
+                row.state = "ready"
+                row.last_error = None
+        for row in AliExpressSubmissionAttempt.query.all():
+            row.completed_at = old
+        db.session.commit()
+
+    yield
+
+    with app.app_context():
+        baseline_attempt_ids = set(baseline_attempts)
+        for row in AliExpressSubmissionAttempt.query.all():
+            if row.id not in baseline_attempt_ids:
+                db.session.delete(row)
+        db.session.flush()
+
+        baseline_order_ids = set(baseline_orders)
+        for row in AliExpressOrder.query.all():
+            if row.id not in baseline_order_ids:
+                db.session.delete(row)
+        db.session.flush()
+
+        for row in AliExpressOrder.query.all():
+            original = baseline_orders.get(row.id)
+            if original is not None:
+                row.state, row.last_error = original
+        for row in AliExpressSubmissionAttempt.query.all():
+            original = baseline_attempts.get(row.id)
+            if original is not None:
+                row.state, row.completed_at, row.last_error = original
+        db.session.commit()
 
 
 def _order(state="ready"):
