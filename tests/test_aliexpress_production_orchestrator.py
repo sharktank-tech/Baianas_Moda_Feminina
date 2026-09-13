@@ -2,6 +2,10 @@
 
 from types import SimpleNamespace
 
+from loja.integrations.aliexpress.production_circuit_breaker import (
+    CIRCUIT_OPEN_RECONCILIATION,
+    ProductionCircuitBreakerState,
+)
 from loja.integrations.aliexpress.production_fulfillment import (
     ProductionFulfillmentGateState,
 )
@@ -22,6 +26,15 @@ def _eligibility(*, eligible=True, code=None):
         attempt_count=0,
         attempt_rows=0,
         snapshot_present=True,
+    )
+
+
+def _closed_circuit(*args, **kwargs):
+    return ProductionCircuitBreakerState(
+        open=False,
+        code=None,
+        rejection_threshold=3,
+        window_minutes=15,
     )
 
 
@@ -57,6 +70,7 @@ def test_ineligible_preflight_never_selects_or_submits():
             eligible=False,
             code="production_preflight_attempt_unresolved",
         ),
+        circuit_breaker_fn=_closed_circuit,
         gate_state_fn=_enabled_gates,
         submitter_factory=factory,
         submit_fn=submit,
@@ -66,6 +80,38 @@ def test_ineligible_preflight_never_selects_or_submits():
     assert result.eligible is False
     assert result.code == "production_preflight_attempt_unresolved"
     assert result.state == "ready"
+    assert calls == {"factory": 0, "submit": 0}
+
+
+def test_open_circuit_never_selects_provider_or_submits():
+    order = SimpleNamespace(state="ready")
+    calls = {"factory": 0, "submit": 0}
+
+    def factory():
+        calls["factory"] += 1
+        return object()
+
+    def submit(*args, **kwargs):
+        calls["submit"] += 1
+        raise AssertionError("submit não deveria ser chamado")
+
+    result = orchestrate_production_submission(
+        order,
+        preflight_fn=lambda *args, **kwargs: _eligibility(),
+        circuit_breaker_fn=lambda **kwargs: ProductionCircuitBreakerState(
+            open=True,
+            code=CIRCUIT_OPEN_RECONCILIATION,
+            rejection_threshold=3,
+            window_minutes=15,
+        ),
+        gate_state_fn=_enabled_gates,
+        submitter_factory=factory,
+        submit_fn=submit,
+    )
+
+    assert result.dispatched is False
+    assert result.eligible is True
+    assert result.code == CIRCUIT_OPEN_RECONCILIATION
     assert calls == {"factory": 0, "submit": 0}
 
 
@@ -84,6 +130,7 @@ def test_disabled_gates_never_select_provider_or_submit():
     result = orchestrate_production_submission(
         order,
         preflight_fn=lambda *args, **kwargs: _eligibility(),
+        circuit_breaker_fn=_closed_circuit,
         gate_state_fn=_disabled_gates,
         submitter_factory=factory,
         submit_fn=submit,
@@ -114,6 +161,7 @@ def test_eligible_enabled_path_submits_exactly_once():
     result = orchestrate_production_submission(
         order,
         preflight_fn=lambda *args, **kwargs: _eligibility(),
+        circuit_breaker_fn=_closed_circuit,
         gate_state_fn=_enabled_gates,
         submitter_factory=factory,
         submit_fn=submit,
@@ -137,6 +185,7 @@ def test_pending_reconciliation_is_returned_without_retry():
     result = orchestrate_production_submission(
         order,
         preflight_fn=lambda *args, **kwargs: _eligibility(),
+        circuit_breaker_fn=_closed_circuit,
         gate_state_fn=_enabled_gates,
         submitter_factory=lambda: object(),
         submit_fn=submit,
@@ -158,6 +207,10 @@ def test_session_and_refresher_are_forwarded_once():
         seen["preflight"] = (target, session, refresher)
         return _eligibility()
 
+    def breaker(*, session):
+        seen["breaker"] = session
+        return _closed_circuit()
+
     def submit(target, *, submitter, refresher, session):
         seen["submit"] = (target, submitter, session, refresher)
         return SimpleNamespace(state="submitted")
@@ -168,6 +221,7 @@ def test_session_and_refresher_are_forwarded_once():
         session=session,
         refresher=refresher,
         preflight_fn=preflight,
+        circuit_breaker_fn=breaker,
         gate_state_fn=_enabled_gates,
         submitter_factory=lambda: submitter,
         submit_fn=submit,
@@ -175,4 +229,5 @@ def test_session_and_refresher_are_forwarded_once():
 
     assert result.state == "submitted"
     assert seen["preflight"] == (order, session, refresher)
+    assert seen["breaker"] is session
     assert seen["submit"] == (order, submitter, session, refresher)
