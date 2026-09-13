@@ -159,3 +159,44 @@ def test_invalid_order_facts_fail_closed(charged, discount):
             discount_amount=discount,
             policy=policy,
         )
+
+
+
+def test_observed_processor_retention_replaces_both_payment_estimates():
+    policy = load_unit_economics_cost_policy(
+        {
+            "UNIT_ECONOMICS_GATEWAY_FEE_PERCENT": "5.00",
+            "UNIT_ECONOMICS_INSTALLMENT_COST_PERCENT": "3.00",
+            "UNIT_ECONOMICS_TAX_PERCENT": "0",
+            "UNIT_ECONOMICS_ACQUISITION_COST_PER_ORDER": "0",
+            "UNIT_ECONOMICS_REFUND_RESERVE_PERCENT": "0",
+        }
+    )
+
+    variable, _ = build_unit_economics_components(
+        charged_amount="100.00",
+        discount_amount="0.00",
+        policy=policy,
+        processor_retained_amount="6.25",
+    )
+
+    assert [(item.name, item.amount) for item in variable] == [
+        ("processor_retention", Decimal("6.25")),
+        ("discount", Decimal("0.00")),
+        ("tax", Decimal("0.00")),
+    ]
+
+
+def test_observed_processor_retention_cannot_exceed_charged_amount():
+    policy = load_unit_economics_cost_policy({})
+
+    with pytest.raises(
+        UnitEconomicsPolicyError,
+        match="processor_retained_amount_exceeds_charged",
+    ):
+        build_unit_economics_components(
+            charged_amount="100.00",
+            discount_amount="0.00",
+            policy=policy,
+            processor_retained_amount="100.01",
+        )
