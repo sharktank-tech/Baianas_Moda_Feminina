@@ -50,28 +50,50 @@ Ativação operacional permanece fora do escopo automático: ligar gates em prod
 
 ## FASE 8.2.0 — Margem líquida e proteção contra venda com prejuízo
 
-**Status:** em andamento.
+**Status:** em andamento — checkpoints A, B e C entregues; D em PR.
 
 Objetivo: sair da margem baseada apenas em landed cost e calcular unit economics reais.
 
-### Checkpoint 8.2.0-A — semântica canônica de unit economics
+### Checkpoint 8.2.0-A — semântica canônica de unit economics ✅
 
-Em implementação/validação:
+Entregue:
 
 - avaliador puro/read-only;
 - custos classificados explicitamente como `known`, `not_applicable` ou `unknown`;
 - `unknown` nunca é convertido silenciosamente para zero;
-- margem de contribuição e margem operacional só são definitivas quando todos os componentes relevantes são conhecidos ou explicitamente não aplicáveis;
-- nenhuma alteração automática de preço/publicação neste checkpoint;
-- nenhuma migration e nenhuma escrita de produção neste checkpoint.
+- margem de contribuição e margem operacional só são definitivas quando todos os componentes relevantes são conhecidos ou explicitamente não aplicáveis.
 
-Componentes previstos para integração posterior, quando conhecidos e configurados:
+### Checkpoint 8.2.0-B — política explícita de custos ✅
 
-- custo do fornecedor;
-- frete do fornecedor;
+Entregue:
+
+- classificação centralizada dos componentes financeiros;
+- validação fail-closed de valores ausentes ou inválidos;
+- composição sem defaults financeiros implícitos.
+
+### Checkpoint 8.2.0-C — adaptação de pedidos ✅
+
+Entregue:
+
+- receita bruta baseada em subtotal + frete cobrado;
+- reconciliação do total cobrado com descontos;
+- landed cost canônico obrigatório para resultado definitivo;
+- nenhuma leitura retroativa do catálogo mutável.
+
+### Checkpoint 8.2.0-D — snapshot financeiro no checkout
+
+Em implementação:
+
+- custo unitário, frete do fornecedor, landed cost e moeda congelados no `OrderItem`;
+- snapshot somente quando existe exatamente um fornecedor ativo e os valores são coerentes;
+- pedidos legados e custos incompletos permanecem `NULL`, nunca zero;
+- migration aditiva e idempotente no schema `pollomodas`;
+- nenhuma aplicação automática da migration em produção.
+
+Componentes ainda previstos para integração posterior:
+
 - taxa do gateway;
 - custo de parcelamento quando aplicável;
-- descontos/cupons;
 - impostos configurados pelo negócio;
 - custo de aquisição por pedido/canal para análise gerencial;
 - reserva operacional para reembolso/chargeback, se adotada.
