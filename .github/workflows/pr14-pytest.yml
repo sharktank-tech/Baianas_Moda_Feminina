@@ -26,6 +26,7 @@ on:
       - feat/payment-net-receipt-8.2.0
       - feat/actual-payment-cost-8.2.0
       - feat/net-margin-publication-8.2.0
+      - feat/net-margin-publication-guard-8.2.0
 
 permissions:
   contents: read
