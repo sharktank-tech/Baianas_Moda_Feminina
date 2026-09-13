@@ -4,6 +4,15 @@ Este módulo traduz configuração operacional em ``CostComponent`` sem inventar
 custos. Ausência de configuração significa ``unknown``; zero só é aceito quando
 foi configurado explicitamente como zero.
 
+Contrato contábil para pedidos:
+- o evaluator deve receber como ``sale_price`` a receita bruta antes do desconto
+  (por exemplo, ``Order.subtotal + Order.shipping``);
+- ``discount`` entra como custo variável conhecido exatamente uma vez;
+- taxas percentuais desta política usam como base o valor efetivamente cobrado
+  (por exemplo, ``Order.total``), porque é a base transacional disponível;
+- a política NÃO afirma que essas porcentagens reproduzem a tarifa contratual do
+  Mercado Pago: sem configuração explícita, o custo permanece ``unknown``.
+
 Não altera preços, publicação, pedidos, pagamentos ou banco de dados.
 """
 
@@ -73,6 +82,16 @@ def _decimal_config(
     return value.quantize(Decimal("0.01"))
 
 
+def _money_fact(value, field: str) -> Decimal:
+    try:
+        result = Decimal(str(value)).quantize(Decimal("0.01"))
+    except (InvalidOperation, TypeError, ValueError):
+        raise UnitEconomicsPolicyError(f"{field}_invalid") from None
+    if not result.is_finite() or result < 0:
+        raise UnitEconomicsPolicyError(f"{field}_invalid")
+    return result
+
+
 def load_unit_economics_cost_policy(
     env: Optional[Mapping[str, str]] = None,
 ) -> UnitEconomicsCostPolicy:
@@ -101,13 +120,10 @@ def load_unit_economics_cost_policy(
     )
 
 
-def _percent_cost(name: str, base_amount, percent: Optional[Decimal]) -> CostComponent:
+def _percent_cost(name: str, base_amount: Decimal, percent: Optional[Decimal]) -> CostComponent:
     if percent is None:
         return CostComponent.unknown(name)
-    base = Decimal(str(base_amount)).quantize(Decimal("0.01"))
-    if base < 0:
-        raise UnitEconomicsPolicyError(f"{name}_base_invalid")
-    amount = (base * percent / Decimal("100")).quantize(Decimal("0.01"))
+    amount = (base_amount * percent / Decimal("100")).quantize(Decimal("0.01"))
     return CostComponent.known(name, amount)
 
 
@@ -119,19 +135,17 @@ def build_unit_economics_components(
 ) -> tuple[tuple[CostComponent, ...], tuple[CostComponent, ...]]:
     """Converte política + fatos do pedido em componentes canônicos.
 
-    ``charged_amount`` é o valor efetivamente cobrado ao cliente.
-    ``discount_amount`` é o desconto já persistido no pedido; por ser fato
-    transacional conhecido, é sempre componente ``known`` (inclusive zero).
+    ``charged_amount`` é o valor efetivamente cobrado ao cliente (tipicamente
+    ``Order.total``) e serve de base para custos percentuais configurados.
+    ``discount_amount`` é o desconto persistido no pedido e vira custo conhecido.
 
-    Retorna ``(variable_costs, operational_costs)`` para
-    ``evaluate_unit_economics``.
+    IMPORTANTE: ao passar estes componentes para ``evaluate_unit_economics``, o
+    ``sale_price`` deve ser a receita bruta ANTES do desconto, por exemplo
+    ``Order.subtotal + Order.shipping``. Usar ``Order.total`` como ``sale_price``
+    e também incluir ``discount`` causaria dupla contagem.
     """
-    charged = Decimal(str(charged_amount)).quantize(Decimal("0.01"))
-    discount = Decimal(str(discount_amount)).quantize(Decimal("0.01"))
-    if charged < 0:
-        raise UnitEconomicsPolicyError("charged_amount_invalid")
-    if discount < 0:
-        raise UnitEconomicsPolicyError("discount_amount_invalid")
+    charged = _money_fact(charged_amount, "charged_amount")
+    discount = _money_fact(discount_amount, "discount_amount")
 
     variable = (
         _percent_cost("gateway_fee", charged, policy.gateway_fee_percent),
