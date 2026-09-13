@@ -1,35 +1,23 @@
-name: PR14 pytest validation
+name: Pytest
 
 on:
+  pull_request:
+    branches:
+      - master
   push:
     branches:
-      - safety/aliexpress-third-diagnostic-canary
-      - fix/aliexpress-invalid-appkey-reconciliation-8.0.11t
-      - fix/aliexpress-placeorder-sync-8.0.11u
-      - fix/aliexpress-address-reconciliation-8.0.11w
-      - fix/aliexpress-brazil-address-8.0.11x
-      - fix/aliexpress-snapshot-revision-8.0.11y
-      - fix/aliexpress-br-tax-id-8.0.12a
-      - fix/aliexpress-cpf-admin-8.0.12b
-      - feat/checkout-cpf-8.0.12c
-      - feat/aliexpress-production-fulfillment-8.1.0
-      - feat/aliexpress-production-preflight-8.1.0
-      - feat/aliexpress-production-orchestrator-8.1.0
-      - feat/aliexpress-postpayment-autodispatch-8.1.0
-      - feat/aliexpress-production-circuit-breaker-8.1.0
-      - feat/aliexpress-production-observability-8.1.0
-      - feat/unit-economics-8.2.0
-      - feat/unit-economics-policy-8.2.0
-      - feat/order-unit-economics-adapter-8.2.0
-      - feat/order-unit-economics-8.2.0
-      - feat/order-snapshot-economics-8.2.0
-      - feat/payment-net-receipt-8.2.0
-      - feat/actual-payment-cost-8.2.0
-      - feat/net-margin-publication-8.2.0
-      - feat/net-margin-publication-guard-8.2.0
+      - master
+      # Bootstrap da migração do CI: permite validar a própria PR #44 antes
+      # de o gatilho pull_request desta versão existir na branch padrão.
+      - feat/post-sale-status-sync-8.3.0-a
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: pytest-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   pytest:
@@ -38,12 +26,20 @@ jobs:
     env:
       PYTHONPATH: .
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
           cache: pip
+          cache-dependency-path: requirements-dev.txt
+
       - name: Install dependencies
-        run: python -m pip install --upgrade pip && pip install -r requirements-dev.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
       - name: Run full SQLite test suite
         run: python -m pytest -q tests/
