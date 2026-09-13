@@ -220,6 +220,59 @@ def _resolve_payment_variant(product, raw_variant_id, fallback_size):
     return variant, label
 
 
+def _supplier_cost_snapshot(product):
+    """Congela o landed cost canônico do fornecedor sem inferir ausências.
+
+    O snapshot só é completo quando existe exatamente um vínculo ativo, custo
+    e frete válidos, moedas coerentes e landed_cost igual a custo + frete.
+    Qualquer lacuna permanece NULL para a economia unitária falhar fechada.
+    """
+    empty = {
+        "supplier_unit_cost_snapshot": None,
+        "supplier_shipping_cost_snapshot": None,
+        "supplier_landed_cost_snapshot": None,
+        "supplier_cost_currency_snapshot": None,
+    }
+
+    active_links = [
+        link
+        for link in (getattr(product, "supplier_links", None) or [])
+        if getattr(link, "is_active", False)
+    ]
+    if len(active_links) != 1:
+        return empty
+
+    link = active_links[0]
+    try:
+        unit_cost = money(link.cost)
+        shipping_cost = money(link.shipping_cost)
+        landed_cost = money(link.landed_cost)
+    except (TypeError, ValueError):
+        return empty
+
+    currency = str(getattr(link, "currency", "") or "").strip().upper()
+    freight_currency = str(
+        getattr(link, "freight_currency", "") or ""
+    ).strip().upper()
+
+    if (
+        unit_cost <= 0
+        or shipping_cost < 0
+        or landed_cost <= 0
+        or landed_cost != money(unit_cost + shipping_cost)
+        or not currency
+        or currency != freight_currency
+    ):
+        return empty
+
+    return {
+        "supplier_unit_cost_snapshot": unit_cost,
+        "supplier_shipping_cost_snapshot": shipping_cost,
+        "supplier_landed_cost_snapshot": landed_cost,
+        "supplier_cost_currency_snapshot": currency[:3],
+    }
+
+
 def _get_direct_product_items():
     raw_product_id = str(
         request.form.get("product_id") or ""
@@ -280,6 +333,7 @@ def _get_direct_product_items():
             "variant_id": (
                 variant.id if variant is not None else None
             ),
+            **_supplier_cost_snapshot(product),
         }
     ]
 
@@ -344,6 +398,7 @@ def _get_cart_items():
                 "variant_id": (
                     variant.id if variant is not None else None
                 ),
+                **_supplier_cost_snapshot(product),
             }
         )
 
