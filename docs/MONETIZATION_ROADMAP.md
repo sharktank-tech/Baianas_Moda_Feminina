@@ -172,7 +172,7 @@ Entregue:
 
 ## FASE 8.3.0 — Pós-venda, rastreio e exceções
 
-**Status:** em andamento — checkpoints A–G implementados em branch; reconciliação financeira e exceções permanecem pendentes.
+**Status:** em andamento — checkpoints A–H implementados em branch; fila de exceções e alertas permanecem pendentes.
 
 Objetivo: fechar o ciclo após a compra no fornecedor.
 
@@ -262,8 +262,20 @@ Implementado:
 - refunded continua sendo confirmado pela autoridade existente: webhook Mercado Pago;
 - nenhuma chamada financeira, retry ou mudança de estoque automática.
 
-Pendente para os próximos checkpoints: reconciliação financeira persistida,
-fila administrativa e alertas de estagnação.
+### Checkpoint 8.3.0-H — ledger e reconciliação financeira
+
+Implementado:
+
+- ledger em Order para requested/pending_webhook/confirmed/failed/manual_review;
+- timestamps de solicitação e confirmação, sem sobrescrita em reprocessamento;
+- migration 0016 idempotente e restrita ao schema pollomodas;
+- outcomes do boundary persistidos sem alterar Order.status para refunded;
+- webhook Mercado Pago confirma o ledger na mesma transação de refunded;
+- refunds não relacionados a cancelamento do fornecedor não criam ledger;
+- erros persistidos somente como códigos fixos e sanitizados.
+
+Pendente para os próximos checkpoints: fila administrativa de exceções e
+alertas de estagnação.
 
 Critérios de saída:
 
