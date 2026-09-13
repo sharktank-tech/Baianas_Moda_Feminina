@@ -102,7 +102,7 @@ def test_fulfillment_index_surfaces_open_circuit(client, admin_user, login):
     resp = client.get(BASE_URL)
 
     assert resp.status_code == 200
-    assert "Canary safety: BLOQUEADO" in resp.text
+    assert "Canary legado: BLOQUEADO" in resp.text
     assert "Circuit breaker" in resp.text
     assert "ABERTO" in resp.text
     assert "attempt-key-MUST-NOT-LEAK" not in resp.text
