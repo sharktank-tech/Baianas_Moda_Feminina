@@ -128,8 +128,84 @@ def evaluate_order_unit_economics(
     )
 
 
+
+def resolve_order_landed_cost_snapshot(order) -> Optional[Decimal]:
+    """Soma o landed cost congelado dos itens, sem consultar o catálogo.
+
+    Retorna None quando qualquer item possui snapshot incompleto (incluindo
+    pedidos legados). Valores presentes porém inválidos ou incoerentes são
+    erros de integridade e falham fechado.
+    """
+    items = list(getattr(order, "items", None) or [])
+    if not items:
+        raise OrderUnitEconomicsError("order_items_missing")
+
+    total = Decimal("0.00")
+    currency = None
+
+    for item in items:
+        raw_quantity = getattr(item, "quantity", None)
+        try:
+            quantity = Decimal(str(raw_quantity))
+        except (InvalidOperation, TypeError, ValueError):
+            raise OrderUnitEconomicsError("order_item_quantity_invalid") from None
+        if not quantity.is_finite() or quantity < 1 or quantity != quantity.to_integral_value():
+            raise OrderUnitEconomicsError("order_item_quantity_invalid")
+
+        raw_unit = getattr(item, "supplier_unit_cost_snapshot", None)
+        raw_shipping = getattr(item, "supplier_shipping_cost_snapshot", None)
+        raw_landed = getattr(item, "supplier_landed_cost_snapshot", None)
+        raw_currency = getattr(item, "supplier_cost_currency_snapshot", None)
+
+        if (
+            raw_unit is None
+            or raw_shipping is None
+            or raw_landed is None
+            or not raw_currency
+        ):
+            return None
+
+        unit = _money(raw_unit, "order_item_supplier_unit_cost_snapshot")
+        shipping = _money(
+            raw_shipping,
+            "order_item_supplier_shipping_cost_snapshot",
+        )
+        landed = _money(raw_landed, "order_item_supplier_landed_cost_snapshot")
+        if unit <= 0 or landed <= 0:
+            raise OrderUnitEconomicsError("order_item_landed_cost_invalid")
+        if landed != (unit + shipping).quantize(Decimal("0.01")):
+            raise OrderUnitEconomicsError("order_item_landed_cost_mismatch")
+
+        item_currency = str(raw_currency).strip().upper()
+        if len(item_currency) != 3:
+            raise OrderUnitEconomicsError("order_item_cost_currency_invalid")
+        if currency is None:
+            currency = item_currency
+        elif item_currency != currency:
+            raise OrderUnitEconomicsError("order_item_cost_currency_mismatch")
+
+        total += landed * quantity
+
+    return total.quantize(Decimal("0.01"))
+
+
+def evaluate_order_unit_economics_from_snapshot(
+    order,
+    *,
+    policy: Optional[UnitEconomicsCostPolicy] = None,
+) -> OrderUnitEconomicsResult:
+    """Avalia exclusivamente fatos persistidos no pedido e em seus itens."""
+    return evaluate_order_unit_economics(
+        order,
+        landed_cost=resolve_order_landed_cost_snapshot(order),
+        policy=policy,
+    )
+
+
 __all__ = [
     "OrderUnitEconomicsError",
     "OrderUnitEconomicsResult",
     "evaluate_order_unit_economics",
+    "evaluate_order_unit_economics_from_snapshot",
+    "resolve_order_landed_cost_snapshot",
 ]
