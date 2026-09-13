@@ -25,11 +25,15 @@ Códigos estáveis de bloqueio (NUNCA usar mensagens livres como lógica):
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import List
 
 from loja.modules.models import Product
+
+from .publication_unit_economics import evaluate_product_net_margin
+from .unit_economics_policy import load_unit_economics_cost_policy
 
 from .pricing import (
     FREIGHT_AVAILABLE,
@@ -41,6 +45,18 @@ from .pricing import (
 )
 
 logger = logging.getLogger(__name__)
+
+NET_MARGIN_PUBLICATION_GUARD_ENV = (
+    "UNIT_ECONOMICS_PUBLICATION_GUARD_ENABLED"
+)
+MIN_OPERATIONAL_MARGIN_PERCENT_ENV = (
+    "UNIT_ECONOMICS_MIN_OPERATIONAL_MARGIN_PERCENT"
+)
+
+
+def net_margin_publication_guard_enabled() -> bool:
+    """Gate operacional estrito: somente o valor literal 1 habilita."""
+    return os.environ.get(NET_MARGIN_PUBLICATION_GUARD_ENV) == "1"
 
 
 class PublicationError(Exception):
@@ -142,6 +158,20 @@ def evaluate_publication(product: Product) -> PublicationDecision:
         if sale < required:
             reasons.append("margin_below_target")
 
+    # FASE 8.2.0-I: integração hard-off por padrão. Quando o gate é
+    # habilitado, configuração incompleta ou margem insuficiente bloqueiam.
+    if net_margin_publication_guard_enabled():
+        net_margin = evaluate_product_net_margin(
+            product,
+            policy=load_unit_economics_cost_policy(),
+            minimum_operational_margin_percent=os.environ.get(
+                MIN_OPERATIONAL_MARGIN_PERCENT_ENV
+            ),
+        )
+        for reason in net_margin.reasons:
+            if reason not in reasons:
+                reasons.append(reason)
+
     # O estoque publicável pertence EXCLUSIVAMENTE ao SupplierProduct ativo
     # selecionado: variante ativa de um vínculo de fornecedor inativo não conta.
     has_sellable = False
@@ -184,6 +214,9 @@ __all__ = [
     "PublicationError",
     "PublicationBlocked",
     "PublicationDecision",
+    "MIN_OPERATIONAL_MARGIN_PERCENT_ENV",
+    "NET_MARGIN_PUBLICATION_GUARD_ENV",
     "evaluate_publication",
+    "net_margin_publication_guard_enabled",
     "publish_product",
 ]
