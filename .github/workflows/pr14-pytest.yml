@@ -23,6 +23,7 @@ on:
       - feat/order-unit-economics-adapter-8.2.0
       - feat/order-unit-economics-8.2.0
       - feat/order-snapshot-economics-8.2.0
+      - feat/payment-net-receipt-8.2.0
 
 permissions:
   contents: read
