@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
+from .payment_net_receipt import resolve_payment_net_receipt
 from .unit_economics import UnitEconomicsResult, evaluate_unit_economics
 from .unit_economics_policy import (
     UnitEconomicsCostPolicy,
@@ -54,10 +55,17 @@ def _money(value, field: str) -> Decimal:
     return amount
 
 
-def _policy_unknowns(policy: UnitEconomicsCostPolicy) -> tuple[str, ...]:
-    fields = (
+def _policy_unknowns(
+    policy: UnitEconomicsCostPolicy,
+    *,
+    processor_retention_known: bool = False,
+) -> tuple[str, ...]:
+    payment_fields = () if processor_retention_known else (
         ("gateway_fee", policy.gateway_fee_percent),
         ("installment_cost", policy.installment_cost_percent),
+    )
+    fields = (
+        *payment_fields,
         ("tax", policy.tax_percent),
         ("acquisition_cost", policy.acquisition_cost_per_order),
         ("refund_reserve", policy.refund_reserve_percent),
@@ -70,6 +78,7 @@ def evaluate_order_unit_economics(
     *,
     landed_cost=None,
     policy: Optional[UnitEconomicsCostPolicy] = None,
+    processor_retained_amount=None,
 ) -> OrderUnitEconomicsResult:
     """Avalia um Order sem mutá-lo e sem consultar fontes externas.
 
@@ -96,6 +105,7 @@ def evaluate_order_unit_economics(
         charged_amount=charged,
         discount_amount=discount,
         policy=resolved_policy,
+        processor_retained_amount=processor_retained_amount,
     )
 
     if landed_cost is None:
@@ -104,7 +114,15 @@ def evaluate_order_unit_economics(
             gross_revenue=gross,
             charged_amount=charged,
             discount_amount=discount,
-            unknown_components=("landed_cost", *_policy_unknowns(resolved_policy)),
+            unknown_components=(
+                "landed_cost",
+                *_policy_unknowns(
+                    resolved_policy,
+                    processor_retention_known=(
+                        processor_retained_amount is not None
+                    ),
+                ),
+            ),
             evaluation=None,
         )
 
@@ -202,10 +220,48 @@ def evaluate_order_unit_economics_from_snapshot(
     )
 
 
+
+def evaluate_order_unit_economics_with_payment(
+    order,
+    payment,
+    *,
+    policy: Optional[UnitEconomicsCostPolicy] = None,
+) -> OrderUnitEconomicsResult:
+    """Usa retenção observada quando disponível; política é fallback.
+
+    O Payment e o Order precisam representar a mesma cobrança. Nenhum dado é
+    buscado no provider e nenhum objeto é mutado.
+    """
+    order_id = getattr(order, "id", None)
+    payment_order_id = getattr(payment, "order_id", None)
+    if (
+        order_id is not None
+        and payment_order_id is not None
+        and str(order_id) != str(payment_order_id)
+    ):
+        raise OrderUnitEconomicsError("payment_order_mismatch")
+
+    receipt = resolve_payment_net_receipt(payment)
+    retained = None
+    if receipt is not None:
+        charged = _money(getattr(order, "total", None), "order_total")
+        if receipt.charged_amount != charged:
+            raise OrderUnitEconomicsError("payment_charged_amount_mismatch")
+        retained = receipt.processor_retained_amount
+
+    return evaluate_order_unit_economics(
+        order,
+        landed_cost=resolve_order_landed_cost_snapshot(order),
+        policy=policy,
+        processor_retained_amount=retained,
+    )
+
+
 __all__ = [
     "OrderUnitEconomicsError",
     "OrderUnitEconomicsResult",
     "evaluate_order_unit_economics",
     "evaluate_order_unit_economics_from_snapshot",
+    "evaluate_order_unit_economics_with_payment",
     "resolve_order_landed_cost_snapshot",
 ]
