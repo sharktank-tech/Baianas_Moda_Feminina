@@ -20,6 +20,7 @@ on:
       - feat/aliexpress-production-observability-8.1.0
       - feat/unit-economics-8.2.0
       - feat/unit-economics-policy-8.2.0
+      - feat/order-unit-economics-adapter-8.2.0
 
 permissions:
   contents: read
