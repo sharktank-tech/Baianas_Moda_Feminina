@@ -50,7 +50,7 @@ Ativação operacional permanece fora do escopo automático: ligar gates em prod
 
 ## FASE 8.2.0 — Margem líquida e proteção contra venda com prejuízo
 
-**Status:** em andamento — checkpoints A–G entregues; H em PR.
+**Status:** em andamento — checkpoints A–H entregues; integração da rota administrativa pendente.
 
 Objetivo: sair da margem baseada apenas em landed cost e calcular unit economics reais.
 
@@ -120,9 +120,11 @@ Entregue:
 - vínculo pagamento/pedido e valor cobrado são validados;
 - nenhuma leitura de provider ou escrita em produção.
 
-### Checkpoint 8.2.0-H — avaliação líquida pré-publicação
+### Checkpoint 8.2.0-H — avaliação líquida pré-publicação ✅
 
-Em implementação:
+Integrado na master em 2026-09-13 via PR #42 (merge `80c924a`), sem migration e sem alteração em produção.
+
+Entregue:
 
 - simulação explícita da venda de uma unidade;
 - gateway, parcelamento, imposto, CAC e reserva incluídos pela política;
