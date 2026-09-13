@@ -54,4 +54,10 @@ def _guard_new_submission_snapshot_cpf(session, flush_context, instances):
         _freeze_checkout_cpf(session, obj)
 
 
+# Ponto tardio de bootstrap da integração: registra o hook pós-pagamento sem
+# acoplar o provider à transação financeira. O próprio hook permanece hard-off
+# até ALIEXPRESS_POSTPAYMENT_AUTODISPATCH_ENABLED ser exatamente "1".
+from . import postpayment_autodispatch as _postpayment_autodispatch  # noqa: F401,E402
+
+
 __all__ = ["_freeze_checkout_cpf"]
