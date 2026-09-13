@@ -151,10 +151,12 @@ def evaluate_unit_economics(
 
     unknown = tuple(c.name for c in (*variable, *operational) if c.status == UNKNOWN)
     known_variable = sum(
-        (c.amount or Decimal("0.00")) for c in variable if c.status != UNKNOWN
+        ((c.amount or Decimal("0.00")) for c in variable if c.status != UNKNOWN),
+        Decimal("0.00"),
     ).quantize(Decimal("0.01"))
     known_operational = sum(
-        (c.amount or Decimal("0.00")) for c in operational if c.status != UNKNOWN
+        ((c.amount or Decimal("0.00")) for c in operational if c.status != UNKNOWN),
+        Decimal("0.00"),
     ).quantize(Decimal("0.01"))
 
     if unknown:
