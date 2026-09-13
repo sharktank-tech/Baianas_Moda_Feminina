@@ -172,9 +172,28 @@ Entregue:
 
 ## FASE 8.3.0 — Pós-venda, rastreio e exceções
 
-**Status:** futura.
+**Status:** em andamento — checkpoint A implementado em branch; persistência e integração pendentes.
 
 Objetivo: fechar o ciclo após a compra no fornecedor.
+
+Base já existente reconciliada: a sincronização monotônica de status do
+fornecedor foi entregue anteriormente na FASE 8.0.8, com provider gated,
+hard-off por padrão e estados canônicos até entrega/cancelamento.
+
+### Checkpoint 8.3.0-A — contrato sanitizado de rastreio
+
+Implementado:
+
+- boundary read-only separado para consultar tracking por pedido remoto;
+- provider padrão HARD-OFF, sem chamadas de rede;
+- validação estrita de tracking code e carrier, sem texto livre;
+- cardinalidade 0/1/N validada contra os pedidos remotos persistidos;
+- rastreio ausente permanece pendente e nunca vira string vazia ou dado inventado;
+- testes unitários do contrato, sanitização, cardinalidade e hard-off.
+
+Pendente para os próximos checkpoints: migration e persistência transacional,
+integração com provider, acompanhamento pelo cliente, cancelamento/reembolso,
+fila administrativa e alertas de estagnação.
 
 Critérios de saída:
 
