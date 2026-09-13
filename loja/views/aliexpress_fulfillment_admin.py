@@ -1,4 +1,4 @@
-"""Fila administrativa de fulfillment AliExpress (Fase 8.0/8.0.11N).
+"""Fila administrativa de fulfillment AliExpress (Fase 8.0/8.1.0).
 
 Segurança:
   * Todas as rotas exigem @admin_required + CSRF quando mutáveis
@@ -9,6 +9,8 @@ Segurança:
   * Fase 8.0.11N expõe no detalhe apenas um ledger sanitizado das tentativas:
     estado, timestamps e diagnóstico durável que ainda passe pelo parser
     fail-closed. IDs de tentativa/attempt_key nunca são enviados ao template.
+  * Fase 8.1.0 expõe somente booleanos dos gates, estado/código sanitizado do
+    breaker de produção e contagens agregadas. Valores crus de env não chegam ao HTML.
 """
 
 from __future__ import annotations
@@ -47,6 +49,9 @@ from loja.integrations.aliexpress import (
 )
 from loja.integrations.aliexpress.controlled_canary import get_canary_circuit_status
 from loja.integrations.aliexpress.placeorder_diagnostics import validate_durable_unknown_error
+from loja.integrations.aliexpress.production_observability import (
+    get_production_observability_snapshot,
+)
 from loja.integrations.aliexpress.sku_identity_enrichment import (
     SkuIdentityEnrichmentError,
     enrich_sku_identity_batch,
@@ -107,9 +112,7 @@ def index():
     ]
 
     canary_status = get_canary_circuit_status(session=db.session)
-    pending_reconciliation_count = AliExpressOrder.query.filter_by(
-        state="pending_reconciliation"
-    ).count()
+    production_status = get_production_observability_snapshot(session=db.session)
 
     return render_template(
         "admin/aliexpress/fulfillment_list.html",
@@ -119,7 +122,8 @@ def index():
         current_state=state_filter,
         current_supplier=supplier_filter,
         canary_status=canary_status,
-        pending_reconciliation_count=pending_reconciliation_count,
+        production_status=production_status,
+        pending_reconciliation_count=production_status.pending_reconciliation_count,
     )
 
 
