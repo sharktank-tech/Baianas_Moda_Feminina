@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}Exceções pós-venda — Admin{% endblock %}
+
+{% block content %}
+<section class="container py-4">
+    <header class="mb-4">
+        <p class="text-muted mb-1">AliExpress · pós-venda</p>
+        <h1 class="h3">Exceções e fulfillment estagnado</h1>
+        <p class="text-muted">
+            Somente dados operacionais sanitizados. Esta página não consulta
+            providers e não altera pedidos.
+        </p>
+    </header>
+
+    {% if config_error %}
+        <div class="alert alert-danger" role="alert">
+            Configuração inválida: FULFILLMENT_STALE_AFTER_HOURS deve ser um
+            inteiro entre 1 e 720. A fila foi bloqueada.
+        </div>
+    {% elif snapshot %}
+        <div class="row g-3 mb-4">
+            <div class="col-sm-4">
+                <div class="card card-body">
+                    <span class="text-muted">Exceções</span>
+                    <strong class="h4 mb-0">{{ snapshot.total }}</strong>
+                </div>
+            </div>
+            <div class="col-sm-4">
+                <div class="card card-body">
+                    <span class="text-muted">Estagnados</span>
+                    <strong class="h4 mb-0">{{ snapshot.stalled }}</strong>
+                </div>
+            </div>
+            <div class="col-sm-4">
+                <div class="card card-body">
+                    <span class="text-muted">Janela</span>
+                    <strong class="h4 mb-0">{{ snapshot.stale_after_hours }}h</strong>
+                </div>
+            </div>
+        </div>
+
+        {% if snapshot.rows %}
+            <div class="table-responsive">
+                <table class="table table-striped align-middle">
+                    <thead>
+                        <tr>
+                            <th>Pedido</th>
+                            <th>Fornecedor</th>
+                            <th>Estado</th>
+                            <th>Motivos</th>
+                            <th>Sem atualização</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in snapshot.rows %}
+                            <tr>
+                                <td>{{ row.order_number or "—" }}</td>
+                                <td>{{ row.supplier_name or "—" }}</td>
+                                <td><code>{{ row.state }}</code></td>
+                                <td>
+                                    {% for reason in row.reasons %}
+                                        <span class="badge text-bg-warning">{{ reason }}</span>
+                                    {% endfor %}
+                                </td>
+                                <td>
+                                    {% if row.age_hours is none %}
+                                        timestamp ausente
+                                    {% else %}
+                                        {{ row.age_hours }}h
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if row.fulfillment_id %}
+                                        <a
+                                            class="btn btn-sm btn-outline-dark"
+                                            href="{{ url_for('aliexpress_fulfillment_admin.detail', order_id=row.fulfillment_id) }}"
+                                        >Abrir</a>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="alert alert-success">
+                Nenhuma exceção pós-venda identificada.
+            </div>
+        {% endif %}
+    {% endif %}
+</section>
+{% endblock %}

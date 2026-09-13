@@ -172,7 +172,7 @@ Entregue:
 
 ## FASE 8.3.0 — Pós-venda, rastreio e exceções
 
-**Status:** em andamento — checkpoints A–H implementados em branch; fila de exceções e alertas permanecem pendentes.
+**Status:** implementação técnica concluída — checkpoints A–J entregues; migrations 0015/0016 aguardam aplicação e validação no PostgreSQL.
 
 Objetivo: fechar o ciclo após a compra no fornecedor.
 
@@ -274,8 +274,30 @@ Implementado:
 - refunds não relacionados a cancelamento do fornecedor não criam ledger;
 - erros persistidos somente como códigos fixos e sanitizados.
 
-Pendente para os próximos checkpoints: fila administrativa de exceções e
-alertas de estagnação.
+### Checkpoint 8.3.0-I — fila administrativa de exceções
+
+Implementado:
+
+- rota GET admin-only em /admin/integrations/aliexpress/pedidos/exceptions;
+- consolidação de manual_review, pending_reconciliation e failed;
+- cancelamento e refund pendentes/rejeitados entram com reason codes fixos;
+- projeção sanitizada sem remote order ID, attempt key, payload ou erro bruto;
+- acesso direto ao detalhe interno do fulfillment para tratamento operacional;
+- configuração inválida bloqueia a fila em vez de ocultar exceções.
+
+### Checkpoint 8.3.0-J — alertas de estagnação
+
+Implementado:
+
+- janela FULFILLMENT_STALE_AFTER_HOURS, padrão 48h;
+- validação estrita entre 1 e 720 horas;
+- alertas para status, cancelamento e refund sem atualização;
+- shipped sem tracking gera tracking_missing;
+- timestamp ausente é tratado como exceção, nunca como registro recente;
+- painel mostra totais, idade e motivos, sem polling ou chamadas externas.
+
+Pendência operacional pós-merge: aplicar e validar migrations 0015/0016 no
+PostgreSQL antes de depender dos novos campos em produção.
 
 Critérios de saída:
 
