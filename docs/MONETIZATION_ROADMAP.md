@@ -50,7 +50,7 @@ Ativação operacional permanece fora do escopo automático: ligar gates em prod
 
 ## FASE 8.2.0 — Margem líquida e proteção contra venda com prejuízo
 
-**Status:** em andamento — checkpoints A–G entregues; H em PR.
+**Status:** em andamento — checkpoints A–H entregues; I em PR.
 
 Objetivo: sair da margem baseada apenas em landed cost e calcular unit economics reais.
 
@@ -120,15 +120,25 @@ Entregue:
 - vínculo pagamento/pedido e valor cobrado são validados;
 - nenhuma leitura de provider ou escrita em produção.
 
-### Checkpoint 8.2.0-H — avaliação líquida pré-publicação
+### Checkpoint 8.2.0-H — avaliação líquida pré-publicação ✅
 
-Em implementação:
+Entregue:
 
 - simulação explícita da venda de uma unidade;
 - gateway, parcelamento, imposto, CAC e reserva incluídos pela política;
 - custo desconhecido bloqueia a decisão;
 - margem operacional comparada a um mínimo obrigatório;
 - avaliador puro, ainda sem ativar o bloqueio na rota administrativa.
+
+### Checkpoint 8.2.0-I — guard líquido de publicação
+
+Em implementação:
+
+- avaliador líquido conectado ao caminho canônico de publicação;
+- gate `UNIT_ECONOMICS_PUBLICATION_GUARD_ENABLED` default-off;
+- somente o valor literal `1` habilita o bloqueio;
+- margem mínima e política incompletas bloqueiam quando habilitado;
+- ativação em produção continua fora do escopo automático.
 
 Componentes ainda previstos para integração posterior:
 
