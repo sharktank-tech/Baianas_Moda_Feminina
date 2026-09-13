@@ -377,6 +377,83 @@ Acompanhe seu pedido na Pollo Modas utilizando o número do pedido e o e-mail da
         </div>
 
 
+        {% if supplier_tracking_data %}
+
+            <div class="track-shipments" aria-label="Rastreio do fornecedor">
+
+                {% for tracking in supplier_tracking_data %}
+
+                    <article class="track-shipment">
+
+                        <header class="track-shipment-header">
+
+                            <div>
+                                <span class="track-shipment-eyebrow">
+                                    {% if supplier_tracking_data|length > 1 %}
+                                        Volume {{ loop.index }} de {{ supplier_tracking_data|length }}
+                                    {% else %}
+                                        Atualização do fornecedor
+                                    {% endif %}
+                                </span>
+
+                                <h3>{{ tracking.status_label }}</h3>
+
+                                {% if tracking.tracking_code %}
+                                    <p>O rastreio já está disponível.</p>
+                                {% else %}
+                                    <p>O código de rastreio ainda não foi informado.</p>
+                                {% endif %}
+                            </div>
+
+                            <span class="track-shipment-status">
+                                {{ tracking.status_label }}
+                            </span>
+
+                        </header>
+
+                        {% if tracking.tracking_code %}
+
+                            <div class="track-shipment-info">
+
+                                <div class="track-info-item">
+                                    <span>Código de rastreio</span>
+                                    <div class="track-code-wrapper">
+                                        <strong>{{ tracking.tracking_code }}</strong>
+                                        <button
+                                            type="button"
+                                            class="track-copy"
+                                            data-code="{{ tracking.tracking_code }}"
+                                        >Copiar</button>
+                                    </div>
+                                </div>
+
+                                {% if tracking.carrier %}
+                                    <div class="track-info-item">
+                                        <span>Transportadora</span>
+                                        <strong>{{ tracking.carrier }}</strong>
+                                    </div>
+                                {% endif %}
+
+                                {% if tracking.updated_at %}
+                                    <div class="track-info-item">
+                                        <span>Atualizado em</span>
+                                        <strong>{{ tracking.updated_at.strftime('%d/%m/%Y %H:%M') }}</strong>
+                                    </div>
+                                {% endif %}
+
+                            </div>
+
+                        {% endif %}
+
+                    </article>
+
+                {% endfor %}
+
+            </div>
+
+        {% endif %}
+
+
         {% if shipment_data %}
 
             <div class="track-shipments">

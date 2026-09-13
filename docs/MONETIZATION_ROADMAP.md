@@ -172,7 +172,7 @@ Entregue:
 
 ## FASE 8.3.0 — Pós-venda, rastreio e exceções
 
-**Status:** em andamento — checkpoints A–B implementados em branch; integração com provider pendente.
+**Status:** em andamento — checkpoints A–C implementados em branch; integração com provider pendente.
 
 Objetivo: fechar o ciclo após a compra no fornecedor.
 
@@ -202,9 +202,19 @@ Implementado:
 - conflito de identidade falha fechado sem sobrescrever o código existente;
 - validator PostgreSQL e testes de persistência/rollback lógico.
 
+### Checkpoint 8.3.0-C — acompanhamento read-only pelo cliente
+
+Implementado:
+
+- projeção sanitizada dos fulfillments e pedidos remotos;
+- integração à consulta existente por número do pedido + e-mail;
+- exibição de estado, tracking code, carrier e data de atualização;
+- tracking pendente é comunicado explicitamente;
+- nenhuma identidade remota, attempt key, diagnóstico ou payload é exposto;
+- a requisição do cliente nunca consulta o provider nem altera o pedido.
+
 Pendente para os próximos checkpoints: integração com provider,
-acompanhamento pelo cliente, cancelamento/reembolso, fila administrativa e
-alertas de estagnação.
+cancelamento/reembolso, fila administrativa e alertas de estagnação.
 
 Critérios de saída:
 
