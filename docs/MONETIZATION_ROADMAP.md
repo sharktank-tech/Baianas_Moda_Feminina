@@ -172,7 +172,7 @@ Entregue:
 
 ## FASE 8.3.0 — Pós-venda, rastreio e exceções
 
-**Status:** em andamento — checkpoints A–F implementados em branch; reembolso e exceções permanecem pendentes.
+**Status:** em andamento — checkpoints A–G implementados em branch; reconciliação financeira e exceções permanecem pendentes.
 
 Objetivo: fechar o ciclo após a compra no fornecedor.
 
@@ -249,7 +249,20 @@ Implementado:
 - rejeição conclusiva do fornecedor usa reason code fixo e sanitizado;
 - estados shipped/delivered/cancelled não são reabertos silenciosamente.
 
-Pendente para os próximos checkpoints: integração com reembolso,
+### Checkpoint 8.3.0-G — boundary/preflight de reembolso
+
+Implementado:
+
+- elegibilidade somente quando todos os fulfillments estão cancelled;
+- Order precisa continuar paid e possuir exatamente um pagamento approved;
+- valor e moeda precisam coincidir integralmente com o pedido;
+- gate estrito SUPPLIER_CANCELLATION_REFUND_ENABLED=1;
+- provider padrão hard-off e provider real sempre explícito;
+- confirmed/rejected/unknown não falsificam Order.status;
+- refunded continua sendo confirmado pela autoridade existente: webhook Mercado Pago;
+- nenhuma chamada financeira, retry ou mudança de estoque automática.
+
+Pendente para os próximos checkpoints: reconciliação financeira persistida,
 fila administrativa e alertas de estagnação.
 
 Critérios de saída:
