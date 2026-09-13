@@ -172,7 +172,7 @@ Entregue:
 
 ## FASE 8.3.0 — Pós-venda, rastreio e exceções
 
-**Status:** implementação técnica concluída — checkpoints A–J entregues; migrations 0016/0017 aguardam aplicação e validação no PostgreSQL.
+**Status:** implementação técnica concluída — checkpoints A–J entregues; migrations 0015/0016/0017 aplicadas e validadas no PostgreSQL de produção.
 
 Objetivo: fechar o ciclo após a compra no fornecedor.
 
@@ -296,8 +296,10 @@ Implementado:
 - timestamp ausente é tratado como exceção, nunca como registro recente;
 - painel mostra totais, idade e motivos, sem polling ou chamadas externas.
 
-Pendência operacional pós-merge: aplicar e validar migrations 0016/0017 no
-PostgreSQL antes de depender dos novos campos em produção.
+Pendência operacional pós-merge: aplicar e validar migrations no PostgreSQL
+antes de depender dos novos campos em produção. **Resolvido em 2026-09-13**:
+0015 (snapshot de custo, FASE 8.2.0-D), 0016 (tracking remoto) e 0017 (ledger
+de refund) aplicadas e validadas no PostgreSQL de produção (schema pollomodas).
 
 Critérios de saída:
 
