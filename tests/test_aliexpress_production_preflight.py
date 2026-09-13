@@ -8,7 +8,6 @@ import pytest
 from loja.modules.getway_mercado_pago.payment_models import Order
 from loja.modules.models import (
     AliExpressOrder,
-    AliExpressOrderItem,
     AliExpressRemoteOrder,
     AliExpressSubmissionAttempt,
 )
@@ -62,26 +61,14 @@ def _target(db, make_user, *, source_status="paid", state="ready", cpf="52998224
     ali_order = AliExpressOrder(
         id=uuid.uuid4(),
         order_id=source.id,
-        supplier_id=uuid.uuid4(),
+        supplier_id=None,
         state=state,
         attempt_count=0,
     )
     db.session.add(ali_order)
     db.session.flush()
 
-    item = AliExpressOrderItem(
-        id=uuid.uuid4(),
-        aliexpress_order_id=ali_order.id,
-        order_item_id=uuid.uuid4(),
-        supplier_product_external_id="100000001",
-        supplier_sku_external_id="SKU001",
-        supplier_sku_attr="14:771",
-        quantity=1,
-        state="ready",
-    )
-    db.session.add(item)
-    db.session.flush()
-
+    frozen_order_item_id = uuid.uuid4()
     snapshot = AliExpressSubmissionSnapshot(
         id=uuid.uuid4(),
         aliexpress_order_id=ali_order.id,
@@ -99,7 +86,7 @@ def _target(db, make_user, *, source_status="paid", state="ready", cpf="52998224
             "cpf": cpf,
         },
         items=[{
-            "order_item_id": str(item.order_item_id),
+            "order_item_id": str(frozen_order_item_id),
             "product_id": "100000001",
             "sku_attr": "14:771",
             "product_count": 1,
