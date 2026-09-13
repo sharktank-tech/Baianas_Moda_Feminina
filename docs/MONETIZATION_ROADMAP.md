@@ -172,7 +172,7 @@ Entregue:
 
 ## FASE 8.3.0 — Pós-venda, rastreio e exceções
 
-**Status:** em andamento — checkpoint A implementado em branch; persistência e integração pendentes.
+**Status:** em andamento — checkpoints A–B implementados em branch; integração com provider pendente.
 
 Objetivo: fechar o ciclo após a compra no fornecedor.
 
@@ -191,9 +191,20 @@ Implementado:
 - rastreio ausente permanece pendente e nunca vira string vazia ou dado inventado;
 - testes unitários do contrato, sanitização, cardinalidade e hard-off.
 
-Pendente para os próximos checkpoints: migration e persistência transacional,
-integração com provider, acompanhamento pelo cliente, cancelamento/reembolso,
-fila administrativa e alertas de estagnação.
+### Checkpoint 8.3.0-B — persistência transacional de tracking
+
+Implementado:
+
+- campos nullable por pedido remoto: tracking code, carrier e timestamp;
+- migration 0015 idempotente, restrita ao schema pollomodas;
+- persistência 0/1/N sob lock, vinculada pela posição durável;
+- atualização idempotente e no-op enquanto tracking não está disponível;
+- conflito de identidade falha fechado sem sobrescrever o código existente;
+- validator PostgreSQL e testes de persistência/rollback lógico.
+
+Pendente para os próximos checkpoints: integração com provider,
+acompanhamento pelo cliente, cancelamento/reembolso, fila administrativa e
+alertas de estagnação.
 
 Critérios de saída:
 

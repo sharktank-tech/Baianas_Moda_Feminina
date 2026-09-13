@@ -1740,6 +1740,9 @@ class AliExpressRemoteOrder(db.Model):
         nullable=True,
     )
     remote_status = db.Column(db.Text, nullable=True)
+    tracking_code = db.Column(db.String(64), nullable=True)
+    carrier = db.Column(db.String(64), nullable=True)
+    tracking_updated_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(
         db.DateTime,
         nullable=False,

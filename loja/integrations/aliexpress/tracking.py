@@ -11,6 +11,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Iterable, Optional, Tuple
 
+from loja import db
+from loja.modules.models import AliExpressOrder
+from loja.utils import utcnow
+
 _TRACKING_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{4,63}$")
 _CARRIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
@@ -30,6 +34,16 @@ class AliExpressTrackingSnapshot:
     observations: Tuple[AliExpressTrackingObservation, ...]
     complete: bool
     reason: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class AliExpressTrackingPersistenceResult:
+    persisted: int
+    reason: Optional[str] = None
+
+    @property
+    def accepted(self) -> bool:
+        return self.reason is None
 
 
 class AliExpressTrackingProvider(ABC):
@@ -98,3 +112,63 @@ def fetch_sanitized_tracking(
         active_provider.fetch_tracking(remote_order_count),
         expected_count=remote_order_count,
     )
+
+
+def persist_sanitized_tracking(
+    ali_order: AliExpressOrder,
+    snapshot: AliExpressTrackingSnapshot,
+    *,
+    session=None,
+) -> AliExpressTrackingPersistenceResult:
+    """Persiste tracking 0/1/N atomicamente, sem sobrescrever divergências."""
+    session = session or db.session
+    if snapshot.reason not in {None, "tracking_pending"}:
+        return AliExpressTrackingPersistenceResult(0, "tracking_snapshot_invalid")
+
+    order = (
+        session.query(AliExpressOrder)
+        .filter_by(id=ali_order.id)
+        .with_for_update()
+        .populate_existing()
+        .first()
+    )
+    if order is None:
+        raise ValueError("aliexpress_order_not_found")
+
+    remote_orders = sorted(order.remote_orders, key=lambda item: item.position)
+    if not remote_orders or len(remote_orders) != len(snapshot.observations):
+        session.rollback()
+        return AliExpressTrackingPersistenceResult(
+            0, "tracking_cardinality_mismatch"
+        )
+
+    for remote, observation in zip(remote_orders, snapshot.observations):
+        if (
+            observation.tracking_code is not None
+            and remote.tracking_code is not None
+            and remote.tracking_code != observation.tracking_code
+        ):
+            session.rollback()
+            return AliExpressTrackingPersistenceResult(
+                0, "tracking_identity_conflict"
+            )
+
+    now = utcnow()
+    persisted = 0
+    for remote, observation in zip(remote_orders, snapshot.observations):
+        if observation.tracking_code is None:
+            continue
+        changed = (
+            remote.tracking_code != observation.tracking_code
+            or remote.carrier != observation.carrier
+        )
+        if changed:
+            remote.tracking_code = observation.tracking_code
+            remote.carrier = observation.carrier
+            remote.tracking_updated_at = now
+            remote.updated_at = now
+            persisted += 1
+
+    order.updated_at = now
+    session.commit()
+    return AliExpressTrackingPersistenceResult(persisted)
