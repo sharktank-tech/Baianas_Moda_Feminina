@@ -172,7 +172,7 @@ Entregue:
 
 ## FASE 8.3.0 — Pós-venda, rastreio e exceções
 
-**Status:** em andamento — checkpoints A–E implementados em branch; cancelamento e exceções permanecem pendentes.
+**Status:** em andamento — checkpoints A–F implementados em branch; reembolso e exceções permanecem pendentes.
 
 Objetivo: fechar o ciclo após a compra no fornecedor.
 
@@ -236,7 +236,20 @@ Implementado:
 - erros do provider são convertidos em reason codes sanitizados;
 - tracking pendente conclui como no-op, sem inventar valores.
 
-Pendente para os próximos checkpoints: cancelamento/reembolso,
+### Checkpoint 8.3.0-F — máquina de cancelamento e rejeição
+
+Implementado:
+
+- pedido de cancelamento somente para submitted/confirmed;
+- cancel_requested idempotente e sem chamada remota;
+- desfechos canônicos cancelled/rejected/unknown;
+- cancelamento confirmado persiste cancelled_at sem sobrescrever timestamp;
+- rejeição de cancelamento vai para manual_review;
+- resultado ambíguo permanece cancel_requested, sem retry;
+- rejeição conclusiva do fornecedor usa reason code fixo e sanitizado;
+- estados shipped/delivered/cancelled não são reabertos silenciosamente.
+
+Pendente para os próximos checkpoints: integração com reembolso,
 fila administrativa e alertas de estagnação.
 
 Critérios de saída:
