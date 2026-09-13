@@ -138,3 +138,105 @@ def test_adapter_does_not_mutate_order():
     )
 
     assert vars(order) == before
+
+
+
+def _snapshot_item(quantity="1", **overrides):
+    values = {
+        "quantity": quantity,
+        "supplier_unit_cost_snapshot": Decimal("30.00"),
+        "supplier_shipping_cost_snapshot": Decimal("5.00"),
+        "supplier_landed_cost_snapshot": Decimal("35.00"),
+        "supplier_cost_currency_snapshot": "BRL",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_snapshot_adapter_aggregates_landed_cost_by_quantity():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_from_snapshot,
+        resolve_order_landed_cost_snapshot,
+    )
+
+    order = _order(
+        subtotal=Decimal("150.00"),
+        shipping=Decimal("0.00"),
+        discount=Decimal("0.00"),
+        total=Decimal("150.00"),
+        items=[_snapshot_item(quantity=2), _snapshot_item()],
+    )
+
+    assert resolve_order_landed_cost_snapshot(order) == Decimal("105.00")
+    result = evaluate_order_unit_economics_from_snapshot(
+        order,
+        policy=_complete_policy(),
+    )
+    assert result.complete is True
+    assert result.evaluation is not None
+    assert result.evaluation.landed_cost == Decimal("105.00")
+
+
+def test_snapshot_adapter_keeps_legacy_order_incomplete():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_from_snapshot,
+    )
+
+    order = _order(items=[
+        _snapshot_item(supplier_landed_cost_snapshot=None)
+    ])
+    result = evaluate_order_unit_economics_from_snapshot(
+        order,
+        policy=_complete_policy(),
+    )
+
+    assert result.complete is False
+    assert result.unknown_components == ("landed_cost",)
+
+
+@pytest.mark.parametrize(
+    "item,error",
+    [
+        (_snapshot_item(quantity=0), "order_item_quantity_invalid"),
+        (
+            _snapshot_item(supplier_landed_cost_snapshot="99.00"),
+            "order_item_landed_cost_mismatch",
+        ),
+        (
+            _snapshot_item(supplier_cost_currency_snapshot="USD"),
+            None,
+        ),
+    ],
+)
+def test_snapshot_integrity_validation(item, error):
+    from loja.services.order_unit_economics import (
+        resolve_order_landed_cost_snapshot,
+    )
+
+    items = [item]
+    if error is None:
+        items.append(_snapshot_item())
+
+    with pytest.raises(OrderUnitEconomicsError, match=(
+        error or "order_item_cost_currency_mismatch"
+    )):
+        resolve_order_landed_cost_snapshot(_order(items=items))
+
+
+def test_snapshot_adapter_does_not_mutate_order_or_items():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_from_snapshot,
+    )
+
+    item = _snapshot_item()
+    order = _order(items=[item])
+    before_order = dict(vars(order))
+    before_item = dict(vars(item))
+
+    evaluate_order_unit_economics_from_snapshot(
+        order,
+        policy=_complete_policy(),
+    )
+
+    assert vars(order) == before_order
+    assert vars(item) == before_item

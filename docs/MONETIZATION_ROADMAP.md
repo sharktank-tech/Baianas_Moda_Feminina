@@ -50,7 +50,7 @@ Ativação operacional permanece fora do escopo automático: ligar gates em prod
 
 ## FASE 8.2.0 — Margem líquida e proteção contra venda com prejuízo
 
-**Status:** em andamento — checkpoints A, B e C entregues; D em PR.
+**Status:** em andamento — checkpoints A, B, C e D entregues; E em PR.
 
 Objetivo: sair da margem baseada apenas em landed cost e calcular unit economics reais.
 
@@ -80,15 +80,25 @@ Entregue:
 - landed cost canônico obrigatório para resultado definitivo;
 - nenhuma leitura retroativa do catálogo mutável.
 
-### Checkpoint 8.2.0-D — snapshot financeiro no checkout
+### Checkpoint 8.2.0-D — snapshot financeiro no checkout ✅
 
-Em implementação:
+Entregue:
 
 - custo unitário, frete do fornecedor, landed cost e moeda congelados no `OrderItem`;
 - snapshot somente quando existe exatamente um fornecedor ativo e os valores são coerentes;
 - pedidos legados e custos incompletos permanecem `NULL`, nunca zero;
 - migration aditiva e idempotente no schema `pollomodas`;
 - nenhuma aplicação automática da migration em produção.
+
+### Checkpoint 8.2.0-E — consumo automático do snapshot no pedido
+
+Em implementação:
+
+- landed cost total derivado exclusivamente dos snapshots dos itens;
+- quantidade de cada item considerada na agregação;
+- pedidos legados/incompletos permanecem inconclusivos;
+- snapshots presentes porém incoerentes falham como erro de integridade;
+- nenhuma consulta ao catálogo, fornecedor ou provider.
 
 Componentes ainda previstos para integração posterior:
 
