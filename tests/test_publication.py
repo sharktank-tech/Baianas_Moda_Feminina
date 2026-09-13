@@ -318,3 +318,104 @@ def test_stable_reason_codes_no_free_text(db):
             name for name in ("UNPRICED", "PROVIDER_UNAVAILABLE", "None")
         }
         assert " " not in code or code in {"no_sellable_variant"}
+
+
+def _enable_net_margin_guard(monkeypatch, *, minimum="10.00"):
+    monkeypatch.setenv(
+        "UNIT_ECONOMICS_PUBLICATION_GUARD_ENABLED",
+        "1",
+    )
+    monkeypatch.setenv(
+        "UNIT_ECONOMICS_MIN_OPERATIONAL_MARGIN_PERCENT",
+        minimum,
+    )
+    monkeypatch.setenv("UNIT_ECONOMICS_GATEWAY_FEE_PERCENT", "5.00")
+    monkeypatch.setenv("UNIT_ECONOMICS_INSTALLMENT_COST_PERCENT", "0.00")
+    monkeypatch.setenv("UNIT_ECONOMICS_TAX_PERCENT", "10.00")
+    monkeypatch.setenv("UNIT_ECONOMICS_ACQUISITION_COST_PER_ORDER", "5.00")
+    monkeypatch.setenv("UNIT_ECONOMICS_REFUND_RESERVE_PERCENT", "2.00")
+
+
+def test_net_margin_guard_is_default_off(db, monkeypatch):
+    monkeypatch.delenv(
+        "UNIT_ECONOMICS_PUBLICATION_GUARD_ENABLED",
+        raising=False,
+    )
+    product, _ = _prepared(db)
+    assert evaluate_publication(product).allowed is True
+
+
+def test_enabled_net_margin_guard_allows_complete_profitable_product(
+    db,
+    monkeypatch,
+):
+    _enable_net_margin_guard(monkeypatch, minimum="10.00")
+    product, _ = _prepared(
+        db,
+        price="150.00",
+        landed="110.00",
+        cost="100.00",
+        shipping_cost="10.00",
+    )
+
+    decision = evaluate_publication(product)
+
+    assert decision.allowed is True
+    assert decision.reasons == []
+
+
+def test_enabled_net_margin_guard_blocks_below_operational_minimum(
+    db,
+    monkeypatch,
+):
+    _enable_net_margin_guard(monkeypatch, minimum="10.00")
+    product, _ = _prepared(
+        db,
+        price="150.00",
+        landed="130.00",
+        cost="120.00",
+        shipping_cost="10.00",
+        margin="10.00",
+    )
+
+    _assert_not_published(
+        product,
+        ["operational_margin_below_minimum"],
+    )
+
+
+def test_enabled_net_margin_guard_fails_closed_on_missing_policy(
+    db,
+    monkeypatch,
+):
+    _enable_net_margin_guard(monkeypatch)
+    monkeypatch.delenv("UNIT_ECONOMICS_TAX_PERCENT")
+
+    product, _ = _prepared(db)
+
+    _assert_not_published(product, ["unit_economics_incomplete"])
+
+
+def test_enabled_net_margin_guard_requires_minimum(db, monkeypatch):
+    _enable_net_margin_guard(monkeypatch)
+    monkeypatch.delenv(
+        "UNIT_ECONOMICS_MIN_OPERATIONAL_MARGIN_PERCENT"
+    )
+
+    product, _ = _prepared(db)
+
+    _assert_not_published(
+        product,
+        ["minimum_operational_margin_missing_or_invalid"],
+    )
+
+
+def test_non_literal_gate_values_remain_off(db, monkeypatch):
+    product, _ = _prepared(db)
+
+    for value in ("true", "TRUE", "yes", "0", ""):
+        monkeypatch.setenv(
+            "UNIT_ECONOMICS_PUBLICATION_GUARD_ENABLED",
+            value,
+        )
+        assert evaluate_publication(product).allowed is True
