@@ -172,7 +172,7 @@ Entregue:
 
 ## FASE 8.3.0 — Pós-venda, rastreio e exceções
 
-**Status:** em andamento — checkpoints A–C implementados em branch; integração com provider pendente.
+**Status:** em andamento — checkpoints A–D implementados em branch; orquestração automática permanece pendente.
 
 Objetivo: fechar o ciclo após a compra no fornecedor.
 
@@ -213,7 +213,18 @@ Implementado:
 - nenhuma identidade remota, attempt key, diagnóstico ou payload é exposto;
 - a requisição do cliente nunca consulta o provider nem altera o pedido.
 
-Pendente para os próximos checkpoints: integração com provider,
+### Checkpoint 8.3.0-D — adapter DS explícito de tracking
+
+Implementado:
+
+- extração restrita a logistics number e logistics service no endpoint DS já provado;
+- suporte às formas documentadas de logistics info sem persistir payload bruto;
+- consulta 0/1/N na ordem das identidades remotas duráveis;
+- cardinalidade e identidade validadas antes de qualquer chamada;
+- payload ausente permanece pendente e resposta ambígua falha fechado;
+- cliente obrigatório por injeção; provider default continua HARD-OFF.
+
+Pendente para os próximos checkpoints: orquestração operacional sob gate,
 cancelamento/reembolso, fila administrativa e alertas de estagnação.
 
 Critérios de saída:
