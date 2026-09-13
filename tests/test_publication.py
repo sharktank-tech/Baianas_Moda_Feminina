@@ -352,7 +352,7 @@ def test_enabled_net_margin_guard_allows_complete_profitable_product(
     _enable_net_margin_guard(monkeypatch, minimum="10.00")
     product, _ = _prepared(
         db,
-        price="150.00",
+        price="170.00",
         landed="110.00",
         cost="100.00",
         shipping_cost="10.00",
