@@ -12,30 +12,40 @@ O fluxo-alvo é:
 
 ## FASE 8.0.12C — CPF nativo no checkout
 
-**Status:** em andamento.
+**Status:** concluída e implantada.
 
 Objetivo: capturar, validar e persistir o CPF do destinatário antes da criação da preferência do Mercado Pago, para que novos pedidos AliExpress já nasçam com identidade fiscal suficiente para materializar o submission snapshot.
 
-Critérios de saída:
+Entregue:
 
 - CPF informado no checkout, sem valor hardcoded;
 - normalização para 11 dígitos e validação dos dígitos verificadores;
 - nenhum CPF em logs, exceptions ou mensagens sanitizadas;
 - `orders.customer_cpf` persistido para pedidos novos;
 - pedidos legados continuam válidos com `customer_cpf = NULL`;
-- fulfillment AliExpress novo falha fechado se CPF obrigatório estiver ausente/inválido;
 - snapshot novo recebe `cpf` diretamente da fonte persistida;
 - falha de CPF acontece antes da chamada ao Mercado Pago;
-- testes SQLite e migration validator verdes;
-- nenhuma chamada real AliExpress é habilitada por esta fase.
+- migration 0014 aplicada e validada no Supabase de produção;
+- nenhuma chamada real AliExpress foi habilitada por esta fase.
 
 ## FASE 8.1.0 — Fulfillment AliExpress de produção
 
-**Status:** futura.
+**Status:** em andamento.
 
 Objetivo: substituir o caminho operacional HARD-OFF/canário por um pipeline de produção explicitamente controlado para pedidos pagos.
 
-Critérios de saída:
+### Checkpoint 8.1.0-A — política de dupla trava
+
+Em implementação/validação:
+
+- `ALIEXPRESS_PRODUCTION_FULFILLMENT_ENABLED=1` autoriza a camada de produção;
+- `ALIEXPRESS_PLACEORDER_ENABLED=1` continua sendo exigido pelo boundary HTTP;
+- provider real só pode ser selecionado quando os dois gates são exatamente `1`;
+- qualquer estado parcial/ausente seleciona `HardOffOrderSubmitter`;
+- este checkpoint NÃO conecta automaticamente o provider ao webhook/pedido pago;
+- este checkpoint NÃO faz HTTP real.
+
+Critérios de saída da fase completa:
 
 - somente pedidos `paid` e íntegros entram no fulfillment;
 - provider real habilitado por configuração de produção, sem depender de canários one-shot;
