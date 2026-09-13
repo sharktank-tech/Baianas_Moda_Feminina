@@ -172,7 +172,7 @@ Entregue:
 
 ## FASE 8.3.0 — Pós-venda, rastreio e exceções
 
-**Status:** em andamento — checkpoints A–D implementados em branch; orquestração automática permanece pendente.
+**Status:** em andamento — checkpoints A–E implementados em branch; cancelamento e exceções permanecem pendentes.
 
 Objetivo: fechar o ciclo após a compra no fornecedor.
 
@@ -224,8 +224,20 @@ Implementado:
 - payload ausente permanece pendente e resposta ambígua falha fechado;
 - cliente obrigatório por injeção; provider default continua HARD-OFF.
 
-Pendente para os próximos checkpoints: orquestração operacional sob gate,
-cancelamento/reembolso, fila administrativa e alertas de estagnação.
+### Checkpoint 8.3.0-E — orquestração gated de tracking
+
+Implementado:
+
+- gate estrito ALIEXPRESS_TRACKING_SYNC_ENABLED, habilitado somente com valor 1;
+- gate desligado bloqueia antes de construir ou chamar provider;
+- provider ou factory precisa ser injetado explicitamente mesmo com gate ligado;
+- elegibilidade limitada a estados pós-submissão com identidades remotas;
+- consulta e persistência compostas sem retry automático;
+- erros do provider são convertidos em reason codes sanitizados;
+- tracking pendente conclui como no-op, sem inventar valores.
+
+Pendente para os próximos checkpoints: cancelamento/reembolso,
+fila administrativa e alertas de estagnação.
 
 Critérios de saída:
 
