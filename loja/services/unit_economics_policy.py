@@ -132,12 +132,15 @@ def build_unit_economics_components(
     charged_amount,
     discount_amount,
     policy: UnitEconomicsCostPolicy,
+    processor_retained_amount=None,
 ) -> tuple[tuple[CostComponent, ...], tuple[CostComponent, ...]]:
     """Converte política + fatos do pedido em componentes canônicos.
 
     ``charged_amount`` é o valor efetivamente cobrado ao cliente (tipicamente
     ``Order.total``) e serve de base para custos percentuais configurados.
     ``discount_amount`` é o desconto persistido no pedido e vira custo conhecido.
+    Quando ``processor_retained_amount`` é informado, o fato observado
+    substitui as estimativas de gateway e parcelamento, nunca soma com elas.
 
     IMPORTANTE: ao passar estes componentes para ``evaluate_unit_economics``, o
     ``sale_price`` deve ser a receita bruta ANTES do desconto, por exemplo
@@ -147,11 +150,32 @@ def build_unit_economics_components(
     charged = _money_fact(charged_amount, "charged_amount")
     discount = _money_fact(discount_amount, "discount_amount")
 
+    if processor_retained_amount is None:
+        payment_costs = (
+            _percent_cost("gateway_fee", charged, policy.gateway_fee_percent),
+            _percent_cost(
+                "installment_cost",
+                charged,
+                policy.installment_cost_percent,
+            ),
+        )
+    else:
+        retained = _money_fact(
+            processor_retained_amount,
+            "processor_retained_amount",
+        )
+        if retained > charged:
+            raise UnitEconomicsPolicyError(
+                "processor_retained_amount_exceeds_charged"
+            )
+        # Fato observado substitui ambas as estimativas. A retenção não é
+        # decomposta sem evidência do provider.
+        payment_costs = (
+            CostComponent.known("processor_retention", retained),
+        )
+
     variable = (
-        _percent_cost("gateway_fee", charged, policy.gateway_fee_percent),
-        _percent_cost(
-            "installment_cost", charged, policy.installment_cost_percent
-        ),
+        *payment_costs,
         CostComponent.known("discount", discount),
         _percent_cost("tax", charged, policy.tax_percent),
     )
