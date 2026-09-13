@@ -52,6 +52,9 @@ from loja.integrations.aliexpress.placeorder_diagnostics import validate_durable
 from loja.integrations.aliexpress.production_observability import (
     get_production_observability_snapshot,
 )
+from loja.services.post_sale_exceptions import (
+    build_post_sale_exception_snapshot,
+)
 from loja.integrations.aliexpress.sku_identity_enrichment import (
     SkuIdentityEnrichmentError,
     enrich_sku_identity_batch,
@@ -124,6 +127,33 @@ def index():
         canary_status=canary_status,
         production_status=production_status,
         pending_reconciliation_count=production_status.pending_reconciliation_count,
+    )
+
+
+@fulfillment_admin_blueprint.route("/exceptions", methods=["GET"])
+@admin_required
+def post_sale_exceptions():
+    """Fila read-only de exceções e alertas de estagnação."""
+    fulfillments = (
+        AliExpressOrder.query.options(
+            selectinload(AliExpressOrder.supplier),
+            selectinload(AliExpressOrder.order),
+            selectinload(AliExpressOrder.remote_orders),
+        )
+        .order_by(AliExpressOrder.updated_at.asc())
+        .all()
+    )
+    try:
+        snapshot = build_post_sale_exception_snapshot(fulfillments)
+        config_error = None
+    except ValueError:
+        snapshot = None
+        config_error = "fulfillment_stale_after_invalid"
+
+    return render_template(
+        "admin/aliexpress/post_sale_exceptions.html",
+        snapshot=snapshot,
+        config_error=config_error,
     )
 
 

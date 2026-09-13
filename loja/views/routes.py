@@ -49,6 +49,7 @@ from loja.modules.tracking_status import (
     TRACKING_STATUS,
     get_tracking_status,
 )
+from loja.services.customer_tracking import build_customer_tracking
 
 from loja.modules.getway_mercado_pago.payment_service import (
     calculate_shipping,
@@ -2472,6 +2473,7 @@ def acompanhar_pedido():
                 )
 
     shipment_data = []
+    supplier_tracking_data = ()
 
     if order:
         # Compatibilidade com templates de rastreio que ainda exibem
@@ -2490,12 +2492,15 @@ def acompanhar_pedido():
                 "events": shipment.events,
             })
 
+        supplier_tracking_data = build_customer_tracking(order)
+
     return render_template(
         "tracking/acompanhar_pedido.html",
         order=order,
         error=error,
         shipment_data=shipment_data,
         all_statuses=TRACKING_STATUS,
+        supplier_tracking_data=supplier_tracking_data,
     )
 
 

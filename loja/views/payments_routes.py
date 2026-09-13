@@ -984,6 +984,14 @@ def _sync_payment(payment_id):
     elif mapped_status in {"refunded", "charged_back"}:
         _release_stock(order)
         order.status = mapped_status
+        # O webhook continua sendo a única autoridade para confirmar o ledger
+        # de refund iniciado após cancelamento do fornecedor (FASE 8.3.0-H).
+        if mapped_status == "refunded" and order.supplier_refund_state is not None:
+            order.supplier_refund_state = "confirmed"
+            order.supplier_refund_confirmed_at = (
+                order.supplier_refund_confirmed_at or utcnow()
+            )
+            order.supplier_refund_last_error = None
         # Cancelar fulfillment pré-submissão (Fase 8.0)
         cancel_fulfillment_before_submission(order)
     elif mapped_status == "payment_failed" and order.status not in {

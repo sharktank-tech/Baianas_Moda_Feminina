@@ -172,9 +172,132 @@ Entregue:
 
 ## FASE 8.3.0 — Pós-venda, rastreio e exceções
 
-**Status:** futura.
+**Status:** implementação técnica concluída — checkpoints A–J entregues; migrations 0016/0017 aguardam aplicação e validação no PostgreSQL.
 
 Objetivo: fechar o ciclo após a compra no fornecedor.
+
+Base já existente reconciliada: a sincronização monotônica de status do
+fornecedor foi entregue anteriormente na FASE 8.0.8, com provider gated,
+hard-off por padrão e estados canônicos até entrega/cancelamento.
+
+### Checkpoint 8.3.0-A — contrato sanitizado de rastreio
+
+Implementado:
+
+- boundary read-only separado para consultar tracking por pedido remoto;
+- provider padrão HARD-OFF, sem chamadas de rede;
+- validação estrita de tracking code e carrier, sem texto livre;
+- cardinalidade 0/1/N validada contra os pedidos remotos persistidos;
+- rastreio ausente permanece pendente e nunca vira string vazia ou dado inventado;
+- testes unitários do contrato, sanitização, cardinalidade e hard-off.
+
+### Checkpoint 8.3.0-B — persistência transacional de tracking
+
+Implementado:
+
+- campos nullable por pedido remoto: tracking code, carrier e timestamp;
+- migration 0016 idempotente, restrita ao schema pollomodas;
+- persistência 0/1/N sob lock, vinculada pela posição durável;
+- atualização idempotente e no-op enquanto tracking não está disponível;
+- conflito de identidade falha fechado sem sobrescrever o código existente;
+- validator PostgreSQL e testes de persistência/rollback lógico.
+
+### Checkpoint 8.3.0-C — acompanhamento read-only pelo cliente
+
+Implementado:
+
+- projeção sanitizada dos fulfillments e pedidos remotos;
+- integração à consulta existente por número do pedido + e-mail;
+- exibição de estado, tracking code, carrier e data de atualização;
+- tracking pendente é comunicado explicitamente;
+- nenhuma identidade remota, attempt key, diagnóstico ou payload é exposto;
+- a requisição do cliente nunca consulta o provider nem altera o pedido.
+
+### Checkpoint 8.3.0-D — adapter DS explícito de tracking
+
+Implementado:
+
+- extração restrita a logistics number e logistics service no endpoint DS já provado;
+- suporte às formas documentadas de logistics info sem persistir payload bruto;
+- consulta 0/1/N na ordem das identidades remotas duráveis;
+- cardinalidade e identidade validadas antes de qualquer chamada;
+- payload ausente permanece pendente e resposta ambígua falha fechado;
+- cliente obrigatório por injeção; provider default continua HARD-OFF.
+
+### Checkpoint 8.3.0-E — orquestração gated de tracking
+
+Implementado:
+
+- gate estrito ALIEXPRESS_TRACKING_SYNC_ENABLED, habilitado somente com valor 1;
+- gate desligado bloqueia antes de construir ou chamar provider;
+- provider ou factory precisa ser injetado explicitamente mesmo com gate ligado;
+- elegibilidade limitada a estados pós-submissão com identidades remotas;
+- consulta e persistência compostas sem retry automático;
+- erros do provider são convertidos em reason codes sanitizados;
+- tracking pendente conclui como no-op, sem inventar valores.
+
+### Checkpoint 8.3.0-F — máquina de cancelamento e rejeição
+
+Implementado:
+
+- pedido de cancelamento somente para submitted/confirmed;
+- cancel_requested idempotente e sem chamada remota;
+- desfechos canônicos cancelled/rejected/unknown;
+- cancelamento confirmado persiste cancelled_at sem sobrescrever timestamp;
+- rejeição de cancelamento vai para manual_review;
+- resultado ambíguo permanece cancel_requested, sem retry;
+- rejeição conclusiva do fornecedor usa reason code fixo e sanitizado;
+- estados shipped/delivered/cancelled não são reabertos silenciosamente.
+
+### Checkpoint 8.3.0-G — boundary/preflight de reembolso
+
+Implementado:
+
+- elegibilidade somente quando todos os fulfillments estão cancelled;
+- Order precisa continuar paid e possuir exatamente um pagamento approved;
+- valor e moeda precisam coincidir integralmente com o pedido;
+- gate estrito SUPPLIER_CANCELLATION_REFUND_ENABLED=1;
+- provider padrão hard-off e provider real sempre explícito;
+- confirmed/rejected/unknown não falsificam Order.status;
+- refunded continua sendo confirmado pela autoridade existente: webhook Mercado Pago;
+- nenhuma chamada financeira, retry ou mudança de estoque automática.
+
+### Checkpoint 8.3.0-H — ledger e reconciliação financeira
+
+Implementado:
+
+- ledger em Order para requested/pending_webhook/confirmed/failed/manual_review;
+- timestamps de solicitação e confirmação, sem sobrescrita em reprocessamento;
+- migration 0017 idempotente e restrita ao schema pollomodas;
+- outcomes do boundary persistidos sem alterar Order.status para refunded;
+- webhook Mercado Pago confirma o ledger na mesma transação de refunded;
+- refunds não relacionados a cancelamento do fornecedor não criam ledger;
+- erros persistidos somente como códigos fixos e sanitizados.
+
+### Checkpoint 8.3.0-I — fila administrativa de exceções
+
+Implementado:
+
+- rota GET admin-only em /admin/integrations/aliexpress/pedidos/exceptions;
+- consolidação de manual_review, pending_reconciliation e failed;
+- cancelamento e refund pendentes/rejeitados entram com reason codes fixos;
+- projeção sanitizada sem remote order ID, attempt key, payload ou erro bruto;
+- acesso direto ao detalhe interno do fulfillment para tratamento operacional;
+- configuração inválida bloqueia a fila em vez de ocultar exceções.
+
+### Checkpoint 8.3.0-J — alertas de estagnação
+
+Implementado:
+
+- janela FULFILLMENT_STALE_AFTER_HOURS, padrão 48h;
+- validação estrita entre 1 e 720 horas;
+- alertas para status, cancelamento e refund sem atualização;
+- shipped sem tracking gera tracking_missing;
+- timestamp ausente é tratado como exceção, nunca como registro recente;
+- painel mostra totais, idade e motivos, sem polling ou chamadas externas.
+
+Pendência operacional pós-merge: aplicar e validar migrations 0016/0017 no
+PostgreSQL antes de depender dos novos campos em produção.
 
 Critérios de saída:
 

@@ -150,6 +150,13 @@ class Order(db.Model):
     manual_review_reason = db.Column(db.Text)
     paid_at = db.Column(db.DateTime)
 
+    # FASE 8.3.0-H: ledger financeiro local; não substitui a autoridade
+    # do webhook Mercado Pago sobre Order.status == "refunded".
+    supplier_refund_state = db.Column(db.String(30), nullable=True)
+    supplier_refund_requested_at = db.Column(db.DateTime, nullable=True)
+    supplier_refund_confirmed_at = db.Column(db.DateTime, nullable=True)
+    supplier_refund_last_error = db.Column(db.String(64), nullable=True)
+
     # Estoque já reservado (abatido) na criação do pedido para evitar
     # overselling enquanto o pagamento está pendente.
     stock_reserved = db.Column(
@@ -225,6 +232,11 @@ class Order(db.Model):
         db.CheckConstraint(
             "customer_cpf IS NULL OR length(customer_cpf) = 11",
             name="ck_orders_customer_cpf_length",
+        ),
+        db.CheckConstraint(
+            "supplier_refund_state IS NULL OR supplier_refund_state IN "
+            "('requested','pending_webhook','confirmed','failed','manual_review')",
+            name="ck_orders_supplier_refund_state",
         ),
         db.Index(
             "ix_orders_user_created",
