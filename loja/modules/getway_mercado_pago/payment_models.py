@@ -289,6 +289,13 @@ class OrderItem(db.Model):
     unit_price = db.Column(db.Numeric(10, 2), nullable=False)
     line_total = db.Column(db.Numeric(10, 2), nullable=False)
 
+    # FASE 8.2.0-D: snapshot financeiro unitário no checkout. Campos
+    # nullable preservam pedidos legados e mantêm custo desconhecido como NULL.
+    supplier_unit_cost_snapshot = db.Column(db.Numeric(10, 2), nullable=True)
+    supplier_shipping_cost_snapshot = db.Column(db.Numeric(10, 2), nullable=True)
+    supplier_landed_cost_snapshot = db.Column(db.Numeric(10, 2), nullable=True)
+    supplier_cost_currency_snapshot = db.Column(db.String(3), nullable=True)
+
     created_at = db.Column(
         db.DateTime,
         nullable=False,
@@ -312,6 +319,21 @@ class OrderItem(db.Model):
         db.CheckConstraint(
             "line_total >= 0",
             name="ck_order_items_line_total_nonnegative",
+        ),
+        db.CheckConstraint(
+            "supplier_unit_cost_snapshot IS NULL OR "
+            "supplier_unit_cost_snapshot > 0",
+            name="ck_order_items_supplier_unit_cost_positive",
+        ),
+        db.CheckConstraint(
+            "supplier_shipping_cost_snapshot IS NULL OR "
+            "supplier_shipping_cost_snapshot >= 0",
+            name="ck_order_items_supplier_shipping_nonnegative",
+        ),
+        db.CheckConstraint(
+            "supplier_landed_cost_snapshot IS NULL OR "
+            "supplier_landed_cost_snapshot > 0",
+            name="ck_order_items_supplier_landed_cost_positive",
         ),
     )
 
