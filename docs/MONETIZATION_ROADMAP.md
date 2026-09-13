@@ -172,7 +172,7 @@ Entregue:
 
 ## FASE 8.3.0 — Pós-venda, rastreio e exceções
 
-**Status:** implementação técnica concluída — checkpoints A–J entregues; migrations 0015/0016 aguardam aplicação e validação no PostgreSQL.
+**Status:** implementação técnica concluída — checkpoints A–J entregues; migrations 0016/0017 aguardam aplicação e validação no PostgreSQL.
 
 Objetivo: fechar o ciclo após a compra no fornecedor.
 
@@ -196,7 +196,7 @@ Implementado:
 Implementado:
 
 - campos nullable por pedido remoto: tracking code, carrier e timestamp;
-- migration 0015 idempotente, restrita ao schema pollomodas;
+- migration 0016 idempotente, restrita ao schema pollomodas;
 - persistência 0/1/N sob lock, vinculada pela posição durável;
 - atualização idempotente e no-op enquanto tracking não está disponível;
 - conflito de identidade falha fechado sem sobrescrever o código existente;
@@ -268,7 +268,7 @@ Implementado:
 
 - ledger em Order para requested/pending_webhook/confirmed/failed/manual_review;
 - timestamps de solicitação e confirmação, sem sobrescrita em reprocessamento;
-- migration 0016 idempotente e restrita ao schema pollomodas;
+- migration 0017 idempotente e restrita ao schema pollomodas;
 - outcomes do boundary persistidos sem alterar Order.status para refunded;
 - webhook Mercado Pago confirma o ledger na mesma transação de refunded;
 - refunds não relacionados a cancelamento do fornecedor não criam ledger;
@@ -296,7 +296,7 @@ Implementado:
 - timestamp ausente é tratado como exceção, nunca como registro recente;
 - painel mostra totais, idade e motivos, sem polling ou chamadas externas.
 
-Pendência operacional pós-merge: aplicar e validar migrations 0015/0016 no
+Pendência operacional pós-merge: aplicar e validar migrations 0016/0017 no
 PostgreSQL antes de depender dos novos campos em produção.
 
 Critérios de saída:

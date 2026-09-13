@@ -1,53 +1,53 @@
-"""Validator da migration 0016: ledger de supplier refund."""
+"""Validator da migration 0016: tracking em aliexpress_remote_orders."""
 from __future__ import annotations
 import os
 import sys
 
 
-def validate_schema(conn):
+def validate_schema(conn) -> list[str]:
     errors = []
     cur = conn.cursor()
     cur.execute("""
         SELECT column_name, data_type, character_maximum_length, is_nullable
         FROM information_schema.columns
-        WHERE table_schema='pollomodas' AND table_name='orders'
-          AND column_name IN (
-            'supplier_refund_state','supplier_refund_requested_at',
-            'supplier_refund_confirmed_at','supplier_refund_last_error'
-          )
+        WHERE table_schema='pollomodas'
+          AND table_name='aliexpress_remote_orders'
+          AND column_name IN ('tracking_code','carrier','tracking_updated_at')
     """)
     columns = {row[0]: row[1:] for row in cur.fetchall()}
-    expected = {
-        'supplier_refund_state', 'supplier_refund_requested_at',
-        'supplier_refund_confirmed_at', 'supplier_refund_last_error'
-    }
-    errors.extend(
-        f"column {name} NOT FOUND" for name in sorted(expected - set(columns))
-    )
-    for name in ('supplier_refund_state', 'supplier_refund_last_error'):
+    expected = {'tracking_code', 'carrier', 'tracking_updated_at'}
+    missing = expected - set(columns)
+    errors.extend(f"column {name} NOT FOUND" for name in sorted(missing))
+    for name in ('tracking_code', 'carrier'):
         if name in columns:
             dtype, length, nullable = columns[name]
-            expected_length = 30 if name.endswith('state') else 64
-            if dtype != 'character varying' or length != expected_length or nullable != 'YES':
+            if dtype != 'character varying' or length != 64 or nullable != 'YES':
                 errors.append(f"{name} has unexpected definition")
+    if 'tracking_updated_at' in columns:
+        dtype, _, nullable = columns['tracking_updated_at']
+        if dtype != 'timestamp without time zone' or nullable != 'YES':
+            errors.append("tracking_updated_at has unexpected definition")
     cur.execute("""
-        SELECT 1 FROM pg_constraint
-        WHERE conname='ck_orders_supplier_refund_state'
-          AND conrelid='pollomodas.orders'::regclass
+        SELECT conname FROM pg_constraint
+        WHERE conrelid='pollomodas.aliexpress_remote_orders'::regclass
+          AND conname IN ('ck_areo_tracking_code_format','ck_areo_carrier_format')
     """)
-    if cur.fetchone() is None:
-        errors.append("constraint ck_orders_supplier_refund_state NOT FOUND")
+    constraints = {row[0] for row in cur.fetchall()}
+    for name in ('ck_areo_tracking_code_format','ck_areo_carrier_format'):
+        if name not in constraints:
+            errors.append(f"constraint {name} NOT FOUND")
     cur.execute("""
         SELECT count(*) FROM information_schema.columns
-        WHERE table_schema='public' AND table_name='orders'
-          AND column_name LIKE 'supplier_refund_%'
+        WHERE table_schema='public'
+          AND table_name='aliexpress_remote_orders'
+          AND column_name IN ('tracking_code','carrier','tracking_updated_at')
     """)
     if cur.fetchone()[0]:
-        errors.append("supplier refund columns exist in public.orders")
+        errors.append("tracking columns unexpectedly exist in public schema")
     return errors
 
 
-def main():
+def main() -> int:
     url = os.environ.get("DATABASE_URL", "")
     if not url.startswith("postgresql"):
         print("NOT RUN: no PostgreSQL DATABASE_URL available")

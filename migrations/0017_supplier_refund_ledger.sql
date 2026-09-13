@@ -1,4 +1,4 @@
--- Migration 0016: ledger de refund pós-cancelamento (FASE 8.3.0-H)
+-- Migration 0017: ledger de refund pós-cancelamento (FASE 8.3.0-H)
 -- Idempotente, somente schema pollomodas. Não chama gateway financeiro.
 \set ON_ERROR_STOP on
 SET search_path TO pollomodas;
