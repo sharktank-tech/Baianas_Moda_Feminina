@@ -50,7 +50,7 @@ Ativação operacional permanece fora do escopo automático: ligar gates em prod
 
 ## FASE 8.2.0 — Margem líquida e proteção contra venda com prejuízo
 
-**Status:** em andamento — checkpoints A, B, C, D, E e F entregues; G em PR.
+**Status:** em andamento — checkpoints A–G entregues; H em PR.
 
 Objetivo: sair da margem baseada apenas em landed cost e calcular unit economics reais.
 
@@ -110,15 +110,25 @@ Entregue:
 - divergências de valor, moeda ou retenção falham fechado;
 - nenhuma decomposição presumida entre tarifa e parcelamento.
 
-### Checkpoint 8.2.0-G — retenção real no avaliador
+### Checkpoint 8.2.0-G — retenção real no avaliador ✅
 
-Em implementação:
+Entregue:
 
 - retenção observada tem precedência sobre estimativas percentuais;
 - gateway e parcelamento estimados nunca são somados à retenção real;
 - ausência do fato usa a política configurada como fallback;
 - vínculo pagamento/pedido e valor cobrado são validados;
 - nenhuma leitura de provider ou escrita em produção.
+
+### Checkpoint 8.2.0-H — avaliação líquida pré-publicação
+
+Em implementação:
+
+- simulação explícita da venda de uma unidade;
+- gateway, parcelamento, imposto, CAC e reserva incluídos pela política;
+- custo desconhecido bloqueia a decisão;
+- margem operacional comparada a um mínimo obrigatório;
+- avaliador puro, ainda sem ativar o bloqueio na rota administrativa.
 
 Componentes ainda previstos para integração posterior:
 
