@@ -19,6 +19,7 @@ on:
       - feat/aliexpress-production-circuit-breaker-8.1.0
       - feat/aliexpress-production-observability-8.1.0
       - feat/unit-economics-8.2.0
+      - feat/unit-economics-policy-8.2.0
 
 permissions:
   contents: read
