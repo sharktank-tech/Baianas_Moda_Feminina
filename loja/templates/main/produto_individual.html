@@ -16,7 +16,7 @@
 
 {% if structured_data %}
 <script type="application/ld+json">
-{{ structured_data | safe }}
+{{ structured_data | tojson }}
 </script>
 {% endif %}
 
