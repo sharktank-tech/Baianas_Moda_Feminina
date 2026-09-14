@@ -71,9 +71,11 @@ def test_feed_route_emits_valid_product(client, db, monkeypatch):
     assert response.mimetype == "application/rss+xml"
     assert response.headers["X-Robots-Tag"] == "noindex"
     root = ET.fromstring(response.get_data(as_text=True))
-    item = root.find("./channel/item")
-    assert item is not None
-    assert item.find("g:id", GOOGLE_NS).text == str(product.id)
+    items = root.findall("./channel/item")
+    item = next(
+        row for row in items
+        if row.find("g:id", GOOGLE_NS).text == str(product.id)
+    )
     assert item.find("g:price", GOOGLE_NS).text == "89.90 BRL"
     assert item.find("g:availability", GOOGLE_NS).text == "in_stock"
     assert item.find("g:condition", GOOGLE_NS).text == "new"
