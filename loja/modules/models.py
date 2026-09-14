@@ -323,6 +323,23 @@ class Product(db.Model):
         return f"<Product {self.name}>"
 
 # ==========================================================
+# Aquisição agregada (FASE 9.0.0-G)
+# ==========================================================
+class AcquisitionDailyMetric(db.Model):
+    __tablename__ = "acquisition_daily_metrics"
+
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    day = db.Column(db.Date, nullable=False)
+    channel = db.Column(db.String(140), nullable=False)
+    sessions = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+
+    __table_args__ = (
+        db.UniqueConstraint("day", "channel", name="uq_acquisition_daily_day_channel"),
+        db.CheckConstraint("sessions >= 0", name="ck_acquisition_daily_sessions_nonnegative"),
+    )
+
+
+# ==========================================================
 # Promoções
 # ==========================================================
 class Promotion(db.Model):
