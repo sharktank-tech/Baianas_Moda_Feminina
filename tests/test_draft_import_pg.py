@@ -60,13 +60,24 @@ def _split_sql_statements(sql):
     return out
 
 
-def _url_with_search_path(url, schema):
-    from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+def _engine_with_search_path(url, schema):
+    """Engine com search_path isolado ao schema descartável para PostgreSQL.
 
-    parts = urlparse(url)
-    q = parse_qs(parts.query)
-    q["options"] = "-csearch_path=%s" % schema
-    return urlunparse(parts._replace(query=urlencode(q, doseq=True)))
+    IMPORTANTE: passar `-csearch_path=...` via options (na URL ou em
+    connect_args) é silenciosamente ignorado pelo pooler do Supabase
+    (Supavisor), fazendo o CREATE TABLE/INSERT vazar para `public`.
+    O caminho confiável é executar `SET search_path` logo após a conexão.
+    """
+    engine = create_engine(url)
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "connect")
+    def _set_search_path(dbapi_conn, _record):
+        cur = dbapi_conn.cursor()
+        cur.execute("SET search_path = %s" % schema)
+        cur.close()
+
+    return engine
 
 
 def _public_columns_snapshot(eng):
@@ -117,7 +128,7 @@ def test_migration_is_idempotent_and_public_untouched(env):
     schema, eng = env
     before = _public_columns_snapshot(eng)
 
-    se = create_engine(_url_with_search_path(DATABASE_URL, schema))
+    se = _engine_with_search_path(DATABASE_URL, schema)
     # A migration é aditiva sobre tabelas EXISTENTES: cria a forma "legada"
     # (sem as colunas novas) para validar os ADD COLUMN/CONSTRAINT de fato.
     with se.begin() as c:

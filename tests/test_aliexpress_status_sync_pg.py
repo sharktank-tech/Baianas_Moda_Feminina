@@ -24,6 +24,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
 from conftest import ORIGINAL_DATABASE_URL
+from tests.aliexpress_snapshot_utils import materialize_snapshot
 from loja.integrations.aliexpress.status_sync import (
     AliExpressOrderStatusSyncer,
     AliExpressOrderStatusRequest,
@@ -62,7 +63,7 @@ class CountingSubmitter(AliExpressOrderSubmitter):
     def submit(self, request):
         with self._lock:
             self.call_count += 1
-        return AliExpressSubmissionResult(external_order_ids=(f"AE-PG-{secrets.token_hex(4)}",))
+        return AliExpressSubmissionResult(external_order_ids=(f"991100{self.call_count:03d}",))
 
 
 class FixedSyncer(AliExpressOrderStatusSyncer):
@@ -168,6 +169,10 @@ def _materialize_submitted(app):
         variant = ProductVariant(
             id=uuid.uuid4(), product_id=product.id, supplier_product_id=sp.id,
             supplier_sku_id="SKU_PG_806", sku=None, color="Red", size="M",
+            attributes=[
+                {"name": "Color", "value": "Red", "sku_property_id": "14", "property_value_id": "771"},
+                {"name": "Size", "value": "M", "sku_property_id": "200000124", "property_value_id": "100013888"},
+            ],
             stock=10, price=Decimal("29.90"), is_active=True,
         )
         db.session.add(variant)
@@ -199,6 +204,7 @@ def _materialize_submitted(app):
         ali_order_id = results[0].aliexpress_order.id
 
         ali_order = db.session.get(AliExpressOrder, ali_order_id)
+        materialize_snapshot(ali_order, session=db.session)
         res = submit_aliexpress_order(ali_order, submitter=CountingSubmitter())
         assert res.state == "submitted"
         db.session.commit()

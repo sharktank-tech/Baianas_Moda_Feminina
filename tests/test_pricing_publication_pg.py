@@ -20,9 +20,9 @@ from sqlalchemy.exc import IntegrityError
 
 from conftest import ORIGINAL_DATABASE_URL
 from test_draft_import_pg import (
+    _engine_with_search_path,
     _public_columns_snapshot,
     _split_sql_statements,
-    _url_with_search_path,
 )
 
 DATABASE_URL = ORIGINAL_DATABASE_URL
@@ -126,7 +126,7 @@ def test_migration_idempotent_and_checks_bound_to_products(env):
     schema, eng = env
     before = _public_columns_snapshot(eng)
 
-    se = create_engine(_url_with_search_path(DATABASE_URL, schema))
+    se = _engine_with_search_path(DATABASE_URL, schema)
     with se.begin() as c:
         c.execute(text(_LEGACY_PRODUCTS))
     _apply_migration(se, schema)
@@ -151,7 +151,7 @@ def test_migration_idempotent_and_checks_bound_to_products(env):
 
 def test_db_guard_rejects_aliexpress_active_unpriced(env):
     schema, eng = env
-    se = create_engine(_url_with_search_path(DATABASE_URL, schema))
+    se = _engine_with_search_path(DATABASE_URL, schema)
     with se.begin() as c:
         c.execute(text(_LEGACY_PRODUCTS))
     _apply_migration(se, schema)
@@ -166,7 +166,7 @@ def test_db_guard_rejects_aliexpress_active_unpriced(env):
 
 def test_db_guard_accepts_priced_published_and_legacy_internal(env):
     schema, eng = env
-    se = create_engine(_url_with_search_path(DATABASE_URL, schema))
+    se = _engine_with_search_path(DATABASE_URL, schema)
     with se.begin() as c:
         c.execute(text(_LEGACY_PRODUCTS))
     _apply_migration(se, schema)
@@ -196,7 +196,7 @@ def test_db_guard_accepts_priced_published_and_legacy_internal(env):
 
 def test_db_guard_target_margin_range(env):
     schema, eng = env
-    se = create_engine(_url_with_search_path(DATABASE_URL, schema))
+    se = _engine_with_search_path(DATABASE_URL, schema)
     with se.begin() as c:
         c.execute(text(_LEGACY_PRODUCTS))
     _apply_migration(se, schema)
@@ -232,7 +232,7 @@ def test_db_guard_target_margin_range(env):
 
 def test_db_guard_pricing_status_whitelist(env):
     schema, eng = env
-    se = create_engine(_url_with_search_path(DATABASE_URL, schema))
+    se = _engine_with_search_path(DATABASE_URL, schema)
     with se.begin() as c:
         c.execute(text(_LEGACY_PRODUCTS))
     _apply_migration(se, schema)

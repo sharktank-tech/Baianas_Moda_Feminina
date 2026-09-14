@@ -25,6 +25,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
 from conftest import ORIGINAL_DATABASE_URL
+from tests.aliexpress_snapshot_utils import materialize_snapshot
 from loja.integrations.aliexpress.reconciliation import (
     AliExpressOrderReconciler,
     AliExpressOrderReconciliationResult,
@@ -66,7 +67,7 @@ class CountingSubmitter(AliExpressOrderSubmitter):
             self.call_count += 1
         if self.outcome_override is AliExpressSubmissionUnknown:
             raise AliExpressSubmissionUnknown("timeout sem confirmação")
-        return AliExpressSubmissionResult(external_order_ids=(f"AE-PG-{secrets.token_hex(4)}",))
+        return AliExpressSubmissionResult(external_order_ids=(f"991100{self.call_count:03d}",))
 
 
 class CountingReconciler(AliExpressOrderReconciler):
@@ -194,6 +195,10 @@ def _materialize_pending(app):
             sku=None,
             color="Red",
             size="M",
+            attributes=[
+                {"name": "Color", "value": "Red", "sku_property_id": "14", "property_value_id": "771"},
+                {"name": "Size", "value": "M", "sku_property_id": "200000124", "property_value_id": "100013888"},
+            ],
             stock=10,
             price=Decimal("29.90"),
             is_active=True,
@@ -249,6 +254,7 @@ def _materialize_pending(app):
         from loja.modules.models import AliExpressOrder
 
         ali_order = db.session.get(AliExpressOrder, ali_order_id)
+        materialize_snapshot(ali_order, session=db.session)
         amb = submit_aliexpress_order(
             ali_order,
             submitter=CountingSubmitter(outcome_override=AliExpressSubmissionUnknown),
@@ -318,7 +324,14 @@ def test_submit_vs_reconcile_never_creates_second_submission(env):
     t2.join(timeout=60)
 
     assert errors == [], errors
-    assert set(results) == {"pending_reconciliation", "submitted"}
+    # Corrida real: quem vence o lock observa o estado correspondente.
+    #   * submit vence -> enxerga pending_reconciliation (sem nova chamada);
+    #   * reconcile vence -> já saiu submitted -> submit vê submitted.
+    # As invariantes FORTES valem em ambos os caminhos:
+    #   zero chamada nova ao provider (call_count==0), reconcile aplicado 1x,
+    #   estado/identidade finais consistentes (verificado abaixo).
+    assert set(results) <= {"pending_reconciliation", "submitted"}
+    assert "submitted" in results
     # Nenhuma criação externa nova (submitter nunca chamado); só 1 reconciliação.
     assert submitter.call_count == 0
     assert reconciler.call_count == 1
