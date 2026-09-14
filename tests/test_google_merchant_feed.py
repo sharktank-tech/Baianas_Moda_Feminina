@@ -17,6 +17,12 @@ from loja.services.google_merchant_feed import (
 GOOGLE_NS = {"g": "http://base.google.com/ns/1.0"}
 
 
+@pytest.fixture()
+def req_ctx(app):
+    with app.test_request_context("/"):
+        yield
+
+
 def _product(**overrides):
     values = dict(
         id=uuid.uuid4(),
