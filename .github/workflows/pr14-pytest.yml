@@ -7,9 +7,6 @@ on:
   push:
     branches:
       - master
-      # Bootstrap da migração do CI: permite validar a própria PR #44 antes
-      # de o gatilho pull_request desta versão existir na branch padrão.
-      - feat/post-sale-status-sync-8.3.0-a
   workflow_dispatch:
 
 permissions:
