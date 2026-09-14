@@ -45,7 +45,7 @@ def test_product_structured_data_basic(req_ctx):
     product = _product()
     data = product_structured_data(product)
     assert data is not None
-    parsed = json.loads(data)
+    parsed = data
     assert parsed["@type"] == "Product"
     assert parsed["name"] == "Vestido Floral"
     assert parsed["offers"]["price"] == "89.90"
@@ -57,7 +57,7 @@ def test_product_structured_data_basic(req_ctx):
 
 def test_product_structured_data_out_of_stock(req_ctx):
     data = product_structured_data(_product(stock=0))
-    parsed = json.loads(data)
+    parsed = data
     assert parsed["offers"]["availability"] == "https://schema.org/OutOfStock"
 
 
@@ -65,18 +65,18 @@ def test_product_structured_data_images_from_gallery(req_ctx):
     product = _product()
     images = [{"url": "https://cdn.exemplo.com/a.jpg"}, {"url": "https://cdn.exemplo.com/b.jpg"}]
     data = product_structured_data(product, gallery_images=images)
-    parsed = json.loads(data)
+    parsed = data
     assert parsed["image"] == ["https://cdn.exemplo.com/a.jpg", "https://cdn.exemplo.com/b.jpg"]
 
 
 def test_product_structured_data_fallback_image(req_ctx):
     data = product_structured_data(_product())
-    parsed = json.loads(data)
+    parsed = data
     assert "https://exemplo.com/vestido.jpg" in parsed["image"]
 
 
 def test_product_structured_data_invalid_price_no_offers_price(req_ctx):
-    parsed = json.loads(product_structured_data(_product(price=None)))
+    parsed = product_structured_data(_product(price=None))
     assert "price" not in parsed["offers"]
 
 
@@ -174,6 +174,18 @@ def test_product_page_has_canonical_and_structured_data(client, db):
     assert f"/produtos/{product.id}" in body
     assert "application/ld+json" in body
     assert '"@type": "Product"' in body
+
+
+def test_product_json_ld_escapes_script_terminator(client, db):
+    product = _product(name='Vestido </script><script>alert(1)</script>')
+    db.session.add(product)
+    db.session.commit()
+
+    response = client.get(f"/produtos/{product.id}")
+    body = response.get_data(as_text=True)
+
+    assert "</script><script>alert(1)</script>" not in body
+    assert "\\u003c/script\\u003e" in body
 
 
 def test_listing_page_canonical_and_meta(client, db):
