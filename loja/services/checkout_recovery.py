@@ -1,14 +1,10 @@
-"""FASE 9.0.0-C — recuperação de checkout/pedido pendente (somente e-mail).
+"""FASE 9.0.0-C/E — recuperação de checkout/pedido pendente por e-mail.
 
-Encontra pedidos abandonados em ``pending_payment`` dentro da janela em que o
-estoque ainda está reservado e, gated por env ``CHECKOUT_RECOVERY_ENABLED == 1``
-(default OFF), envia um lembrete único por pedido apontando para a área do
-cliente. Nunca inicia tráfego pago, nunca chama provider e nunca reenvia o mesmo
-pedido (dedupe via ``recovery_email_sent_at``).
-
-Fail-closed: qualquer erro de envio marca o pedido como lembrado apenas se o
-e-mail realmente foi despachado; caso contrário permanece NULL para a próxima
-execução sem risco de spam duplicado.
+A execução é explicitamente gated e acontece somente pelo comando administrativo.
+A seleção usa lock pessimista para impedir que workers concorrentes processem o
+mesmo pedido. SMTP e banco não formam uma transação distribuída; portanto a
+garantia é at-most-once entre execuções concorrentes e best-effort diante de
+queda do processo entre envio e commit.
 """
 
 from __future__ import annotations
@@ -26,7 +22,10 @@ from loja.utils import utcnow
 ENABLED_ENV = "CHECKOUT_RECOVERY_ENABLED"
 AFTER_HOURS_ENV = "CHECKOUT_RECOVERY_AFTER_HOURS"
 DEFAULT_AFTER_HOURS = 2
+DEFAULT_RESERVATION_HOURS = 24
+DEFAULT_BATCH_LIMIT = 50
 _MAX_AFTER_HOURS = 24 * 30
+_MAX_BATCH_LIMIT = 200
 _ORDER_DETAIL_URL_NAME = "main.detalhes_encomenda"
 _SUBJECT = "Você deixou um pedido para trás — Pollo Modas"
 
@@ -61,17 +60,26 @@ def find_recoverable_orders(
     after_hours: Optional[int] = None,
     limit: Optional[int] = None,
     now=None,
+    lock: bool = False,
 ) -> list[Order]:
-    """Pedidos pending_payment ainda com reserva, nunca antes lembrados.
+    """Seleciona apenas pedidos cuja reserva de 24h ainda não expirou.
 
-    Idade mínima impede lembrete imediato após o checkout; a reserva expira
-    via ``release_expired_stock_reservations`` e encerra a janela.
+    lock=True usa FOR UPDATE SKIP LOCKED. A listagem administrativa usa
+    leitura normal; a execução usa lock até o commit posterior ao envio.
     """
     hours = after_hours if after_hours is not None else load_after_hours()
     if not isinstance(hours, int) or isinstance(hours, bool) or not 1 <= hours <= _MAX_AFTER_HOURS:
         raise ValueError("checkout_recovery_after_hours_invalid")
+    if limit is not None and (
+        not isinstance(limit, int)
+        or isinstance(limit, bool)
+        or not 1 <= limit <= _MAX_BATCH_LIMIT
+    ):
+        raise ValueError("checkout_recovery_limit_invalid")
+
     now = now or utcnow()
-    cutoff = now - timedelta(hours=hours)
+    minimum_age = now - timedelta(hours=hours)
+    reservation_started_after = now - timedelta(hours=DEFAULT_RESERVATION_HOURS)
 
     query = (
         Order.query
@@ -79,12 +87,15 @@ def find_recoverable_orders(
             Order.status == "pending_payment",
             Order.stock_reserved.is_(True),
             Order.recovery_email_sent_at.is_(None),
-            Order.created_at < cutoff,
+            Order.created_at < minimum_age,
+            Order.created_at >= reservation_started_after,
             Order.customer_email.isnot(None),
             Order.customer_email != "",
         )
         .order_by(Order.created_at.asc())
     )
+    if lock:
+        query = query.with_for_update(skip_locked=True)
     if limit is not None:
         query = query.limit(limit)
     return query.all()
@@ -98,13 +109,12 @@ def _format_total(order) -> str:
 
 
 def _build_message(order, order_detail_url: str) -> str:
-    """Corpo em texto simples (o remetente escapa antes de virar HTML)."""
     lines = [
         "Olá!",
         "",
         "Parece que você iniciou uma compra na Pollo Modas e o pagamento",
-        f"ainda está pendente. Seus itens estão reservados por um tempo,",
-        "mas podemos perder a reserva se o pagamento não for concluído.",
+        "ainda está pendente. Seus itens continuam reservados por um tempo,",
+        "mas a reserva expira se o pagamento não for concluído.",
         "",
         "Para finalizar sua compra, acesse o passo a passo abaixo:",
         "",
@@ -126,18 +136,9 @@ def send_recovery_emails(
     email_sender=None,
     after_hours: Optional[int] = None,
 ) -> CheckoutRecoveryResult:
-    """Despacha lembretes únicos por pedido (gated pelo env da aplicação).
-
-    ``order_detail_url_builder`` recebe um Order e devolve a URL absoluta da
-    área do cliente; default constrói via url_for(nome da rota, external).
-    ``email_sender`` é injetável para testes (default: enviar_email).
-    """
-    enabled = is_recovery_enabled()
-    if not enabled:
-        return CheckoutRecoveryResult(
-            enabled=False, candidates=0, sent=0,
-            skipped_empty_email=0, failed=0,
-        )
+    """Envia a coleção já selecionada; o chamador mantém os locks até o commit."""
+    if not is_recovery_enabled():
+        return CheckoutRecoveryResult(False, 0, 0, 0, 0)
 
     if order_detail_url_builder is None:
         from flask import url_for
@@ -152,13 +153,12 @@ def send_recovery_emails(
         order_detail_url_builder = _default_builder
 
     sender = email_sender or enviar_email
-
     candidates = list(orders)
-    sent = 0
-    failed = 0
-    skipped_empty_email = 0
+    sent = failed = skipped_empty_email = 0
 
     for order in candidates:
+        if getattr(order, "recovery_email_sent_at", None) is not None:
+            continue
         email = (getattr(order, "customer_email", None) or "").strip()
         if not email:
             skipped_empty_email += 1
@@ -172,7 +172,6 @@ def send_recovery_emails(
             order.recovery_email_sent_at = utcnow()
             sent += 1
         except Exception:
-            # Não marca o pedido como lembrado: falha de envio não é lembrete.
             failed += 1
 
     return CheckoutRecoveryResult(
@@ -186,37 +185,41 @@ def send_recovery_emails(
 
 def run_checkout_recovery(
     *,
-    limit: Optional[int] = None,
+    limit: Optional[int] = DEFAULT_BATCH_LIMIT,
     order_detail_url_builder=None,
     email_sender=None,
     after_hours: Optional[int] = None,
 ) -> CheckoutRecoveryResult:
-    """Busca candidatos e envia lembretes; persiste dedupe somente se enviado."""
-    enabled = is_recovery_enabled()
-    if not enabled:
-        return CheckoutRecoveryResult(
-            enabled=False, candidates=0, sent=0,
-            skipped_empty_email=0, failed=0,
-        )
+    """Processa um lote limitado, fora dos webhooks e sob lock pessimista."""
+    if not is_recovery_enabled():
+        return CheckoutRecoveryResult(False, 0, 0, 0, 0)
 
-    orders = find_recoverable_orders(
-        after_hours=after_hours,
-        limit=limit,
-    )
-    result = send_recovery_emails(
-        orders,
-        order_detail_url_builder=order_detail_url_builder,
-        email_sender=email_sender,
-        after_hours=after_hours,
-    )
-    if result.sent > 0 or result.failed > 0 or result.skipped_empty_email > 0:
-        from loja import db
+    from loja import db
+
+    try:
+        orders = find_recoverable_orders(
+            after_hours=after_hours,
+            limit=limit,
+            lock=True,
+        )
+        result = send_recovery_emails(
+            orders,
+            order_detail_url_builder=order_detail_url_builder,
+            email_sender=email_sender,
+            after_hours=after_hours,
+        )
         db.session.commit()
-    return result
+        return result
+    except Exception:
+        db.session.rollback()
+        raise
 
 
 __all__ = [
     "CheckoutRecoveryResult",
+    "DEFAULT_AFTER_HOURS",
+    "DEFAULT_BATCH_LIMIT",
+    "DEFAULT_RESERVATION_HOURS",
     "find_recoverable_orders",
     "is_recovery_enabled",
     "load_after_hours",
