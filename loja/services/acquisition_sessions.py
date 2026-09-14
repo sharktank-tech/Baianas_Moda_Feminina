@@ -81,6 +81,10 @@ def record_acquisition_session(acquisition: dict, *, session, day: date | None =
     return True
 
 
+def first_session_day():
+    return db.session.query(func.min(AcquisitionDailyMetric.day)).scalar()
+
+
 def session_counts_by_channel() -> dict[str, int]:
     rows = (
         db.session.query(
@@ -95,6 +99,7 @@ def session_counts_by_channel() -> dict[str, int]:
 
 __all__ = [
     "acquisition_channel",
+    "first_session_day",
     "record_acquisition_session",
     "session_counts_by_channel",
     "should_count_acquisition_session",
