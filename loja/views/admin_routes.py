@@ -361,6 +361,50 @@ def channel_metrics_dashboard():
     )
 
 
+@admin_blueprint.route(
+    "/admin/recuperacao-checkout",
+    methods=["GET", "POST"],
+)
+@admin_required
+def checkout_recovery():
+    """Fila read-only de pedidos pending_payment com reserva ativa e lembrete
+    nunca enviado; POST aciona o envio de lembretes (gated por env).
+
+    GET não envia nada; POST só dispara se CHECKOUT_RECOVERY_ENABLED == 1
+    (fail-closed, espelha as rotinas de manutenção da FASE 8.3.0).
+    """
+    from loja.services.checkout_recovery import (
+        find_recoverable_orders,
+        is_recovery_enabled,
+        load_after_hours,
+        run_checkout_recovery,
+    )
+
+    enabled = is_recovery_enabled()
+    result = None
+
+    if request.method == "POST":
+        result = run_checkout_recovery()
+
+    try:
+        after_hours = load_after_hours()
+    except ValueError:
+        after_hours = None
+
+    try:
+        candidates = find_recoverable_orders(after_hours=after_hours)
+    except ValueError:
+        candidates = []
+
+    return render_template(
+        "admin/checkout_recovery.html",
+        enabled=enabled,
+        after_hours=after_hours,
+        candidates=candidates,
+        result=result,
+    )
+
+
 # -------------------------------------------------------------------
 # Adicionar produto
 # -------------------------------------------------------------------

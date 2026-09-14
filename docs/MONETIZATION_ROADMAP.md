@@ -339,6 +339,17 @@ Checkpoints entregues:
   margem por pedido (avaliador 8.2.0-C) e recompra, agrupados por origem. Sem
   sessões persistidas não há "sessões"; sem gasto publicitário não há CAC — os
   campos permanecem ausentes em vez de inventados.
+- **9.0.0-C (2026-09-14):** recuperação de checkout/pedido pendente por e-mail
+  (sem tráfego pago) — fila de pedidos `pending_payment` com reserva ativa,
+  idade mínima configurável (`CHECKOUT_RECOVERY_AFTER_HOURS`) e lembrete único
+  por pedido (dedupe via `recovery_email_sent_at`, migration 0019). Envio
+  fail-closed e gated por `CHECKOUT_RECOVERY_ENABLED=1`; coluna nunca cai em
+  `public`; disparo via webhook/retorno a partir dos touchpoints de rotina e
+  botão admin em `/admin/recuperacao-checkout`.
+- **9.0.0-D (2026-09-14):** SEO de páginas de produto/categoria — JSON-LD
+  Product com oferta/esgotado/inventário, `<link rel="canonical">` em produto e
+  listagem, title/meta dinâmicos e `noindex` para busca, `sitemap.xml` público
+  (produtos ativos + páginas institucionais) e `Sitemap:` no `robots.txt`.
 
 ## Regra de progressão
 

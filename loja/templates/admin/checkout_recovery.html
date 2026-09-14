@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Recuperação de Checkout — Pollo Modas{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-8">
+  <div class="mb-8">
+    <a href="{{ url_for('admin.dashboard') }}" class="text-sm text-gray-500 hover:underline">&larr; Painel administrativo</a>
+    <h1 class="text-3xl font-bold text-gray-800 mt-2">Recuperação de Checkout</h1>
+    <p class="text-gray-500 mt-2 max-w-3xl">
+      Fila somente leitura de pedidos <span class="font-mono">pending_payment</span> com
+      reserva de estoque ainda ativa, criados há mais de
+      {{ after_hours }} hora(s), cujo lembrete de retomada nunca foi enviado.
+      Não inicia tráfego pago e não consulta provedores.
+    </p>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Lembretes habilitados</div>
+      <div class="text-2xl font-bold mt-1 {% if enabled %}text-green-700{% else %}text-red-700{% endif %}">
+        {{ "SIM" if enabled else "NÃO (gated)" }}
+      </div>
+      <div class="text-xs text-gray-400 mt-1">
+        {% if enabled %}
+          CHECKOUT_RECOVERY_ENABLED=1 — o POST abaixo envia e-mails reais.
+        {% else %}
+          Fail-closed: envio está desligado mesmo que o GET abaixo seja usado.
+        {% endif %}
+      </div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Idade mínima de espera</div>
+      <div class="text-2xl font-bold mt-1">{% if after_hours is not none %}{{ after_hours }}h{% else %}—{% endif %}</div>
+      <div class="text-xs text-gray-400 mt-1">CHECKOUT_RECOVERY_AFTER_HOURS</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Candidatos pendentes</div>
+      <div class="text-2xl font-bold mt-1">{{ candidates|length }}</div>
+      <div class="text-xs text-gray-400 mt-1">Fila read-only atual</div>
+    </div>
+  </div>
+
+  {% if result %}
+  <div class="mb-6 bg-white rounded-2xl shadow p-5">
+    <h2 class="font-semibold text-gray-800">Resultado da última execução</h2>
+    <table class="w-full mt-2">
+      <tbody class="divide-y divide-gray-100">
+        <tr>
+          <td class="py-2 text-sm text-gray-600">Habilitado</td>
+          <td class="py-2 text-sm font-medium">{{ "sim" if result.enabled else "não" }}</td>
+        </tr>
+        <tr>
+          <td class="py-2 text-sm text-gray-600">Candidatos</td>
+          <td class="py-2 text-sm font-medium">{{ result.candidates }}</td>
+        </tr>
+        <tr>
+          <td class="py-2 text-sm text-gray-600">E-mails enviados</td>
+          <td class="py-2 text-sm font-medium text-green-700">{{ result.sent }}</td>
+        </tr>
+        <tr>
+          <td class="py-2 text-sm text-gray-600">Sem e-mail no pedido</td>
+          <td class="py-2 text-sm font-medium">{{ result.skipped_empty_email }}</td>
+        </tr>
+        <tr>
+          <td class="py-2 text-sm text-gray-600">Falhas (não marcam envio)</td>
+          <td class="py-2 text-sm font-medium text-red-700">{{ result.failed }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="mb-6">
+    <form method="POST" action="{{ url_for('admin.checkout_recovery') }}">
+      <button type="submit"
+              class="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-sm">
+        Enviar lembretes pendentes
+      </button>
+    </form>
+    <p class="text-xs text-gray-500 mt-2">
+      Verifica CHECKOUT_RECOVERY_ENABLED no servidor; se desligado, nada é enviado.
+    </p>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow overflow-hidden">
+    <div class="p-5 border-b border-gray-200">
+      <h2 class="font-semibold text-gray-800">Fila de recuperação</h2>
+      <p class="text-xs text-gray-500 mt-1">
+        Pedidos ainda com reserva de estoque + pending_payment + sem lembrete
+        enviado. E-mail e número do pedido aparecem para identificação no admin.
+      </p>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Pedido</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Cliente</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">E-mail</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Total</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Criado em</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Reserva ativa</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for order in candidates %}
+          <tr>
+            <td class="px-4 py-3 text-sm">{{ order.order_number }}</td>
+            <td class="px-4 py-3 text-sm">{{ order.customer_name or "—" }}</td>
+            <td class="px-4 py-3 text-sm">{{ order.customer_email }}</td>
+            <td class="px-4 py-3 text-sm">R$ {{ order.total }}</td>
+            <td class="px-4 py-3 text-sm">{{ order.created_at.strftime('%d/%m/%Y %H:%M') if order.created_at else "—" }}</td>
+            <td class="px-4 py-3 text-sm text-green-700">{{ "sim" if order.stock_reserved else "não" }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">Nenhum pedido aguardando lembrete.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

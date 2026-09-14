@@ -1,9 +1,15 @@
 {% extends "base.html" %}
 
-{% block title %}Nossa Coleção — {{ site.name }}{% endblock %}
-{% block meta_description %}Explore toda a coleção da {{ site.name }}. Moda feminina, masculina e infantil.{% endblock %}
+{% block title %}{{ seo_title or ('Nossa Coleção — ' ~ site.name) }}{% endblock %}
+{% block meta_description %}{{ seo_description or ('Explore toda a coleção da ' ~ site.name ~ '. Moda feminina, masculina e infantil.') }}{% endblock %}
 
 {% block extra_head %}
+  {% if seo_canonical %}
+  <link rel="canonical" href="{{ seo_canonical }}">
+  {% endif %}
+  {% if seo_robots %}
+  <meta name="robots" content="{{ seo_robots }}">
+  {% endif %}
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/produtos.css') }}">
 
   <style>

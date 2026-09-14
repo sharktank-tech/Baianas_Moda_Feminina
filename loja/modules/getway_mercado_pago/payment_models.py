@@ -157,6 +157,10 @@ class Order(db.Model):
     acquisition_campaign = db.Column(db.String(120), nullable=True)
     acquisition_referrer = db.Column(db.String(120), nullable=True)
 
+    # FASE 9.0.0-C: momento do lembrete de retomada de pagamento de pedido
+    # abandonado (dedupe anti-spam). NULL = ainda não lembrado.
+    recovery_email_sent_at = db.Column(db.DateTime, nullable=True)
+
     # FASE 8.3.0-H: ledger financeiro local; não substitui a autoridade
     # do webhook Mercado Pago sobre Order.status == "refunded".
     supplier_refund_state = db.Column(db.String(30), nullable=True)

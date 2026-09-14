@@ -4,6 +4,22 @@
 {% block meta_description %}{{ product_description_excerpt(product.description) or product.name }}{% endblock %}
 
 {% block extra_head %}
+<link rel="canonical" href="{{ product_canonical_url(product) }}">
+
+<!-- Open Graph / social share -->
+<meta property="og:title" content="{{ product.name }} — {{ site.name }}">
+<meta property="og:description" content="{{ product_description_excerpt(product.description) or product.name }}">
+<meta property="og:type" content="product">
+{% if gallery_images %}
+<meta property="og:image" content="{{ gallery_images[0].url }}">
+{% endif %}
+
+{% if structured_data %}
+<script type="application/ld+json">
+{{ structured_data | safe }}
+</script>
+{% endif %}
+
 <link rel="stylesheet" href="{{ url_for('static', filename='styles/produtos_individual.css') }}">
 
 <style>

@@ -17,6 +17,11 @@ from loja.services.product_content import (
     sanitize_product_description_html,
     sanitize_product_description_without_images,
 )
+from loja.services.seo import (
+    listing_meta,
+    product_canonical_url,
+    product_structured_data,
+)
 from loja.modules.services import (
     get_favorited_ids,
     get_footer_data,
@@ -146,6 +151,7 @@ def inject_product_content_helpers():
         "sanitize_product_description_html": sanitize_product_description_html,
         "sanitize_product_description_without_images": sanitize_product_description_without_images,
         "product_description_excerpt": product_description_excerpt,
+        "product_canonical_url": product_canonical_url,
     }
 
 
@@ -194,6 +200,8 @@ def produtos():
     )
     categorias = [categoria[0] for categoria in categorias]
 
+    seo = listing_meta(categoria=categoria, busca=busca)
+
     return render_template(
         "main/produtos.html",
         products=products,
@@ -201,6 +209,10 @@ def produtos():
         categoria_atual=categoria,
         ordenar_atual=ordenar,
         busca_atual=busca,
+        seo_title=seo["title"],
+        seo_description=seo["meta_description"],
+        seo_robots=seo["robots"],
+        seo_canonical=seo["canonical"],
     )
 
 
@@ -233,6 +245,11 @@ def produto_individual(id):
 
     gallery_images = build_product_gallery(product)
 
+    structured_data = product_structured_data(
+        product,
+        gallery_images=gallery_images,
+    )
+
     return render_template(
         "main/produto_individual.html",
         product=product,
@@ -241,6 +258,7 @@ def produto_individual(id):
         uses_variants=uses_variants,
         no_variants_available=no_variants_available,
         gallery_images=gallery_images,
+        structured_data=structured_data,
     )
 
 
@@ -2576,11 +2594,29 @@ def contato():
 # ================== Robots ==================
 @main_blueprint.route("/robots.txt")
 def robots():
+    sitemap_url = url_for("main.sitemap_xml", _external=True)
     linhas = [
         "User-agent: *",
         "Disallow: /conta/",
         "Disallow: /admin/",
         "Disallow: /cart/",
         "Disallow: /checkout/",
+        "",
+        f"Sitemap: {sitemap_url}",
     ]
     return Response("\n".join(linhas), mimetype="text/plain")
+
+
+@main_blueprint.route("/sitemap.xml")
+def sitemap_xml():
+    """Sitemap público (somente produtos ativos + páginas institucionais).
+
+    Read-only e sem dados privados: não lista contas, pedidos nem URLs de
+    checkout. Qualquer produto fora de estoque continua indexável e é
+    resolvido na página (oferta fora de estoque).
+    """
+    from loja.services.seo import build_sitemap_urls, build_sitemap_xml
+
+    urls = build_sitemap_urls()
+    xml = build_sitemap_xml(urls)
+    return Response(xml, mimetype="application/xml")

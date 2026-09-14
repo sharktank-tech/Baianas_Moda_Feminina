@@ -47,6 +47,7 @@ from loja.services.acquisition_source import (
     acquisition_to_order_kwargs,
     order_acquisition,
 )
+from loja.services.checkout_recovery import run_checkout_recovery
 
 
 # O nome "payments" precisa ser exatamente este,
@@ -1049,6 +1050,9 @@ def mercado_pago_webhook():
         return jsonify({"ok": True}), 200
 
     try:
+        first_run = run_checkout_recovery()
+        if first_run.sent or first_run.failed:
+            db.session.commit()
         release_expired_stock_reservations()
         _sync_payment(payment_id)
     except PaymentGatewayError:
@@ -1088,6 +1092,16 @@ def payment_return(result):
         db.session.rollback()
         current_app.logger.exception(
             "Falha ao liberar reservas expiradas no retorno."
+        )
+
+    try:
+        recovery_run = run_checkout_recovery()
+        if recovery_run.sent or recovery_run.failed:
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Falha ao processar recuperação de checkout no retorno."
         )
 
     payment_id = (
