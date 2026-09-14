@@ -3,6 +3,8 @@
 from datetime import date
 from types import SimpleNamespace
 
+import pytest
+
 from loja.modules.models import AcquisitionDailyMetric
 from loja.services.acquisition_sessions import (
     acquisition_channel,
@@ -14,6 +16,15 @@ from loja.services.acquisition_sessions import (
 
 
 DAY = date(2026, 9, 14)
+
+
+@pytest.fixture(autouse=True)
+def _clean_acquisition_metrics(db):
+    AcquisitionDailyMetric.query.delete()
+    db.session.commit()
+    yield
+    AcquisitionDailyMetric.query.delete()
+    db.session.commit()
 
 
 def test_channel_prefers_source_then_referrer_then_direct():
