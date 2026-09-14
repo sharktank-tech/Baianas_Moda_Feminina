@@ -129,6 +129,35 @@ Na aplicação do Mercado Pago:
 
 A URL enviada na preferência também aponta para esse endpoint.
 
+### 8.1 Notificações IPN legadas (importante)
+
+O Mercado Pago também pode disparar IPN no formato antigo:
+
+```text
+https://SEU_DOMINIO/pagamentos/webhook?id=<resource>&topic=<payment|merchant_order>
+```
+
+Esse formato não contém a assinatura secreta usada pelos Webhooks atuais e,
+por isso, é tratado como sinal sem confiança: o `POST /pagamentos/webhook`
+classifica cada chamada ANTES de validar assinatura:
+
+- `modern_webhook` (`data.id` no query string): única fonte com autoridade
+  para sincronizar pagamentos — exige assinatura válida (401 se inválida,
+  503 se `MERCADO_PAGO_WEBHOOK_SECRET` ausente);
+- `legacy_ipn` (`id` + `topic` no allowlist, sem `data.id`/`type`): reconhecida
+  e ignorada com HTTP 200 para interromper retries — sem consultar provedor,
+  sem sincronizar e sem alterar banco/estoque;
+- `malformed_or_unknown`: ignorada com HTTP 200, sem efeitos colaterais.
+
+Classifications em `getway_mercado_pago/webhook_classification.py`. Regra
+inegociável: notificação com `data.id` no query NUNCA cai no caminho legado.
+Eventos no log (`mp_observability`): `modern_webhook_validated`,
+`modern_webhook_rejected`, `legacy_ipn_ignored`, `webhook_malformed_ignored` —
+sempre sanitizados, sem IDs em texto puro.
+
+Quando o Webhook autenticado for a fonte primária, desative a IPN no painel do
+Mercado Pago (ação operacional, fora do código).
+
 ## 9. Testar
 
 ```bash

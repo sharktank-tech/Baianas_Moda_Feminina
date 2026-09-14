@@ -47,6 +47,17 @@ from loja.services.acquisition_source import (
     acquisition_to_order_kwargs,
     order_acquisition,
 )
+from loja.modules.getway_mercado_pago.webhook_classification import (
+    WebhookKind,
+    classify_webhook,
+)
+from loja.observability.mercado_pago import (
+    WH_LEGACY_IPN_IGNORED,
+    WH_MALFORMED_IGNORED,
+    WH_MODERN_REJECTED,
+    WH_MODERN_VALIDATED,
+    log_event,
+)
 
 
 # O nome "payments" precisa ser exatamente este,
@@ -1022,6 +1033,29 @@ def mercado_pago_webhook():
     body = request.get_json(silent=True) or {}
     query_data_id = request.args.get("data.id")
 
+    kind = classify_webhook(request.args, body)
+
+    if kind == WebhookKind.LEGACY_IPN:
+        # IPN legado (id + topic) não permite validar origem pela chave
+        # secreta. Reconhecemos apenas para responder 200 e interromper
+        # retries; NUNCA consultamos provider, sincronizamos ou gravamos.
+        log_event(
+            WH_LEGACY_IPN_IGNORED,
+            level="info",
+            legacy_topic=_clean_query_arg(request.args.get("topic")),
+        )
+        return jsonify({"ok": True}), 200
+
+    if kind == WebhookKind.MALFORMED:
+        # Payload desconhecido/malformado: sem processamento, sem provider,
+        # sem banco. Resposta 200 apenas para não gerar retries.
+        log_event(
+            WH_MALFORMED_IGNORED,
+            level="info",
+            reason="malformed_or_unknown",
+        )
+        return jsonify({"ok": True}), 200
+
     try:
         validate_webhook_signature(
             request.headers.get("x-signature"),
@@ -1029,11 +1063,19 @@ def mercado_pago_webhook():
             query_data_id,
         )
     except InvalidWebhookError:
-        current_app.logger.warning("Webhook Mercado Pago com assinatura inválida.")
+        log_event(WH_MODERN_REJECTED, level="warning", reason="invalid_signature")
+        current_app.logger.warning(
+            "Webhook Mercado Pago com assinatura inválida; evento não processado."
+        )
         return jsonify({"ok": False}), 401
     except PaymentConfigurationError:
-        current_app.logger.exception("Webhook Mercado Pago sem configuração segura.")
+        log_event(WH_MODERN_REJECTED, level="error", reason="configuration_error")
+        current_app.logger.exception(
+            "Webhook Mercado Pago sem configuração segura."
+        )
         return jsonify({"ok": False}), 503
+
+    log_event(WH_MODERN_VALIDATED, level="info")
 
     event_type = body.get("type") or request.args.get("type")
     payment_id = (
@@ -1068,6 +1110,14 @@ def mercado_pago_webhook():
         return jsonify({"ok": False}), 500
 
     return jsonify({"ok": True}), 200
+
+
+def _clean_query_arg(value):
+    """Valor de query para telemetria legada, limitado e sem payload."""
+    normalized = str(value or "").strip()
+    if len(normalized) > 64:
+        return normalized[:64]
+    return normalized
 
 
 def _valid_payment_id(value):

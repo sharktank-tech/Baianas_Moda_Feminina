@@ -161,6 +161,32 @@ mercadopago.webhook.failure
 
 Para `topic_merchant_order_wh`, registrar hash do merchant order e tipo do webhook; não assumir existência de Payment.
 
+### 5.1 Classificação de webhooks (IPN legada)
+
+O Mercado Pago pode reenviar IPN no formato antigo (`?id=...&topic=...`), que
+não é assinável pela chave secreta. `POST /pagamentos/webhook` classifica cada
+chamada antes da validação de assinatura (issue #50):
+
+```text
+modern_webhook       -> data.id no query; exige assinatura (401/503 se inválida);
+legacy_ipn           -> id + topic em {payment, merchant_order}, sem data.id/type;
+malformed_or_unknown -> todo o resto.
+```
+
+Política: IPN legada e payload malformado/desconhecido respondem HTTP 200 para
+interromper retries, SEM consultar provedor, SEM sincronização e SEM alteração
+de banco/estoque. Webhook moderno continua fail-closed. Nada com `data.id` no
+query cai no caminho legado.
+
+Eventos correspondentes (`mp_observability`, sempre sanitizados):
+
+```text
+modern_webhook_validated
+modern_webhook_rejected
+legacy_ipn_ignored
+webhook_malformed_ignored
+```
+
 #### Sincronização de Payment
 
 Registrar:

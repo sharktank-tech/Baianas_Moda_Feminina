@@ -47,14 +47,16 @@ def test_login_flow_with_csrf_token(app, client, make_user):
 
 def test_webhook_is_exempt_from_csrf(app, client):
     # Sem a isenção, o webhook seria rejeitado com 400. Como está isento,
-    # cai na validação de assinatura (não configurada) e retorna 503.
+    # um payload sem data.id no query é malformado/desconhecido e é ignorado
+    # com 200 (IPN legado/malformado não exige assinatura).
     app.config["WTF_CSRF_ENABLED"] = True
     try:
         resp = client.post(
             "/pagamentos/webhook",
             json={"type": "payment", "data": {"id": "123"}},
         )
-        assert resp.status_code == 503
+        assert resp.status_code == 200
+        assert resp.get_json() == {"ok": True}
     finally:
         app.config["WTF_CSRF_ENABLED"] = False
 
