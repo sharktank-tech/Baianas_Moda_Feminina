@@ -73,6 +73,7 @@
 
   <div class="mb-6">
     <form method="POST" action="{{ url_for('admin.checkout_recovery') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit"
               class="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-sm">
         Enviar lembretes pendentes

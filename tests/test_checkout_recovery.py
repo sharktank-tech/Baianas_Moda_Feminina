@@ -84,22 +84,22 @@ def test_after_hours_accepts_boundary(monkeypatch):
 
 
 def test_find_recoverable_orders_scope(db):
-    eligible = _order(status="pending_payment", created_at=NOW - timedelta(hours=48))
-    paid = _order(status="paid", created_at=NOW - timedelta(hours=48))
+    eligible = _order(status="pending_payment", created_at=NOW - timedelta(hours=4))
+    paid = _order(status="paid", created_at=NOW - timedelta(hours=4))
     fresh = _order(status="pending_payment", created_at=NOW - timedelta(hours=1))
     already_sent = _order(
         status="pending_payment",
-        created_at=NOW - timedelta(hours=48),
+        created_at=NOW - timedelta(hours=4),
         recovery_email_sent_at=NOW - timedelta(hours=1),
     )
     no_reservation = _order(
         status="pending_payment",
-        created_at=NOW - timedelta(hours=48),
+        created_at=NOW - timedelta(hours=4),
         stock_reserved=False,
     )
     no_email = _order(
         status="pending_payment",
-        created_at=NOW - timedelta(hours=48),
+        created_at=NOW - timedelta(hours=4),
         customer_email="",
     )
     for order in (eligible, paid, fresh, already_sent, no_reservation, no_email):
@@ -116,12 +116,24 @@ def test_find_recoverable_orders_scope(db):
     assert no_email.id not in ids
 
 
+def test_find_recoverable_orders_excludes_expired_reservation(db):
+    expired = _order(
+        status="pending_payment",
+        created_at=NOW - timedelta(hours=25),
+    )
+    db.session.add(expired)
+    db.session.commit()
+
+    rows = find_recoverable_orders(after_hours=2, now=NOW)
+    assert expired.id not in {row.id for row in rows}
+
+
 def test_find_recoverable_orders_limit(db):
     for _ in range(3):
         db.session.add(
             _order(
                 status="pending_payment",
-                created_at=NOW - timedelta(hours=48),
+                created_at=NOW - timedelta(hours=4),
             )
         )
     db.session.commit()
@@ -135,6 +147,10 @@ def test_find_recoverable_orders_invalid_after_hours():
         find_recoverable_orders(after_hours=0)
     with pytest.raises(ValueError, match="checkout_recovery_after_hours_invalid"):
         find_recoverable_orders(after_hours="2")
+
+
+    with pytest.raises(ValueError, match="checkout_recovery_limit_invalid"):
+        find_recoverable_orders(after_hours=2, limit=0)
 
 
 def test_send_disabled_by_gate_does_nothing(monkeypatch):
@@ -152,7 +168,7 @@ def test_send_marks_only_after_success(db, monkeypatch):
     def _fake_send(destinatario, assunto, corpo):
         sent.append(destinatario)
 
-    order = _order(created_at=NOW - timedelta(hours=48))
+    order = _order(created_at=NOW - timedelta(hours=4))
     db.session.add(order)
     db.session.commit()
 
@@ -175,7 +191,7 @@ def test_send_failure_keeps_dedupe_unset(db, monkeypatch):
     def _boom(*args, **kwargs):
         raise RuntimeError("smtp down")
 
-    order = _order(created_at=NOW - timedelta(hours=48))
+    order = _order(created_at=NOW - timedelta(hours=4))
     db.session.add(order)
     db.session.commit()
 
@@ -189,7 +205,7 @@ def test_send_failure_keeps_dedupe_unset(db, monkeypatch):
 
 def test_send_skips_orders_without_email(db, monkeypatch):
     monkeypatch.setenv("CHECKOUT_RECOVERY_ENABLED", "1")
-    order = _order(customer_email="  ", created_at=NOW - timedelta(hours=48))
+    order = _order(customer_email="  ", created_at=NOW - timedelta(hours=4))
     db.session.add(order)
     db.session.commit()
 
@@ -212,7 +228,7 @@ def test_message_escapes_order_data(monkeypatch):
     def _fake_send(destinatario, assunto, corpo):
         captured["corpo"] = corpo
 
-    order = _order(created_at=NOW - timedelta(hours=48))
+    order = _order(created_at=NOW - timedelta(hours=4))
     send_recovery_emails(
         [order],
         email_sender=_fake_send,
@@ -227,11 +243,12 @@ def test_message_escapes_order_data(monkeypatch):
 
 def test_recovery_route_admin_get(client, admin_user, login, db):
     login(admin_user.email, "senha123")
-    db.session.add(_order(status="pending_payment", created_at=NOW - timedelta(hours=48)))
+    db.session.add(_order(status="pending_payment", created_at=NOW - timedelta(hours=4)))
     db.session.commit()
     response = client.get("/admin/recuperacao-checkout")
     assert response.status_code == 200
     assert "Recuperação de Checkout" in response.get_data(as_text=True)
+    assert 'name="csrf_token"' in response.get_data(as_text=True)
 
 
 def test_recovery_route_anonymous_redirect(client):
@@ -248,7 +265,7 @@ def test_recovery_route_non_admin_denied(client, regular_user, login):
 def test_recovery_post_honors_gate(client, admin_user, login, db, monkeypatch):
     monkeypatch.delenv("CHECKOUT_RECOVERY_ENABLED", raising=False)
     login(admin_user.email, "senha123")
-    db.session.add(_order(status="pending_payment", created_at=NOW - timedelta(hours=48)))
+    db.session.add(_order(status="pending_payment", created_at=NOW - timedelta(hours=4)))
     db.session.commit()
     response = client.post("/admin/recuperacao-checkout")
     assert response.status_code == 200

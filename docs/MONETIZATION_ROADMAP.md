@@ -350,6 +350,14 @@ Checkpoints entregues:
   Product com oferta/esgotado/inventário, `<link rel="canonical">` em produto e
   listagem, title/meta dinâmicos e `noindex` para busca, `sitemap.xml` público
   (produtos ativos + páginas institucionais) e `Sitemap:` no `robots.txt`.
+- **9.0.0-E (2026-09-14):** hardening da recuperação e SEO — formulário
+  administrativo protegido por CSRF; JSON-LD serializado com `tojson` contra
+  encerramento de `<script>`; fila limitada a 50 pedidos e somente reservas
+  dentro da janela real de 24h; execução concorrente usa
+  `FOR UPDATE SKIP LOCKED`. O envio em lote foi removido do webhook e do
+  retorno do Mercado Pago, ficando restrito à ação administrativa gated.
+  A deduplicação é concorrente/best-effort: SMTP e banco não oferecem transação
+  distribuída, portanto queda entre envio e commit ainda pode exigir auditoria.
 
 ## Regra de progressão
 

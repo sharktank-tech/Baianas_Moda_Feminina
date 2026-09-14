@@ -392,7 +392,7 @@ def checkout_recovery():
         after_hours = None
 
     try:
-        candidates = find_recoverable_orders(after_hours=after_hours)
+        candidates = find_recoverable_orders(after_hours=after_hours, limit=200)
     except ValueError:
         candidates = []
 
