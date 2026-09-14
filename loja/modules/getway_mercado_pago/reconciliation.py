@@ -8,16 +8,16 @@ from loja.modules.getway_mercado_pago.payment_service import (
     get_merchant_order,
     validate_webhook_signature,
 )
-from loja.observability.mercado_pago import log_event
+from loja.modules.getway_mercado_pago.webhook_classification import (
+    WebhookKind,
+    classify_webhook,
+)
+from loja.observability.mercado_pago import WH_LEGACY_IPN_IGNORED, log_event
 
 
 MERCHANT_ORDER_EVENT_TYPES = {
     "merchant_order",
     "topic_merchant_order_wh",
-}
-LEGACY_IPN_TOPICS = {
-    "payment",
-    "merchant_order",
 }
 
 
@@ -38,7 +38,7 @@ def _merchant_order_id(body):
     )
 
 
-def _legacy_ipn_notification():
+def _is_legacy_ipn():
     """Identifica somente o formato IPN legado observado em produção.
 
     IPN legado chega como ?id=<resource>&topic=<topic> e não contém a assinatura
@@ -47,17 +47,7 @@ def _legacy_ipn_notification():
     sincronizamos Payment e NÃO alteramos estado local. A fonte confiável segue
     sendo o Webhook assinado (?data.id=...&type=...).
     """
-    topic = (request.args.get("topic") or "").strip().lower()
-    resource_id = (request.args.get("id") or "").strip()
-
-    if topic not in LEGACY_IPN_TOPICS or not resource_id:
-        return None
-
-    # Não confundir uma notificação Webhook moderna com o formato legado.
-    if request.args.get("data.id") or request.args.get("type"):
-        return None
-
-    return topic, resource_id
+    return classify_webhook(request.args) == WebhookKind.LEGACY_IPN
 
 
 def _sync_payment_by_id(payment_id):
@@ -100,13 +90,11 @@ def install_merchant_order_reconciliation(app):
         if request.method != "POST" or request.path != "/pagamentos/webhook":
             return None
 
-        legacy_ipn = _legacy_ipn_notification()
-        if legacy_ipn is not None:
-            topic, resource_id = legacy_ipn
+        if _is_legacy_ipn():
             log_event(
-                "webhook.legacy_ipn.acknowledged",
-                legacy_topic=topic,
-                provider_resource_id=resource_id,
+                WH_LEGACY_IPN_IGNORED,
+                level="info",
+                legacy_topic=(request.args.get("topic") or "").strip().lower(),
             )
             return jsonify({"ok": True}), 200
 

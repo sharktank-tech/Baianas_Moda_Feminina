@@ -388,6 +388,19 @@ Checkpoints entregues:
   200, sem erro visual ou novos HTTP 500 na janela final de observação. A
   persistência agregada de sessões no schema privado também foi confirmada; os
   acessos públicos continuam sem privilégios diretos ao schema.
+- **9.0.0-I (2026-09-14):** compatibilidade com notificações IPN legadas do
+  Mercado Pago (issue #50) — classificador puro envia o webhook para
+  `modern_webhook` / `legacy_ipn` / `malformed_or_unknown` ANTES de qualquer
+  validação de assinatura. IPN legada (`?id=...&topic=payment|merchant_order`)
+  e payload malformado/desconhecido são reconhecidos sem consultar provedor,
+  sem sincronizar e sem alterar banco/estoque, respondendo 200 para interromper
+  retries; `data.id` presente no query NUNCA cai no caminho legado. Webhooks
+  modernos seguem fail-closed (401 assinatura inválida, 503 sem segredo).
+  Telemetria sanitizada: `modern_webhook_validated`, `modern_webhook_rejected`,
+  `legacy_ipn_ignored`, `webhook_malformed_ignored`. Nenhuma migration, nenhuma
+  chamada real ao provedor; IPN segue habilitada no painel até desativação
+  operacional. Sempre que o novo webhook autenticado for a fonte primária, a IPN
+  deve ser desativada no painel do Mercado Pago.
 
 ## Regra de progressão
 
