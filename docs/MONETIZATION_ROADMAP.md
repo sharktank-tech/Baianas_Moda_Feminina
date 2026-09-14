@@ -376,7 +376,18 @@ Checkpoints entregues:
   relações/funções a `anon`, `authenticated`, `service_role` ou
   `authenticator`; a aplicação usa conexão PostgreSQL de backend. Migration
   0021 torna essas revogações explícitas também para objetos futuros, sem
-  habilitar RLS em massa e sem alterar o schema legado `public`.
+  habilitar RLS em massa e sem alterar o schema legado `public`. A migration
+  foi aplicada e validada no PostgreSQL de produção em 2026-09-14, registrada
+  como `20260914140452 private_pollomodas_schema_0021`.
+- **Validação operacional 9.0.0-H (2026-09-14):** durante o smoke pós-migration,
+  a home e a listagem retornaram HTTP 500 por credencial desatualizada na
+  `DATABASE_URL` da Vercel. Os logs provaram que a falha de autenticação do
+  usuário `postgres` era preexistente (com ocorrências desde 2026-07-03), não
+  causada pelos grants da migration. Após atualizar a variável e o deployment,
+  home, `/produtos`, detalhe de produto e retorno à listagem responderam HTTP
+  200, sem erro visual ou novos HTTP 500 na janela final de observação. A
+  persistência agregada de sessões no schema privado também foi confirmada; os
+  acessos públicos continuam sem privilégios diretos ao schema.
 
 ## Regra de progressão
 
