@@ -369,8 +369,14 @@ Checkpoints entregues:
   `day`, canal sanitizado e contador; não persiste IP, URL, cookie, usuário ou
   identificador publicitário. Cada sessão Flask incrementa no máximo uma vez
   por dia em páginas públicas de catálogo, usando upsert atômico. Dashboard e
-  pedidos são alinhados ao início da janela medida. Migration 0020 deve ser
-  aplicada e validada antes do deploy depender da nova tabela.
+  pedidos são alinhados ao início da janela medida. Migration 0020 aplicada e
+  validada em produção em 2026-09-14, exclusivamente no schema `pollomodas`.
+- **9.0.0-H (2026-09-14):** hardening de acesso ao banco após auditoria
+  dos grants. O schema `pollomodas` não concede `USAGE` nem privilégios sobre
+  relações/funções a `anon`, `authenticated`, `service_role` ou
+  `authenticator`; a aplicação usa conexão PostgreSQL de backend. Migration
+  0021 torna essas revogações explícitas também para objetos futuros, sem
+  habilitar RLS em massa e sem alterar o schema legado `public`.
 
 ## Regra de progressão
 
