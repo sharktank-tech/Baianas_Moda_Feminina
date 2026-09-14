@@ -7,7 +7,6 @@ SKU externo vaza: tudo é extraído de fields públicos e texto-plano.
 
 from __future__ import annotations
 
-import json
 from typing import Optional
 
 from flask import request, url_for
@@ -35,11 +34,11 @@ def _image_urls(product, gallery_images) -> list[str]:
     return [img["url"] for img in images if img.get("url")]
 
 
-def product_structured_data(product, *, gallery_images=None, request=None) -> Optional[str]:
-    """JSON-LD Product (schema.org) com dados públicos e texto-plano.
+def product_structured_data(product, *, gallery_images=None, request=None) -> dict:
+    """Retorna dados públicos; o template serializa com o filtro tojson.
 
-    Retorna a string JSON (prontas para template via ``| safe`` seguindo o
-    padrão da home) ou None quando o produto não é indexável.
+    Manter a serialização no Jinja garante o escaping seguro de delimitadores
+    HTML, inclusive sequências como </script>.
     """
     excerpt = product_description_excerpt(product.description or "") or product.name
     price = _price_to_float(product)
@@ -75,7 +74,7 @@ def product_structured_data(product, *, gallery_images=None, request=None) -> Op
         offers["price"] = f"{price:.2f}"
     data["offers"] = offers
 
-    return json.dumps(data, ensure_ascii=False)
+    return data
 
 
 def product_canonical_url(product) -> str:
