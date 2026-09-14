@@ -370,6 +370,7 @@ def channel_metrics_dashboard():
         "admin/channel_metrics_dashboard.html",
         rows=rows,
         totals=totals,
+        measurement_start=measurement_start,
     )
 
 
