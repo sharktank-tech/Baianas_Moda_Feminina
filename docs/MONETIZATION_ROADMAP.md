@@ -358,10 +358,21 @@ Checkpoints entregues:
   retorno do Mercado Pago, ficando restrito à ação administrativa gated.
   A deduplicação é concorrente/best-effort: SMTP e banco não oferecem transação
   distribuída, portanto queda entre envio e commit ainda pode exigir auditoria.
+- **9.0.0-F (2026-09-14):** feed Google Merchant preparado em RSS 2.0,
+  somente leitura e hard-off por `GOOGLE_MERCHANT_FEED_ENABLED=1`. Exporta
+  apenas campos públicos de produtos ativos/não rascunho com preço BRL positivo
+  e imagem HTTP(S); valores inválidos são omitidos, nunca convertidos em zero.
+  A rota `/feeds/google-merchant.xml` responde 404 enquanto gated. Nenhum feed
+  foi cadastrado no Google e nenhuma campanha ou chamada externa foi feita.
 
 ## Regra de progressão
 
 Não avançar tráfego pago relevante enquanto uma venda aprovada ainda exigir correção manual para chegar ao fornecedor. Crescimento só deve ser acelerado depois de checkout, fulfillment, margem e pós-venda estarem observáveis e previsíveis.
+
+**Bloqueio vigente (2026-09-14):** issues #4/#5 — Checkout Pro cria
+merchant order, mas o Mercado Pago não materializa nenhum Payment. Nenhuma
+campanha paga nem cadastro externo de feed deve ser ativado até resposta do
+provider e nova tentativa LIVE explicitamente autorizada.
 
 ## Regras permanentes de segurança AliExpress
 

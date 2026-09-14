@@ -2620,3 +2620,21 @@ def sitemap_xml():
     urls = build_sitemap_urls()
     xml = build_sitemap_xml(urls)
     return Response(xml, mimetype="application/xml")
+
+
+@main_blueprint.route("/feeds/google-merchant.xml")
+def google_merchant_feed():
+    """Feed preparado para Google Merchant; hard-off por padrão."""
+    from loja.services.google_merchant_feed import (
+        build_google_merchant_feed,
+        find_google_merchant_products,
+        is_google_merchant_feed_enabled,
+    )
+
+    if not is_google_merchant_feed_enabled():
+        abort(404)
+
+    xml = build_google_merchant_feed(find_google_merchant_products())
+    response = Response(xml, mimetype="application/rss+xml")
+    response.headers["X-Robots-Tag"] = "noindex"
+    return response
