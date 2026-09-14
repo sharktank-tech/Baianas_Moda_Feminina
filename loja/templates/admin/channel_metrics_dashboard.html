@@ -15,7 +15,12 @@
     </p>
   </div>
 
-  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+  <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Sessões</div>
+      <div class="text-2xl font-bold mt-1">{{ totals.sessions }}</div>
+      <div class="text-xs text-gray-400 mt-1">{% if measurement_start %}desde {{ measurement_start.strftime('%d/%m/%Y') }}{% else %}medição ainda não iniciada{% endif %}</div>
+    </div>
     <div class="bg-white rounded-2xl shadow p-5">
       <div class="text-sm text-gray-500">Pedidos</div>
       <div class="text-2xl font-bold mt-1">{{ totals.orders }}</div>
@@ -39,7 +44,7 @@
     <div class="p-5 border-b border-gray-200">
       <h2 class="font-semibold text-gray-800">Canais</h2>
       <p class="text-xs text-gray-500 mt-1">
-        Conversão = pedidos pagos / pedidos. Recompra = compradores pagos
+        Conversão = pedidos pagos / sessões medidas. Recompra = compradores pagos
         distintos. Margem média usa apenas pedidos com snapshot de custo
         completo (pedidos legados ficam de fora, nunca zero silencioso).
       </p>
@@ -49,6 +54,7 @@
         <thead class="bg-gray-50">
           <tr>
             <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Canal</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Sessões</th>
             <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Pedidos</th>
             <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Pagos</th>
             <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Conversão</th>
@@ -62,6 +68,7 @@
           {% for row in rows %}
           <tr>
             <td class="px-4 py-3 text-sm font-medium">{{ row.channel }}</td>
+            <td class="px-4 py-3 text-sm">{{ row.sessions }}</td>
             <td class="px-4 py-3 text-sm">{{ row.orders }}</td>
             <td class="px-4 py-3 text-sm">{{ row.paid_orders }}</td>
             <td class="px-4 py-3 text-sm">{% if row.conversion is not none %}{{ row.conversion }}{% else %}—{% endif %}</td>
@@ -73,7 +80,7 @@
             <td class="px-4 py-3 text-sm">{{ row.repeat_customers }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">Nenhum pedido registrado.</td></tr>
+          <tr><td colspan="9" class="px-4 py-8 text-center text-gray-500">Nenhum pedido registrado.</td></tr>
           {% endfor %}
         </tbody>
       </table>

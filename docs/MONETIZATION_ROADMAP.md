@@ -364,6 +364,13 @@ Checkpoints entregues:
   e imagem HTTP(S); valores inválidos são omitidos, nunca convertidos em zero.
   A rota `/feeds/google-merchant.xml` responde 404 enquanto gated. Nenhum feed
   foi cadastrado no Google e nenhuma campanha ou chamada externa foi feita.
+- **9.0.0-G (2026-09-14):** sessões agregadas por dia/canal para medir
+  conversão real (pagamentos aprovados / sessões). O banco guarda somente
+  `day`, canal sanitizado e contador; não persiste IP, URL, cookie, usuário ou
+  identificador publicitário. Cada sessão Flask incrementa no máximo uma vez
+  por dia em páginas públicas de catálogo, usando upsert atômico. Dashboard e
+  pedidos são alinhados ao início da janela medida. Migration 0020 deve ser
+  aplicada e validada antes do deploy depender da nova tabela.
 
 ## Regra de progressão
 

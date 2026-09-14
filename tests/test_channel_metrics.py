@@ -102,12 +102,17 @@ def test_conversion_ticket_and_repeat(db):
                email="a@example.com"),
         _order(status="pending_payment", source="facebook"),
     ]
-    rows, totals = build_channel_metrics(orders)
+    rows, totals = build_channel_metrics(
+        orders,
+        session_counts={"facebook": 3},
+    )
     row = next(r for r in rows if r.channel == "facebook")
 
+    assert row.sessions == 3
+    assert totals.sessions == 3
     assert row.orders == 3
     assert row.paid_orders == 2
-    # conversão = 2/3 ≈ 0.666666… quantizado para 0.67
+    # conversão = 2 pagos / 3 sessões
     assert row.conversion == Decimal("0.67")
     assert row.revenue == Decimal("150.00")
     assert row.avg_ticket == Decimal("75.00")

@@ -27,6 +27,7 @@ from .unit_economics_policy import load_unit_economics_cost_policy
 @dataclass(frozen=True)
 class ChannelMetricRow:
     channel: str
+    sessions: int
     orders: int
     paid_orders: int
     conversion: Optional[Decimal]
@@ -40,6 +41,7 @@ class ChannelMetricRow:
 
 @dataclass(frozen=True)
 class ChannelMetricsTotals:
+    sessions: int
     orders: int
     paid_orders: int
     revenue: Optional[Decimal]
@@ -81,6 +83,7 @@ def build_channel_metrics(
     orders: Iterable[Order],
     *,
     policy=None,
+    session_counts: Optional[dict[str, int]] = None,
 ) -> tuple[list[ChannelMetricRow], ChannelMetricsTotals]:
     """Agrega pedidos por canal de forma read-only e sanitizada.
 
@@ -90,10 +93,12 @@ def build_channel_metrics(
     """
     active_policy = policy if policy is not None else load_unit_economics_cost_policy()
     rows: dict[str, dict] = {}
+    known_sessions = session_counts or {}
 
     def bucket(channel: str) -> dict:
         if channel not in rows:
             rows[channel] = {
+                "sessions": max(0, int(known_sessions.get(channel, 0))),
                 "orders": 0,
                 "paid_orders": 0,
                 "revenue": Decimal("0.00"),
@@ -102,6 +107,9 @@ def build_channel_metrics(
                 "paid_customers": set(),
             }
         return rows[channel]
+
+    for channel in known_sessions:
+        bucket(channel)
 
     for order in orders:
         channel = _channel_of(order)
@@ -139,9 +147,10 @@ def build_channel_metrics(
         revenue = (
             _quant2(group["revenue"]) if group["paid_orders"] else None
         )
+        sessions_n = group["sessions"]
         conversion = (
-            _quant2(Decimal(str(paid_n)) / Decimal(str(orders_n)))
-            if orders_n
+            _quant2(Decimal(str(paid_n)) / Decimal(str(sessions_n)))
+            if sessions_n
             else None
         )
         avg_ticket = (
@@ -160,6 +169,7 @@ def build_channel_metrics(
         result_rows.append(
             ChannelMetricRow(
                 channel=channel,
+                sessions=sessions_n,
                 orders=orders_n,
                 paid_orders=paid_n,
                 conversion=conversion,
@@ -173,6 +183,7 @@ def build_channel_metrics(
         )
 
     totals = ChannelMetricsTotals(
+        sessions=sum(group["sessions"] for group in rows.values()),
         orders=sum(group["orders"] for group in rows.values()),
         paid_orders=sum(group["paid_orders"] for group in rows.values()),
         revenue=(

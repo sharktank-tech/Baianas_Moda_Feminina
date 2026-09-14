@@ -75,13 +75,26 @@ main_blueprint = Blueprint("main", __name__)
 # First-touch: captura sanitizada de UTM/referrer na primeira página da sessão
 # e mantém até o checkout. Somente leitura, fail-closed, nunca loga payload.
 from loja.services.acquisition_source import capture_acquisition
+from loja.services.acquisition_sessions import (
+    record_acquisition_session,
+    should_count_acquisition_session,
+)
+
 
 @main_blueprint.before_request
 def capture_acquisition_origin():
-    capture_acquisition(
+    acquisition = capture_acquisition(
         request,
         session=session,
     )
+    if should_count_acquisition_session(request):
+        try:
+            record_acquisition_session(acquisition, session=session)
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception(
+                "Falha ao incrementar métrica agregada de aquisição."
+            )
     return None
 
 
