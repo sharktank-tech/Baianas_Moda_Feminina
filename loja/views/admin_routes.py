@@ -344,14 +344,26 @@ def unit_economics_dashboard():
 @admin_required
 def channel_metrics_dashboard():
     from loja.modules.getway_mercado_pago.payment_models import Order
+    from loja.services.acquisition_sessions import (
+        first_session_day,
+        session_counts_by_channel,
+    )
     from loja.services.channel_metrics import build_channel_metrics
 
-    orders = Order.query.options(
-        selectinload(Order.items)
-    ).all()
+    session_counts = session_counts_by_channel()
+    measurement_start = first_session_day()
+    query = Order.query.options(selectinload(Order.items))
+    if measurement_start is not None:
+        query = query.filter(
+            Order.created_at >= datetime.combine(
+                measurement_start,
+                datetime.min.time(),
+            )
+        )
     rows, totals = build_channel_metrics(
-        orders,
+        query.all(),
         policy=load_unit_economics_cost_policy(),
+        session_counts=session_counts,
     )
 
     return render_template(
