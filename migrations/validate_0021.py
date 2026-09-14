@@ -26,7 +26,7 @@ def validate_schema(conn):
             FROM pg_class c
             JOIN pg_namespace n ON n.oid=c.relnamespace
             WHERE n.nspname='pollomodas'
-              AND c.relkind IN ('r', 'S', 'v', 'm')
+              AND c.relkind IN ('r', 'v', 'm')
               AND (
                 has_table_privilege(%s, c.oid, 'SELECT')
                 OR has_table_privilege(%s, c.oid, 'INSERT')
@@ -36,6 +36,21 @@ def validate_schema(conn):
         """, (role, role, role, role))
         if cur.fetchone()[0]:
             errors.append(f"{role} has relation privileges")
+
+        cur.execute("""
+            SELECT count(*)
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname='pollomodas'
+              AND c.relkind='S'
+              AND (
+                has_sequence_privilege(%s, c.oid, 'USAGE')
+                OR has_sequence_privilege(%s, c.oid, 'SELECT')
+                OR has_sequence_privilege(%s, c.oid, 'UPDATE')
+              )
+        """, (role, role, role))
+        if cur.fetchone()[0]:
+            errors.append(f"{role} has sequence privileges")
 
         cur.execute("""
             SELECT count(*)
