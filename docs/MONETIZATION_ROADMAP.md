@@ -393,10 +393,21 @@ Checkpoints entregues:
 
 Não avançar tráfego pago relevante enquanto uma venda aprovada ainda exigir correção manual para chegar ao fornecedor. Crescimento só deve ser acelerado depois de checkout, fulfillment, margem e pós-venda estarem observáveis e previsíveis.
 
-**Bloqueio vigente (2026-09-14):** issues #4/#5 — Checkout Pro cria
-merchant order, mas o Mercado Pago não materializa nenhum Payment. Nenhuma
-campanha paga nem cadastro externo de feed deve ser ativado até resposta do
-provider e nova tentativa LIVE explicitamente autorizada.
+**Incidente Mercado Pago resolvido (2026-09-14):** a issue #4 foi encerrada
+após a tentativa LIVE controlada de 2026-09-10 materializar um `Payment`
+`approved`, persistir o pagamento e promover o pedido para `paid`. A
+revalidação read-only em produção confirmou 1 pedido pago e 1 pagamento
+aprovado. A issue #5 foi encerrada como duplicata.
+
+**Pendência residual:** a issue #50 acompanha notificações legadas do Mercado
+Pago rejeitadas com HTTP 401. Os webhooks atuais foram aceitos com HTTP 200 e
+foram suficientes para a reconciliação do pagamento. A revisão deve preservar
+validação fail-closed; não autoriza aceitar webhook sem autenticidade
+comprovada nem executar nova compra LIVE.
+
+Tráfego pago relevante e cadastro externo do feed continuam sujeitos à regra
+de progressão: somente avançar depois que checkout, fulfillment, margem e
+pós-venda estiverem observáveis e previsíveis.
 
 ## Regras permanentes de segurança AliExpress
 
