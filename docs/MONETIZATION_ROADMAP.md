@@ -313,7 +313,8 @@ Critérios de saída:
 
 ## FASE 9.0.0 — Aquisição e crescimento
 
-**Status:** futura, somente após o ciclo operacional estar estável.
+**Status:** iniciada. Frente base (coleta de origem e métricas por canal)
+entregue; tráfego pago permanece gated pela regra de progressão abaixo.
 
 Objetivo: transformar infraestrutura de venda em faturamento recorrente.
 
@@ -326,6 +327,18 @@ Frentes planejadas:
 - recuperação de checkout/pedido pendente;
 - remarketing;
 - métricas por canal: sessões, conversão, CAC, ticket médio, margem por pedido e recompra.
+
+Checkpoints entregues:
+
+- **9.0.0-A (2026-09-14):** captura sanitizada de origem de tráfego (UTM/
+  referrer first-touch) no pedido — migration 0018, colunas acquisition_*
+  opcionais em orders, allowlist estrita e fail-closed. Nunca persiste payload
+  bruto da URL.
+- **9.0.0-B (2026-09-14):** dashboard administrativo somente leitura de métricas
+  por canal (`/admin/metricas-por-canal`) — pedidos, conversão, ticket médio,
+  margem por pedido (avaliador 8.2.0-C) e recompra, agrupados por origem. Sem
+  sessões persistidas não há "sessões"; sem gasto publicitário não há CAC — os
+  campos permanecem ausentes em vez de inventados.
 
 ## Regra de progressão
 

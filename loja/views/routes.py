@@ -66,6 +66,20 @@ tracking_blueprint = Blueprint(
 main_blueprint = Blueprint("main", __name__)
 
 
+# ── Origem de tráfego (FASE 9.0.0) ──────────────────────────────────────────
+# First-touch: captura sanitizada de UTM/referrer na primeira página da sessão
+# e mantém até o checkout. Somente leitura, fail-closed, nunca loga payload.
+from loja.services.acquisition_source import capture_acquisition
+
+@main_blueprint.before_request
+def capture_acquisition_origin():
+    capture_acquisition(
+        request,
+        session=session,
+    )
+    return None
+
+
 # ── Injeção de configurações do site (title, meta description etc.) ─────────
 # Roda em todos os templates da aplicação porque o base.html usa
 # site.name / site.meta_description no <head>. Usamos app_context_processor

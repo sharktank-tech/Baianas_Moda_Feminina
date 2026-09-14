@@ -337,6 +337,31 @@ def unit_economics_dashboard():
 
 
 # -------------------------------------------------------------------
+# Dashboard de métricas por canal (FASE 9.0.0-B, somente leitura)
+# -------------------------------------------------------------------
+
+@admin_blueprint.route("/admin/metricas-por-canal", methods=["GET"])
+@admin_required
+def channel_metrics_dashboard():
+    from loja.modules.getway_mercado_pago.payment_models import Order
+    from loja.services.channel_metrics import build_channel_metrics
+
+    orders = Order.query.options(
+        selectinload(Order.items)
+    ).all()
+    rows, totals = build_channel_metrics(
+        orders,
+        policy=load_unit_economics_cost_policy(),
+    )
+
+    return render_template(
+        "admin/channel_metrics_dashboard.html",
+        rows=rows,
+        totals=totals,
+    )
+
+
+# -------------------------------------------------------------------
 # Adicionar produto
 # -------------------------------------------------------------------
 

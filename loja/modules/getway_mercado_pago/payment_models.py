@@ -150,6 +150,13 @@ class Order(db.Model):
     manual_review_reason = db.Column(db.Text)
     paid_at = db.Column(db.DateTime)
 
+    # FASE 9.0.0: origem de tráfego sanitizada e opcional; nunca expõe
+    # payload bruto da URL. Pedidos legados permanecem NULL (fail-closed).
+    acquisition_source = db.Column(db.String(64), nullable=True)
+    acquisition_medium = db.Column(db.String(64), nullable=True)
+    acquisition_campaign = db.Column(db.String(120), nullable=True)
+    acquisition_referrer = db.Column(db.String(120), nullable=True)
+
     # FASE 8.3.0-H: ledger financeiro local; não substitui a autoridade
     # do webhook Mercado Pago sobre Order.status == "refunded".
     supplier_refund_state = db.Column(db.String(30), nullable=True)

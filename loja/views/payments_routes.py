@@ -43,6 +43,10 @@ from loja.integrations.aliexpress import (
     ensure_aliexpress_fulfillment,
     cancel_fulfillment_before_submission,
 )
+from loja.services.acquisition_source import (
+    acquisition_to_order_kwargs,
+    order_acquisition,
+)
 
 
 # O nome "payments" precisa ser exatamente este,
@@ -676,6 +680,9 @@ def create_mercado_pago_payment():
             total=total,
             stock_reserved=True,
             **_get_customer_data(),
+            **acquisition_to_order_kwargs(
+                order_acquisition(session=session)
+            ),
         )
 
         db.session.add(order)

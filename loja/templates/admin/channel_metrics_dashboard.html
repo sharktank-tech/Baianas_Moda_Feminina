@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Métricas por Canal — Pollo Modas{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-8">
+  <div class="mb-8">
+    <a href="{{ url_for('admin.dashboard') }}" class="text-sm text-gray-500 hover:underline">&larr; Painel administrativo</a>
+    <h1 class="text-3xl font-bold text-gray-800 mt-2">Métricas por Canal</h1>
+    <p class="text-gray-500 mt-2 max-w-3xl">
+      Painel somente leitura com pedidos, conversão, ticket médio, margem por
+      pedido e recompra agrupados pela origem de tráfego capturada no checkout.
+      Não consulta provedores, não inicia tráfego pago e não altera nada.
+      Pedidos sem origem capturada aparecem como "direto".
+    </p>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Pedidos</div>
+      <div class="text-2xl font-bold mt-1">{{ totals.orders }}</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Pagos</div>
+      <div class="text-2xl font-bold mt-1 text-green-700">{{ totals.paid_orders }}</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Receita paga</div>
+      <div class="text-2xl font-bold mt-1">{% if totals.revenue is not none %}R$ {{ totals.revenue }}{% else %}—{% endif %}</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Margem com custo conhecido</div>
+      <div class="text-2xl font-bold mt-1">{% if totals.margin_known_value is not none %}R$ {{ totals.margin_known_value }}{% else %}—{% endif %}</div>
+      <div class="text-xs text-gray-400 mt-1">{{ totals.margin_known_orders }} pedido(s)</div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow overflow-hidden">
+    <div class="p-5 border-b border-gray-200">
+      <h2 class="font-semibold text-gray-800">Canais</h2>
+      <p class="text-xs text-gray-500 mt-1">
+        Conversão = pedidos pagos / pedidos. Recompra = compradores pagos
+        distintos. Margem média usa apenas pedidos com snapshot de custo
+        completo (pedidos legados ficam de fora, nunca zero silencioso).
+      </p>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Canal</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Pedidos</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Pagos</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Conversão</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Receita</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Ticket médio</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Margem média</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Recompra</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for row in rows %}
+          <tr>
+            <td class="px-4 py-3 text-sm font-medium">{{ row.channel }}</td>
+            <td class="px-4 py-3 text-sm">{{ row.orders }}</td>
+            <td class="px-4 py-3 text-sm">{{ row.paid_orders }}</td>
+            <td class="px-4 py-3 text-sm">{% if row.conversion is not none %}{{ row.conversion }}{% else %}—{% endif %}</td>
+            <td class="px-4 py-3 text-sm">{% if row.revenue is not none %}R$ {{ row.revenue }}{% else %}—{% endif %}</td>
+            <td class="px-4 py-3 text-sm">{% if row.avg_ticket is not none %}R$ {{ row.avg_ticket }}{% else %}—{% endif %}</td>
+            <td class="px-4 py-3 text-sm font-semibold {% if row.avg_margin is not none and row.avg_margin < 0 %}text-red-700{% else %}text-gray-700{% endif %}">
+              {% if row.avg_margin is not none %}R$ {{ row.avg_margin }}{% else %}—{% endif %}
+            </td>
+            <td class="px-4 py-3 text-sm">{{ row.repeat_customers }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">Nenhum pedido registrado.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
