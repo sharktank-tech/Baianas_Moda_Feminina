@@ -455,15 +455,7 @@ Checkpoints entregues:
   Product com oferta/esgotado/inventário, `<link rel="canonical">` em produto e
   listagem, title/meta dinâmicos e `noindex` para busca, `sitemap.xml` público
   (produtos ativos + páginas institucionais) e `Sitemap:` no `robots.txt`.
-- **9.0.0-E (2026-09-14):** hardening da recuperação e SEO — formulário
-  administrativo protegido por CSRF; JSON-LD serializado com `tojson` contra
-  encerramento de `<script>`; fila limitada a 50 pedidos e somente reservas
-  dentro da janela real de 24h; execução concorrente usa
-  `FOR UPDATE SKIP LOCKED`. O envio em lote foi removido do webhook e do
-  retorno do Mercado Pago, ficando restrito à ação administrativa gated.
-  A deduplicação é concorrente/best-effort: SMTP e banco não oferecem
-  transação distribuída, portanto queda entre envio e commit ainda pode
-  exigir auditoria.
+- **9.0.0-E (2026-09-14):** O checkpoint 9.0.0-E substituiu o comportamento anterior. O envio em lote foi removido dos touchpoints webhook e retorno do Mercado Pago, ficando restrito à ação administrativa gated. A deduplicação permanece best-effort, podendo exigir auditoria em falha entre SMTP e commit.
 - **9.0.0-F (2026-09-14):** feed Google Merchant preparado em RSS 2.0,
   somente leitura e hard-off por `GOOGLE_MERCHANT_FEED_ENABLED=1`. Exporta
   apenas campos públicos de produtos ativos/não rascunho com preço BRL positivo
@@ -504,9 +496,7 @@ Checkpoints entregues:
   modernos seguem fail-closed (401 assinatura inválida, 503 sem segredo).
   Telemetria sanitizada: `modern_webhook_validated`, `modern_webhook_rejected`,
   `legacy_ipn_ignored`, `webhook_malformed_ignored`. Nenhuma migration, nenhuma
-  chamada real ao provedor; IPN segue habilitada no painel até desativação
-  operacional. Sempre que o novo webhook autenticado for a fonte primária, a IPN
-  deve ser desativada no painel do Mercado Pago.
+  chamada real ao provedor. A IPN legada não estava configurada no painel. Os Webhooks modernos permanecem configurados como canal de notificação.
 
 ## Regra de progressão
 
