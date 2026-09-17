@@ -96,21 +96,21 @@ Ativação operacional permanece fora do escopo automático: ligar gates em prod
 2. Não implementar automaticamente antes de apresentar o desenho
 3. O desenho deve incluir:
    - target exato
-   - exatamente cinco tentativas anteriores
-   - todas conclusivas e sem identidade remota
+   - exatamente cinco tentativas anteriores (todas conclusivas, sem identidade remota)
    - revisão de snapshot auditável
    - CPF presente e válido
    - novo gate independente
    - gate final de execução
-   - limite global de uma única sexta tentativa
    - circuit breaker
    - zero retry
    - resultado ambíguo consumindo o slot
    - custo e exposição máxima
    - desligamento imediato dos gates
-4. Criar PR técnico separado
-5. Merge exige autorização explícita
-6. Execução real exige outra autorização explícita, contendo pedido sanitizado e exposição máxima
+4. O próximo canário deve usar pedido novo, pago, completo e elegível
+5. O pedido legado permanece bloqueado após cinco tentativas consumidas e não deve ser reutilizado como canário
+6. Criar PR técnico separado
+7. Merge exige autorização explícita
+8. Execução real exige outra autorização explícita, contendo pedido sanitizado e exposição máxima
 
 ### Higiene do Dado Pessoal
 
@@ -128,7 +128,8 @@ Ativação operacional permanece fora do escopo automático: ligar gates em prod
 
 ### Roadmap - Próximos Passos
 
-- [ ] Criar checkpoint para sexta tentativa (se necessário)
+- [ ] Próximo canário com pedido novo, pago, completo e elegível
+- [ ] Pedido legado permanece bloqueado após cinco tentativas consumidas e não deve ser reutilizado como canário
 - [ ] Autorização explícita para fulfillment manual ou reembolso
 - [ ] Novos testes com pedido novo e completo
 - [ ] Manter roadmap atualizado com status operacional
@@ -459,10 +460,10 @@ Checkpoints entregues:
   encerramento de `<script>`; fila limitada a 50 pedidos e somente reservas
   dentro da janela real de 24h; execução concorrente usa
   `FOR UPDATE SKIP LOCKED`. O envio em lote foi removido do webhook e do
-  retorno do Mercado Pago, ficando restrito à ação administrativa gated por
-  `CHECKOUT_RECOVERY_ENABLED=1`; coluna nunca cai em `public`; disparo via
-  webhook/retorno a partir dos touchpoints de rotina e botão admin em
-  `/admin/recuperacao-checkout`.
+  retorno do Mercado Pago, ficando restrito à ação administrativa gated.
+  A deduplicação é concorrente/best-effort: SMTP e banco não oferecem
+  transação distribuída, portanto queda entre envio e commit ainda pode
+  exigir auditoria.
 - **9.0.0-F (2026-09-14):** feed Google Merchant preparado em RSS 2.0,
   somente leitura e hard-off por `GOOGLE_MERCHANT_FEED_ENABLED=1`. Exporta
   apenas campos públicos de produtos ativos/não rascunho com preço BRL positivo
