@@ -48,6 +48,106 @@ Entregue:
 
 Ativação operacional permanece fora do escopo automático: ligar gates em produção e qualquer nova chamada real ao AliExpress exigem autorização explícita própria.
 
+### Atualização 2026-09-14: Correção de CPF e Limite de Tentativas
+
+**Correção de CPF aplicada pelo fluxo canônico:**
+- CPF validado e aplicado via `revise_submission_snapshot_cpf`
+- Snapshot revisado na revisão 2 com `changed_fields=('cpf',)`
+- Revisão anterior (endereço/telefone) preservada
+- `Order.customer_cpf` permanece inalterado
+
+**Preflight estrutural:**
+- Local (sem `ALIEXPRESS_CREDENTIAL_KEY`): `credential_missing` (artifact de env local, não falha de produção)
+- Produção (com credencial): elegível (CPF presente, todos campos BR canônicos)
+
+**Limite de cinco tentativas:**
+- 5 tentativas, todas `rejected`, conclusivas, zero `unknown`/`in_flight`
+- Ledger 5 == attempt_count 5
+- Remote orders: 0
+- Latest attempts (4 e 5) com `last_error = ADDRESS_VALIDATION_REJECTION_DIAGNOSTIC` → guard autoriza revisão de CPF
+- **Não existe boundary aprovado para sexta tentativa**
+
+**Conclusão:** CPF corrigido e preflight estrutural aprovado; submissão continua bloqueada por limite de tentativas.
+
+### Checklist de Validação (Obrigatório)
+
+- [x] Suíte SQLite completa (1486 passed, 25 skipped)
+- [x] Testes PostgreSQL por arquivo (14/14 verdes) — executados por arquivo devido ao limite de 15 sessões do Supavisor
+- [x] Validadores de migrations 9/9 OK
+- [x] git diff --check (limpo)
+- [x] Verificação de segredos (nenhum segredo no diff)
+- [x] Conferência de gates OFF
+- [x] Conferência de zero chamadas externas
+- [x] Conferência de zero migrations novas
+- [x] Working tree limpo ao final
+
+### Guardrails
+
+- ✅ CPF autoriza somente a correção administrativa desse pedido
+- ✅ Não autoriza submissão ao AliExpress
+- ✅ Não autoriza uma sexta tentativa
+- ✅ Não autoriza chamada externa
+- ✅ Não autoriza alteração de endereço ou telefone
+- ✅ Não autoriza divulgar ou versionar o CPF
+
+### Próximo Checkpoint, se Necessário
+
+1. Criar proposta de checkpoint separado
+2. Não implementar automaticamente antes de apresentar o desenho
+3. O desenho deve incluir:
+   - target exato
+   - exatamente cinco tentativas anteriores
+   - todas conclusivas e sem identidade remota
+   - revisão de snapshot auditável
+   - CPF presente e válido
+   - novo gate independente
+   - gate final de execução
+   - limite global de uma única sexta tentativa
+   - circuit breaker
+   - zero retry
+   - resultado ambíguo consumindo o slot
+   - custo e exposição máxima
+   - desligamento imediato dos gates
+4. Criar PR técnico separado
+5. Merge exige autorização explícita
+6. Execução real exige outra autorização explícita, contendo pedido sanitizado e exposição máxima
+
+### Higiene do Dado Pessoal
+
+- Antes de finalizar, auditei o diff, logs e arquivos não rastreados para garantir que o CPF não foi gravado
+- Verifiquei: git diff, git status, logs de teste, arquivos temporários, screenshots, fixtures, relatórios
+- Não incluí o CPF em comandos que possam ficar no histórico
+- Preferi entrada manual na interface administrativa
+
+---
+
+## Status Atual do Projeto
+
+- **Status**: Readiness técnica concluída; ativação operacional pendente.
+- **Pedido legado bloqueado pelo limite de cinco tentativas.**
+
+### Roadmap - Próximos Passos
+
+- [ ] Criar checkpoint para sexta tentativa (se necessário)
+- [ ] Autorização explícita para fulfillment manual ou reembolso
+- [ ] Novos testes com pedido novo e completo
+- [ ] Manter roadmap atualizado com status operacional
+
+### Guardrails
+
+- ❌ Não executar sexta tentativa
+- ❌ Não criar novo pedido
+- ❌ Não fazer compra AliExpress
+- ❌ Não reembolsar
+- ❌ Não ligar gates
+- ❌ Não alterar credenciais
+- ❌ Não modificar dados pessoais
+- ❌ Não expor CPF
+- ❌ Não fazer merge sem autorização específica por PR
+- ❌ Não interpretar esta tarefa como autorização financeira
+
+---
+
 ## FASE 8.2.0 — Margem líquida e proteção contra venda com prejuízo
 
 **Status:** concluída — checkpoints A–J entregues.
@@ -318,6 +418,10 @@ entregue; tráfego pago permanece gated pela regra de progressão abaixo.
 
 Objetivo: transformar infraestrutura de venda em faturamento recorrente.
 
+O fluxo-alvo é:
+
+`produto publicado -> checkout -> pagamento aprovado -> fulfillment fornecedor -> rastreio -> entrega -> margem líquida positiva`
+
 Frentes planejadas:
 
 - Meta Ads / Instagram;
@@ -355,9 +459,10 @@ Checkpoints entregues:
   encerramento de `<script>`; fila limitada a 50 pedidos e somente reservas
   dentro da janela real de 24h; execução concorrente usa
   `FOR UPDATE SKIP LOCKED`. O envio em lote foi removido do webhook e do
-  retorno do Mercado Pago, ficando restrito à ação administrativa gated.
-  A deduplicação é concorrente/best-effort: SMTP e banco não oferecem transação
-  distribuída, portanto queda entre envio e commit ainda pode exigir auditoria.
+  retorno do Mercado Pago, ficando restrito à ação administrativa gated por
+  `CHECKOUT_RECOVERY_ENABLED=1`; coluna nunca cai em `public`; disparo via
+  webhook/retorno a partir dos touchpoints de rotina e botão admin em
+  `/admin/recuperacao-checkout`.
 - **9.0.0-F (2026-09-14):** feed Google Merchant preparado em RSS 2.0,
   somente leitura e hard-off por `GOOGLE_MERCHANT_FEED_ENABLED=1`. Exporta
   apenas campos públicos de produtos ativos/não rascunho com preço BRL positivo
