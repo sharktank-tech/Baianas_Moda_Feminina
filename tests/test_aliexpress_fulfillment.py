@@ -33,6 +33,7 @@ from loja.modules.models import (
     AliExpressOrderItem,
     Order,
     OrderItem,
+    Payment,
     Product,
     ProductVariant,
     Supplier,
@@ -88,6 +89,25 @@ def _make_order(db, *, user_id=None, status="pending_payment", product=None,
         db.session.add(item)
     db.session.commit()
     return order
+
+
+def _add_approved_payment(db, order):
+    """Vincula um Payment approved BRL conferindo com order.total.
+
+    Helper explicito para testes cujo cenario representa pedido pago:
+    o pagamento canonico e pre-condicao do fulfillment, nunca implicito.
+    """
+    payment = Payment(
+        id=uuid.uuid4(),
+        order_id=order.id,
+        provider_payment_id=f"mp_test_{uuid.uuid4().hex[:12]}",
+        status="approved",
+        amount=order.total,
+        currency="BRL",
+    )
+    db.session.add(payment)
+    db.session.commit()
+    return payment
 
 
 def _mp_payload(payment_id, order, status, detail):
@@ -676,6 +696,7 @@ class TestFulfillmentService:
         # Simular pagamento aprovado
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         results = ensure_aliexpress_fulfillment(order_with_items)
         assert len(results) == 1
@@ -711,6 +732,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         results1 = ensure_aliexpress_fulfillment(order_with_items)
         order_id = results1[0].aliexpress_order.id
@@ -751,6 +773,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         # Executar duas vezes
         ensure_aliexpress_fulfillment(order_with_items)
@@ -805,6 +828,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         results = ensure_aliexpress_fulfillment(order_with_items)
         assert len(results) == 1  # Só 1 fulfillment (AliExpress)
@@ -906,6 +930,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         results = ensure_aliexpress_fulfillment(order_with_items)
         assert len(results) == 2  # Dois fulfillments
@@ -952,6 +977,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         results = ensure_aliexpress_fulfillment(order_with_items)
         # Variante ausente -> AliExpressOrder blocked, atribuído ao único
@@ -961,7 +987,10 @@ class TestFulfillmentService:
         assert ali_order.state == "blocked"
         assert ali_order.last_error == "variant_missing"
         assert ali_order.supplier_id == aliexpress_supplier.id
-        assert AliExpressOrder.query.count() == 1
+        assert (
+            AliExpressOrder.query.filter_by(order_id=order_with_items.id).count()
+            == 1
+        )
 
     def test_supplier_product_missing_blocks_fulfillment(
         self, db, aliexpress_supplier, aliexpress_product, order_with_items, valid_credential_env
@@ -1007,6 +1036,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         results = ensure_aliexpress_fulfillment(order_with_items)
         # Supplier product ausente e nenhum SupplierProduct ativo do produto ->
@@ -1016,7 +1046,10 @@ class TestFulfillmentService:
         assert ali_order.state == "blocked"
         assert ali_order.last_error == "supplier_product_missing"
         assert ali_order.supplier_id is None
-        assert AliExpressOrder.query.count() == 1
+        assert (
+            AliExpressOrder.query.filter_by(order_id=order_with_items.id).count()
+            == 1
+        )
         assert ali_order.idempotency_key == _unattributed_key(order_with_items.id)
 
     def test_supplier_sku_missing_blocks_fulfillment(
@@ -1070,6 +1103,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         results = ensure_aliexpress_fulfillment(order_with_items)
         # supplier SKU ausente -> blocked atribuído ao supplier da variante
@@ -1079,7 +1113,10 @@ class TestFulfillmentService:
         assert ali_order.state == "blocked"
         assert ali_order.last_error == "supplier_sku_missing"
         assert ali_order.supplier_id == aliexpress_supplier.id
-        assert AliExpressOrder.query.count() == 1
+        assert (
+            AliExpressOrder.query.filter_by(order_id=order_with_items.id).count()
+            == 1
+        )
 
     def test_credential_missing_blocks_fulfillment(
         self, db, aliexpress_supplier, aliexpress_product, supplier_product_factory, order_with_items, monkeypatch
@@ -1112,6 +1149,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         results = ensure_aliexpress_fulfillment(order_with_items)
         assert len(results) == 1
@@ -1148,6 +1186,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         ensure_aliexpress_fulfillment(order_with_items)
 
@@ -1156,7 +1195,7 @@ class TestFulfillmentService:
         db.session.commit()
 
         # AliExpressOrderItem deve manter o SKU original
-        ali_item = AliExpressOrderItem.query.first()
+        ali_item = AliExpressOrderItem.query.filter_by(order_item_id=item.id).one()
         assert ali_item.supplier_sku_external_id == "SKU_ORIGINAL"
 
     def test_pending_order_does_not_create_fulfillment(
@@ -1250,6 +1289,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         # Criar fulfillment
         ensure_aliexpress_fulfillment(order_with_items)
@@ -1361,6 +1401,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         results = ensure_aliexpress_fulfillment(order_with_items)
         assert results
@@ -1446,6 +1487,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         results = ensure_aliexpress_fulfillment(order_with_items)
         # Dois resultados finais: um supplier (ready) e um unattributed (blocked).
@@ -1530,6 +1572,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         results = ensure_aliexpress_fulfillment(order_with_items)
         # O item interno deve ser ignorado; nenhum fulfillment criado para item não-AE
@@ -1572,6 +1615,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         results = ensure_aliexpress_fulfillment(order_with_items)
         assert results[0].state == "ready"
@@ -1640,6 +1684,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         results = ensure_aliexpress_fulfillment(order_with_items)
         assert results[0].state == "ready"
@@ -1706,6 +1751,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         results = ensure_aliexpress_fulfillment(order_with_items)
         assert results[0].state == "ready"
@@ -1761,6 +1807,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         # 1) Sem credencial -> blocked (credential_missing).
         r1 = ensure_aliexpress_fulfillment(order_with_items)
@@ -1869,6 +1916,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         r1 = ensure_aliexpress_fulfillment(order_with_items)
         assert r1[0].state == "blocked"
@@ -1989,6 +2037,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         r = ensure_aliexpress_fulfillment(order_with_items)
         # UM único resultado e UMA única AliExpressOrder.
@@ -2052,6 +2101,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         ensure_aliexpress_fulfillment(order_with_items)
         snapshot_sku = AliExpressOrderItem.query.filter_by(
@@ -2103,6 +2153,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         ensure_aliexpress_fulfillment(order_with_items)
         ali_order = AliExpressOrder.query.filter_by(
@@ -2157,6 +2208,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         ensure_aliexpress_fulfillment(order_with_items)
         ali_order = AliExpressOrder.query.filter_by(
@@ -2207,6 +2259,7 @@ class TestFulfillmentService:
 
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         ensure_aliexpress_fulfillment(order_with_items)
         ali_order = AliExpressOrder.query.filter_by(
@@ -2274,6 +2327,7 @@ class TestAdminFulfillmentQueue:
 
         order.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order)
 
         from loja.integrations.aliexpress.credential_store import (
             persist_credential,
@@ -2352,6 +2406,7 @@ class TestAdminFulfillmentQueue:
 
         order.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order)
 
         from loja.integrations.aliexpress.credential_store import (
             persist_credential,
@@ -2419,6 +2474,7 @@ class TestAdminFulfillmentQueue:
 
         order.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order)
 
         from loja.integrations.aliexpress.credential_store import (
             persist_credential,
@@ -2487,6 +2543,7 @@ class TestAdminFulfillmentQueue:
 
         order.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order)
 
         from loja.integrations.aliexpress.credential_store import (
             persist_credential,
@@ -2553,6 +2610,7 @@ class TestAdminFulfillmentQueue:
 
         order.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order)
 
         from loja.integrations.aliexpress.credential_store import (
             persist_credential,
@@ -2601,6 +2659,7 @@ class TestAdminFulfillmentQueue:
         # Sem credencial -> blocked.
         order_with_items.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order_with_items)
 
         from loja.integrations.aliexpress.fulfillment import ensure_aliexpress_fulfillment
         results = ensure_aliexpress_fulfillment(order_with_items)
@@ -2739,6 +2798,7 @@ class TestAdminFulfillmentQueue:
 
         order.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order)
 
         ensure_aliexpress_fulfillment(order)
         cancel_fulfillment_before_submission(order, reason="payment_charged_back_before_submission")
@@ -2799,6 +2859,7 @@ class TestAdminFulfillmentQueue:
 
         order.status = "paid"
         db.session.commit()
+        _add_approved_payment(db, order)
 
         results1 = ensure_aliexpress_fulfillment(order)
         ali_order_id = results1[0].aliexpress_order.id
@@ -2941,6 +3002,7 @@ class TestRevalidateSecurity:
             db, user_id=admin_user.id, status="paid", product=aliexpress_product,
             variant=variant,
         )
+        _add_approved_payment(db, order)
         from loja.integrations.aliexpress.fulfillment import ensure_aliexpress_fulfillment
         results = ensure_aliexpress_fulfillment(order)
         return results[0].aliexpress_order

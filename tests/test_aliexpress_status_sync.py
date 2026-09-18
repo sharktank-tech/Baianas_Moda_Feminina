@@ -58,6 +58,7 @@ from loja.modules.getway_mercado_pago.payment_models import Order, OrderItem
 from loja.modules.models import (
     AliExpressOrder,
     AliExpressOrderItem,
+    Payment,
     Product,
     ProductVariant,
     Supplier,
@@ -283,6 +284,17 @@ def _make_paid_order_with_item(db, make_user, product, variant):
             quantity=1,
             unit_price=Decimal("29.90"),
             line_total=Decimal("29.90"),
+        )
+    )
+    # Pagamento canonico: pre-condicao explicita do fulfillment pago.
+    db.session.add(
+        Payment(
+            id=uuid.uuid4(),
+            order_id=order.id,
+            provider_payment_id=f"mp_test_{uuid.uuid4().hex[:12]}",
+            status="approved",
+            amount=order.total,
+            currency="BRL",
         )
     )
     db.session.commit()

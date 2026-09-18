@@ -41,6 +41,7 @@ from loja.modules.models import (
     AliExpressOrderItem,
     Order,
     OrderItem,
+    Payment,
     Product,
     ProductVariant,
     Supplier,
@@ -89,6 +90,11 @@ ERROR_CODES = {
     "STATUS_SYNC_INVALID_TRANSITION": "status_sync_invalid_transition",
     "SUBMISSION_SNAPSHOT_MISSING": "submission_snapshot_missing",
     "SUBMISSION_SNAPSHOT_INVALID": "submission_snapshot_invalid",
+    "PAYMENT_GUARD_NOT_PAID": "payment_guard_not_paid",
+    "PAYMENT_GUARD_NO_APPROVED_PAYMENT": "payment_guard_no_approved_payment",
+    "PAYMENT_GUARD_MANUAL_REVIEW": "payment_guard_manual_review",
+    "PAYMENT_GUARD_VALUE_MISMATCH": "payment_guard_value_mismatch",
+    "PAYMENT_GUARD_CURRENCY_MISMATCH": "payment_guard_currency_mismatch",
 }
 
 
@@ -253,6 +259,58 @@ def _resolve_existing_ali_orders(order: Order) -> list[AliExpressOrder]:
     )
 
 
+def _validate_payment_guard(order: Order) -> Optional[str]:
+    """Validação canônica de pagamento antes do fulfillment.
+
+    Retorna código de erro sanitizado se o guard falhar, None se válido.
+
+    Condições obrigatórias (fail-closed):
+    - Order.status == "paid"
+    - Evento financeiro vigente do pedido aprovado, com valor/moeda corretos
+    - Pagamento pertencente ao mesmo pedido (order_id match)
+    - Ausência de divergência/reconciliação pendente (Order.status != "manual_review")
+
+    Política de múltiplos pagamentos (conforme _sync_payment):
+    _sync_payment atualiza o MESMO registro por provider_payment_id único;
+    múltiplos registros = múltiplos provider payments. O estado vigente é o
+    registro mais recente (created_at desc, id desc como desempate
+    determinístico); só depois valida-se se está aprovado. Nunca se filtra
+    approved antes de escolher o evento vigente.
+    """
+    # 1. Estados terminais que bloqueiam fulfillment
+    if order.status == "manual_review":
+        return ERROR_CODES["PAYMENT_GUARD_MANUAL_REVIEW"]
+    if order.status in ("refunded", "charged_back", "cancelled", "payment_failed"):
+        return ERROR_CODES["PAYMENT_GUARD_NOT_PAID"]
+
+    # 2. Status deve ser exatamente "paid"
+    if order.status != "paid":
+        return ERROR_CODES["PAYMENT_GUARD_NOT_PAID"]
+
+    # 3. Evento financeiro vigente: registro mais recente do pedido,
+    #    independente de status; desempate determinístico por id.
+    payment = (
+        Payment.query.filter_by(order_id=order.id)
+        .order_by(Payment.created_at.desc(), Payment.id.desc())
+        .first()
+    )
+    if payment is None or payment.status != "approved":
+        return ERROR_CODES["PAYMENT_GUARD_NO_APPROVED_PAYMENT"]
+
+    # 4. Pagamento deve pertencer a este pedido (order_id match já garantido pela query,
+    #    mas validação defensiva de provider_payment_id)
+    if str(payment.provider_payment_id or "").strip() == "":
+        return ERROR_CODES["PAYMENT_GUARD_NO_APPROVED_PAYMENT"]
+
+    # 5. Valor/moeda devem conferir com o pedido (redundância defensiva no boundary)
+    if payment.currency != "BRL":
+        return ERROR_CODES["PAYMENT_GUARD_CURRENCY_MISMATCH"]
+    if payment.amount != order.total:
+        return ERROR_CODES["PAYMENT_GUARD_VALUE_MISMATCH"]
+
+    return None
+
+
 def ensure_aliexpress_fulfillment(
     order: Order,
     refresher: Optional[AliExpressOAuthRefresher] = None,
@@ -298,6 +356,15 @@ def ensure_aliexpress_fulfillment(
         logger.info(
             "fulfillment: order %s status %r não gera fulfillment",
             order.id, order.status,
+        )
+        return []
+
+    # Validação canônica de pagamento (fail-closed no boundary de serviço)
+    payment_guard_error = _validate_payment_guard(order)
+    if payment_guard_error is not None:
+        logger.info(
+            "fulfillment: bloqueado pelo payment guard: %s",
+            payment_guard_error,
         )
         return []
 
