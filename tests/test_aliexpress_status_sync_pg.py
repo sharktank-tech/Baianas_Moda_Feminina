@@ -129,7 +129,11 @@ def _materialize_submitted(app):
     from loja import db
     from loja.integrations.aliexpress.credential_store import persist_credential
     from loja.integrations.aliexpress.fulfillment import ensure_aliexpress_fulfillment
-    from loja.modules.getway_mercado_pago.payment_models import Order, OrderItem
+    from loja.modules.getway_mercado_pago.payment_models import (
+        Order,
+        OrderItem,
+        Payment,
+    )
     from loja.modules.models import (
         Product,
         ProductVariant,
@@ -195,6 +199,11 @@ def _materialize_submitted(app):
             id=uuid.uuid4(), order_id=order.id, product_id=product.id,
             variant_id=variant.id, product_name=product.name, quantity=1,
             unit_price=Decimal("29.90"), line_total=Decimal("29.90"),
+        ))
+        db.session.add(Payment(
+            id=uuid.uuid4(), order_id=order.id,
+            provider_payment_id="mp_approved_%s" % uuid.uuid4().hex[:12],
+            status="approved", amount=order.total, currency="BRL",
         ))
         db.session.commit()
 

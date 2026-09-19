@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 from loja import db
 from loja.modules.models import (
@@ -41,6 +42,7 @@ from loja.modules.models import (
     AliExpressOrderItem,
     Order,
     OrderItem,
+    Payment,
     Product,
     ProductVariant,
     Supplier,
@@ -89,6 +91,11 @@ ERROR_CODES = {
     "STATUS_SYNC_INVALID_TRANSITION": "status_sync_invalid_transition",
     "SUBMISSION_SNAPSHOT_MISSING": "submission_snapshot_missing",
     "SUBMISSION_SNAPSHOT_INVALID": "submission_snapshot_invalid",
+    "PAYMENT_GUARD_NOT_PAID": "payment_guard_not_paid",
+    "PAYMENT_GUARD_NO_APPROVED_PAYMENT": "payment_guard_no_approved_payment",
+    "PAYMENT_GUARD_MANUAL_REVIEW": "payment_guard_manual_review",
+    "PAYMENT_GUARD_VALUE_MISMATCH": "payment_guard_value_mismatch",
+    "PAYMENT_GUARD_CURRENCY_MISMATCH": "payment_guard_currency_mismatch",
 }
 
 
@@ -253,6 +260,111 @@ def _resolve_existing_ali_orders(order: Order) -> list[AliExpressOrder]:
     )
 
 
+def _validate_payment_guard(order: Order) -> Optional[str]:
+    """Validação canônica de pagamento antes do fulfillment.
+
+    Retorna código de erro sanitizado se o guard falhar, None se válido.
+
+    Condições obrigatórias (fail-closed):
+    - Order.status == "paid"
+    - Evento financeiro vigente do pedido aprovado, com valor/moeda corretos
+    - Pagamento pertencente ao mesmo pedido (order_id match)
+    - Ausência de divergência/reconciliação pendente (Order.status != "manual_review")
+
+    Política de múltiplos pagamentos (conforme _sync_payment):
+    _sync_payment atualiza o MESMO registro por provider_payment_id único;
+    múltiplos registros = múltiplos provider payments. O estado vigente é o
+    registro mais recente (created_at desc, id desc como desempate
+    determinístico); só depois valida-se se está aprovado. Nunca se filtra
+    approved antes de escolher o evento vigente.
+    """
+    # 1. Estados terminais que bloqueiam fulfillment
+    if order.status == "manual_review":
+        return ERROR_CODES["PAYMENT_GUARD_MANUAL_REVIEW"]
+    if order.status in ("refunded", "charged_back", "cancelled", "payment_failed"):
+        return ERROR_CODES["PAYMENT_GUARD_NOT_PAID"]
+
+    # 2. Status deve ser exatamente "paid"
+    if order.status != "paid":
+        return ERROR_CODES["PAYMENT_GUARD_NOT_PAID"]
+
+    # 3. Evento financeiro vigente: registro mais recente do pedido,
+    #    independente de status; desempate determinístico por id.
+    payment = (
+        Payment.query.filter_by(order_id=order.id)
+        .order_by(Payment.created_at.desc(), Payment.id.desc())
+        .first()
+    )
+    if payment is None or payment.status != "approved":
+        return ERROR_CODES["PAYMENT_GUARD_NO_APPROVED_PAYMENT"]
+
+    # 4. Pagamento deve pertencer a este pedido (order_id match já garantido pela query,
+    #    mas validação defensiva de provider_payment_id)
+    if str(payment.provider_payment_id or "").strip() == "":
+        return ERROR_CODES["PAYMENT_GUARD_NO_APPROVED_PAYMENT"]
+
+    # 5. Valor/moeda devem conferir com o pedido (redundância defensiva no boundary)
+    if payment.currency != "BRL":
+        return ERROR_CODES["PAYMENT_GUARD_CURRENCY_MISMATCH"]
+    if payment.amount != order.total:
+        return ERROR_CODES["PAYMENT_GUARD_VALUE_MISMATCH"]
+
+    return None
+
+
+def _acquire_or_create_ali_order(
+    order_id: uuid.UUID,
+    supplier_id: Optional[uuid.UUID],
+    idempotency_key: str,
+    now,
+    sid_order_id: dict,
+    by_order_id: dict,
+) -> AliExpressOrder:
+    """Materializa um AliExpressOrder sob corrida de unicidade.
+
+    Dois workers concorrentes podem resolver o MESMO ``idempotency_key``
+    (chave única da tabela ``aliexpress_orders``). O perdedor do INSERT
+    concorrente recebe ``IntegrityError`` de unicidade no ``flush``.
+
+    Em vez de propagar o erro, o savepoint é revertido e a identidade
+    VENCEDORA já commitada é relida com ``FOR UPDATE`` e reutilizada —
+    assim a corrida termina sem exceção e a sessão do perdedor permanece
+    utilizável (PASSO/publish sem abrir cenário de duplicação).
+    """
+    last_error: Optional[Exception] = None
+
+    for _ in range(3):
+        candidate = AliExpressOrder(
+            id=uuid.uuid4(),
+            order_id=order_id,
+            supplier_id=supplier_id,
+            state="queued",
+            idempotency_key=idempotency_key,
+            queued_at=now,
+        )
+        try:
+            with db.session.begin_nested():
+                db.session.add(candidate)
+                db.session.flush()
+        except IntegrityError as exc:
+            last_error = exc
+            winner = (
+                AliExpressOrder.query.filter_by(idempotency_key=idempotency_key)
+                .with_for_update()
+                .first()
+            )
+            if winner is not None:
+                if supplier_id is not None:
+                    sid_order_id[supplier_id] = winner.id
+                by_order_id[winner.id] = winner
+                return winner
+            continue  # vencedor ainda não visível: nova tentativa
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("não foi possível materializar AliExpressOrder (corrida de unicidade)")
+
+
 def ensure_aliexpress_fulfillment(
     order: Order,
     refresher: Optional[AliExpressOAuthRefresher] = None,
@@ -294,10 +406,13 @@ def ensure_aliexpress_fulfillment(
 
     NÃO faz chamada HTTP para AliExpress (hard off nesta fase).
     """
-    if order.status not in ("paid",):
+
+    # Validação canônica de pagamento (fail-closed no boundary de serviço)
+    payment_guard_error = _validate_payment_guard(order)
+    if payment_guard_error is not None:
         logger.info(
-            "fulfillment: order %s status %r não gera fulfillment",
-            order.id, order.status,
+            "fulfillment: bloqueado pelo payment guard: %s",
+            payment_guard_error,
         )
         return []
 
@@ -455,17 +570,14 @@ def ensure_aliexpress_fulfillment(
                     sid_order_id[sid] = ao.id
                     resolution[key] = ao
                     return ao
-            ao = AliExpressOrder(
-                id=uuid.uuid4(),
-                order_id=order.id,
-                supplier_id=sid,
-                state="queued",
-                idempotency_key=_generate_idempotency_key(str(order.id), sid),
-                queued_at=now,
+            ao = _acquire_or_create_ali_order(
+                order.id,
+                sid,
+                _generate_idempotency_key(str(order.id), sid),
+                now,
+                sid_order_id,
+                by_order_id,
             )
-            db.session.add(ao)
-            db.session.flush()
-            sid_order_id[sid] = ao.id
             resolution[key] = ao
             return ao
 
@@ -474,16 +586,14 @@ def ensure_aliexpress_fulfillment(
             ao = by_order_id.get(unattributed_id)
             resolution[key] = ao
             return ao
-        ao = AliExpressOrder(
-            id=uuid.uuid4(),
-            order_id=order.id,
-            supplier_id=None,
-            state="queued",
-            idempotency_key=_generate_unattributed_idempotency_key(str(order.id)),
-            queued_at=now,
+        ao = _acquire_or_create_ali_order(
+            order.id,
+            None,
+            _generate_unattributed_idempotency_key(str(order.id)),
+            now,
+            sid_order_id,
+            by_order_id,
         )
-        db.session.add(ao)
-        db.session.flush()
         resolution[key] = ao
         return ao
 

@@ -24,11 +24,31 @@ from loja.modules.getway_mercado_pago.payment_models import Order, OrderItem
 from loja.modules.models import (
     AliExpressOrder,
     AliExpressOrderItem,
+    Payment,
     Product,
     ProductVariant,
     Supplier,
     SupplierProduct,
 )
+
+
+def _add_approved_payment(db, order):
+    """Vincula um Payment approved BRL conferindo com order.total.
+
+    Helper explicito para testes cujo cenario representa pedido pago:
+    o pagamento canonico e pre-condicao do fulfillment, nunca implicito.
+    """
+    db.session.add(
+        Payment(
+            id=uuid.uuid4(),
+            order_id=order.id,
+            provider_payment_id=f"mp_test_{uuid.uuid4().hex[:12]}",
+            status="approved",
+            amount=order.total,
+            currency="BRL",
+        )
+    )
+    db.session.commit()
 
 
 VALID_ATTRS = [
@@ -94,7 +114,8 @@ def _make_paid_order(db, setup, quantity=1):
         product_name=setup["product"].name, quantity=quantity, unit_price=Decimal("29.90"), line_total=Decimal("29.90")*quantity,
     )
     db.session.add(item)
-    db.session.commit()
+    # Pagamento canonico: pre-condicao explicita do fulfillment pago.
+    _add_approved_payment(db, order)
     return order, item
 
 
@@ -317,7 +338,8 @@ def test_I_no_pii_in_errors_and_repr(db, ae_setup):
     db.session.flush()
     item2 = OrderItem(id=uuid.uuid4(), order_id=order2.id, product_id=product2.id, variant_id=variant2.id, product_name=product2.name, quantity=1, unit_price=Decimal("29.90"), line_total=Decimal("29.90"))
     db.session.add(item2)
-    db.session.commit()
+    # Pagamento canonico: pre-condicao explicita do fulfillment pago.
+    _add_approved_payment(db, order2)
     ensure_aliexpress_fulfillment(order2)
     ali_order2 = AliExpressOrder.query.filter_by(order_id=order2.id).first()
     res = materialize_submission_snapshot(ali_order2, logistics_service_by_order_item={item2.id: "CAINIAO"}, session=db.session)

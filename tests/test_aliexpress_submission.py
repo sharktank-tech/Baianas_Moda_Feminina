@@ -40,11 +40,31 @@ from loja.modules.models import (
     AliExpressOrderItem,
     AliExpressRemoteOrder,
     AliExpressSubmissionAttempt,
+    Payment,
     Product,
     ProductVariant,
     Supplier,
     SupplierProduct,
 )
+
+
+def _add_approved_payment(db, order):
+    """Vincula um Payment approved BRL conferindo com order.total.
+
+    Helper explicito para testes cujo cenario representa pedido pago:
+    o pagamento canonico e pre-condicao do fulfillment, nunca implicito.
+    """
+    db.session.add(
+        Payment(
+            id=uuid.uuid4(),
+            order_id=order.id,
+            provider_payment_id=f"mp_test_{uuid.uuid4().hex[:12]}",
+            status="approved",
+            amount=order.total,
+            currency="BRL",
+        )
+    )
+    db.session.commit()
 
 
 @pytest.fixture(autouse=True)
@@ -227,7 +247,7 @@ def _materialize_ready(
         line_total=Decimal("29.90") * quantity,
     )
     db.session.add(item)
-    db.session.commit()
+    _add_approved_payment(db, order)
 
     results = ensure_aliexpress_fulfillment(order)
     assert len(results) == 1
@@ -287,7 +307,7 @@ def _materialize_ready_without_snap(
         line_total=Decimal("29.90") * quantity,
     )
     db.session.add(item)
-    db.session.commit()
+    _add_approved_payment(db, order)
 
     results = ensure_aliexpress_fulfillment(order)
     assert len(results) == 1
@@ -436,7 +456,7 @@ class TestInvalidOrdersNeverSubmitted:
             unit_price=Decimal("29.90"),
             line_total=Decimal("29.90"),
         ))
-        db.session.commit()
+        _add_approved_payment(db, order)
 
         results = ensure_aliexpress_fulfillment(order)
         assert results[0].state == "blocked"
@@ -503,7 +523,7 @@ class TestInvalidOrdersNeverSubmitted:
             unit_price=Decimal("29.90"),
             line_total=Decimal("29.90"),
         ))
-        db.session.commit()
+        _add_approved_payment(db, order)
 
         results = ensure_aliexpress_fulfillment(order)
         ali_order = results[0].aliexpress_order

@@ -35,11 +35,31 @@ from loja.integrations.aliexpress.submission import (
 from loja.modules.getway_mercado_pago.payment_models import Order, OrderItem
 from loja.modules.models import (
     AliExpressOrder,
+    Payment,
     Product,
     ProductVariant,
     Supplier,
     SupplierProduct,
 )
+
+
+def _add_approved_payment(db, order):
+    """Vincula um Payment approved BRL conferindo com order.total.
+
+    Helper explicito para testes cujo cenario representa pedido pago:
+    o pagamento canonico e pre-condicao do fulfillment, nunca implicito.
+    """
+    db.session.add(
+        Payment(
+            id=uuid.uuid4(),
+            order_id=order.id,
+            provider_payment_id=f"mp_test_{uuid.uuid4().hex[:12]}",
+            status="approved",
+            amount=order.total,
+            currency="BRL",
+        )
+    )
+    db.session.commit()
 from aliexpress_snapshot_utils import materialize_snapshot
 
 BASE_URL = "/admin/integrations/aliexpress/pedidos"
@@ -184,7 +204,8 @@ def _materialize_submitted_return(db, buyer, ae_env, submit=True):
             line_total=Decimal("29.90"),
         )
     )
-    db.session.commit()
+    # Pagamento canonico: pre-condicao explicita do fulfillment pago.
+    _add_approved_payment(db, order)
 
     results = ensure_aliexpress_fulfillment(order)
     assert results[0].state == "ready"
