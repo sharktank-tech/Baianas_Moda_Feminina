@@ -352,12 +352,6 @@ def ensure_aliexpress_fulfillment(
 
     NÃO faz chamada HTTP para AliExpress (hard off nesta fase).
     """
-    if order.status not in ("paid",):
-        logger.info(
-            "fulfillment: order %s status %r não gera fulfillment",
-            order.id, order.status,
-        )
-        return []
 
     # Validação canônica de pagamento (fail-closed no boundary de serviço)
     payment_guard_error = _validate_payment_guard(order)
