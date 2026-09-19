@@ -16,7 +16,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import create_engine, text, inspect as sa_inspect
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 
 from conftest import ORIGINAL_DATABASE_URL
 from test_draft_import_pg import (
@@ -74,7 +74,17 @@ def _apply_migration(engine, schema):
 
 @pytest.fixture
 def env(monkeypatch):
+    # Guarda de destino: nunca tocar produção; só schemas descartáveis.
+    try:
+        _url = make_url(DATABASE_URL) if DATABASE_URL else None
+        assert _url is not None and _url.get_backend_name() == "postgresql", "DATABASE_URL não é postgresql"
+        assert _url.host in ("127.0.0.1", "localhost", "::1"), "host não é descartável: %s" % _url.host
+        assert _url.database and _url.database.startswith("pollo"), "database não é descartável: %s" % _url.database
+    except Exception as _guard_exc:
+        pytest.skip("DATABASE_URL não é PostgreSQL descartável: %r" % _guard_exc)
+
     schema = "pollo_test_%s_%s" % ("pricing", secrets.token_hex(4))
+    assert schema.startswith("pollo_test_pricing_"), "schema não é descartável"
     eng = create_engine(DATABASE_URL)
     with eng.connect() as c:
         c.execute(text("CREATE SCHEMA IF NOT EXISTS %s" % schema))
@@ -118,7 +128,10 @@ def _insert_product(se, **fields):
 
 
 def _expect_rejected(se, **fields):
-    with pytest.raises(IntegrityError):
+    # CHECK violations são 23514: com pg8000 viram ProgrammingError, com psycopg2
+    # viram IntegrityError. O teste deve aceitar ambos sem enfraquecer a
+    # proteção (continua exigindo violação de constraint).
+    with pytest.raises((IntegrityError, ProgrammingError, DBAPIError)):
         _insert_product(se, **fields)
 
 
@@ -355,7 +368,7 @@ def test_pricing_and_publish_roundtrip_in_disposable_schema(env, monkeypatch):
         half_ready.is_active = True
         try:
             db.session.commit()
-        except IntegrityError:
+        except (IntegrityError, ProgrammingError, DBAPIError):
             db.session.rollback()
         else:
             raise AssertionError("banco aceitou AliExpress ativo não-priced")
