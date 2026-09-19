@@ -48,6 +48,39 @@ from loja.integrations.aliexpress.routes import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_oauth_env(monkeypatch):
+    """Isola testes OAuth de poluição de env global de outros testes.
+
+    Vários testes antes deste arquivo (ex.: acquisition, admin, fulfillment)
+    deixam variáveis como ALIEXPRESS_SMOKE_BUYER_FREIGHT, VERCEL_ENV etc.
+    no os.environ quando usam mock.patch.dict/clear sem restaurar corretamente
+    ou quando o scope do monkeypatch não cobre o session-scoped app fixture.
+    Este autouse garante estado limpo antes de cada teste OAuth.
+    """
+    for key in [
+        "ALIEXPRESS_OAUTH_AUTHORIZE_URL",
+        "ALIEXPRESS_OAUTH_API_BASE_URL",
+        "ALIEXPRESS_APP_KEY",
+        "ALIEXPRESS_APP_SECRET",
+        "ALIEXPRESS_CALLBACK_URL",
+        "VERCEL_ENV",
+        "VERCEL_BRANCH_URL",
+        "VERCEL_PROJECT_PRODUCTION_URL",
+        "VERCEL_TARGET_ENV",
+        "VERCEL",
+        "ALIEXPRESS_SMOKE_BUYER_FREIGHT",
+        "ALIEXPRESS_SMOKE_PROVINCE_CODE",
+        "ALIEXPRESS_SMOKE_CITY_CODE",
+        "ALIEXPRESS_SMOKE_SEND_GOODS_COUNTRY_CODE",
+        "ALIEXPRESS_DRAFT_IMPORT",
+        "ALIEXPRESS_PLACEORDER_ENABLED",
+        "ALIEXPRESS_ORDER_STATUS_SYNC_ENABLED",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+    yield
+
+
 # --------------------------------------------------------------------------
 # Signer Open Platform (HMAC-SHA256)
 # --------------------------------------------------------------------------

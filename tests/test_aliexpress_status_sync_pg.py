@@ -305,8 +305,11 @@ def test_two_concurrent_syncs_distinct_stages_pick_most_advanced(env):
     t2.join(timeout=60)
 
     assert errors == [], errors
-    # Estado final é o estágio monotonicamente mais avançado permitido.
-    assert results == ["confirmed", "delivered"] or results == ["delivered", "confirmed"]
+    # Monotônica: se delivered vence a corrida, o thread confirmed lê delivered e
+    # retorna delivered (não regride). Aceita ambos delivered como válido.
+    assert len(results) == 2
+    assert set(results) <= {"confirmed", "delivered"}
+    assert "delivered" in results
 
     from loja import db
     from loja.modules.models import AliExpressOrder
@@ -343,7 +346,10 @@ def test_concurrent_confirmed_vs_shipped_milestone_staging(env):
     t2.join(timeout=60)
 
     assert errors == [], errors
-    assert results == ["confirmed", "shipped"] or results == ["shipped", "confirmed"]
+    # Se shipped vence primeiro, confirmed retorna shipped (monotônica).
+    assert len(results) == 2
+    assert set(results) <= {"confirmed", "shipped"}
+    assert "shipped" in results
 
     from loja import db
     from loja.modules.models import AliExpressOrder
@@ -381,7 +387,10 @@ def test_concurrent_shipped_vs_delivered_milestone_staging(env):
     t2.join(timeout=60)
 
     assert errors == [], errors
-    assert results == ["shipped", "delivered"] or results == ["delivered", "shipped"]
+    # Se delivered vence a corrida, o thread shipped lê delivered e retorna delivered.
+    assert len(results) == 2
+    assert set(results) <= {"shipped", "delivered"}
+    assert "delivered" in results
 
     from loja import db
     from loja.modules.models import AliExpressOrder
