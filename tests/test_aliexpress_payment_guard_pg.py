@@ -21,14 +21,13 @@ HTTP é feita a AliExpress.
 """
 import secrets
 import threading
+import time
 import uuid
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import IntegrityError
-
 from conftest import ORIGINAL_DATABASE_URL
 
 DATABASE_URL = ORIGINAL_DATABASE_URL
@@ -474,22 +473,35 @@ def test_after_commit_approval_allows_fulfillment(env):
     assert refresher.call_count == 0
 
 
-def test_two_concurrent_after_approval_do_not_duplicate(env):
-    """Duas chamadas concorrentes pós-aprovação => exatamente 1 AliExpressOrder.
+def test_two_concurrent_after_approval_no_duplicate_and_no_exception(env):
+    """Corrida determinística terminando SEM exceção no boundary.
 
-    A unicidade é garantida por idempotency_key único + FOR UPDATE: o perdedor
-    da corrida reutiliza/compartilha o INSERT e, no pior caso, recebe
-    IntegrityError de unicidade — nunca criação duplicada.
+    A ordem das transações é controlada por eventos:
+
+    * vencedor materializa a AliExpressOrder (INSERT ainda NÃO commitado);
+    * perdedor inicia só depois: o INSERT do MESMO idempotency_key fica
+      bloqueado no índice único;
+    * vencedor commita; o INSERT perdedor recebe IntegrityError de unicidade;
+      o perdedor descarta o savepoint (begin_nested) e relê a identidade
+      VENCEDORA já commitada com FOR UPDATE — terminando ``ready`` sem
+      exceção e mantendo a própria sessão utilizável.
+
+    Invariantes assertadas:
+    * ``errors == []`` (IntegrityError NÃO é aceito como verde);
+    * exatamente 1 AliExpressOrder e 1 AliExpressOrderItem;
+    * as duas chamadas retornam a MESMA identidade (reuso, nunca duplicação);
+    * a sessão perdedora consegue ler/escrever/commit após o recovery.
     """
     schema, app = env
     order_id = _materialize_order(
         app, committed_status="paid", payment_status="approved"
     )
-    barrier = threading.Barrier(2)
-    results = []
-    errors = []
+    winner_inserted = threading.Event()
+    loser_started = threading.Event()
+    results: list = []
+    errors: list = []
 
-    def run():
+    def winner():
         try:
             with app.app_context():
                 from loja import db
@@ -501,36 +513,84 @@ def test_two_concurrent_after_approval_do_not_duplicate(env):
                 db.session.connection().exec_driver_sql(
                     "SET SESSION lock_timeout = 15000"
                 )
-                barrier.wait(timeout=30)
                 order = db.session.get(Order, order_id)
                 res = ensure_aliexpress_fulfillment(order)
+                db.session.flush()  # mantém o INSERT aberto, sem commit
+                winner_inserted.set()
+                assert loser_started.wait(timeout=30)
+                time.sleep(1.0)  # dá tempo do perdedor travar no índice único
                 db.session.commit()
-                results.append([r.state for r in res])
+                results.append(
+                    ("winner", [r.state for r in res],
+                     [r.aliexpress_order.id for r in res])
+                )
         except Exception as exc:  # noqa: BLE001
-            errors.append(exc)
+            errors.append(("winner", exc))
             try:
                 db.session.rollback()
             except Exception:  # noqa: BLE001
                 pass
 
-    t1 = threading.Thread(target=run)
-    t2 = threading.Thread(target=run)
+    def loser():
+        try:
+            with app.app_context():
+                from loja import db
+                from loja.integrations.aliexpress.fulfillment import (
+                    ensure_aliexpress_fulfillment,
+                )
+                from loja.modules.getway_mercado_pago.payment_models import Order
+                from loja.modules.models import AliExpressOrder
+
+                assert winner_inserted.wait(timeout=30)
+                db.session.connection().exec_driver_sql(
+                    "SET SESSION lock_timeout = 15000"
+                )
+                order = db.session.get(Order, order_id)
+                loser_started.set()
+                res = ensure_aliexpress_fulfillment(order)
+                # Recovery: relê a identidade vencedora e reusa os snapshots.
+                # Sessão perdedora continua utilizável: leitura + escrita + commit.
+                ao_id = res[0].aliexpress_order.id
+                ao = db.session.get(AliExpressOrder, ao_id)
+                ao.attempt_count = 7
+                db.session.flush()
+                db.session.commit()
+                ao.attempt_count = 0
+                db.session.commit()
+                results.append(
+                    ("loser", [r.state for r in res],
+                     [r.aliexpress_order.id for r in res])
+                )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(("loser", exc))
+            try:
+                db.session.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+
+    t1 = threading.Thread(target=winner)
+    t2 = threading.Thread(target=loser)
     t1.start()
     t2.start()
     t1.join(timeout=60)
     t2.join(timeout=60)
+    if t1.is_alive() or t2.is_alive():
+        pytest.fail("threads penduradas — possível deadlock de lock")
 
-    assert len(results) + len(errors) == 2
-    for exc in errors:
-        # Único erro aceitável: corrida de unicidade do idempotency_key.
-        assert isinstance(exc, IntegrityError), errors
+    # ZERO exceções no boundary: IntegrityError não é aceito como verde.
+    assert errors == [], errors
+    assert len(results) == 2
+    result_by_label = {
+        label: row for label, *row in results
+    }
+    states_w = result_by_label["winner"][0]
+    ids_w = result_by_label["winner"][1]
+    states_l = result_by_label["loser"][0]
+    ids_l = result_by_label["loser"][1]
 
     with app.app_context():
         from loja import db
-        from loja.modules.models import (
-            AliExpressOrder,
-            AliExpressOrderItem,
-        )
+        from loja.modules.models import AliExpressOrder, AliExpressOrderItem
 
         assert AliExpressOrder.query.filter_by(order_id=order_id).count() == 1
         items = (
@@ -540,4 +600,7 @@ def test_two_concurrent_after_approval_do_not_duplicate(env):
         )
         assert items == 1
 
-    assert any("ready" in r for r in results), (results, errors)
+    # Mesma identidade (reuso, nunca duplicação) e estado final ready.
+    assert ids_w == ids_l and ids_w, (ids_w, ids_l)
+    assert states_w == ["ready"], states_w
+    assert states_l == ["ready"], states_l

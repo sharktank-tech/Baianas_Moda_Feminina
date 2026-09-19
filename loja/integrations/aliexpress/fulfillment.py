@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 from loja import db
 from loja.modules.models import (
@@ -311,6 +312,59 @@ def _validate_payment_guard(order: Order) -> Optional[str]:
     return None
 
 
+def _acquire_or_create_ali_order(
+    order_id: uuid.UUID,
+    supplier_id: Optional[uuid.UUID],
+    idempotency_key: str,
+    now,
+    sid_order_id: dict,
+    by_order_id: dict,
+) -> AliExpressOrder:
+    """Materializa um AliExpressOrder sob corrida de unicidade.
+
+    Dois workers concorrentes podem resolver o MESMO ``idempotency_key``
+    (chave única da tabela ``aliexpress_orders``). O perdedor do INSERT
+    concorrente recebe ``IntegrityError`` de unicidade no ``flush``.
+
+    Em vez de propagar o erro, o savepoint é revertido e a identidade
+    VENCEDORA já commitada é relida com ``FOR UPDATE`` e reutilizada —
+    assim a corrida termina sem exceção e a sessão do perdedor permanece
+    utilizável (PASSO/publish sem abrir cenário de duplicação).
+    """
+    last_error: Optional[Exception] = None
+
+    for _ in range(3):
+        candidate = AliExpressOrder(
+            id=uuid.uuid4(),
+            order_id=order_id,
+            supplier_id=supplier_id,
+            state="queued",
+            idempotency_key=idempotency_key,
+            queued_at=now,
+        )
+        try:
+            with db.session.begin_nested():
+                db.session.add(candidate)
+                db.session.flush()
+        except IntegrityError as exc:
+            last_error = exc
+            winner = (
+                AliExpressOrder.query.filter_by(idempotency_key=idempotency_key)
+                .with_for_update()
+                .first()
+            )
+            if winner is not None:
+                if supplier_id is not None:
+                    sid_order_id[supplier_id] = winner.id
+                by_order_id[winner.id] = winner
+                return winner
+            continue  # vencedor ainda não visível: nova tentativa
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("não foi possível materializar AliExpressOrder (corrida de unicidade)")
+
+
 def ensure_aliexpress_fulfillment(
     order: Order,
     refresher: Optional[AliExpressOAuthRefresher] = None,
@@ -516,17 +570,14 @@ def ensure_aliexpress_fulfillment(
                     sid_order_id[sid] = ao.id
                     resolution[key] = ao
                     return ao
-            ao = AliExpressOrder(
-                id=uuid.uuid4(),
-                order_id=order.id,
-                supplier_id=sid,
-                state="queued",
-                idempotency_key=_generate_idempotency_key(str(order.id), sid),
-                queued_at=now,
+            ao = _acquire_or_create_ali_order(
+                order.id,
+                sid,
+                _generate_idempotency_key(str(order.id), sid),
+                now,
+                sid_order_id,
+                by_order_id,
             )
-            db.session.add(ao)
-            db.session.flush()
-            sid_order_id[sid] = ao.id
             resolution[key] = ao
             return ao
 
@@ -535,16 +586,14 @@ def ensure_aliexpress_fulfillment(
             ao = by_order_id.get(unattributed_id)
             resolution[key] = ao
             return ao
-        ao = AliExpressOrder(
-            id=uuid.uuid4(),
-            order_id=order.id,
-            supplier_id=None,
-            state="queued",
-            idempotency_key=_generate_unattributed_idempotency_key(str(order.id)),
-            queued_at=now,
+        ao = _acquire_or_create_ali_order(
+            order.id,
+            None,
+            _generate_unattributed_idempotency_key(str(order.id)),
+            now,
+            sid_order_id,
+            by_order_id,
         )
-        db.session.add(ao)
-        db.session.flush()
         resolution[key] = ao
         return ao
 
