@@ -100,3 +100,8 @@ jobs:
           tests/test_aliexpress_status_sync_pg.py
           tests/test_aliexpress_submission_pg.py
           tests/test_draft_import_pg.py
+
+      - name: Prova observável do bloqueio (2o INSERT aguardando unicidade)
+        run: >
+          python -m pytest -q -s
+          tests/test_aliexpress_payment_guard_pg.py::test_two_concurrent_after_approval_no_duplicate_and_no_exception

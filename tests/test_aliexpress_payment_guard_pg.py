@@ -19,6 +19,7 @@ transações controlada por eventos/barreira:
 Este arquivo usa somente dados sintéticos e providers fake; nenhuma chamada
 HTTP é feita a AliExpress.
 """
+import json
 import secrets
 import threading
 import time
@@ -473,33 +474,139 @@ def test_after_commit_approval_allows_fulfillment(env):
     assert refresher.call_count == 0
 
 
+def _observe_loser_blocked(
+    winner_pid,
+    loser_pid,
+    evidence,
+    errors,
+    loser_blocked,
+    timeout=30.0,
+):
+    """Observa (somente leitura) o INSERT do perdedor aguardando o vencedor.
+
+    Prova observável no PostgreSQL, sem espera arbitrária: a sessão do
+    perdedor está BLOQUEADA quando
+       ``pg_blocking_pids(loser_pid)`` contém ``winner_pid``
+    E ``pg_stat_activity.wait_event_type`` está definido (a sessão está
+    aguardando um "lock"/transação do vencedor no índice único).
+
+    Ao confirmar o bloqueio, registra a amostra em ``evidence["loser_blocked"]``
+    e SÓ ENTÃO sinaliza ``loser_blocked`` — o vencedor só commita depois dessa
+    confirmação observável (removendo o ``time.sleep`` com presunção).
+
+    Em seguida aguarda o bloqueio RESOLVER (blockers vazio) e registra a
+    amostra final em ``evidence["loser_resolved"]``.
+
+    Timeouts definidos: se pids não chegarem ou o bloqueio não for observado
+    no prazo, registra erro (o teste falha) mas libera ``loser_blocked`` para
+    o vencedor não pendurar em deadlock.
+    """
+    obs_engine = create_engine(DATABASE_URL)
+    deadline = time.monotonic() + timeout
+    query = text(
+        "SELECT state, wait_event_type, wait_event, pg_blocking_pids(pid) "
+        "FROM pg_stat_activity WHERE pid = :pid"
+    )
+    try:
+        with obs_engine.connect().execution_options(
+            isolation_level="AUTOCOMMIT"
+        ) as conn:
+            while time.monotonic() < deadline:
+                row = conn.execute(query, {"pid": loser_pid}).one_or_none()
+                if (
+                    row is not None
+                    and row[0] == "active"
+                    and row[1] is not None
+                    and winner_pid in row[3]
+                ):
+                    evidence["loser_blocked"] = {
+                        "winner_pid": winner_pid,
+                        "loser_pid": loser_pid,
+                        "state": row[0],
+                        "wait_event_type": row[1],
+                        "wait_event": row[2],
+                        "blocking_pids": row[3],
+                    }
+                    # Libera o vencedor para commitar assim que o bloqueio é
+                    # confirmado; a observação da resolução é posterior.
+                    loser_blocked.set()
+                    resolve_deadline = time.monotonic() + timeout
+                    while time.monotonic() < resolve_deadline:
+                        r2 = conn.execute(query, {"pid": loser_pid}).one_or_none()
+                        if r2 is not None and winner_pid not in r2[3]:
+                            evidence["loser_resolved"] = {
+                                "winner_pid": winner_pid,
+                                "loser_pid": loser_pid,
+                                "state": r2[0],
+                                "wait_event_type": r2[1],
+                                "wait_event": r2[2],
+                                "blocking_pids": r2[3],
+                            }
+                            break
+                        time.sleep(0.05)
+                    return
+                time.sleep(0.05)
+            errors.append((
+                "observer",
+                RuntimeError(
+                    "2o INSERT (loser_pid=%s) nao foi observado bloqueado por "
+                    "winner_pid=%s em %.0fs: pg_stat_activity/pg_blocking_pids "
+                    "nao confirmaram a espera." % (loser_pid, winner_pid, timeout)
+                ),
+            ))
+            loser_blocked.set()
+    except Exception as exc:  # noqa: BLE001
+        errors.append(("observer", exc))
+        loser_blocked.set()
+    finally:
+        obs_engine.dispose()
+
+
 def test_two_concurrent_after_approval_no_duplicate_and_no_exception(env):
     """Corrida determinística terminando SEM exceção no boundary.
 
-    A ordem das transações é controlada por eventos:
+    Diferente de presumir por ``time.sleep`` que o perdedor alcançou o INSERT
+    (ou tratar apenas "thread iniciada" como prova), o bloqueio é OBSERVADO no
+    PostgreSQL: um observer (sessões somente leitura) polla
+    ``pg_stat_activity``/``pg_blocking_pids`` e SÓ libera o commit do vencedor
+    depois de confirmar que o segundo INSERT está AGUARDANDO a transação do
+    vencedor no índice único (``pg_blocking_pids(loser)`` contém ``winner`` e
+    ``wait_event_type`` definido). Nenhum intervalo arbitrário.
 
+    Sequência:
     * vencedor materializa a AliExpressOrder (INSERT ainda NÃO commitado);
-    * perdedor inicia só depois: o INSERT do MESMO idempotency_key fica
+    * perdedor inicia depois; o INSERT do MESMO idempotency_key fica
       bloqueado no índice único;
-    * vencedor commita; o INSERT perdedor recebe IntegrityError de unicidade;
-      o perdedor descarta o savepoint (begin_nested) e relê a identidade
-      VENCEDORA já commitada com FOR UPDATE — terminando ``ready`` sem
-      exceção e mantendo a própria sessão utilizável.
+    * observer confirma o bloqueio (evidência ``loser_blocked``);
+    * vencedor então commita; o INSERT perdedor recebe IntegrityError de
+      unicidade; o perdedor descarta o savepoint (begin_nested) e relê a
+      identidade VENCEDORA já commitada com FOR UPDATE — terminando ``ready``
+      sem exceção e mantendo a própria sessão utilizável.
 
     Invariantes assertadas:
     * ``errors == []`` (IntegrityError NÃO é aceito como verde);
     * exatamente 1 AliExpressOrder e 1 AliExpressOrderItem;
-    * as duas chamadas retornam a MESMA identidade (reuso, nunca duplicação);
-    * a sessão perdedora consegue ler/escrever/commit após o recovery.
+    * as duas chamadas retornam a MESMA identidade e estado ``ready``;
+    * a sessão perdedora lê/escreve/commita após o recovery;
+    * zero tentativas (ledger), zero identidades remotas e zero chamadas de
+      refresh/fornecedor;
+    * evidência observável registrada: ``blocking_pids == [winner_pid]``.
     """
     schema, app = env
     order_id = _materialize_order(
         app, committed_status="paid", payment_status="approved"
     )
-    winner_inserted = threading.Event()
-    loser_started = threading.Event()
+    refresher = CountingRefresher()
+    pids: dict = {}
+    winner_ready = threading.Event()
+    loser_ready = threading.Event()
+    winner_flushed = threading.Event()
+    loser_blocked = threading.Event()
     results: list = []
     errors: list = []
+    evidence: dict = {}
+    lock = threading.Lock()
+    sql_pid = text("SELECT pg_backend_pid()")
 
     def winner():
         try:
@@ -513,19 +620,26 @@ def test_two_concurrent_after_approval_no_duplicate_and_no_exception(env):
                 db.session.connection().exec_driver_sql(
                     "SET SESSION lock_timeout = 15000"
                 )
+                with lock:
+                    pids["winner"] = db.session.execute(sql_pid).scalar()
+                winner_ready.set()
                 order = db.session.get(Order, order_id)
-                res = ensure_aliexpress_fulfillment(order)
+                res = ensure_aliexpress_fulfillment(order, refresher=refresher)
                 db.session.flush()  # mantém o INSERT aberto, sem commit
-                winner_inserted.set()
-                assert loser_started.wait(timeout=30)
-                time.sleep(1.0)  # dá tempo do perdedor travar no índice único
+                winner_flushed.set()
+                if not loser_blocked.wait(timeout=60):
+                    raise RuntimeError(
+                        "observer nao confirmou o bloqueio do 2o INSERT"
+                    )
                 db.session.commit()
-                results.append(
-                    ("winner", [r.state for r in res],
-                     [r.aliexpress_order.id for r in res])
-                )
+                with lock:
+                    results.append(
+                        ("winner", [r.state for r in res],
+                         [r.aliexpress_order.id for r in res])
+                    )
         except Exception as exc:  # noqa: BLE001
-            errors.append(("winner", exc))
+            with lock:
+                errors.append(("winner", exc))
             try:
                 db.session.rollback()
             except Exception:  # noqa: BLE001
@@ -541,45 +655,83 @@ def test_two_concurrent_after_approval_no_duplicate_and_no_exception(env):
                 from loja.modules.getway_mercado_pago.payment_models import Order
                 from loja.modules.models import AliExpressOrder
 
-                assert winner_inserted.wait(timeout=30)
+                assert winner_flushed.wait(timeout=60)
                 db.session.connection().exec_driver_sql(
                     "SET SESSION lock_timeout = 15000"
                 )
+                with lock:
+                    pids["loser"] = db.session.execute(sql_pid).scalar()
+                loser_ready.set()
                 order = db.session.get(Order, order_id)
-                loser_started.set()
-                res = ensure_aliexpress_fulfillment(order)
+                res = ensure_aliexpress_fulfillment(order, refresher=refresher)
                 # Recovery: relê a identidade vencedora e reusa os snapshots.
-                # Sessão perdedora continua utilizável: leitura + escrita + commit.
+                # Sessão perdedora continua utilizável: LEITURA + ESCRITA + COMMIT.
                 ao_id = res[0].aliexpress_order.id
+                # LEITURA na sessão perdedora pós-recovery: roundtrip real.
+                sid_read = db.session.execute(
+                    text("SELECT id FROM aliexpress_orders WHERE id = :id"),
+                    {"id": ao_id},
+                ).scalar_one()
+                assert sid_read == ao_id, sid_read
+                # ESCRITA + COMMIT: a sessão perdedora ainda escreve/commita.
                 ao = db.session.get(AliExpressOrder, ao_id)
                 ao.attempt_count = 7
-                db.session.flush()
                 db.session.commit()
+                # Pós-commit a sessão lê o estado final commitado ('ready').
+                state_read = db.session.execute(
+                    text("SELECT state FROM aliexpress_orders WHERE id = :id"),
+                    {"id": ao_id},
+                ).scalar_one()
+                assert state_read == "ready", state_read
                 ao.attempt_count = 0
                 db.session.commit()
-                results.append(
-                    ("loser", [r.state for r in res],
-                     [r.aliexpress_order.id for r in res])
-                )
+                with lock:
+                    results.append(
+                        ("loser", [r.state for r in res],
+                         [r.aliexpress_order.id for r in res])
+                    )
         except Exception as exc:  # noqa: BLE001
-            errors.append(("loser", exc))
+            with lock:
+                errors.append(("loser", exc))
             try:
                 db.session.rollback()
             except Exception:  # noqa: BLE001
                 pass
 
+    def observer():
+        if not (winner_ready.wait(timeout=60) and loser_ready.wait(timeout=60)):
+            with lock:
+                errors.append((
+                    "observer",
+                    RuntimeError("pids das duas sessoes nao chegaram ao observer"),
+                ))
+            loser_blocked.set()
+            return
+        with lock:
+            wpid = pids["winner"]
+            lpid = pids["loser"]
+        _observe_loser_blocked(wpid, lpid, evidence, errors, loser_blocked)
+
+    t_obs = threading.Thread(target=observer)
     t1 = threading.Thread(target=winner)
     t2 = threading.Thread(target=loser)
+    t_obs.start()
     t1.start()
     t2.start()
-    t1.join(timeout=60)
-    t2.join(timeout=60)
-    if t1.is_alive() or t2.is_alive():
-        pytest.fail("threads penduradas — possível deadlock de lock")
+    t_obs.join(timeout=90)
+    t1.join(timeout=90)
+    t2.join(timeout=90)
+    alive = [
+        name
+        for name, t in (("observer", t_obs), ("winner", t1), ("loser", t2))
+        if t.is_alive()
+    ]
+    if alive:
+        pytest.fail("threads penduradas — possível deadlock de lock: %s" % alive)
 
     # ZERO exceções no boundary: IntegrityError não é aceito como verde.
     assert errors == [], errors
-    assert len(results) == 2
+    assert len(results) == 2, results
     result_by_label = {
         label: row for label, *row in results
     }
@@ -588,9 +740,20 @@ def test_two_concurrent_after_approval_no_duplicate_and_no_exception(env):
     states_l = result_by_label["loser"][0]
     ids_l = result_by_label["loser"][1]
 
+    # Evidência observável: o 2o INSERT aguardou a 1a transação no índice único.
+    assert evidence.get("loser_blocked"), evidence
+    assert evidence["loser_blocked"]["wait_event_type"] is not None, evidence
+    assert evidence["loser_blocked"]["blocking_pids"] == [pids["winner"]], evidence
+    assert evidence.get("loser_resolved"), evidence
+
     with app.app_context():
         from loja import db
-        from loja.modules.models import AliExpressOrder, AliExpressOrderItem
+        from loja.modules.models import (
+            AliExpressOrder,
+            AliExpressOrderItem,
+            AliExpressRemoteOrder,
+            AliExpressSubmissionAttempt,
+        )
 
         assert AliExpressOrder.query.filter_by(order_id=order_id).count() == 1
         items = (
@@ -599,8 +762,25 @@ def test_two_concurrent_after_approval_no_duplicate_and_no_exception(env):
             .count()
         )
         assert items == 1
+        attempts = (
+            db.session.query(AliExpressSubmissionAttempt)
+            .join(AliExpressOrder)
+            .filter(AliExpressOrder.order_id == order_id)
+            .count()
+        )
+        assert attempts == 0, attempts
+        remotes = (
+            db.session.query(AliExpressRemoteOrder)
+            .join(AliExpressOrder)
+            .filter(AliExpressOrder.order_id == order_id)
+            .count()
+        )
+        assert remotes == 0, remotes
 
     # Mesma identidade (reuso, nunca duplicação) e estado final ready.
     assert ids_w == ids_l and ids_w, (ids_w, ids_l)
     assert states_w == ["ready"], states_w
     assert states_l == ["ready"], states_l
+    assert refresher.call_count == 0, refresher.call_count
+
+    print("RACE_EVIDENCE " + json.dumps(evidence, sort_keys=True))
