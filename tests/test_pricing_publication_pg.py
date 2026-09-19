@@ -13,6 +13,8 @@ import secrets
 import uuid
 from decimal import Decimal
 
+import re
+
 import pytest
 from sqlalchemy import create_engine, text, inspect as sa_inspect
 from sqlalchemy.engine import make_url
@@ -127,12 +129,73 @@ def _insert_product(se, **fields):
         )
 
 
-def _expect_rejected(se, **fields):
-    # CHECK violations são 23514: com pg8000 viram ProgrammingError, com psycopg2
-    # viram IntegrityError. O teste deve aceitar ambos sem enfraquecer a
-    # proteção (continua exigindo violação de constraint).
-    with pytest.raises((IntegrityError, ProgrammingError, DBAPIError)):
+def _extract_sqlstate_constraint(exc):
+    """Extrai SQLSTATE e constraint de DBAPIError compatível com pg8000 e psycopg2.
+
+    pg8000: orig.args[0] é dict {'C': '23514', 'n': 'ck_...', ...}
+    psycopg2: orig.pgcode == '23514', orig.diag.constraint_name == 'ck_...',
+              ou parsing de pgerror/message.
+    """
+    orig = getattr(exc, "orig", None)
+    if orig is None:
+        orig = exc
+    # pg8000 dict
+    try:
+        if hasattr(orig, "args") and orig.args:
+            arg0 = orig.args[0]
+            if isinstance(arg0, dict) and "C" in arg0:
+                return arg0.get("C"), arg0.get("n")
+    except Exception:
+        pass
+    # psycopg2 attributes
+    sqlstate = getattr(orig, "pgcode", None)
+    constraint = None
+    diag = getattr(orig, "diag", None)
+    if diag is not None:
+        constraint = getattr(diag, "constraint_name", None)
+    # fallback parsing from message
+    msg = getattr(orig, "pgerror", None) or str(orig) or str(exc)
+    if sqlstate is None:
+        if "23514" in msg:
+            sqlstate = "23514"
+        else:
+            m = re.search(r'"C":\s*"(\d{5})"', msg)
+            if m:
+                sqlstate = m.group(1)
+    if constraint is None:
+        m = re.search(r'violates check constraint "([^"]+)"', msg)
+        if m:
+            constraint = m.group(1)
+        else:
+            m2 = re.search(r'"n":\s*"([^"]+)"', msg)
+            if m2:
+                constraint = m2.group(1)
+            else:
+                m3 = re.search(r'(ck_product_\w+)', msg)
+                if m3:
+                    constraint = m3.group(1)
+    # último fallback a partir do exc string
+    if sqlstate is None and "23514" in str(exc):
+        sqlstate = "23514"
+    if constraint is None:
+        m = re.search(r'violates check constraint "([^"]+)"', str(exc))
+        if m:
+            constraint = m.group(1)
+    return sqlstate, constraint
+
+
+def _assert_check_violation(exc, expected_constraint):
+    sqlstate, constraint = _extract_sqlstate_constraint(exc)
+    assert sqlstate == "23514", f"SQLSTATE esperado 23514, obtido {sqlstate!r} em {exc!r}"
+    assert constraint == expected_constraint, f"constraint esperada {expected_constraint!r}, obtida {constraint!r} em {exc!r}"
+
+
+def _expect_rejected(se, expected_constraint, **fields):
+    # Captura DBAPIError genérico mas exige SQLSTATE/constraint específicos.
+    # Erro de conexão, outro SQLSTATE ou outra constraint faz o teste falhar.
+    with pytest.raises(DBAPIError) as excinfo:
         _insert_product(se, **fields)
+    _assert_check_violation(excinfo.value, expected_constraint)
 
 
 def test_migration_idempotent_and_checks_bound_to_products(env):
@@ -171,7 +234,8 @@ def test_db_guard_rejects_aliexpress_active_unpriced(env):
 
     # AliExpress ativo + unpriced (default) => rejeitado no banco.
     _expect_rejected(
-        se, id=str(uuid.uuid4()), name="x", price="10.00",
+        se, "ck_product_aliexpress_publication_guard",
+        id=str(uuid.uuid4()), name="x", price="10.00",
         source="aliexpress", is_active=True,
     )
     assert _public_columns_snapshot(eng) == _public_columns_snapshot(eng)
@@ -215,19 +279,23 @@ def test_db_guard_target_margin_range(env):
     _apply_migration(se, schema)
 
     _expect_rejected(
-        se, id=str(uuid.uuid4()), name="m0", price="10.00",
+        se, "ck_product_target_margin_range",
+        id=str(uuid.uuid4()), name="m0", price="10.00",
         target_margin_percent="0",
     )
     _expect_rejected(
-        se, id=str(uuid.uuid4()), name="mneg", price="10.00",
+        se, "ck_product_target_margin_range",
+        id=str(uuid.uuid4()), name="mneg", price="10.00",
         target_margin_percent="-10",
     )
     _expect_rejected(
-        se, id=str(uuid.uuid4()), name="m100", price="10.00",
+        se, "ck_product_target_margin_range",
+        id=str(uuid.uuid4()), name="m100", price="10.00",
         target_margin_percent="100",
     )
     _expect_rejected(
-        se, id=str(uuid.uuid4()), name="m150", price="10.00",
+        se, "ck_product_target_margin_range",
+        id=str(uuid.uuid4()), name="m150", price="10.00",
         target_margin_percent="150",
     )
 
@@ -251,11 +319,13 @@ def test_db_guard_pricing_status_whitelist(env):
     _apply_migration(se, schema)
 
     _expect_rejected(
-        se, id=str(uuid.uuid4()), name="bogus", price="10.00",
+        se, "ck_product_pricing_status",
+        id=str(uuid.uuid4()), name="bogus", price="10.00",
         pricing_status="reservado",
     )
     _expect_rejected(
-        se, id=str(uuid.uuid4()), name="empty", price="10.00",
+        se, "ck_product_pricing_status",
+        id=str(uuid.uuid4()), name="empty", price="10.00",
         pricing_status="",
     )
 
@@ -368,7 +438,8 @@ def test_pricing_and_publish_roundtrip_in_disposable_schema(env, monkeypatch):
         half_ready.is_active = True
         try:
             db.session.commit()
-        except (IntegrityError, ProgrammingError, DBAPIError):
+        except DBAPIError as exc:
+            _assert_check_violation(exc, "ck_product_aliexpress_publication_guard")
             db.session.rollback()
         else:
             raise AssertionError("banco aceitou AliExpress ativo não-priced")
