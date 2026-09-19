@@ -13,12 +13,10 @@ import secrets
 import uuid
 from decimal import Decimal
 
-import re
-
 import pytest
 from sqlalchemy import create_engine, text, inspect as sa_inspect
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
+from sqlalchemy.exc import DBAPIError
 
 from conftest import ORIGINAL_DATABASE_URL
 from test_draft_import_pg import (
@@ -130,16 +128,16 @@ def _insert_product(se, **fields):
 
 
 def _extract_sqlstate_constraint(exc):
-    """Extrai SQLSTATE e constraint de DBAPIError compatível com pg8000 e psycopg2.
+    """Extrai SQLSTATE e constraint somente dos campos estruturados.
 
-    pg8000: orig.args[0] é dict {'C': '23514', 'n': 'ck_...', ...}
-    psycopg2: orig.pgcode == '23514', orig.diag.constraint_name == 'ck_...',
-              ou parsing de pgerror/message.
+    pg8000: exc.orig.args[0]["C"] e ["n"]
+    psycopg2: exc.orig.pgcode e exc.orig.diag.constraint_name
+    Sem fallbacks em texto livre; se ausentes retorna (None, None).
     """
     orig = getattr(exc, "orig", None)
     if orig is None:
         orig = exc
-    # pg8000 dict
+    # pg8000 — dict estruturado
     try:
         if hasattr(orig, "args") and orig.args:
             arg0 = orig.args[0]
@@ -147,47 +145,19 @@ def _extract_sqlstate_constraint(exc):
                 return arg0.get("C"), arg0.get("n")
     except Exception:
         pass
-    # psycopg2 attributes
+    # psycopg2 — campos estruturados
     sqlstate = getattr(orig, "pgcode", None)
     constraint = None
     diag = getattr(orig, "diag", None)
     if diag is not None:
         constraint = getattr(diag, "constraint_name", None)
-    # fallback parsing from message
-    msg = getattr(orig, "pgerror", None) or str(orig) or str(exc)
-    if sqlstate is None:
-        if "23514" in msg:
-            sqlstate = "23514"
-        else:
-            m = re.search(r'"C":\s*"(\d{5})"', msg)
-            if m:
-                sqlstate = m.group(1)
-    if constraint is None:
-        m = re.search(r'violates check constraint "([^"]+)"', msg)
-        if m:
-            constraint = m.group(1)
-        else:
-            m2 = re.search(r'"n":\s*"([^"]+)"', msg)
-            if m2:
-                constraint = m2.group(1)
-            else:
-                m3 = re.search(r'(ck_product_\w+)', msg)
-                if m3:
-                    constraint = m3.group(1)
-    # último fallback a partir do exc string
-    if sqlstate is None and "23514" in str(exc):
-        sqlstate = "23514"
-    if constraint is None:
-        m = re.search(r'violates check constraint "([^"]+)"', str(exc))
-        if m:
-            constraint = m.group(1)
     return sqlstate, constraint
 
 
 def _assert_check_violation(exc, expected_constraint):
     sqlstate, constraint = _extract_sqlstate_constraint(exc)
-    assert sqlstate == "23514", f"SQLSTATE esperado 23514, obtido {sqlstate!r} em {exc!r}"
-    assert constraint == expected_constraint, f"constraint esperada {expected_constraint!r}, obtida {constraint!r} em {exc!r}"
+    assert sqlstate == "23514", f"SQLSTATE esperado 23514, obtido {sqlstate!r}"
+    assert constraint == expected_constraint, f"constraint esperada {expected_constraint!r}, obtida {constraint!r}"
 
 
 def _expect_rejected(se, expected_constraint, **fields):
