@@ -467,7 +467,7 @@
         <div class="deals-title-wrap">
           <span aria-hidden="true">🔥</span>
           <h2 class="deals-title">
-            Ofertas <span class="flash">do dia</span>
+            Ofertas{% if deals_do_dia %} <span class="flash">do dia</span>{% endif %}
           </h2>
         </div>
         {% endif %}
@@ -575,7 +575,7 @@
                 </p>
                 {% if promo.ends_at %}
                 <p class="pcard-deadline">
-                  Termina em {{ promo.ends_at.strftime('%d/%m às %H:%M') }}
+                  Termina em {{ format_deadline_sp(promo.ends_at) }}
                 </p>
                 {% endif %}
                 {% endif %}

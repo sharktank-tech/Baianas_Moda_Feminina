@@ -45,7 +45,7 @@ def _promo_transiente(produto, ends_at=None):
     )
 
 
-def _render_home(app, promotions):
+def _render_home(app, promotions, deals_do_dia=False):
     """Renderiza a home com contexto explícito, sem ler nem escrever Promotion no banco."""
     with app.test_request_context("/"):
         return render_template(
@@ -54,6 +54,7 @@ def _render_home(app, promotions):
             categories=[],
             banner={},
             promotions=promotions,
+            deals_do_dia=deals_do_dia,
             products=[],
             testimonials=[],
             store_policy={},
@@ -287,13 +288,14 @@ def test_home_promocao_sem_prazo_visivel_sem_relogio(app):
     assert "Acaba em" not in html
 
 
-def test_home_promocao_com_prazo_mostra_prazo_correto(app):
-    fim = datetime.now().replace(microsecond=0) + timedelta(days=2, hours=3)
+def test_home_prazo_convertido_para_sao_paulo(app):
+    # Banco guarda UTC naive: 15:00 UTC == 12:00 em America/Sao_Paulo.
+    fim_utc = datetime(2026, 1, 15, 15, 0)
     html = _render_home(
-        app, [_promo_transiente(_produto_transiente(), ends_at=fim)]
+        app, [_promo_transiente(_produto_transiente(), ends_at=fim_utc)]
     )
-    esperado = fim.strftime("%d/%m às %H:%M")
-    assert f"Termina em {esperado}" in html
+    assert "Termina em 15/01 às 12:00" in html
+    assert "15/01 às 15:00" not in html
     assert "data-end=" not in html
     assert "dealsCountdown" not in html
 
@@ -301,11 +303,56 @@ def test_home_promocao_com_prazo_mostra_prazo_correto(app):
 def test_home_promos_mistas_um_prazo_por_card(app):
     com_prazo = _promo_transiente(
         _produto_transiente("Com Prazo"),
-        ends_at=datetime.now().replace(microsecond=0) + timedelta(days=2),
+        ends_at=datetime(2026, 3, 10, 15, 0),
     )
     sem_prazo = _promo_transiente(_produto_transiente("Sem Prazo"), ends_at=None)
     html = _render_home(app, [com_prazo, sem_prazo])
     assert html.count("Termina em") == 1
+    assert "Termina em 10/03 às 12:00" in html
     assert "Com Prazo" in html and "Sem Prazo" in html
     assert "data-end=" not in html
     assert "Acaba em" not in html
+
+
+def test_titulo_do_dia_so_quando_todas_terminam_hoje(app):
+    html = _render_home(
+        app, [_promo_transiente(_produto_transiente(), ends_at=None)],
+        deals_do_dia=False,
+    )
+    assert "deals-title" in html
+    assert '<span class="flash">do dia</span>' not in html
+
+    html = _render_home(
+        app, [_promo_transiente(_produto_transiente(), ends_at=None)],
+        deals_do_dia=True,
+    )
+    assert '<span class="flash">do dia</span>' in html
+
+
+def test_deals_do_dia_exige_todas_terminando_hoje():
+    from loja.modules.services import deals_show_do_dia
+
+    agora = datetime(2026, 6, 10, 12, 0)  # 09:00 em São Paulo
+    assert deals_show_do_dia([], agora) is False
+    assert deals_show_do_dia(
+        [_promo_transiente(_produto_transiente(), ends_at=None)], agora
+    ) is False
+    assert deals_show_do_dia(
+        [_promo_transiente(_produto_transiente(), ends_at=datetime(2026, 6, 10, 20, 0))],
+        agora,
+    ) is True
+    assert deals_show_do_dia(
+        [
+            _promo_transiente(_produto_transiente(), ends_at=datetime(2026, 6, 10, 20, 0)),
+            _promo_transiente(_produto_transiente(), ends_at=datetime(2026, 6, 11, 15, 0)),
+        ],
+        agora,
+    ) is False
+
+
+def test_rodape_rejeita_rota_exclusiva_de_post(app):
+    from loja.modules.footer_links import is_safe_footer_url
+
+    with app.test_request_context("/"):
+        assert is_safe_footer_url("/sobre") is True
+        assert is_safe_footer_url(f"/produtos/{uuid.uuid4()}/favoritar") is False

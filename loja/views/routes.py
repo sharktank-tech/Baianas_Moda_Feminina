@@ -160,11 +160,15 @@ def inject_product_content_helpers():
     padrão do Jinja sobre o conteúdo já sanitizado).
     Reveal/meta/cards: `product_description_excerpt(...)` — texto puro sem HTML.
     """
+    from loja.utils import format_deadline_sp
+
     return {
         "sanitize_product_description_html": sanitize_product_description_html,
         "sanitize_product_description_without_images": sanitize_product_description_without_images,
         "product_description_excerpt": product_description_excerpt,
         "product_canonical_url": product_canonical_url,
+        # Prazos de promoção sempre em America/Sao_Paulo (banco guarda UTC naive).
+        "format_deadline_sp": format_deadline_sp,
     }
 
 

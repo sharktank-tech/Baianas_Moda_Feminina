@@ -29,7 +29,7 @@ from loja.modules.models import (
     Favorite,
 )
 from loja.modules.footer_links import is_safe_footer_url
-from loja.utils import utcnow
+from loja.utils import as_sao_paulo, utcnow
 
 
 # ── Layout base (contexto global de admin) ─────────────────────────────────────
@@ -66,6 +66,21 @@ def get_layout_data() -> dict:
 
 # ── Home ──────────────────────────────────────────────────────────────────────
 
+def deals_show_do_dia(promotions, now) -> bool:
+    """True só se há ofertas e todas terminam hoje (America/Sao_Paulo).
+
+    O flash "do dia" fica reservado para duração que sustenta a afirmação;
+    promoções sem prazo ou com término futuro usam o título geral "Ofertas".
+    """
+    if not promotions:
+        return False
+    today = as_sao_paulo(now).date()
+    return all(
+        p.ends_at is not None and as_sao_paulo(p.ends_at).date() == today
+        for p in promotions
+    )
+
+
 def get_home_data() -> dict:
     """
     Dados usados pela home (main/index.html).
@@ -75,7 +90,8 @@ def get_home_data() -> dict:
         categories    – cards de categoria
         banner        – dict  { quote, cta_text, cta_link }
         promotions    – list[Promotion] (ativas, não expiradas; cada card mostra
-                        o próprio ends_at quando houver prazo real)
+                        o próprio ends_at em America/Sao_Paulo quando houver)
+        deals_do_dia  – bool (True só se todas as ofertas terminam hoje)
         products      – list[Product] (até 8, ativos, favoritados)
         testimonials  – list[Testimonial] (visíveis, até 6)
         store_policy  – dict  { exchange_days, max_installments, free_shipping_min }
@@ -133,9 +149,11 @@ def get_home_data() -> dict:
         .all()
     )
 
-    # Prazo real por oferta: cada card exibe o próprio ends_at quando ele
-    # existe. Não há relógio geral nem fallback para o fim do dia — um
-    # prazo fabricado sugeriria que todas as ofertas terminam juntas.
+    # Prazo real por oferta: cada card exibe o próprio ends_at (em
+    # America/Sao_Paulo) quando ele existe. Não há relógio geral nem
+    # fallback para o fim do dia — um prazo fabricado sugeriria que todas
+    # as ofertas terminam juntas.
+    deals_do_dia = deals_show_do_dia(promotions, now)
 
     structured_data = None
     if products and has_request_context():
@@ -167,6 +185,7 @@ def get_home_data() -> dict:
             "cta_link": url_for("main.produtos"),
         },
         "promotions": promotions,
+        "deals_do_dia": deals_do_dia,
         "products": products,
         "testimonials": testimonials,
         "store_policy": {

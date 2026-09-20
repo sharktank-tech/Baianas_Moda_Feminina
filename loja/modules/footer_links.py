@@ -4,17 +4,18 @@ Regra única usada na renderização (omitir registros antigos inválidos sem
 apagar dados) e nos formulários do admin (impedir novos placeholders):
 
 - aceita caminhos internos que resolvem em uma rota funcional da aplicação
-  (ex.: /sobre, /produtos, /politica-privacidade, /acompanhar-pedido);
+  **aberta por GET** (ex.: /sobre, /produtos, /politica-privacidade,
+  /acompanhar-pedido);
 - aceita URLs externas https:// com host (ex.: perfis de redes sociais);
 - rejeita valor vazio, "#", javascript:, data: (e outros esquemas ativos),
-  URLs http:// sem TLS, caminhos que não resolvem e qualquer destino inválido.
+  URLs http:// sem TLS, rotas exclusivas de POST, caminhos que não resolvem
+  e qualquer destino inválido.
 """
 
 from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-from werkzeug.exceptions import MethodNotAllowed
 from werkzeug.routing import RequestRedirect
 
 _BLOCKED_PREFIXES = ("javascript:", "data:", "vbscript:", "file:")
@@ -41,7 +42,7 @@ def _is_external_https(value: str) -> bool:
 
 
 def _resolves_internally(path: str) -> bool:
-    """Confere se o caminho interno corresponde a uma rota funcional."""
+    """Confere se o caminho interno abre por GET em uma rota funcional."""
     from flask import current_app
 
     if not path.startswith("/") or path.startswith("//") or "\\" in path:
@@ -54,14 +55,12 @@ def _resolves_internally(path: str) -> bool:
     except RuntimeError:
         return False
     try:
-        adapter.match(clean)
+        adapter.match(clean, method="GET")
     except RequestRedirect:
         # Rota existe; só exige barra final (ex.: /acompanhar-pedido/).
         return True
-    except MethodNotAllowed:
-        # Rota existe (método diferente de GET).
-        return True
     except Exception:
+        # Inclui MethodNotAllowed: rota exclusiva de POST não serve ao rodapé.
         return False
     return True
 
