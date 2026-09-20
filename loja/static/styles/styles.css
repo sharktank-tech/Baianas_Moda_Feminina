@@ -894,6 +894,7 @@ button:focus-visible {
 }
 .pcard-price-now--sale { color: var(--sale-red); }
 .pcard-installment { margin: 0.3rem 0 0; font-size: 0.75rem; color: var(--gray-700); }
+.pcard-deadline { margin: 0.3rem 0 0; font-size: 0.75rem; font-weight: 700; color: var(--sale-red); }
 
 .pcard-buy {
   margin-top: auto;

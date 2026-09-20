@@ -457,36 +457,18 @@
 
 
   <!-- ══════════════════════════════════════════════
-       OFERTAS DO DIA (com cronômetro regressivo)
+       OFERTAS DO DIA (prazo real exibido em cada card)
   ══════════════════════════════════════════════ -->
   <section class="deals" data-reveal aria-label="Ofertas do dia">
     <div class="deals-inner">
 
       <div class="deals-head">
-        {% if promotions and deals_end_at %}
+        {% if promotions %}
         <div class="deals-title-wrap">
           <span aria-hidden="true">🔥</span>
           <h2 class="deals-title">
             Ofertas <span class="flash">do dia</span>
           </h2>
-        </div>
-
-        <div class="deals-countdown">
-          <span>Acaba em</span>
-
-          <span
-            class="countdown-clock"
-            id="dealsCountdown"
-            role="timer"
-            aria-label="Tempo restante"
-            data-end="{{ deals_end_at }}"
-          >
-            <span class="countdown-box" data-h>00</span>
-            <span class="countdown-sep">:</span>
-            <span class="countdown-box" data-m>00</span>
-            <span class="countdown-sep">:</span>
-            <span class="countdown-box" data-s>00</span>
-          </span>
         </div>
         {% endif %}
       </div>
@@ -591,6 +573,11 @@
                     | replace('.', ',')
                   }} sem juros
                 </p>
+                {% if promo.ends_at %}
+                <p class="pcard-deadline">
+                  Termina em {{ promo.ends_at.strftime('%d/%m às %H:%M') }}
+                </p>
+                {% endif %}
                 {% endif %}
 
                 <a
@@ -904,28 +891,6 @@
         });
       }, { threshold: 0.12 });
       els.forEach(function (el) { io.observe(el); });
-    })();
-
-    // Cronômetro das ofertas do dia — usa o timestamp real vindo do backend
-    (function () {
-      const el = document.getElementById('dealsCountdown');
-      if (!el) return;
-      const end = new Date(el.dataset.end).getTime();
-      if (isNaN(end)) return;
-      const h = el.querySelector('[data-h]'), m = el.querySelector('[data-m]'), s = el.querySelector('[data-s]');
-
-      function tick() {
-        const diff = end - Date.now();
-        if (diff <= 0) { h.textContent = m.textContent = s.textContent = '00'; clearInterval(timer); return; }
-        const hh = Math.floor(diff / 3600000);
-        const mm = Math.floor((diff % 3600000) / 60000);
-        const ss = Math.floor((diff % 60000) / 1000);
-        h.textContent = String(hh).padStart(2, '0');
-        m.textContent = String(mm).padStart(2, '0');
-        s.textContent = String(ss).padStart(2, '0');
-      }
-      tick();
-      const timer = setInterval(tick, 1000);
     })();
 
     // Favoritar produto — chama o endpoint do backend
