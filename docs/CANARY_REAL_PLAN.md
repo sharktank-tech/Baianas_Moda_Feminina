@@ -21,6 +21,8 @@ Validar end-to-end, com um único pedido orgânico novo, que o fluxo `ready → 
 - **Gates desligados:** `ALIEXPRESS_PLACEORDER_ENABLED !=1` confirmado via `os.environ` e `loja` config.
 - **Observabilidade pronta:** logs sem PII (sem `exc`/SQL params, sem `acquisition_source` bruto, sem `CPF`/`endereço`/`telefone`/`token`), métricas de snapshot, e `verify_future_canary_readonly.py` passando.
 
+O procedimento de responsáveis, dupla evidência, registro restrito e decisão está em [CANARY_CUSTOMER_EVIDENCE_PROTOCOL.md](CANARY_CUSTOMER_EVIDENCE_PROTOCOL.md). Sem local privado aprovado para a trilha e sem evidências de um pedido específico, a confirmação permanece pendente. Nenhum contato com cliente é iniciado por este plano.
+
 ### Situação da verificação automática
 
 `scripts/verify_future_canary_readonly.py` verifica as condições técnicas em transação somente leitura e retorna `1` mesmo quando os checks preliminares passam: a confirmação independente acima permanece fora do banco e pendente. Não use a existência de `acquisition_source`, CPF, conta ou pagamento como substituto das duas evidências. Antes de qualquer canário, repetir a leitura, conferir a trilha restrita e obter a autorização financeira separada.
