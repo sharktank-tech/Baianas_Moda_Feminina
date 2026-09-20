@@ -103,6 +103,37 @@ def test_termos_curto_continua_404(client, db):
     assert resp.status_code == 404
 
 
+# ── Política comercial: troca em 7 dias, sem promessa antiga ────────────
+
+def test_troca_sete_dias_sem_texto_de_trinta(client, db, make_product):
+    home = _get(client, "/")
+    assert "30 dias" not in home
+    assert "Troca em até 7 dias" in home
+
+    login = _get(client, "/login")
+    assert "30 dias" not in login
+    assert "Troca em até 7 dias" in login
+
+    product = make_product()
+    pagina = _get(client, f"/produtos/{product.id}")
+    assert "30 dias" not in pagina
+    assert "Troca fácil em até 7 dias" not in pagina
+    assert (
+        "Solicite a troca em até 7 dias; a troca gratuita será combinada com o atendimento"
+        in pagina
+    )
+
+
+def test_parcelamento_sem_promessa_fixa(client, db):
+    for path in ("/", "/login"):
+        html = _get(client, path)
+        assert "12× sem juros" not in html
+        assert "12x sem juros" not in html
+        assert "3x de R$" not in html
+    home = _get(client, "/")
+    assert "Mercado Pago" in home
+
+
 # ── Links do rodapé cadastrados pelo admin ──────────────────────────────
 
 import loja.cache as _cache_mod
