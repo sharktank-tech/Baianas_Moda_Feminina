@@ -2,6 +2,13 @@ import os
 import tempfile
 import uuid
 
+# Não carregue o .env local ao importar config.Config na suíte.
+# load_dotenv() injeta flags AliExpress/Vercel ausentes no primeiro teste que
+# inicializa a fixture app (scope=session), contaminando os testes posteriores.
+# Variáveis explicitamente exportadas, como DATABASE_URL para PG descartável,
+# continuam disponíveis; somente a leitura automática do .env é desativada.
+os.environ["PYTHON_DOTENV_DISABLED"] = "1"
+
 # Captura a URL original fornecida pelo usuário ANTES de sobrescrevê-la com
 # SQLite. Os testes de isolamento de schema (tests/test_schema_isolation.py)
 # usam ORIGINAL_DATABASE_URL para enxergar o PostgreSQL real; a suíte comum

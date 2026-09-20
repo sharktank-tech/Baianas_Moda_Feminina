@@ -41,6 +41,13 @@ jobs:
       - name: Check diff whitespace
         run: git diff --check
 
+      - name: Prove local .env cannot leak into OAuth tests
+        run: |
+          test ! -e .env
+          trap 'rm -f .env' EXIT
+          printf 'ALIEXPRESS_OAUTH_AUTHORIZE_URL=\nALIEXPRESS_SMOKE_BUYER_FREIGHT=1\nVERCEL_ENV=preview\n' > .env
+          python -m pytest -q tests/test_acquisition_sessions.py tests/test_aliexpress_oauth.py
+
       - name: Run full SQLite test suite
         run: python -m pytest -q tests/
 
