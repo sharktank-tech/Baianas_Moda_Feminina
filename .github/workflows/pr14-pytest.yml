@@ -102,6 +102,7 @@ jobs:
       - name: Run AliExpress PostgreSQL suite (incl. corrida payment x fulfillment)
         run: >
           python -m pytest -q
+          tests/test_canary_evidence_pg.py
           tests/test_aliexpress_controlled_canary_pg.py
           tests/test_aliexpress_oauth_pg.py
           tests/test_aliexpress_payment_guard_pg.py
