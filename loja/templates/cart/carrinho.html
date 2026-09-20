@@ -725,7 +725,9 @@
                 <span>Frete</span>
 
                 <span>
-                    {% if shipping == 0 %}
+                    {% if shipping is none %}
+                        {{ shipping_estimate | default('a partir de R$ 10,00 (estimativa)') }}
+                    {% elif shipping == 0 %}
                         Grátis
                     {% else %}
                         R$ {{ '%.2f'|format(shipping) | replace('.', ',') }}

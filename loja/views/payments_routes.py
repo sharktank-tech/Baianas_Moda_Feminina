@@ -32,13 +32,90 @@ from loja.modules.getway_mercado_pago.payment_service import (
     InvalidWebhookError,
     PaymentConfigurationError,
     PaymentGatewayError,
-    calculate_shipping,
     create_preference,
     get_payment,
     money,
     mp_status_to_order_status,
     validate_webhook_signature,
 )
+from loja.services.shipping_quote import (
+    QUOTE_TTL_SECONDS,
+    QuoteUnavailable,
+    assert_not_estimate,
+    quote_for_items,
+)
+
+
+def _unavailable_message(code: str) -> str:
+    return {
+        "missing_origin": (
+            "Frete indisponível para este destino no momento. "
+            "Confira o CEP e tente novamente."
+        ),
+        "provider_unavailable": (
+            "Frete indisponível para este destino no momento. "
+            "Confira o CEP e tente novamente."
+        ),
+        "no_supplier_data": (
+            "Frete indisponível para este destino no momento. "
+            "Confira o CEP e tente novamente."
+        ),
+        "currency_mismatch": (
+            "Frete indisponível para este destino no momento. "
+            "Confira o CEP e tente novamente."
+        ),
+        "invalid_destination": "Informe um CEP válido com 8 números.",
+        "expired": (
+            "Cotação de frete vencida. Calcule novamente e tente outra vez."
+        ),
+        "invalid_quote": (
+            "Frete desatualizado. Calcule novamente e tente outra vez."
+        ),
+    }.get(
+        code,
+        "Frete indisponível para este destino no momento. "
+        "Confira o CEP e tente novamente.",
+    )
+
+
+def quote_checkout_shipping(item_data, dest_cep):
+    """Frete total do checkout por cotação (nunca tarifa presumida)."""
+    try:
+        result = quote_for_items(item_data, dest_cep)
+    except QuoteUnavailable as exc:
+        raise ValueError(_unavailable_message(exc.code)) from exc
+    shipping = result["total"]
+    assert_not_estimate(shipping)
+    return shipping
+
+
+def _check_quoted_staleness(item_data, dest_cep, shipping):
+    """Recusa cobrança com cotação vencida ou divergente do recálculo.
+
+    Recalcula sempre a partir de dados autoritativos (carrinho no banco +
+    CEP do formulário). Se o cliente enviou cotação (shipping_quoted[_at]),
+    ela precisa ser fresca e igual ao recálculo.
+    """
+    from datetime import datetime
+
+    from loja.utils import utcnow
+
+    raw_value = (request.form.get("shipping_quoted") or "").strip()
+    raw_at = (request.form.get("shipping_quoted_at") or "").strip()
+    if not raw_value and not raw_at:
+        return
+    try:
+        quoted_at = datetime.fromisoformat(raw_at) if raw_at else None
+    except ValueError:
+        raise ValueError(_unavailable_message("invalid_quote")) from None
+    if quoted_at is not None and (utcnow() - quoted_at).total_seconds() > QUOTE_TTL_SECONDS:
+        raise ValueError(_unavailable_message("expired"))
+    try:
+        quoted = money(raw_value)
+    except Exception:
+        raise ValueError(_unavailable_message("invalid_quote")) from None
+    if quoted != money(shipping):
+        raise ValueError(_unavailable_message("invalid_quote"))
 from loja.integrations.aliexpress import (
     ensure_aliexpress_fulfillment,
     cancel_fulfillment_before_submission,
@@ -665,7 +742,9 @@ def create_mercado_pago_payment():
             subtotal,
         )
 
-        shipping = calculate_shipping(subtotal)
+        customer_data = _get_customer_data()
+        shipping = quote_checkout_shipping(item_data, customer_data["zip_code"])
+        _check_quoted_staleness(item_data, customer_data["zip_code"], shipping)
 
         total = money(
             max(
@@ -690,7 +769,7 @@ def create_mercado_pago_payment():
             discount=discount,
             total=total,
             stock_reserved=True,
-            **_get_customer_data(),
+            **customer_data,
             **acquisition_to_order_kwargs(
                 order_acquisition(session=session)
             ),

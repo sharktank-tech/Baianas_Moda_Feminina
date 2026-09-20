@@ -198,10 +198,15 @@ def test_apply_coupon_in_checkout(client, db, product, make_user, make_coupon):
 
 
 def test_first_purchase_coupon_blocked_for_prior_buyer(
-    client, db, product, make_user, make_coupon
+    client, db, product, make_user, make_coupon, monkeypatch
 ):
     """Regressão do bypass: usuário com compra anterior não usa cupom 1ª compra."""
+    import loja.views.payments_routes as pr
+
     from loja.modules.getway_mercado_pago.payment_models import Order
+
+    # Cotação simulada: o foco aqui é o cupom, não a tarifa.
+    monkeypatch.setattr(pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("18.90"))
 
     user = make_user()
     client.post(

@@ -1056,13 +1056,13 @@
 
             <div class="summary-row">
                 <span>Frete</span>
-                <span id="shipping-price">
+                <span id="shipping-price" data-estimate="{{ shipping_estimate | default('a partir de R$ 10,00 (estimativa)') }}">
                     {% if shipping is defined and shipping == 0 %}
                         Grátis
-                    {% elif shipping is defined %}
+                    {% elif shipping is defined and shipping is not none %}
                         R$ {{ '%.2f'|format(shipping) | replace('.', ',') }}
                     {% else %}
-                        Calcular
+                        {{ shipping_estimate | default('a partir de R$ 10,00 (estimativa)') }}
                     {% endif %}
                 </span>
             </div>
@@ -1305,16 +1305,17 @@
                 "R$ " + formatMoney(data.subtotal);
         }
 
-        if (
-            shippingPrice &&
-            data.shipping !== undefined &&
-            Number.isFinite(Number(data.shipping))
-        ) {
-            const shipping = Number(data.shipping);
+        if (shippingPrice && data.shipping !== undefined) {
+            if (data.shipping === null) {
+                shippingPrice.textContent =
+                    shippingPrice.dataset.estimate || "a calcular";
+            } else if (Number.isFinite(Number(data.shipping))) {
+                const shipping = Number(data.shipping);
 
-            shippingPrice.textContent = shipping <= 0
-                ? "Grátis"
-                : "R$ " + formatMoney(shipping);
+                shippingPrice.textContent = shipping <= 0
+                    ? "Grátis"
+                    : "R$ " + formatMoney(shipping);
+            }
         }
 
         const discount = Number(data.discount || 0);

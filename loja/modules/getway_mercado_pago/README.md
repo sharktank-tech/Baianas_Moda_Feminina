@@ -181,10 +181,11 @@ Fluxo manual:
 
 ## Pontos que precisam coincidir com a loja
 
-O checkout encontrado usa valores de frete diferentes em trechos distintos
-(R$ 20,00 no carrinho e R$ 18,90 no cálculo por CEP). Este pacote centraliza
-o valor em `PAYMENT_FLAT_SHIPPING=18.90`. Atualize a tela do carrinho para
-usar a mesma regra ou substitua `calculate_shipping()` por uma integração real.
+O frete não usa mais tarifa fixa: `calculate_shipping()` foi removido. A
+cobrança sai de cotação por grupo de remessa/fornecedor
+(`loja/services/shipping_quote.py`), e a vitrine exibe apenas a estimativa
+"a partir de R$ 10,00 (estimativa)" antes do CEP. Sem cotação válida não há
+preferência nem pedido (mensagem + retry).
 
 O carrinho é esvaziado depois que a preferência é criada e o pedido é salvo.
 Mesmo que o cliente abandone o Mercado Pago, o pedido pendente continua no

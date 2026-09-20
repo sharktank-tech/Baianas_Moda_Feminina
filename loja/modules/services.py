@@ -94,7 +94,7 @@ def get_home_data() -> dict:
         deals_do_dia  – bool (True só se todas as ofertas terminam hoje)
         products      – list[Product] (até 8, ativos, favoritados)
         testimonials  – list[Testimonial] (visíveis, até 6)
-        store_policy  – dict  { exchange_days, free_shipping_min }
+        store_policy  – dict  { exchange_days }
     """
     favoritos = get_favorited_ids()
 
@@ -190,7 +190,6 @@ def get_home_data() -> dict:
         "testimonials": testimonials,
         "store_policy": {
             "exchange_days": 7,
-            "free_shipping_min": 249,
         },
     }
 

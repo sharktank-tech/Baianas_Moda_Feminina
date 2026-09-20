@@ -83,16 +83,6 @@ def public_url(path):
     return urljoin(_public_origin() + "/", str(path or "").lstrip("/"))
 
 
-def calculate_shipping(subtotal):
-    subtotal = money(subtotal)
-    flat = money(current_app.config.get("PAYMENT_FLAT_SHIPPING", "18.90"))
-    free_min = money(current_app.config.get("FREE_SHIPPING_MIN", "249.00"))
-
-    if free_min > 0 and subtotal >= free_min:
-        return Decimal("0.00")
-    return flat
-
-
 def create_preference(order):
     sdk = get_sdk()
 

@@ -73,11 +73,9 @@ class Config:
         "MERCADO_PAGO_REQUIRE_WEBHOOK_SIGNATURE",
         True,
     )
-    PAYMENT_FLAT_SHIPPING = os.environ.get(
-        "PAYMENT_FLAT_SHIPPING",
-        "18.90",
-    )
-    FREE_SHIPPING_MIN = os.environ.get(
-        "FREE_SHIPPING_MIN",
-        "249.00",
-    )
+    # Sem tarifa fixa de frete: a cobrança sai de cotação por grupo
+    # (loja/services/shipping_quote.py). SHIPPING_ORIGIN_CEP e
+    # SHIPPING_DOMESTIC_RATES são opcionais; ausentes, o checkout bloqueia
+    # com mensagem em vez de presumir valor.
+    SHIPPING_ORIGIN_CEP = os.environ.get("SHIPPING_ORIGIN_CEP") or None
+    SHIPPING_DOMESTIC_RATES = os.environ.get("SHIPPING_DOMESTIC_RATES") or None

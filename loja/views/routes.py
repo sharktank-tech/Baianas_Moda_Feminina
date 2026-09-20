@@ -56,10 +56,8 @@ from loja.modules.tracking_status import (
 )
 from loja.services.customer_tracking import build_customer_tracking
 
-from loja.modules.getway_mercado_pago.payment_service import (
-    calculate_shipping,
-    money,
-)
+from loja.modules.getway_mercado_pago.payment_service import money
+from loja.services.shipping_quote import estimate_label
 
 tracking_blueprint = Blueprint(
     "tracking",
@@ -941,23 +939,28 @@ def _calculate_cart_subtotal(cart_items):
     )
 
 
-def _calculate_checkout_totals(subtotal, discount=Decimal("0.00")):
+def _calculate_display_totals(subtotal, discount=Decimal("0.00")):
+    """Totais de vitrine (carrinho/checkout sem CEP): frete como estimativa.
+
+    Sem destino não há cotação — retorna shipping None e o template exibe
+    o rótulo de estimativa. O valor cobrado sai sempre de cotação com CEP
+    (ver /calcular_frete e criação do pedido), nunca deste total parcial.
+    """
     subtotal = money(subtotal)
     discount = money(discount)
 
-    if subtotal <= 0:
-        shipping = money(Decimal("0.00"))
-    else:
-        shipping = money(calculate_shipping(subtotal))
-
     total = money(
         max(
-            subtotal + shipping - discount,
+            subtotal - discount,
             Decimal("0.00"),
         )
     )
 
-    return shipping, total
+    return None, total
+
+
+def _shipping_estimate_label() -> str:
+    return estimate_label()
 
 
 def _user_already_completed_purchase():
@@ -1161,7 +1164,7 @@ def carrinho():
     subtotal = _calculate_cart_subtotal(cart_items)
 
     if cart_items:
-        shipping, total = _calculate_checkout_totals(subtotal)
+        shipping, total = _calculate_display_totals(subtotal)
     else:
         shipping = money(Decimal("0.00"))
         total = money(Decimal("0.00"))
@@ -1173,6 +1176,7 @@ def carrinho():
         subtotal=subtotal,
         shipping=shipping,
         total=total,
+        shipping_estimate=_shipping_estimate_label(),
     )
 
 
@@ -1375,7 +1379,7 @@ def checkout_carrinho():
         subtotal,
     )
 
-    shipping, total = _calculate_checkout_totals(
+    shipping, total = _calculate_display_totals(
         subtotal,
         discount,
     )
@@ -1390,6 +1394,7 @@ def checkout_carrinho():
         discount=discount,
         total=total,
         applied_coupon=applied_coupon,
+        shipping_estimate=_shipping_estimate_label(),
     )
 
 
@@ -1518,7 +1523,7 @@ def checkout(product_id):
         product_id=product.id,
     )
 
-    shipping, total = _calculate_checkout_totals(
+    shipping, total = _calculate_display_totals(
         subtotal,
         discount,
     )
@@ -1537,6 +1542,7 @@ def checkout(product_id):
         discount=discount,
         total=total,
         applied_coupon=applied_coupon,
+        shipping_estimate=_shipping_estimate_label(),
     )
 
 
@@ -1686,7 +1692,7 @@ def apply_checkout_coupon():
         coupon.calculate_discount(subtotal)
     )
 
-    shipping, total = _calculate_checkout_totals(
+    shipping, total = _calculate_display_totals(
         subtotal,
         discount,
     )
@@ -1713,7 +1719,7 @@ def apply_checkout_coupon():
         "message": f"Cupom {coupon.code} aplicado com sucesso.",
         "code": coupon.code,
         "subtotal": float(subtotal),
-        "shipping": float(shipping),
+        "shipping": None,
         "discount": float(discount),
         "total": float(total),
     }), 200
@@ -1741,7 +1747,7 @@ def remove_checkout_coupon():
             "message": str(error),
         }), 400
 
-    shipping, total = _calculate_checkout_totals(
+    shipping, total = _calculate_display_totals(
         subtotal,
         Decimal("0.00"),
     )
@@ -1754,7 +1760,7 @@ def remove_checkout_coupon():
         "message": "Cupom removido.",
         "code": "",
         "subtotal": float(subtotal),
-        "shipping": float(shipping),
+        "shipping": None,
         "discount": 0.0,
         "total": float(total),
     }), 200
@@ -1822,17 +1828,42 @@ def calcular_frete():
             "error": "Quantidade maior que o estoque disponível.",
         }), 400
 
+    from loja.services.shipping_quote import (
+        QuoteUnavailable,
+        ShipmentLine,
+        default_providers,
+        group_lines,
+        quote_groups,
+        resolve_supplier_id,
+    )
+
     subtotal = money(
         money(product.price) * quantity
     )
 
-    shipping = money(
-        calculate_shipping(subtotal)
+    # Cotação por grupo de remessa (nunca tarifa presumida): o CEP é usado
+    # de verdade; sem cotação válida, erro explícito em vez de valor fixo.
+    line = ShipmentLine(
+        product_id=product.id,
+        variant_id=None,
+        quantity=quantity,
     )
+    groups = group_lines(
+        [line],
+        lambda ln: resolve_supplier_id(ln.product_id, ln.variant_id),
+    )
+    try:
+        quoted = quote_groups(groups, cep, default_providers())
+    except QuoteUnavailable:
+        return jsonify({
+            "error": (
+                "Frete indisponível para este destino no momento. "
+                "Confira o CEP e tente novamente."
+            ),
+        }), 409
 
-    total = money(
-        subtotal + shipping
-    )
+    shipping = money(quoted["total"])
+    total = money(subtotal + shipping)
 
     return jsonify({
         "valor": f"{shipping:.2f}",
@@ -1840,6 +1871,17 @@ def calcular_frete():
         "total": f"{total:.2f}",
         "quantity": quantity,
         "cep": cep,
+        "grupos": [
+            {
+                "channel": g["channel"],
+                "cost": f"{g['cost']:.2f}",
+                "min_days": g["min_days"],
+                "max_days": g["max_days"],
+                "carrier": g["carrier"],
+                "expires_at": g["expires_at"].isoformat(),
+            }
+            for g in quoted["groups"]
+        ],
     })
 
 # ── Encomendas / área de compras ─────────────────────────────────────────────

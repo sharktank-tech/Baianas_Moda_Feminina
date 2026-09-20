@@ -972,7 +972,7 @@ def test_real_checkout_persists_variant_id_and_uses_product_price(
 
     client.post("/login", data={"email": user.email, "password": "senha123"})
 
-    monkeypatch.setattr(pr, "calculate_shipping", lambda subtotal: Decimal("18.90"))
+    monkeypatch.setattr(pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("18.90"))
     monkeypatch.setattr(
         pr,
         "create_preference",

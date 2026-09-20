@@ -197,9 +197,12 @@ def test_release_expired_reservations(db, make_user, make_product):
     assert fresh_product.stock == 19
 
 
-def test_checkout_failure_rolls_back_reservation(db, client, make_user, make_product):
+def test_checkout_failure_rolls_back_reservation(db, client, make_user, make_product, monkeypatch):
     user = make_user()
     product = make_product(stock=5)
+
+    # Cotação simulada: o foco aqui é o rollback da reserva, não a tarifa.
+    monkeypatch.setattr(pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("18.90"))
 
     client.post(
         "/login",

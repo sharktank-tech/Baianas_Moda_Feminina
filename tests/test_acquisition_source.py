@@ -279,7 +279,7 @@ def test_checkout_persists_captured_first_touch_origin(
 
     client.post("/login", data={"email": user.email, "password": "senha123"})
 
-    monkeypatch.setattr(pr, "calculate_shipping", lambda subtotal: Decimal("18.90"))
+    monkeypatch.setattr(pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("18.90"))
     monkeypatch.setattr(
         pr,
         "create_preference",
@@ -335,7 +335,7 @@ def test_checkout_without_origin_keeps_null(
 
     client.post("/login", data={"email": user.email, "password": "senha123"})
 
-    monkeypatch.setattr(pr, "calculate_shipping", lambda subtotal: Decimal("18.90"))
+    monkeypatch.setattr(pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("18.90"))
     monkeypatch.setattr(
         pr,
         "create_preference",
