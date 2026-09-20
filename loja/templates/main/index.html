@@ -463,6 +463,7 @@
     <div class="deals-inner">
 
       <div class="deals-head">
+        {% if promotions and deals_end_at %}
         <div class="deals-title-wrap">
           <span aria-hidden="true">🔥</span>
           <h2 class="deals-title">
@@ -470,7 +471,6 @@
           </h2>
         </div>
 
-        {% if deals_end_at %}
         <div class="deals-countdown">
           <span>Acaba em</span>
 
