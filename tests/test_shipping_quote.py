@@ -1435,9 +1435,15 @@ def test_temporary_flat_rate_config_invalida_bloqueia(client, db, make_user, mon
     if product is not None and estoque_antes is not None:
         db.session.refresh(product)
         assert product.stock == estoque_antes
-    # Erro sanitizado na página; para "abc" garante sem eco.
-    if str(raw).lower() == "abc":
-        assert "abc" not in resp.get_data(as_text=True).lower()
+    # A página completa contém UUIDs e outros dados aleatórios; portanto
+    # não procure o token curto "abc" no HTML inteiro. Prove a sanitização
+    # pela mensagem pública estável, sem nome da variável, traceback ou
+    # exceção decimal.
+    page = resp.get_data(as_text=True).lower()
+    assert "frete desatualizado" in page
+    assert "shipping_temporary_flat_rate" not in page
+    assert "invalidoperation" not in page
+    assert "traceback" not in page
     # Bloqueio implica não ter virado frete zero implícito (pedido não existe).
 
 
