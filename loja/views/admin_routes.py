@@ -449,6 +449,12 @@ def checkout_recovery():
         candidates=candidates,
         result=result,
         reservation_release_enabled=is_scheduled_release_enabled(),
+        reservation_batch_release_enabled=bool(
+            current_app.config.get(
+                "STOCK_RESERVATION_BATCH_RELEASE_ENABLED",
+                False,
+            )
+        ),
         reservation_hours=reservation_hours,
         expired_reservations=expired_reservations,
     )
@@ -512,18 +518,55 @@ def skip_checkout_recovery(order_id):
 
 
 @admin_blueprint.route(
+    "/admin/reservas-expiradas/<uuid:order_id>/liberar",
+    methods=["POST"],
+)
+@admin_required
+def release_single_expired_reservation(order_id):
+    """Libera apenas a reserva escolhida, após confirmação e revalidação."""
+    if request.form.get("confirm_release") != "1":
+        flash("Confirme a liberação da reserva antes de continuar.", "warning")
+        return redirect(url_for("admin.checkout_recovery"))
+
+    from loja.services.stock_reservations import (
+        release_single_expired_stock_reservation,
+    )
+
+    released = release_single_expired_stock_reservation(
+        order_id,
+        source="admin_single",
+    )
+    if released:
+        flash("Reserva vencida liberada com sucesso.", "success")
+    else:
+        flash(
+            "Pedido não elegível, não vencido ou com pagamento aprovado; "
+            "nenhum estoque foi alterado.",
+            "warning",
+        )
+    return redirect(url_for("admin.checkout_recovery"))
+
+
+@admin_blueprint.route(
     "/admin/reservas-expiradas/liberar",
     methods=["POST"],
 )
 @admin_required
 def release_expired_reservations():
-    """Ação humana explícita; não depende da flag do cron."""
+    """Lote administrativo separado e fail-closed."""
+    if not current_app.config.get(
+        "STOCK_RESERVATION_BATCH_RELEASE_ENABLED",
+        False,
+    ):
+        flash("Liberação em lote está desligada.", "warning")
+        return redirect(url_for("admin.checkout_recovery"))
+
     from loja.services.stock_reservations import (
         release_expired_stock_reservations,
     )
 
     try:
-        result = release_expired_stock_reservations(source="admin")
+        result = release_expired_stock_reservations(source="admin_batch")
     except ValueError:
         flash(
             "Configuração da janela de reserva inválida; nenhuma reserva foi alterada.",
