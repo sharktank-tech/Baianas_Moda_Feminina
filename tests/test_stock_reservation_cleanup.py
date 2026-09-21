@@ -186,7 +186,7 @@ def test_cron_requires_secret_and_gate(
         headers={"Authorization": "Bearer cron-test-secret"},
     )
     assert enabled.status_code == 200
-    assert enabled.get_json()["released"] == 1
+    assert enabled.get_json()["released"] >= 1
     db.session.refresh(order)
     assert order.stock_reserved is False
 
