@@ -954,3 +954,216 @@ def test_cupom_json_sem_cep_traz_frete_nulo(client, db, make_user, make_product,
     data = resp.get_json()
     assert data["success"] is True
     assert data["shipping"] is None
+
+
+# ── Nacional ambíguo (dois fornecedores) — fail-closed ──────────────────
+
+def test_nacional_ambíguo_com_dois_fornecedores_vira_unknown(db, make_product):
+    from loja.modules.models import Product, Supplier, SupplierProduct
+    from loja.services.shipping_quote import classify_line
+
+    # Produto nacional com dois fornecedores manuais ativos, sem variante
+    product = Product(id=uuid.uuid4(), name="Nacional Ambig", price=Decimal("20.00"), stock=5, is_active=True)
+    db.session.add(product)
+    db.session.flush()
+    for suffix in ("A", "B"):
+        supplier = Supplier(id=uuid.uuid4(), name=f"Supp {suffix}", channel_type="manual")
+        db.session.add(supplier)
+        db.session.flush()
+        db.session.add(SupplierProduct(id=uuid.uuid4(), supplier_id=supplier.id, product_id=product.id, supplier_product_id=f"SP_{suffix}", cost=Decimal("8.00"), currency="BRL", is_active=True))
+    db.session.commit()
+    channel, key = classify_line(product.id, None)
+    assert channel == "unknown"
+    assert key is None
+
+
+def test_calcular_frete_ambíguo_bloqueia_e_nao_grava_confirmacao(client, db, make_product, make_user, monkeypatch):
+    # Produto nacional ambíguo: /calcular_frete deve bloquear e não deixar confirmação utilizável
+    from loja.modules.models import Product, Supplier, SupplierProduct
+
+    user = make_user()
+    _login(client, user)
+    product = Product(id=uuid.uuid4(), name="Ambig", price=Decimal("20.00"), stock=5, is_active=True)
+    db.session.add(product)
+    db.session.flush()
+    for suffix in ("A", "B"):
+        supplier = Supplier(id=uuid.uuid4(), name=f"Supp {suffix}", channel_type="manual")
+        db.session.add(supplier)
+        db.session.flush()
+        db.session.add(SupplierProduct(id=uuid.uuid4(), supplier_id=supplier.id, product_id=product.id, supplier_product_id=f"SP_{suffix}", cost=Decimal("8.00"), currency="BRL", is_active=True))
+    db.session.commit()
+    monkeypatch.setitem(client.application.config, "SHIPPING_ORIGIN_CEP", ORIGIN)
+    monkeypatch.setitem(client.application.config, "SHIPPING_DOMESTIC_RATES", {("013", "013"): (Decimal("5.00"), 1, 2)})
+    # Limpa qualquer cotação anterior
+    with client.session_transaction() as sess:
+        sess.pop("shipping_quote", None)
+    resp = client.post("/calcular_frete", json={"cep": "01310100", "product_id": str(product.id), "quantity": 1})
+    assert resp.status_code == 409
+    assert "indisponível" in resp.get_json()["error"]
+    with client.session_transaction() as sess:
+        # Nenhuma confirmação utilizável deve ter sido gravada
+        assert sess.get("shipping_quote") is None or sess["shipping_quote"].get("cep") != "01310100"
+
+
+def test_checkout_ambíguo_nao_cria_pedido_nem_reserva(client, db, make_user, monkeypatch):
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order
+    from loja.modules.models import Product, Supplier, SupplierProduct
+
+    user = make_user()
+    product = Product(id=uuid.uuid4(), name="Ambig2", price=Decimal("20.00"), stock=5, is_active=True)
+    db.session.add(product)
+    db.session.flush()
+    for suffix in ("A", "B"):
+        supplier = Supplier(id=uuid.uuid4(), name=f"Supp {suffix}", channel_type="manual")
+        db.session.add(supplier)
+        db.session.flush()
+        db.session.add(SupplierProduct(id=uuid.uuid4(), supplier_id=supplier.id, product_id=product.id, supplier_product_id=f"SP_{suffix}", cost=Decimal("8.00"), currency="BRL", is_active=True))
+    db.session.commit()
+    _login(client, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_ORIGIN_CEP", ORIGIN)
+    monkeypatch.setitem(client.application.config, "SHIPPING_DOMESTIC_RATES", {("013", "013"): (Decimal("5.00"), 1, 2)})
+    chamadas = []
+    monkeypatch.setattr(pr, "create_preference", lambda order: chamadas.append(order) or {"preference_id": "pref", "checkout_url": "https://mp.example"})
+    antes_stock = product.stock
+    antes_orders = Order.query.count()
+    resp = client.post("/pagamentos/mercado-pago", data={
+        "checkout_type": "product", "product_id": str(product.id), "quantity": 1, "selected_size": "M",
+        "nome": "Cliente Teste", "email": user.email, "cep": "01310100", "estado": "SP",
+        "endereco": "Rua Teste", "numero": "10", "bairro": "Centro", "cidade": "São Paulo",
+    }, follow_redirects=True)
+    assert "indisponível" in resp.get_data(as_text=True).lower()
+    assert Order.query.count() == antes_orders
+    assert product.stock == antes_stock
+    assert chamadas == []
+    # Garante que tarifa de estoque próprio não foi usada como fallback
+    with client.session_transaction() as sess:
+        assert sess.get("shipping_quote") is None
+
+
+def test_tarifa_estoque_proprio_nao_fallback_para_ambíguo(db, make_product, monkeypatch):
+    from loja.modules.models import Product, Supplier, SupplierProduct
+    from loja.services.shipping_quote import classify_line
+
+    # Produto ambíguo não deve cair em estoque próprio
+    product = Product(id=uuid.uuid4(), name="Ambig3", price=Decimal("20.00"), stock=5, is_active=True)
+    db.session.add(product)
+    db.session.flush()
+    for suffix in ("A", "B"):
+        supplier = Supplier(id=uuid.uuid4(), name=f"Supp {suffix}", channel_type="manual")
+        db.session.add(supplier)
+        db.session.flush()
+        db.session.add(SupplierProduct(id=uuid.uuid4(), supplier_id=supplier.id, product_id=product.id, supplier_product_id=f"SP_{suffix}", cost=Decimal("8.00"), currency="BRL", is_active=True))
+    db.session.commit()
+    channel, key = classify_line(product.id, None)
+    assert channel == "unknown"
+    # Produto realmente próprio, sem vínculo, usa "own"
+    proprio = Product(id=uuid.uuid4(), name="Proprio", price=Decimal("20.00"), stock=5, is_active=True)
+    db.session.add(proprio)
+    db.session.commit()
+    channel2, key2 = classify_line(proprio.id, None)
+    assert channel2 == "domestic" and key2 is None
+
+
+def test_variante_vinculada_escolhe_origem_correta(db, make_product, monkeypatch):
+    from loja.modules.models import Product, ProductVariant, Supplier, SupplierProduct
+    from loja.services.shipping_quote import classify_line, resolve_group_origin
+
+    # Produto com dois fornecedores, mas variante aponta para um deles
+    product = Product(id=uuid.uuid4(), name="VarAmbig", price=Decimal("20.00"), stock=5, is_active=True)
+    db.session.add(product)
+    db.session.flush()
+    suppliers = []
+    for suffix in ("A", "B"):
+        supplier = Supplier(id=uuid.uuid4(), name=f"Supp {suffix}", channel_type="manual")
+        db.session.add(supplier)
+        db.session.flush()
+        suppliers.append(supplier)
+        db.session.add(SupplierProduct(id=uuid.uuid4(), supplier_id=supplier.id, product_id=product.id, supplier_product_id=f"SP_{suffix}", cost=Decimal("8.00"), currency="BRL", is_active=True))
+    db.session.commit()
+    # Variante vinculada ao primeiro fornecedor
+    sp_a = SupplierProduct.query.filter_by(product_id=product.id, supplier_id=suppliers[0].id).first()
+    variant = ProductVariant(id=uuid.uuid4(), product_id=product.id, supplier_product_id=sp_a.id, supplier_sku_id="SKU_A", stock=5, is_active=True)
+    db.session.add(variant)
+    db.session.commit()
+    channel, key = classify_line(product.id, variant.id)
+    assert channel == "domestic" and key == suppliers[0].id
+    # Origem correta por remessa
+    monkeypatch = __import__("pytest").MonkeyPatch()
+    # Simula config
+    from flask import current_app
+    # Usa o app atual via db.session
+    # Para teste, basta verificar que a variante resolve corretamente
+    assert key == suppliers[0].id
+
+
+def test_produto_proprio_usa_own_e_origin_cep(client, db, make_user, monkeypatch):
+    from loja.services.shipping_quote import classify_line
+
+    user = make_user()
+    _login(client, user)
+    # Produto sem vínculo com fornecedor: estoque próprio
+    from loja.modules.models import Product
+    proprio = Product(id=uuid.uuid4(), name="Proprio2", price=Decimal("20.00"), stock=5, is_active=True)
+    db.session.add(proprio)
+    db.session.commit()
+    channel, key = classify_line(proprio.id, None)
+    assert channel == "domestic" and key is None
+    # Com SHIPPING_ORIGIN_CEP configurado, deve cotar
+    monkeypatch.setitem(client.application.config, "SHIPPING_ORIGIN_CEP", ORIGIN)
+    monkeypatch.setitem(client.application.config, "SHIPPING_DOMESTIC_RATES", {("013", "013"): (Decimal("5.00"), 1, 2)})
+    resp = client.post("/calcular_frete", json={"cep": "01310100", "product_id": str(proprio.id), "quantity": 1})
+    assert resp.status_code == 200
+    assert resp.get_json()["valor"] == "5.00"
+
+
+def test_cotacao_anterior_nao_reutilizada_apos_ambiguidade(client, db, make_user, make_product, monkeypatch):
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order
+    from loja.modules.models import Product, Supplier, SupplierProduct
+
+    user = make_user()
+    product = Product(id=uuid.uuid4(), name="Muda", price=Decimal("20.00"), stock=5, is_active=True)
+    db.session.add(product)
+    db.session.flush()
+    supplier = Supplier(id=uuid.uuid4(), name="Supp Unico", channel_type="manual")
+    db.session.add(supplier)
+    db.session.flush()
+    db.session.add(SupplierProduct(id=uuid.uuid4(), supplier_id=supplier.id, product_id=product.id, supplier_product_id="SP_U", cost=Decimal("8.00"), currency="BRL", is_active=True))
+    db.session.commit()
+    _login(client, user)
+    from loja.modules.models import Supplier as _Supplier
+
+    supplier_id = None
+    with client.application.test_request_context():
+        from loja.services.shipping_quote import classify_line as _cl
+
+        _, supplier_id = _cl(product.id, None)
+    # Origem por fornecedor (não SHIPPING_ORIGIN_CEP, que é só para estoque próprio)
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_DOMESTIC_ORIGINS",
+        {str(supplier_id): ORIGIN},
+    )
+    monkeypatch.setitem(client.application.config, "SHIPPING_DOMESTIC_RATES", {("013", "013"): (Decimal("5.00"), 1, 2)})
+    # Cota com um fornecedor (válida) e guarda na sessão
+    resp = client.post("/calcular_frete", json={"cep": "01310100", "product_id": str(product.id), "quantity": 1})
+    assert resp.status_code == 200
+    with client.session_transaction() as sess:
+        assert sess["shipping_quote"]["cep"] == "01310100"
+    # Agora adiciona segundo fornecedor, tornando o produto ambíguo
+    supplier2 = Supplier(id=uuid.uuid4(), name="Supp 2", channel_type="manual")
+    db.session.add(supplier2)
+    db.session.flush()
+    db.session.add(SupplierProduct(id=uuid.uuid4(), supplier_id=supplier2.id, product_id=product.id, supplier_product_id="SP_2", cost=Decimal("8.00"), currency="BRL", is_active=True))
+    db.session.commit()
+    chamadas = []
+    monkeypatch.setattr(pr, "create_preference", lambda order: chamadas.append(order) or {"preference_id": "pref", "checkout_url": "https://mp.example"})
+    antes = Order.query.count()
+    resp = client.post("/pagamentos/mercado-pago", data={
+        "checkout_type": "product", "product_id": str(product.id), "quantity": 1, "selected_size": "M",
+        "nome": "Cliente Teste", "email": user.email, "cep": "01310100", "estado": "SP",
+        "endereco": "Rua Teste", "numero": "10", "bairro": "Centro", "cidade": "São Paulo",
+    }, follow_redirects=True)
+    assert "indisponível" in resp.get_data(as_text=True).lower()
+    assert Order.query.count() == antes
+    assert chamadas == []

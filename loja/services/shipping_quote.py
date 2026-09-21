@@ -348,13 +348,17 @@ def classify_line(product_id, variant_id=None):
         if len(valid_ali) == 1:
             return "aliexpress", next(iter(valid_ali))
         if getattr(product, "source", None) != "aliexpress":
-            # Nacional: fornecedor manual identificável vira a chave da
-            # remessa (origem própria); sem vínculo, estoque próprio.
+            # Variante vinculada inequivocamente vence, mesmo com outros vínculos.
             if variant_supplier is not None:
                 return "domestic", variant_supplier
             if len(manual) == 1:
                 return "domestic", next(iter(manual))
-            return "domestic", None
+            if len(manual) == 0:
+                # Sem vínculo: estoque próprio comprovado.
+                return "domestic", None
+            # Dois ou mais fornecedores manuais ativos, sem variante que
+            # determine inequivocamente -> origem desconhecida (fail-closed).
+            return "unknown", None
     return "unknown", None
 
 
