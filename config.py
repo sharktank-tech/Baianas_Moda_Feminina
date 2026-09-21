@@ -84,7 +84,9 @@ class Config:
         False,
     )
     # Tarifa comercial temporária (não é cálculo por CEP). Cobrada igual
-    # para todo pedido; pode divergir do custo real do fornecedor.
+    # para todo pedido; pode divergir do custo real do fornecedor. O serviço
+    # aceita somente valores entre 0 e 9999.99; o teto é uma proteção
+    # operacional, não política de preço. Fretes maiores exigem cotação real.
     SHIPPING_TEMPORARY_FLAT_RATE = os.environ.get(
         "SHIPPING_TEMPORARY_FLAT_RATE",
         "10.00",
