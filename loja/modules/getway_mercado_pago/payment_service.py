@@ -10,6 +10,7 @@ from mercadopago.webhook import (
 )
 
 from loja.observability.mercado_pago import log_event
+from loja.services.reservation_policy import as_utc_iso
 
 
 MONEY_PLACES = Decimal("0.01")
@@ -86,6 +87,20 @@ def public_url(path):
 def create_preference(order):
     sdk = get_sdk()
 
+    created_at = getattr(order, "created_at", None)
+    expires_at = getattr(order, "mp_preference_expires_at", None)
+    try:
+        expiration_date_from = as_utc_iso(created_at)
+        expiration_date_to = as_utc_iso(expires_at)
+    except ValueError as error:
+        raise PaymentConfigurationError(
+            "Prazo da preferência de pagamento não foi definido."
+        ) from error
+    if expires_at <= created_at:
+        raise PaymentConfigurationError(
+            "Prazo da preferência de pagamento é inválido."
+        )
+
     name_parts = (order.customer_name or "").strip().split(maxsplit=1)
     first_name = name_parts[0] if name_parts else ""
     last_name = name_parts[1] if len(name_parts) > 1 else ""
@@ -127,7 +142,9 @@ def create_preference(order):
         "notification_url": public_url("/pagamentos/webhook"),
         "auto_return": "approved",
         "statement_descriptor": "POLLO MODAS",
-        "expires": False,
+        "expires": True,
+        "expiration_date_from": expiration_date_from,
+        "expiration_date_to": expiration_date_to,
     }
 
     request_options = RequestOptions()
