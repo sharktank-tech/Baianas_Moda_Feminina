@@ -202,7 +202,7 @@ def test_admin_action_releases_without_provider_call(
         lambda *args, **kwargs: provider_calls.append((args, kwargs)),
     )
 
-    login(admin_user)
+    login(admin_user.email)
     response = client.post(
         "/admin/reservas-expiradas/liberar",
         follow_redirects=False,
@@ -222,7 +222,7 @@ def test_admin_action_denies_non_admin(
     user = make_user()
     product = make_product(stock=5)
     order = _reserved_order(db, user, product)
-    login(user)
+    login(user.email)
 
     response = client.post(
         "/admin/reservas-expiradas/liberar",
