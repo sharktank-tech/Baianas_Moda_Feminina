@@ -14,8 +14,10 @@ from loja.modules.getway_mercado_pago.payment_models import Order
 from loja.services.checkout_recovery import (
     DEFAULT_AFTER_HOURS,
     find_recoverable_orders,
+    is_batch_recovery_enabled,
     is_recovery_enabled,
     load_after_hours,
+    run_checkout_recovery,
     send_recovery_emails,
 )
 
@@ -272,3 +274,146 @@ def test_recovery_post_honors_gate(client, admin_user, login, db, monkeypatch):
     text = response.get_data(as_text=True)
     assert "E-mails enviados" in text
     assert "Habilitado" in text
+
+def test_batch_gate_defaults_off_even_when_individual_is_enabled(monkeypatch):
+    monkeypatch.setenv("CHECKOUT_RECOVERY_ENABLED", "1")
+    monkeypatch.delenv("CHECKOUT_RECOVERY_BATCH_ENABLED", raising=False)
+
+    assert is_batch_recovery_enabled() is False
+    result = run_checkout_recovery(email_sender=lambda *args: None)
+    assert result.enabled is False
+    assert result.sent == 0
+
+
+def test_batch_gate_requires_exact_one(monkeypatch):
+    for value in ("true", "yes", "0", "2"):
+        monkeypatch.setenv("CHECKOUT_RECOVERY_BATCH_ENABLED", value)
+        assert is_batch_recovery_enabled() is False
+    monkeypatch.setenv("CHECKOUT_RECOVERY_BATCH_ENABLED", "1")
+    assert is_batch_recovery_enabled() is True
+
+
+def test_individual_route_sends_only_selected_candidate(
+    client, admin_user, login, db, monkeypatch
+):
+    from loja.utils import utcnow
+    import loja.modules.enviar_email as email_module
+    import loja.services.checkout_recovery as recovery
+
+    monkeypatch.setenv("CHECKOUT_RECOVERY_ENABLED", "1")
+    monkeypatch.delenv("CHECKOUT_RECOVERY_BATCH_ENABLED", raising=False)
+    monkeypatch.setattr(email_module, "email_delivery_ready", lambda: True)
+    monkeypatch.setattr(recovery, "email_delivery_ready", lambda: True)
+    sent = []
+    monkeypatch.setattr(
+        recovery,
+        "enviar_email",
+        lambda recipient, subject, body: sent.append(recipient),
+    )
+
+    selected = _order(
+        user_id=admin_user.id,
+        customer_email="selected@example.test",
+        created_at=utcnow() - timedelta(hours=3),
+    )
+    untouched = _order(
+        user_id=admin_user.id,
+        customer_email="untouched@example.test",
+        created_at=utcnow() - timedelta(hours=3),
+    )
+    db.session.add_all([selected, untouched])
+    db.session.commit()
+    login(admin_user.email, "senha123")
+
+    response = client.post(
+        f"/admin/recuperacao-checkout/{selected.id}/enviar",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    db.session.refresh(selected)
+    db.session.refresh(untouched)
+    assert selected.recovery_email_sent_at is not None
+    assert untouched.recovery_email_sent_at is None
+    assert sent == ["selected@example.test"]
+
+
+def test_individual_route_fails_closed_without_smtp(
+    client, admin_user, login, db, monkeypatch
+):
+    from loja.utils import utcnow
+    import loja.modules.enviar_email as email_module
+    import loja.services.checkout_recovery as recovery
+
+    monkeypatch.setenv("CHECKOUT_RECOVERY_ENABLED", "1")
+    monkeypatch.setattr(email_module, "email_delivery_ready", lambda: False)
+    monkeypatch.setattr(recovery, "email_delivery_ready", lambda: False)
+    order = _order(
+        user_id=admin_user.id,
+        created_at=utcnow() - timedelta(hours=3),
+    )
+    db.session.add(order)
+    db.session.commit()
+    login(admin_user.email, "senha123")
+
+    response = client.post(
+        f"/admin/recuperacao-checkout/{order.id}/enviar",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Entrega de e-mail indisponível" in response.get_data(as_text=True)
+    db.session.refresh(order)
+    assert order.recovery_email_sent_at is None
+
+
+def test_individual_route_denies_non_admin(
+    client, regular_user, login, db
+):
+    from loja.utils import utcnow
+
+    order = _order(
+        user_id=regular_user.id,
+        created_at=utcnow() - timedelta(hours=3),
+    )
+    db.session.add(order)
+    db.session.commit()
+    login(regular_user.email, "senha123")
+
+    response = client.post(
+        f"/admin/recuperacao-checkout/{order.id}/enviar",
+        follow_redirects=False,
+    )
+    assert response.status_code in (302, 303, 403)
+    db.session.refresh(order)
+    assert order.recovery_email_sent_at is None
+
+
+def test_email_delivery_logs_never_include_recipient_or_exception(
+    monkeypatch, caplog
+):
+    from config import Config
+    import loja.modules.enviar_email as email_module
+
+    monkeypatch.setattr(Config, "EMAIL_SERVER", "smtp.example.test")
+    monkeypatch.setattr(Config, "EMAIL_PORT", 587)
+    monkeypatch.setattr(Config, "EMAIL_SENDER", "sender@example.test")
+    monkeypatch.setattr(Config, "EMAIL_PASSWORD", "secret-password")
+
+    class BrokenSMTP:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("sensitive-provider-detail")
+
+    monkeypatch.setattr(email_module.smtplib, "SMTP", BrokenSMTP)
+    with pytest.raises(RuntimeError, match="email_delivery_failed"):
+        email_module.enviar_email(
+            "private-recipient@example.test",
+            "Assunto",
+            "Corpo",
+        )
+
+    output = caplog.text
+    assert "private-recipient@example.test" not in output
+    assert "sensitive-provider-detail" not in output
+    assert "secret-password" not in output
+    assert "email_delivery failed=1" in output
