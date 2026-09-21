@@ -175,6 +175,25 @@
 
       </div>
 
+
+      <!-- Operação -->
+
+      <div class="adm-nav-group">
+
+        <div class="adm-nav-group-label">
+          Operação
+        </div>
+
+        <a
+          class="adm-nav-link"
+          href="{{ url_for('admin.checkout_recovery') }}"
+        >
+          <span class="adm-icon">↻</span>
+          Recuperação de checkout
+        </a>
+
+      </div>
+
     </nav>
 
 
@@ -293,6 +312,13 @@
       >
         Rodapé
       </button>
+
+      <a
+        class="adm-nav-link"
+        href="{{ url_for('admin.checkout_recovery') }}"
+      >
+        Recuperação
+      </a>
 
     </nav>
 
