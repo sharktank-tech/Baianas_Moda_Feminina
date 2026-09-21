@@ -28,6 +28,16 @@ class _FakeRequest:
 # Sanitização UTM
 # ---------------------------------------------------------------------------
 
+def _preset_quote(client, product_id, cep="01310100", shipping="10.00", variant_id=None):
+    from test_shipping_quote import preset_shipping_quote
+
+    preset_shipping_quote(
+        client, cep,
+        [{"product_id": product_id, "variant_id": variant_id, "quantity": 1}],
+        shipping,
+    )
+
+
 def test_utm_clean_values_preserved():
     req = _FakeRequest({
         "utm_source": "instagram",
@@ -208,7 +218,7 @@ def _checkout_order(db, product, *, quantity=1):
 
     unit_price = Decimal(str(product.price))
     subtotal = unit_price * quantity
-    shipping = Decimal("18.90")
+    shipping = Decimal("10.00")
     order = Order(
         id=uuid.uuid4(),
         user_id=uuid.uuid4(),
@@ -279,7 +289,7 @@ def test_checkout_persists_captured_first_touch_origin(
 
     client.post("/login", data={"email": user.email, "password": "senha123"})
 
-    monkeypatch.setattr(pr, "calculate_shipping", lambda subtotal: Decimal("18.90"))
+    monkeypatch.setattr(pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("10.00"))
     monkeypatch.setattr(
         pr,
         "create_preference",
@@ -288,6 +298,7 @@ def test_checkout_persists_captured_first_touch_origin(
             "checkout_url": "https://mp.example/x",
         },
     )
+    _preset_quote(client, product.id)
 
     # Primeira página da sessão traz UTM de campanha.
     with client.session_transaction() as sess:
@@ -335,7 +346,7 @@ def test_checkout_without_origin_keeps_null(
 
     client.post("/login", data={"email": user.email, "password": "senha123"})
 
-    monkeypatch.setattr(pr, "calculate_shipping", lambda subtotal: Decimal("18.90"))
+    monkeypatch.setattr(pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("10.00"))
     monkeypatch.setattr(
         pr,
         "create_preference",
@@ -344,6 +355,7 @@ def test_checkout_without_origin_keeps_null(
             "checkout_url": "https://mp.example/x",
         },
     )
+    _preset_quote(client, product.id)
 
     resp = client.post(
         "/pagamentos/mercado-pago",

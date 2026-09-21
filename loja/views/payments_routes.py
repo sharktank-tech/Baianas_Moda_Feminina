@@ -32,13 +32,137 @@ from loja.modules.getway_mercado_pago.payment_service import (
     InvalidWebhookError,
     PaymentConfigurationError,
     PaymentGatewayError,
-    calculate_shipping,
     create_preference,
     get_payment,
     money,
     mp_status_to_order_status,
     validate_webhook_signature,
 )
+from loja.services.shipping_quote import (
+    QuoteUnavailable,
+    quote_for_items,
+    temporary_flat_rate,
+)
+
+
+def _unavailable_message(code: str) -> str:
+    return {
+        "missing_origin": (
+            "Frete indisponível para este destino no momento. "
+            "Confira o CEP e tente novamente."
+        ),
+        "provider_unavailable": (
+            "Frete indisponível para este destino no momento. "
+            "Confira o CEP e tente novamente."
+        ),
+        "no_supplier_data": (
+            "Frete indisponível para este destino no momento. "
+            "Confira o CEP e tente novamente."
+        ),
+        "currency_mismatch": (
+            "Frete indisponível para este destino no momento. "
+            "Confira o CEP e tente novamente."
+        ),
+        "invalid_destination": "Informe um CEP válido com 8 números.",
+        "expired": (
+            "Cotação de frete vencida. Calcule novamente e tente outra vez."
+        ),
+        "invalid_quote": (
+            "Frete desatualizado. Calcule novamente e tente outra vez."
+        ),
+    }.get(
+        code,
+        "Frete indisponível para este destino no momento. "
+        "Confira o CEP e tente novamente.",
+    )
+
+
+def _is_grouped_quote_enabled() -> bool:
+    from flask import current_app
+
+    return bool(current_app.config.get("SHIPPING_GROUPED_QUOTE_ENABLED"))
+
+
+def quote_checkout_shipping(item_data, dest_cep):
+    """Frete total do checkout.
+
+    Com flag desligada (SHIPPING_GROUPED_QUOTE_ENABLED=False), usa a tarifa
+    comercial temporária única (temporary_flat_rate) — regra assumida pela
+    loja, não cotação por CEP. Com flag ligada, usa cotação por grupo
+    (nunca tarifa presumida). Configuração inválida falha sanitizada.
+    """
+    if not _is_grouped_quote_enabled():
+        try:
+            return temporary_flat_rate()
+        except QuoteUnavailable as exc:
+            raise ValueError(_unavailable_message(exc.code)) from exc
+
+    try:
+        result = quote_for_items(item_data, dest_cep)
+    except QuoteUnavailable as exc:
+        raise ValueError(_unavailable_message(exc.code)) from exc
+    return result["total"]
+
+
+def _require_confirmed_quote(item_data, dest_cep, shipping):
+    """Exige confirmação explícita do frete exibido antes da preferência.
+
+    A confirmação é a cotação registrada na sessão (assinada) pelo
+    /calcular_frete: compara CEP, itens/quantidades, valor e validade com
+    o recálculo autoritativo (banco + CEP do formulário). Qualquer
+    divergência, ausência ou vencimento exige nova confirmação — nunca se
+    cobra em cima de inputs do navegador.
+    """
+    from datetime import datetime
+
+    from loja.services.shipping_quote import canonical_items
+    from loja.utils import utcnow
+
+    stored = session.get("shipping_quote")
+    if not isinstance(stored, dict) or not stored:
+        raise ValueError(
+            "Calcule o frete e confirme o valor antes de concluir."
+        )
+    # Cada remessa tem sua validade: basta uma vencer para exigir nova cotação.
+    expiries = [stored.get("expires_at")]
+    groups = stored.get("groups") or []
+    if not isinstance(groups, list):
+        raise ValueError(
+            "Cotação de frete vencida. Calcule novamente e tente outra vez."
+        )
+    for group in groups:
+        expiries.append(group.get("expires_at") if isinstance(group, dict) else None)
+    try:
+        deadlines = [datetime.fromisoformat(exp or "") for exp in expiries]
+    except ValueError:
+        raise ValueError(
+            "Cotação de frete vencida. Calcule novamente e tente outra vez."
+        ) from None
+    if min(deadlines) <= utcnow():
+        raise ValueError(
+            "Cotação de frete vencida. Calcule novamente e tente outra vez."
+        )
+    if stored.get("cep") != dest_cep:
+        raise ValueError(
+            "O frete foi atualizado. Confira o novo valor e confirme novamente."
+        )
+    if stored.get("items") != [
+        {"product_id": pid, "variant_id": vid or None, "quantity": qty}
+        for pid, vid, qty in canonical_items(item_data)
+    ]:
+        raise ValueError(
+            "O frete foi atualizado. Confira o novo valor e confirme novamente."
+        )
+    try:
+        confirmed = money(stored.get("shipping"))
+    except Exception:
+        raise ValueError(
+            "O frete foi atualizado. Confira o novo valor e confirme novamente."
+        ) from None
+    if confirmed != money(shipping):
+        raise ValueError(
+            "O frete foi atualizado. Confira o novo valor e confirme novamente."
+        )
 from loja.integrations.aliexpress import (
     ensure_aliexpress_fulfillment,
     cancel_fulfillment_before_submission,
@@ -665,7 +789,12 @@ def create_mercado_pago_payment():
             subtotal,
         )
 
-        shipping = calculate_shipping(subtotal)
+        customer_data = _get_customer_data()
+        shipping = quote_checkout_shipping(item_data, customer_data["zip_code"])
+        # Flag ligada exige confirmação agrupada por sessão; desligada usa
+        # regra temporária flat aprovada, sem confirmação de remessas.
+        if _is_grouped_quote_enabled():
+            _require_confirmed_quote(item_data, customer_data["zip_code"], shipping)
 
         total = money(
             max(
@@ -690,7 +819,7 @@ def create_mercado_pago_payment():
             discount=discount,
             total=total,
             stock_reserved=True,
-            **_get_customer_data(),
+            **customer_data,
             **acquisition_to_order_kwargs(
                 order_acquisition(session=session)
             ),

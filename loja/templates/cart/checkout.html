@@ -1056,13 +1056,13 @@
 
             <div class="summary-row">
                 <span>Frete</span>
-                <span id="shipping-price">
+                <span id="shipping-price" data-estimate="{{ shipping_estimate | default('Frete calculado após informar o CEP') }}">
                     {% if shipping is defined and shipping == 0 %}
                         Grátis
-                    {% elif shipping is defined %}
+                    {% elif shipping is defined and shipping is not none %}
                         R$ {{ '%.2f'|format(shipping) | replace('.', ',') }}
                     {% else %}
-                        Calcular
+                        {{ shipping_estimate | default('Frete calculado após informar o CEP') }}
                     {% endif %}
                 </span>
             </div>
@@ -1305,16 +1305,17 @@
                 "R$ " + formatMoney(data.subtotal);
         }
 
-        if (
-            shippingPrice &&
-            data.shipping !== undefined &&
-            Number.isFinite(Number(data.shipping))
-        ) {
-            const shipping = Number(data.shipping);
+        if (shippingPrice && data.shipping !== undefined) {
+            if (data.shipping === null) {
+                shippingPrice.textContent =
+                    shippingPrice.dataset.estimate || "a calcular";
+            } else if (Number.isFinite(Number(data.shipping))) {
+                const shipping = Number(data.shipping);
 
-            shippingPrice.textContent = shipping <= 0
-                ? "Grátis"
-                : "R$ " + formatMoney(shipping);
+                shippingPrice.textContent = shipping <= 0
+                    ? "Grátis"
+                    : "R$ " + formatMoney(shipping);
+            }
         }
 
         const discount = Number(data.discount || 0);
@@ -1701,14 +1702,13 @@
             .replace(/\D/g, "");
 
         /*
-         * A rota atual /calcular_frete é específica
-         * para compra direta de produto.
-         * No carrinho, subtotal/frete/total já vêm
-         * calculados pelo backend na renderização.
+         * /calcular_frete atende compra direta (product_id) e carrinho
+         * completo ({cart: true}); a confirmação fica na sessão para o
+         * checkout exigir antes da preferência.
          */
         if (
-            checkoutType !== "product" ||
-            !productId ||
+            (checkoutType !== "product" && checkoutType !== "cart") ||
+            (checkoutType === "product" && !productId) ||
             !shippingUrl ||
             cleanCep.length !== 8 ||
             shippingBusy
@@ -1726,11 +1726,15 @@
                     credentials: "same-origin",
                     redirect: "follow",
                     headers: buildJsonHeaders(),
-                    body: JSON.stringify({
-                        cep: cleanCep,
-                        product_id: productId,
-                        quantity: quantity
-                    })
+                    body: JSON.stringify(
+                        checkoutType === "cart"
+                            ? { cep: cleanCep, cart: true }
+                            : {
+                                cep: cleanCep,
+                                product_id: productId,
+                                quantity: quantity
+                            }
+                    )
                 }
             );
 

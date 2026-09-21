@@ -73,11 +73,23 @@ class Config:
         "MERCADO_PAGO_REQUIRE_WEBHOOK_SIGNATURE",
         True,
     )
-    PAYMENT_FLAT_SHIPPING = os.environ.get(
-        "PAYMENT_FLAT_SHIPPING",
-        "18.90",
+    # Frete por cotação (loja/services/shipping_quote.py) atrás de flag
+    # desligada por padrão: sem SHIPPING_ORIGIN_CEP/tabela real e sem
+    # SHIPPING_ALIEXPRESS_FRESH_QUOTES, todo checkout real bloquearia.
+    # Enquanto a integração real não existir, o checkout usa a tarifa
+    # comercial temporária única SHIPPING_TEMPORARY_FLAT_RATE — regra
+    # assumida pela loja, não cotação por CEP, sem frete grátis automático.
+    SHIPPING_GROUPED_QUOTE_ENABLED = env_bool(
+        "SHIPPING_GROUPED_QUOTE_ENABLED",
+        False,
     )
-    FREE_SHIPPING_MIN = os.environ.get(
-        "FREE_SHIPPING_MIN",
-        "249.00",
+    # Tarifa comercial temporária (não é cálculo por CEP). Cobrada igual
+    # para todo pedido; pode divergir do custo real do fornecedor. O serviço
+    # aceita somente valores entre 0 e 9999.99; o teto é uma proteção
+    # operacional, não política de preço. Fretes maiores exigem cotação real.
+    SHIPPING_TEMPORARY_FLAT_RATE = os.environ.get(
+        "SHIPPING_TEMPORARY_FLAT_RATE",
+        "10.00",
     )
+    SHIPPING_ORIGIN_CEP = os.environ.get("SHIPPING_ORIGIN_CEP") or None
+    SHIPPING_DOMESTIC_RATES = os.environ.get("SHIPPING_DOMESTIC_RATES") or None

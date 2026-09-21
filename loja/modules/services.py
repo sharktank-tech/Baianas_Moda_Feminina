@@ -28,7 +28,8 @@ from loja.modules.models import (
     ContactInfo,
     Favorite,
 )
-from loja.utils import utcnow
+from loja.modules.footer_links import is_safe_footer_url
+from loja.utils import as_sao_paulo, utcnow
 
 
 # ── Layout base (contexto global de admin) ─────────────────────────────────────
@@ -65,6 +66,21 @@ def get_layout_data() -> dict:
 
 # ── Home ──────────────────────────────────────────────────────────────────────
 
+def deals_show_do_dia(promotions, now) -> bool:
+    """True só se há ofertas e todas terminam hoje (America/Sao_Paulo).
+
+    O flash "do dia" fica reservado para duração que sustenta a afirmação;
+    promoções sem prazo ou com término futuro usam o título geral "Ofertas".
+    """
+    if not promotions:
+        return False
+    today = as_sao_paulo(now).date()
+    return all(
+        p.ends_at is not None and as_sao_paulo(p.ends_at).date() == today
+        for p in promotions
+    )
+
+
 def get_home_data() -> dict:
     """
     Dados usados pela home (main/index.html).
@@ -73,11 +89,12 @@ def get_home_data() -> dict:
         hero_slides   – list[HeroSlide] (ativas, ordenadas)
         categories    – cards de categoria
         banner        – dict  { quote, cta_text, cta_link }
-        deals_end_at  – str (ISO) fim da menor promoção ativa
-        promotions    – list[Promotion] (ativas, não expiradas)
+        promotions    – list[Promotion] (ativas, não expiradas; cada card mostra
+                        o próprio ends_at em America/Sao_Paulo quando houver)
+        deals_do_dia  – bool (True só se todas as ofertas terminam hoje)
         products      – list[Product] (até 8, ativos, favoritados)
         testimonials  – list[Testimonial] (visíveis, até 6)
-        store_policy  – dict  { exchange_days, max_installments, free_shipping_min }
+        store_policy  – dict  { exchange_days }
     """
     favoritos = get_favorited_ids()
 
@@ -132,18 +149,11 @@ def get_home_data() -> dict:
         .all()
     )
 
-    # "Acaba em" é uma contagem regressiva das ofertas do DIA: nunca passa do
-    # fim do dia, mesmo que a promoção esteja ativa por vários dias. Usa o
-    # término da promoção apenas quando ele acontece ainda hoje.
-    end_of_day = now.replace(
-        hour=23, minute=59, second=59, microsecond=0
-    )
-    ends_today = [
-        p.ends_at
-        for p in promotions
-        if p.ends_at and p.ends_at.date() == now.date()
-    ]
-    deals_end_at = min(ends_today) if ends_today else end_of_day
+    # Prazo real por oferta: cada card exibe o próprio ends_at (em
+    # America/Sao_Paulo) quando ele existe. Não há relógio geral nem
+    # fallback para o fim do dia — um prazo fabricado sugeriria que todas
+    # as ofertas terminam juntas.
+    deals_do_dia = deals_show_do_dia(promotions, now)
 
     structured_data = None
     if products and has_request_context():
@@ -174,14 +184,12 @@ def get_home_data() -> dict:
             "cta_text": "Ver a coleção completa",
             "cta_link": url_for("main.produtos"),
         },
-        "deals_end_at": deals_end_at.isoformat(),
         "promotions": promotions,
+        "deals_do_dia": deals_do_dia,
         "products": products,
         "testimonials": testimonials,
         "store_policy": {
-            "exchange_days": 30,
-            "max_installments": 12,
-            "free_shipping_min": 249,
+            "exchange_days": 7,
         },
     }
 
@@ -301,16 +309,22 @@ def get_footer_data() -> dict:
 
     site = SiteConfig.query.first()
     footer_config = FooterConfig.query.first()
+
+    def _safe(rows):
+        # Omite registros antigos inválidos na renderização sem apagar dados:
+        # o admin deve revisar/excluir pelo dashboard.
+        return [r for r in rows if is_safe_footer_url(getattr(r, "url", ""))]
+
     data = {
         "brand_name":        footer_config.brand_name        if footer_config else "",
         "brand_description": footer_config.brand_description if footer_config else "",
-        "social_links":      SocialLink.query.all(),
-        "nav_links":         NavLink.query.all(),
-        "categories":        CategoryLink.query.all(),
+        "social_links":      _safe(SocialLink.query.all()),
+        "nav_links":         _safe(NavLink.query.all()),
+        "categories":        _safe(CategoryLink.query.all()),
         "contact":           ContactInfo.query.first(),
         "copyright_year":    site.copyright_year if site else 2025,
         "copyright_text":    site.copyright_text if site else "",
-        "legal_links":       LegalLink.query.all(),
+        "legal_links":       _safe(LegalLink.query.all()),
     }
     set_cached("footer_data", data, ttl=600)
     return data

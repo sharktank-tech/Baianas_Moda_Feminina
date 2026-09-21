@@ -16,7 +16,18 @@ from werkzeug.security import generate_password_hash
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from loja.utils.decorators import admin_required
+from loja.modules.footer_links import is_safe_footer_url
 from loja.modules.services import get_layout_data
+
+_FOOTER_URL_ERROR = (
+    "URL inválida para link do rodapé. "
+    "Use um caminho interno funcional (ex.: /sobre) ou https://."
+)
+
+
+def _footer_url_ok(url: str) -> bool:
+    """Validação compartilhada dos 4 grupos de links do rodapé."""
+    return is_safe_footer_url(url)
 
 from loja.modules.models import (
     db,
@@ -1189,6 +1200,10 @@ def add_social_link():
         url   = request.form.get("url", "").strip()
         icon  = request.form.get("icon", "").strip()
 
+        if not _footer_url_ok(url):
+            flash(_FOOTER_URL_ERROR, "danger")
+            return render_template("admin/config/add_social_link.html")
+
         try:
             social = SocialLink(
                 label = label,
@@ -1219,8 +1234,13 @@ def edit_social_link(id):
 
     if request.method == "POST":
 
+        new_url = (request.form.get("url") or "").strip()
+        if not _footer_url_ok(new_url):
+            flash(_FOOTER_URL_ERROR, "danger")
+            return render_template("admin/config/edit_social_link.html", social=social)
+
         social.label = request.form.get("label", "").strip()
-        social.url   = request.form.get("url")  or None
+        social.url   = new_url
         social.icon  = request.form.get("icon") or None
 
         try:
@@ -1381,6 +1401,10 @@ def add_nav_link():
         label = request.form.get("label", "").strip()
         url   = request.form.get("url", "").strip()
 
+        if not _footer_url_ok(url):
+            flash(_FOOTER_URL_ERROR, "danger")
+            return render_template("admin/footer/add_nav_link.html")
+
         try:
             nav = NavLink(label=label, url=url)
             db.session.add(nav)
@@ -1407,8 +1431,13 @@ def edit_nav_link(id):
 
     if request.method == "POST":
 
+        new_url = request.form.get("url", "").strip()
+        if not _footer_url_ok(new_url):
+            flash(_FOOTER_URL_ERROR, "danger")
+            return render_template("admin/footer/edit_nav_link.html", nav=nav)
+
         nav.label = request.form.get("label", "").strip()
-        nav.url   = request.form.get("url", "").strip()
+        nav.url   = new_url
 
         try:
             db.session.commit()
@@ -1452,6 +1481,10 @@ def add_category_link():
         slug = request.form.get("slug", "").strip()
         image = request.form.get("image", "").strip()
 
+        if not _footer_url_ok(url):
+            flash(_FOOTER_URL_ERROR, "danger")
+            return render_template("admin/footer/add_category_link.html")
+
         try:
             cat = CategoryLink(label=label, url=url, slug=slug, image=image)
             db.session.add(cat)
@@ -1479,8 +1512,13 @@ def edit_category_link(id):
 
     if request.method == "POST":
 
+        new_url = request.form.get("url", "").strip()
+        if not _footer_url_ok(new_url):
+            flash(_FOOTER_URL_ERROR, "danger")
+            return render_template("admin/footer/edit_category_link.html", cat=cat)
+
         cat.label = request.form.get("label", "").strip()
-        cat.url   = request.form.get("url", "").strip()
+        cat.url   = new_url
         cat.slug = request.form.get("slug", "").strip()
         cat.image = request.form.get("image", "").strip()
 
@@ -1524,6 +1562,10 @@ def add_legal_link():
         label = request.form.get("label", "").strip()
         url   = request.form.get("url", "").strip()
 
+        if not _footer_url_ok(url):
+            flash(_FOOTER_URL_ERROR, "danger")
+            return render_template("admin/footer/add_legal_link.html")
+
         try:
             legal = LegalLink(label=label, url=url)
             db.session.add(legal)
@@ -1550,8 +1592,13 @@ def edit_legal_link(id):
 
     if request.method == "POST":
 
+        new_url = request.form.get("url", "").strip()
+        if not _footer_url_ok(new_url):
+            flash(_FOOTER_URL_ERROR, "danger")
+            return render_template("admin/footer/edit_legal_link.html", legal=legal)
+
         legal.label = request.form.get("label", "").strip()
-        legal.url   = request.form.get("url", "").strip()
+        legal.url   = new_url
 
         try:
             db.session.commit()

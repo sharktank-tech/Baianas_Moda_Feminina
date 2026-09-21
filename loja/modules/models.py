@@ -52,9 +52,12 @@ class SiteConfig(db.Model):
     copyright_text = db.Column(db.String(255))
 
     # NOVOS: usados na seção "Selos de confiança" da home (antes eram valores fixos no HTML)
-    exchange_days = db.Column(db.Integer, default=30)
+    exchange_days = db.Column(db.Integer, default=7)
     max_installments = db.Column(db.Integer, default=12)
-    free_shipping_min = db.Column(db.Numeric(10, 2), default=249)
+    # Sem promessa de frete grátis: sem default (linhas antigas podem conter
+    # um limite legado, mas nenhum código mais lê este campo para precificar
+    # ou anunciar).
+    free_shipping_min = db.Column(db.Numeric(10, 2), default=None)
 
 
 # ==========================================================

@@ -7,7 +7,6 @@ from flask import Flask
 from loja.modules.getway_mercado_pago import payment_service
 from loja.modules.getway_mercado_pago.payment_service import (
     PaymentConfigurationError,
-    calculate_shipping,
     create_preference,
     get_merchant_order,
     money,
@@ -18,10 +17,6 @@ from loja.modules.getway_mercado_pago.payment_service import (
 
 def create_test_app():
     app = Flask(__name__)
-    app.config.update(
-        PAYMENT_FLAT_SHIPPING="18.90",
-        FREE_SHIPPING_MIN="249.00",
-    )
     return app
 
 
@@ -29,16 +24,11 @@ def test_money_rounds_to_two_places():
     assert money("10.999") == Decimal("11.00")
 
 
-def test_shipping_is_free_from_threshold():
-    app = create_test_app()
-    with app.app_context():
-        assert calculate_shipping("249.00") == Decimal("0.00")
-
-
-def test_shipping_uses_flat_value_below_threshold():
-    app = create_test_app()
-    with app.app_context():
-        assert calculate_shipping("100.00") == Decimal("18.90")
+def test_flat_shipping_removed_no_free_threshold():
+    """Não existe mais calculadora de envio no payment_service: o frete vem de
+    cotação por grupo (loja.services.shipping_quote) ou da tarifa comercial
+    temporária única (SHIPPING_TEMPORARY_FLAT_RATE)."""
+    assert not hasattr(payment_service, "calculate_shipping")
 
 
 def test_public_url_upgrades_protocol_relative_origin_to_https():

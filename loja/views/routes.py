@@ -56,10 +56,8 @@ from loja.modules.tracking_status import (
 )
 from loja.services.customer_tracking import build_customer_tracking
 
-from loja.modules.getway_mercado_pago.payment_service import (
-    calculate_shipping,
-    money,
-)
+from loja.modules.getway_mercado_pago.payment_service import money
+from loja.services.shipping_quote import estimate_label, temporary_flat_rate
 
 tracking_blueprint = Blueprint(
     "tracking",
@@ -160,11 +158,15 @@ def inject_product_content_helpers():
     padrão do Jinja sobre o conteúdo já sanitizado).
     Reveal/meta/cards: `product_description_excerpt(...)` — texto puro sem HTML.
     """
+    from loja.utils import format_deadline_sp
+
     return {
         "sanitize_product_description_html": sanitize_product_description_html,
         "sanitize_product_description_without_images": sanitize_product_description_without_images,
         "product_description_excerpt": product_description_excerpt,
         "product_canonical_url": product_canonical_url,
+        # Prazos de promoção sempre em America/Sao_Paulo (banco guarda UTC naive).
+        "format_deadline_sp": format_deadline_sp,
     }
 
 
@@ -937,23 +939,33 @@ def _calculate_cart_subtotal(cart_items):
     )
 
 
-def _calculate_checkout_totals(subtotal, discount=Decimal("0.00")):
+def _calculate_display_totals(subtotal, discount=Decimal("0.00")):
+    """Totais de vitrine (carrinho/checkout sem CEP): frete como estimativa.
+
+    Sem destino não há cotação — retorna shipping None e o template exibe
+    o rótulo de estimativa. O valor cobrado sai sempre de cotação com CEP
+    (ver /calcular_frete e criação do pedido), nunca deste total parcial.
+    """
     subtotal = money(subtotal)
     discount = money(discount)
 
-    if subtotal <= 0:
-        shipping = money(Decimal("0.00"))
-    else:
-        shipping = money(calculate_shipping(subtotal))
-
     total = money(
         max(
-            subtotal + shipping - discount,
+            subtotal - discount,
             Decimal("0.00"),
         )
     )
 
-    return shipping, total
+    return None, total
+
+
+def _shipping_estimate_label() -> str:
+    # Flag desligada: regra comercial temporária (não é cálculo por CEP).
+    from flask import current_app
+
+    if not current_app.config.get("SHIPPING_GROUPED_QUOTE_ENABLED"):
+        return "Frete padrão temporário"
+    return estimate_label()
 
 
 def _user_already_completed_purchase():
@@ -1157,7 +1169,7 @@ def carrinho():
     subtotal = _calculate_cart_subtotal(cart_items)
 
     if cart_items:
-        shipping, total = _calculate_checkout_totals(subtotal)
+        shipping, total = _calculate_display_totals(subtotal)
     else:
         shipping = money(Decimal("0.00"))
         total = money(Decimal("0.00"))
@@ -1169,6 +1181,7 @@ def carrinho():
         subtotal=subtotal,
         shipping=shipping,
         total=total,
+        shipping_estimate=_shipping_estimate_label(),
     )
 
 
@@ -1371,7 +1384,7 @@ def checkout_carrinho():
         subtotal,
     )
 
-    shipping, total = _calculate_checkout_totals(
+    shipping, total = _calculate_display_totals(
         subtotal,
         discount,
     )
@@ -1386,6 +1399,7 @@ def checkout_carrinho():
         discount=discount,
         total=total,
         applied_coupon=applied_coupon,
+        shipping_estimate=_shipping_estimate_label(),
     )
 
 
@@ -1514,7 +1528,7 @@ def checkout(product_id):
         product_id=product.id,
     )
 
-    shipping, total = _calculate_checkout_totals(
+    shipping, total = _calculate_display_totals(
         subtotal,
         discount,
     )
@@ -1533,6 +1547,7 @@ def checkout(product_id):
         discount=discount,
         total=total,
         applied_coupon=applied_coupon,
+        shipping_estimate=_shipping_estimate_label(),
     )
 
 
@@ -1682,7 +1697,7 @@ def apply_checkout_coupon():
         coupon.calculate_discount(subtotal)
     )
 
-    shipping, total = _calculate_checkout_totals(
+    shipping, total = _calculate_display_totals(
         subtotal,
         discount,
     )
@@ -1709,7 +1724,7 @@ def apply_checkout_coupon():
         "message": f"Cupom {coupon.code} aplicado com sucesso.",
         "code": coupon.code,
         "subtotal": float(subtotal),
-        "shipping": float(shipping),
+        "shipping": None,
         "discount": float(discount),
         "total": float(total),
     }), 200
@@ -1737,7 +1752,7 @@ def remove_checkout_coupon():
             "message": str(error),
         }), 400
 
-    shipping, total = _calculate_checkout_totals(
+    shipping, total = _calculate_display_totals(
         subtotal,
         Decimal("0.00"),
     )
@@ -1750,7 +1765,7 @@ def remove_checkout_coupon():
         "message": "Cupom removido.",
         "code": "",
         "subtotal": float(subtotal),
-        "shipping": float(shipping),
+        "shipping": None,
         "discount": 0.0,
         "total": float(total),
     }), 200
@@ -1781,54 +1796,156 @@ def calcular_frete():
             "error": "Informe um CEP válido com 8 dígitos.",
         }), 400
 
-    if not product_id:
-        return jsonify({
-            "error": "product_id é obrigatório.",
-        }), 400
+    from loja.services.shipping_quote import (
+        QuoteUnavailable,
+        ShipmentLine,
+        assign_group_origins,
+        canonical_items,
+        default_providers,
+        group_lines,
+        quote_groups,
+    )
+    from loja.utils import utcnow
 
-    if quantity is None:
-        return jsonify({
-            "error": "Quantidade inválida.",
-        }), 400
+    # Compra direta (produto) ou carrinho completo: a cotação exibida fica
+    # registrada na sessão (assinada) para reconfirmação no checkout.
+    item_dicts = []
+    subtotal = Decimal("0.00")
+    if dados.get("cart"):
+        cart = _get_user_cart()
+        for item in _cart_items_as_list(cart):
+            item_dicts.append({
+                "product_id": item.product_id,
+                "variant_id": getattr(item, "variant_id", None),
+                "quantity": item.quantity,
+            })
+            subtotal += money(item.unit_price) * int(item.quantity or 1)
+        if not item_dicts:
+            return jsonify({
+                "error": "Carrinho vazio.",
+            }), 400
+        quantity = None
+    else:
+        if not product_id:
+            return jsonify({
+                "error": "product_id é obrigatório.",
+            }), 400
 
-    try:
-        product_uuid = uuid.UUID(
-            str(product_id)
+        if quantity is None:
+            return jsonify({
+                "error": "Quantidade inválida.",
+            }), 400
+
+        try:
+            product_uuid = uuid.UUID(
+                str(product_id)
+            )
+        except (ValueError, TypeError, AttributeError):
+            return jsonify({
+                "error": "product_id inválido.",
+            }), 400
+
+        product = public_product_query().filter(
+            Product.id == product_uuid,
+        ).first()
+
+        if product is None:
+            return jsonify({
+                "error": "Produto não encontrado ou indisponível.",
+            }), 404
+
+        stock = getattr(product, "stock", None)
+
+        # Produtos com variante validam estoque por variante no checkout.
+        if stock is not None and not _uses_variants(product) and quantity > stock:
+            return jsonify({
+                "error": "Quantidade maior que o estoque disponível.",
+            }), 400
+
+        item_dicts.append({
+            "product_id": product.id,
+            "variant_id": None,
+            "quantity": quantity,
+        })
+        subtotal = money(
+            money(product.price) * quantity
         )
-    except (ValueError, TypeError, AttributeError):
+
+    # Flag desligada (SHIPPING_GROUPED_QUOTE_ENABLED=False): tarifa comercial
+    # temporária única, assumida pela loja — não é cotação por CEP.
+    from flask import current_app as _current_app2
+    from loja.services.shipping_quote import QuoteUnavailable as _QuoteUnavailable2
+
+    if not _current_app2.config.get("SHIPPING_GROUPED_QUOTE_ENABLED"):
+        try:
+            shipping = temporary_flat_rate()
+        except _QuoteUnavailable2:
+            return jsonify({
+                "error": "Frete temporariamente indisponível. Tente novamente em instantes.",
+            }), 409
+        total = money(subtotal + shipping)
+        # Não grava confirmação de cotação agrupada; checkout com flag desligada
+        # chama a mesma função (temporary_flat_rate).
         return jsonify({
-            "error": "product_id inválido.",
-        }), 400
+            "valor": f"{shipping:.2f}",
+            "subtotal": f"{subtotal:.2f}",
+            "total": f"{total:.2f}",
+            "quantity": quantity,
+            "cep": cep,
+            "grupos": [],
+        })
 
-    product = public_product_query().filter(
-        Product.id == product_uuid,
-    ).first()
-
-    if product is None:
+    lines = [
+        ShipmentLine(
+            product_id=item["product_id"],
+            variant_id=item.get("variant_id"),
+            quantity=item["quantity"],
+        )
+        for item in item_dicts
+    ]
+    groups = assign_group_origins(group_lines(lines))
+    try:
+        quoted = quote_groups(groups, cep, default_providers())
+    except QuoteUnavailable:
         return jsonify({
-            "error": "Produto não encontrado ou indisponível.",
-        }), 404
+            "error": (
+                "Frete indisponível para este destino no momento. "
+                "Confira o CEP e tente novamente."
+            ),
+        }), 409
 
-    stock = getattr(product, "stock", None)
+    shipping = money(quoted["total"])
+    total = money(subtotal + shipping)
+    quoted_at = utcnow()
+    # Basta UMA remessa vencer para o total precisar de nova cotação.
+    expires_at = min(g["expires_at"] for g in quoted["groups"])
 
-    # Produtos com variante validam estoque por variante no checkout; aqui o
-    # frete só depende do subtotal financeiro.
-    if stock is not None and not _uses_variants(product) and quantity > stock:
-        return jsonify({
-            "error": "Quantidade maior que o estoque disponível.",
-        }), 400
-
-    subtotal = money(
-        money(product.price) * quantity
-    )
-
-    shipping = money(
-        calculate_shipping(subtotal)
-    )
-
-    total = money(
-        subtotal + shipping
-    )
+    # Confirmação vinculada à sessão (assinada): CEP, itens, valor,
+    # validade mínima e prazos por grupo. O checkout só gera a preferência
+    # se esta confirmação ainda valer integralmente.
+    session["shipping_quote"] = {
+        "cep": cep,
+        "items": [
+            {
+                "product_id": str(pid),
+                "variant_id": str(vid) if vid else None,
+                "quantity": qty,
+            }
+            for pid, vid, qty in canonical_items(item_dicts)
+        ],
+        "shipping": f"{shipping:.2f}",
+        "quoted_at": quoted_at.isoformat(),
+        "expires_at": expires_at.isoformat(),
+        "groups": [
+            {
+                "channel": g["channel"],
+                "cost": f"{g['cost']:.2f}",
+                "expires_at": g["expires_at"].isoformat(),
+            }
+            for g in quoted["groups"]
+        ],
+    }
+    session.modified = True
 
     return jsonify({
         "valor": f"{shipping:.2f}",
@@ -1836,6 +1953,18 @@ def calcular_frete():
         "total": f"{total:.2f}",
         "quantity": quantity,
         "cep": cep,
+        "expires_at": expires_at.isoformat(),
+        "grupos": [
+            {
+                "channel": g["channel"],
+                "cost": f"{g['cost']:.2f}",
+                "min_days": g["min_days"],
+                "max_days": g["max_days"],
+                "carrier": g["carrier"],
+                "expires_at": g["expires_at"].isoformat(),
+            }
+            for g in quoted["groups"]
+        ],
     })
 
 # ── Encomendas / área de compras ─────────────────────────────────────────────
