@@ -160,11 +160,16 @@ def send_recovery_emails(
 
         order_detail_url_builder = _default_builder
 
-    if email_sender is None and not email_delivery_ready():
+    candidates = list(orders)
+    needs_delivery = any(
+        getattr(order, "recovery_email_sent_at", None) is None
+        and (getattr(order, "customer_email", None) or "").strip()
+        for order in candidates
+    )
+    if email_sender is None and needs_delivery and not email_delivery_ready():
         raise ValueError("checkout_recovery_email_unavailable")
 
     sender = email_sender or enviar_email
-    candidates = list(orders)
     sent = failed = skipped_empty_email = 0
 
     for order in candidates:
@@ -249,6 +254,7 @@ def send_single_checkout_recovery(
             order_id=order_id,
         )
         if not orders:
+            db.session.commit()
             return CheckoutRecoveryResult(True, 0, 0, 0, 0)
         result = send_recovery_emails(
             orders,
