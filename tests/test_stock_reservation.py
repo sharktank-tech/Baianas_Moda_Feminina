@@ -193,7 +193,11 @@ def test_release_expired_reservations(db, make_user, make_product):
     pr._reserve_stock(_item_data(product, quantity=2))
     assert product.stock == 8
 
-    pr.release_expired_stock_reservations(hours=24)
+    from loja.services.stock_reservations import (
+        release_expired_stock_reservations,
+    )
+
+    release_expired_stock_reservations(hours=24)
 
     assert product.stock == 10
     assert stale.stock_reserved is False
