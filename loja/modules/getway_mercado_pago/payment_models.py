@@ -145,7 +145,9 @@ class Order(db.Model):
     mp_checkout_url = db.Column(db.Text)
     # Prazo exato enviado ao Mercado Pago. NULL em pedidos legados impede
     # liberação automática: sem prova de expiração, a limpeza falha fechada.
-    mp_preference_expires_at = db.Column(db.DateTime, nullable=True, index=True)
+    # O índice parcial é criado pela migration 0024; não usar index=True,
+    # que criaria um índice completo diferente em schemas novos.
+    mp_preference_expires_at = db.Column(db.DateTime, nullable=True)
     mp_payment_id = db.Column(db.String(100), index=True)
     mp_status = db.Column(db.String(50))
     mp_status_detail = db.Column(db.String(120))
