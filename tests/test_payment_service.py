@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -89,6 +90,8 @@ def test_create_preference_uses_absolute_https_callbacks(monkeypatch):
         customer_email="buyer@testuser.com",
         total=Decimal("99.90"),
         user_id="user-123",
+        created_at=datetime(2026, 9, 21, 12, 0, 0),
+        mp_preference_expires_at=datetime(2026, 9, 22, 12, 0, 0),
         items=[object()],
     )
 
@@ -144,6 +147,8 @@ def test_create_preference_uses_init_point_even_with_sandbox_flag(monkeypatch):
         customer_email="buyer@testuser.com",
         total=Decimal("99.90"),
         user_id="user-123",
+        created_at=datetime(2026, 9, 21, 12, 0, 0),
+        mp_preference_expires_at=datetime(2026, 9, 22, 12, 0, 0),
         items=[object()],
     )
 
