@@ -1540,9 +1540,12 @@ def test_temporary_flat_rate_no_limite_consistente_ponta_a_ponta(
     assert preferences[0].total == order.total
 
 
-@pytest.mark.parametrize("raw", ["10000.00", "1e999999"])
+@pytest.mark.parametrize(
+    ("raw", "coupon_code"),
+    [("10000.00", "FRETE-LIMITE-ALTO"), ("1e999999", "FRETE-LIMITE-EXP")],
+)
 def test_temporary_flat_rate_invalida_preserva_variante_cupom_e_gateway(
-    client, db, make_user, make_coupon, monkeypatch, raw
+    client, db, make_user, make_coupon, monkeypatch, raw, coupon_code
 ):
     import loja.views.payments_routes as pr
     from loja.modules.getway_mercado_pago.payment_models import Order, OrderItem
@@ -1558,7 +1561,7 @@ def test_temporary_flat_rate_invalida_preserva_variante_cupom_e_gateway(
         db.session.commit()
 
     coupon = make_coupon(
-        code="FRETE-LIMITE",
+        code=coupon_code,
         discount_type="fixed",
         discount_value="1.00",
     )
