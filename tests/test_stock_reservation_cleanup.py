@@ -30,6 +30,9 @@ def _reserved_order(db, user, product, *, age_hours=25, status="pending_payment"
         city="São Paulo",
         state="SP",
         created_at=utcnow() - timedelta(hours=age_hours),
+        mp_preference_expires_at=utcnow() - timedelta(
+            hours=max(age_hours - 24, -1)
+        ),
     )
     order.items.append(
         OrderItem(
@@ -204,7 +207,8 @@ def test_admin_action_releases_without_provider_call(
 
     login(admin_user.email)
     response = client.post(
-        "/admin/reservas-expiradas/liberar",
+        f"/admin/reservas-expiradas/{order.id}/liberar",
+        data={"confirm_release": "1"},
         follow_redirects=False,
     )
     assert response.status_code == 302
@@ -225,7 +229,8 @@ def test_admin_action_denies_non_admin(
     login(user.email)
 
     response = client.post(
-        "/admin/reservas-expiradas/liberar",
+        f"/admin/reservas-expiradas/{order.id}/liberar",
+        data={"confirm_release": "1"},
         follow_redirects=False,
     )
     assert response.status_code in {302, 403}
