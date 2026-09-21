@@ -114,6 +114,7 @@ def _materialize(app):
             city="São Paulo",
             state="SP",
             created_at=utcnow() - timedelta(hours=25),
+            mp_preference_expires_at=utcnow() - timedelta(hours=1),
         )
         order.items.append(
             OrderItem(
