@@ -417,3 +417,128 @@ def test_email_delivery_logs_never_include_recipient_or_exception(
     assert "sensitive-provider-detail" not in output
     assert "secret-password" not in output
     assert "email_delivery failed=1" in output
+
+
+def test_individual_route_is_idempotent(
+    client, admin_user, login, db, monkeypatch
+):
+    from loja.utils import utcnow
+    import loja.modules.enviar_email as email_module
+    import loja.services.checkout_recovery as recovery
+
+    monkeypatch.setenv("CHECKOUT_RECOVERY_ENABLED", "1")
+    monkeypatch.delenv("CHECKOUT_RECOVERY_BATCH_ENABLED", raising=False)
+    monkeypatch.setattr(email_module, "email_delivery_ready", lambda: True)
+    monkeypatch.setattr(recovery, "email_delivery_ready", lambda: True)
+    sent = []
+    monkeypatch.setattr(
+        recovery,
+        "enviar_email",
+        lambda recipient, subject, body: sent.append(recipient),
+    )
+
+    order = _order(
+        user_id=admin_user.id,
+        customer_email="idempotent@example.test",
+        created_at=utcnow() - timedelta(hours=3),
+    )
+    db.session.add(order)
+    db.session.commit()
+    login(admin_user.email, "senha123")
+
+    first = client.post(
+        f"/admin/recuperacao-checkout/{order.id}/enviar",
+        follow_redirects=False,
+    )
+    second = client.post(
+        f"/admin/recuperacao-checkout/{order.id}/enviar",
+        follow_redirects=False,
+    )
+
+    assert first.status_code == 302
+    assert second.status_code == 302
+    assert sent == ["idempotent@example.test"]
+    db.session.refresh(order)
+    assert order.recovery_email_sent_at is not None
+
+
+def test_individual_route_denies_anonymous_without_mutation(client, db):
+    from loja.utils import utcnow
+
+    order = _order(created_at=utcnow() - timedelta(hours=3))
+    db.session.add(order)
+    db.session.commit()
+
+    response = client.post(
+        f"/admin/recuperacao-checkout/{order.id}/enviar",
+        follow_redirects=False,
+    )
+
+    assert response.status_code in (302, 303, 401, 403)
+    db.session.refresh(order)
+    assert order.recovery_email_sent_at is None
+
+
+@pytest.mark.parametrize(
+    ("server", "sender", "password", "port"),
+    [
+        ("", "sender@example.test", "secret", 587),
+        ("smtp.example.test", "", "secret", 587),
+        ("smtp.example.test", "sender@example.test", "", 587),
+        ("smtp.example.test", "sender@example.test", "secret", ""),
+        ("smtp.example.test", "sender@example.test", "secret", "abc"),
+        ("smtp.example.test", "sender@example.test", "secret", 0),
+        ("smtp.example.test", "sender@example.test", "secret", 65536),
+    ],
+)
+def test_email_delivery_preflight_rejects_incomplete_or_invalid_config(
+    monkeypatch, server, sender, password, port
+):
+    from config import Config
+    from loja.modules.enviar_email import email_delivery_ready
+
+    monkeypatch.setattr(Config, "EMAIL_SERVER", server)
+    monkeypatch.setattr(Config, "EMAIL_SENDER", sender)
+    monkeypatch.setattr(Config, "EMAIL_PASSWORD", password)
+    monkeypatch.setattr(Config, "EMAIL_PORT", port)
+
+    assert email_delivery_ready() is False
+
+
+def test_email_delivery_preflight_accepts_complete_config(monkeypatch):
+    from config import Config
+    from loja.modules.enviar_email import email_delivery_ready
+
+    monkeypatch.setattr(Config, "EMAIL_SERVER", "smtp.example.test")
+    monkeypatch.setattr(Config, "EMAIL_SENDER", "sender@example.test")
+    monkeypatch.setattr(Config, "EMAIL_PASSWORD", "secret")
+    monkeypatch.setattr(Config, "EMAIL_PORT", "587")
+
+    assert email_delivery_ready() is True
+
+
+def test_admin_page_keeps_batch_form_hidden_by_default(
+    client, admin_user, login, db, monkeypatch
+):
+    from loja.utils import utcnow
+    import loja.modules.enviar_email as email_module
+
+    monkeypatch.setenv("CHECKOUT_RECOVERY_ENABLED", "1")
+    monkeypatch.delenv("CHECKOUT_RECOVERY_BATCH_ENABLED", raising=False)
+    monkeypatch.setattr(email_module, "email_delivery_ready", lambda: True)
+    order = _order(
+        user_id=admin_user.id,
+        created_at=utcnow() - timedelta(hours=3),
+    )
+    db.session.add(order)
+    db.session.commit()
+    login(admin_user.email, "senha123")
+
+    response = client.get("/admin/recuperacao-checkout")
+    text = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert f"/admin/recuperacao-checkout/{order.id}/enviar" in text
+    assert 'name="csrf_token"' in text
+    assert "Envio em lote desabilitado" in text
+    assert 'action="/admin/recuperacao-checkout"' not in text
