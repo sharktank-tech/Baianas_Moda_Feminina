@@ -1538,3 +1538,85 @@ def test_temporary_flat_rate_no_limite_consistente_ponta_a_ponta(
     assert order.total == Decimal(calculated["total"])
     assert len(preferences) == 1
     assert preferences[0].total == order.total
+
+
+@pytest.mark.parametrize("raw", ["10000.00", "1e999999"])
+def test_temporary_flat_rate_invalida_preserva_variante_cupom_e_gateway(
+    client, db, make_user, make_coupon, monkeypatch, raw
+):
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order, OrderItem
+    from loja.modules.models import Product, ProductVariant
+
+    user = make_user()
+    product, variant = _supplier_link(db)
+    with db.session.no_autoflush:
+        stored_product = db.session.get(Product, product.id)
+        stored_product.is_draft = False
+        stored_product.pricing_status = "priced"
+        stored_product.is_active = True
+        db.session.commit()
+
+    coupon = make_coupon(
+        code="FRETE-LIMITE",
+        discount_type="fixed",
+        discount_value="1.00",
+        usage_limit=10,
+    )
+    _login(client, user)
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False
+    )
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_TEMPORARY_FLAT_RATE", raw
+    )
+
+    gateway_calls = []
+    monkeypatch.setattr(
+        pr,
+        "create_preference",
+        lambda order: gateway_calls.append(order) or {
+            "preference_id": "must-not-exist",
+            "checkout_url": "https://mp.example/must-not-exist",
+        },
+    )
+
+    product_stock_before = db.session.get(Product, product.id).stock
+    variant_stock_before = db.session.get(ProductVariant, variant.id).stock
+    coupon_uses_before = coupon.times_used
+    orders_before = Order.query.count()
+    items_before = OrderItem.query.count()
+
+    response = client.post(
+        "/pagamentos/mercado-pago",
+        data={
+            "checkout_type": "product",
+            "product_id": str(product.id),
+            "variant_id": str(variant.id),
+            "quantity": 1,
+            "selected_size": "M",
+            "coupon_code": coupon.code,
+            "nome": "Cliente Teste",
+            "email": user.email,
+            "telefone": "11999999999",
+            "cep": "01310100",
+            "estado": "SP",
+            "endereco": "Rua Teste",
+            "numero": "10",
+            "bairro": "Centro",
+            "cidade": "São Paulo",
+        },
+        follow_redirects=True,
+    )
+
+    page = response.get_data(as_text=True).lower()
+    assert "frete desatualizado" in page
+    assert "invalidoperation" not in page
+    assert "traceback" not in page
+    assert gateway_calls == []
+    assert Order.query.count() == orders_before
+    assert OrderItem.query.count() == items_before
+    assert db.session.get(Product, product.id).stock == product_stock_before
+    assert db.session.get(ProductVariant, variant.id).stock == variant_stock_before
+    db.session.refresh(coupon)
+    assert coupon.times_used == coupon_uses_before
