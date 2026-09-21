@@ -34,6 +34,7 @@ def _make_order(db, user, product, status="pending_payment", stock_reserved=True
     from loja.modules.getway_mercado_pago.payment_models import Order, OrderItem
 
     unit_price = Decimal(str(product.price))
+    created_at = utcnow()
     order = Order(
         id=uuid.uuid4(),
         user_id=user.id,
@@ -44,6 +45,8 @@ def _make_order(db, user, product, status="pending_payment", stock_reserved=True
         discount=Decimal("0.00"),
         total=unit_price * quantity + Decimal("10.00"),
         stock_reserved=stock_reserved,
+        created_at=created_at,
+        mp_preference_expires_at=created_at + timedelta(hours=24),
         customer_name="Cliente Teste",
         customer_email=user.email,
         zip_code="01310100",
@@ -180,6 +183,7 @@ def test_release_expired_reservations(db, make_user, make_product):
     product = make_product(stock=10)
     stale = _make_order(db, user, product, quantity=2)
     stale.created_at = utcnow() - timedelta(hours=48)
+    stale.mp_preference_expires_at = utcnow() - timedelta(hours=24)
     db.session.commit()
 
     fresh_product = make_product(stock=20, name="Camiseta Nova")
