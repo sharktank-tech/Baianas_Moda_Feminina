@@ -11,12 +11,15 @@ Premissas (não presumir origem universal):
   tarifa inventada por distância.
 - Fornecedor não identificado nunca vira grupo nacional: vira grupo
   "unknown" e bloqueia (``unknown_supplier``).
-- R$ 10 é referência inicial informada pelo proprietário, jamais cotação
-  nacional garantida: só aparece rotulada como estimativa e nunca entra
-  em totais, pedidos ou preferência Mercado Pago. A distinção entre
-  cotação real e estimativa é estrutural (objetos ``Quote`` de
-  provedores), nunca pelo valor numérico: R$ 10,00 cotado de verdade
-  é cobrado normalmente.
+- Com ``SHIPPING_GROUPED_QUOTE_ENABLED=False`` (padrão atual) a loja cobra
+  a tarifa comercial temporária ``SHIPPING_TEMPORARY_FLAT_RATE`` via
+  ``temporary_flat_rate()`` — regra assumida pela loja, validada como
+  decimal finito ≥ 0 e arredondada em duas casas; não é cotação por CEP,
+  sem frete grátis, e pode divergir do custo real do fornecedor.
+- Com flag ligada, só cobra o que vem de ``Quote`` real de provedores;
+  pré-CEP mostra apenas rótulo ("Frete calculado após informar o CEP"),
+  nunca valor. A distinção entre tarifa temporária e cotação real é pela
+  flag, não pelo valor numérico.
 
 Sem chamadas reais a transportadoras: provedores recebem dados explícitos
 (origem, destino, tabela) e falham fechado quando falta insumo.
@@ -32,10 +35,6 @@ from typing import Optional
 from loja.utils import utcnow
 
 from .pricing import to_decimal
-
-#: Referência inicial informada pelo proprietário. Uso exclusivo em rótulo
-#: de estimativa pré-CEP; jamais como valor cobrado.
-SHIPPING_ESTIMATE_REFERENCE = Decimal("10.00")
 
 #: Validade padrão de uma cotação exibida (segundos).
 QUOTE_TTL_SECONDS = 1800
@@ -61,12 +60,31 @@ def temporary_flat_rate() -> Decimal:
     comercial assumida pela loja — não é cálculo por CEP, não considera
     fornecedor/distância nem oferece frete grátis. Pode divergir do custo
     real do fornecedor. Requer contexto da aplicação.
+
+    Validação estrita: precisa ser decimal válido, finito, ``>= 0`` e
+    arredondado em duas casas (``ROUND_HALF_UP``). Configuração inválida
+    levanta ``QuoteUnavailable("invalid_quote")`` de forma sanitizada —
+    nunca vira frete zero.
     """
+    from decimal import InvalidOperation
+
     from flask import current_app
 
-    from loja.modules.getway_mercado_pago.payment_service import money
-
-    return money(current_app.config.get(SHIPPING_TEMPORARY_FLAT_RATE_CFG, "10.00"))
+    raw = current_app.config.get(SHIPPING_TEMPORARY_FLAT_RATE_CFG, "10.00")
+    if raw is None:
+        raise QuoteUnavailable("invalid_quote")
+    raw_str = str(raw).strip()
+    if not raw_str:
+        raise QuoteUnavailable("invalid_quote")
+    try:
+        value = Decimal(raw_str)
+    except (InvalidOperation, ValueError, AttributeError, TypeError):
+        raise QuoteUnavailable("invalid_quote") from None
+    if not value.is_finite():
+        raise QuoteUnavailable("invalid_quote")
+    if value < 0:
+        raise QuoteUnavailable("invalid_quote")
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def estimate_label() -> str:
@@ -584,7 +602,6 @@ def quote_groups(groups, dest_cep: str, providers: dict, now=None) -> dict:
 
 
 __all__ = [
-    "SHIPPING_ESTIMATE_REFERENCE",
     "QUOTE_TTL_SECONDS",
     "SHIPPING_TEMPORARY_FLAT_RATE_CFG",
     "QuoteUnavailable",

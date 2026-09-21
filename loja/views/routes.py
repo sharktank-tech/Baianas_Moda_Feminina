@@ -1874,9 +1874,15 @@ def calcular_frete():
     # Flag desligada (SHIPPING_GROUPED_QUOTE_ENABLED=False): tarifa comercial
     # temporária única, assumida pela loja — não é cotação por CEP.
     from flask import current_app as _current_app2
+    from loja.services.shipping_quote import QuoteUnavailable as _QuoteUnavailable2
 
     if not _current_app2.config.get("SHIPPING_GROUPED_QUOTE_ENABLED"):
-        shipping = temporary_flat_rate()
+        try:
+            shipping = temporary_flat_rate()
+        except _QuoteUnavailable2:
+            return jsonify({
+                "error": "Frete temporariamente indisponível. Tente novamente em instantes.",
+            }), 409
         total = money(subtotal + shipping)
         # Não grava confirmação de cotação agrupada; checkout com flag desligada
         # chama a mesma função (temporary_flat_rate).

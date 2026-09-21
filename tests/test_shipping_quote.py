@@ -3,7 +3,9 @@
 Sem chamadas reais: provedor doméstico simulado com origem + tabela
 explícitas; AliExpress com dados persistidos do fornecedor. Em produção,
 sem origem/tabela/custo válido, o checkout bloqueia (mensagem + retry)
-em vez de cobrar tarifa presumida. R$ 10 é só estimativa pré-CEP.
+em vez de cobrar tarifa presumida. Com flag desligada a loja cobra a
+tarifa temporária ``SHIPPING_TEMPORARY_FLAT_RATE`` (validada, arredondada),
+não estimativa; com flag ligada, pré-CEP é só rótulo.
 """
 
 import uuid
@@ -1328,3 +1330,111 @@ def test_flag_desligada_checkout_10_consistente(client, db, make_user, monkeypat
     assert len(preferencias) == 1
     # A preferência Mercado Pago cobra o total oficial (subtotal + frete 10,00).
     assert preferencias[0].total == order.total
+
+
+# ── Validação estrita da tarifa temporária ────────────────────────────────
+
+def test_temporary_flat_rate_10_005_arredonda_para_10_01(client, db, make_user, monkeypatch):
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order
+
+    # "10.005" deve arredondar para 10.01 (ROUND_HALF_UP em duas casas).
+    user = make_user()
+    _login(client, user)
+    _manual_supplier_cart(db, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False)
+    monkeypatch.setitem(client.application.config, "SHIPPING_TEMPORARY_FLAT_RATE", "10.005")
+
+    resp_calc = client.post("/calcular_frete", json={"cart": True, "cep": "77100000"})
+    assert resp_calc.status_code == 200
+    calc = resp_calc.get_json()
+    assert calc["valor"] == "10.01"
+    # Nunca vira frete zero.
+    assert calc["valor"] != "0.00"
+
+    preferencias = []
+    monkeypatch.setattr(pr, "create_preference", lambda order: preferencias.append(order) or {
+        "preference_id": "pref-round", "checkout_url": "https://mp.example/round",
+    })
+    antes = Order.query.count()
+    resp = client.post(
+        "/pagamentos/mercado-pago",
+        data=_cart_checkout_form(user, "77100000"),
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert Order.query.count() == antes + 1
+    order = Order.query.filter_by(user_id=user.id).one()
+    assert order.shipping == Decimal("10.01")
+    assert order.total == Decimal(calc["total"])
+    assert len(preferencias) == 1
+    assert preferencias[0].total == order.total
+    # Sanitizado: a resposta não ecoa o valor bruto "10.005".
+    assert "10.005" not in resp_calc.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("raw", ["abc", "-10", "NaN", "Infinity", ""])
+def test_temporary_flat_rate_config_invalida_bloqueia(client, db, make_user, monkeypatch, raw):
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order
+    from loja.modules.models import Product
+
+    user = make_user()
+    _login(client, user)
+    _manual_supplier_cart(db, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False)
+    monkeypatch.setitem(client.application.config, "SHIPPING_TEMPORARY_FLAT_RATE", raw)
+
+    # /calcular_frete falha controlada, não 200 e nunca frete zero.
+    resp_calc = client.post("/calcular_frete", json={"cart": True, "cep": "77100000"})
+    assert resp_calc.status_code in {400, 409}
+    body = resp_calc.get_json() or {}
+    assert "error" in body
+    assert body.get("valor") is None
+    # Sanitizado: resposta de erro não deve ecoar o valor bruto quando
+    # ele é distintivo ("abc"). Para "-10"/"nan"/"infinity" o eco
+    # sanitizado também não expõe o valor, mas checar substring no HTML
+    # inteiro gera falso positivo (CSS contém "-10", etc).
+    if str(raw).lower() == "abc":
+        assert "abc" not in resp_calc.get_data(as_text=True).lower()
+    # Não cria pedido, não reserva estoque, não chama MP.
+    chamadas = []
+    monkeypatch.setattr(pr, "create_preference", lambda order: chamadas.append(order) or {
+        "preference_id": "pref-bad", "checkout_url": "https://mp.example/bad",
+    })
+    product = Product.query.first()
+    estoque_antes = product.stock if product else None
+    antes = Order.query.count()
+    resp = client.post(
+        "/pagamentos/mercado-pago",
+        data=_cart_checkout_form(user, "77100000"),
+        follow_redirects=True,
+    )
+    assert Order.query.count() == antes
+    assert chamadas == []
+    if product is not None and estoque_antes is not None:
+        db.session.refresh(product)
+        assert product.stock == estoque_antes
+    # Erro sanitizado na página; para "abc" garante sem eco.
+    if str(raw).lower() == "abc":
+        assert "abc" not in resp.get_data(as_text=True).lower()
+    # Bloqueio implica não ter virado frete zero implícito (pedido não existe).
+
+
+def test_temporary_flat_rate_api_invalida_direta(app, monkeypatch):
+    from loja.services.shipping_quote import QuoteUnavailable, temporary_flat_rate
+
+    for raw in ["abc", "-10", "NaN", "Infinity", ""]:
+        monkeypatch.setitem(app.config, "SHIPPING_TEMPORARY_FLAT_RATE", raw)
+        with app.app_context():
+            try:
+                temporary_flat_rate()
+            except QuoteUnavailable as exc:
+                assert exc.code == "invalid_quote"
+            else:
+                assert False, f"raw={raw!r} deveria falhar"
+
+    # "10.005" válido e arredondado.
+    monkeypatch.setitem(app.config, "SHIPPING_TEMPORARY_FLAT_RATE", "10.005")
+    with app.app_context():
+        assert temporary_flat_rate() == Decimal("10.01")

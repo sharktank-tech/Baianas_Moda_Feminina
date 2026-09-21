@@ -89,10 +89,13 @@ def quote_checkout_shipping(item_data, dest_cep):
     Com flag desligada (SHIPPING_GROUPED_QUOTE_ENABLED=False), usa a tarifa
     comercial temporária única (temporary_flat_rate) — regra assumida pela
     loja, não cotação por CEP. Com flag ligada, usa cotação por grupo
-    (nunca tarifa presumida).
+    (nunca tarifa presumida). Configuração inválida falha sanitizada.
     """
     if not _is_grouped_quote_enabled():
-        return temporary_flat_rate()
+        try:
+            return temporary_flat_rate()
+        except QuoteUnavailable as exc:
+            raise ValueError(_unavailable_message(exc.code)) from exc
 
     try:
         result = quote_for_items(item_data, dest_cep)
