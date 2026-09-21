@@ -71,6 +71,41 @@
   </div>
   {% endif %}
 
+  <div class="mb-8 bg-white rounded-2xl shadow p-5">
+    <h2 class="font-semibold text-gray-800">Reservas de estoque vencidas</h2>
+    <p class="text-sm text-gray-500 mt-2">
+      Pedidos ainda em <span class="font-mono">pending_payment</span> com reserva
+      ativa há mais de {{ reservation_hours if reservation_hours is not none else "—" }}
+      hora(s). A limpeza restitui somente o estoque; não cancela o pedido, a
+      preferência ou o pagamento no Mercado Pago.
+    </p>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+      <div>
+        <div class="text-sm text-gray-500">Candidatos atuais</div>
+        <div class="text-2xl font-bold">{{ expired_reservations|length }}</div>
+      </div>
+      <div>
+        <div class="text-sm text-gray-500">Cron automático</div>
+        <div class="text-lg font-bold {% if reservation_release_enabled %}text-green-700{% else %}text-red-700{% endif %}">
+          {{ "HABILITADO" if reservation_release_enabled else "DESLIGADO (fail-closed)" }}
+        </div>
+      </div>
+    </div>
+    <form method="POST"
+          action="{{ url_for('admin.release_expired_reservations') }}"
+          class="mt-4">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit"
+              class="px-4 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700 text-sm">
+        Liberar reservas vencidas
+      </button>
+    </form>
+    <p class="text-xs text-gray-500 mt-2">
+      Operação idempotente e auditada apenas por contagens; nenhuma identidade
+      de cliente é escrita em log.
+    </p>
+  </div>
+
   <div class="mb-6">
     <form method="POST" action="{{ url_for('admin.checkout_recovery') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

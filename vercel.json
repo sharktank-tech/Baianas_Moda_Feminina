@@ -18,5 +18,11 @@
       "source": "/(.*)",
       "destination": "/api/app.py"
     }
+  ],
+  "crons": [
+    {
+      "path": "/internal/maintenance/release-expired-reservations",
+      "schedule": "17 * * * *"
+    }
   ]
 }

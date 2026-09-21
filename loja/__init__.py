@@ -190,6 +190,7 @@ def create_app():
     from loja.views.admin_routes import admin_blueprint
     from loja.views.routes import tracking_blueprint
     from loja.views.payments_routes import payments_blueprint
+    from loja.views.maintenance_routes import maintenance_blueprint
     from loja.integrations.aliexpress.routes import aliexpress_blueprint
     from loja.views.aliexpress_admin_routes import aliexpress_admin_blueprint
     from loja.views.aliexpress_fulfillment_admin import fulfillment_admin_blueprint
@@ -200,6 +201,7 @@ def create_app():
 
     app.register_blueprint(tracking_blueprint)
     app.register_blueprint(payments_blueprint)
+    app.register_blueprint(maintenance_blueprint)
     app.register_blueprint(main_blueprint)
     app.register_blueprint(admin_blueprint)
     app.register_blueprint(aliexpress_blueprint)

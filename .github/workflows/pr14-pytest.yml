@@ -99,7 +99,7 @@ jobs:
           print("DATABASE_URL OK ->", url.render_as_string(hide_password=True))
           PY
 
-      - name: Run AliExpress PostgreSQL suite (incl. corrida payment x fulfillment)
+      - name: Run PostgreSQL integration suite (payment, fulfillment, stock cleanup)
         run: >
           python -m pytest -q
           tests/test_canary_evidence_pg.py
@@ -112,6 +112,7 @@ jobs:
           tests/test_aliexpress_status_sync_pg.py
           tests/test_aliexpress_submission_pg.py
           tests/test_draft_import_pg.py
+          tests/test_stock_reservation_cleanup_pg.py
 
       - name: Prova observável do bloqueio (2o INSERT aguardando unicidade)
         run: >
