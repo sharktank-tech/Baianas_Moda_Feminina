@@ -9,6 +9,7 @@ queda do processo entre envio e commit.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from datetime import timedelta
@@ -18,6 +19,8 @@ from loja.modules.enviar_email import email_delivery_ready, enviar_email
 from loja.modules.getway_mercado_pago.payment_models import Order
 from loja.utils import utcnow
 
+
+logger = logging.getLogger(__name__)
 
 ENABLED_ENV = "CHECKOUT_RECOVERY_ENABLED"
 BATCH_ENABLED_ENV = "CHECKOUT_RECOVERY_BATCH_ENABLED"
@@ -93,6 +96,7 @@ def find_recoverable_orders(
             Order.status == "pending_payment",
             Order.stock_reserved.is_(True),
             Order.recovery_email_sent_at.is_(None),
+            Order.recovery_email_skipped_at.is_(None),
             Order.created_at < minimum_age,
             Order.created_at >= reservation_started_after,
             Order.customer_email.isnot(None),
@@ -269,6 +273,45 @@ def send_single_checkout_recovery(
         raise
 
 
+def skip_single_checkout_recovery(
+    order_id,
+    *,
+    admin_user_id,
+    after_hours: Optional[int] = None,
+) -> bool:
+    """Remove um candidato elegível da fila sem simular envio ou pagamento.
+
+    A decisão é persistida sob lock com momento e administrador responsável.
+    Não altera status, pagamento, reserva de estoque ou preferência externa.
+    """
+    if admin_user_id is None:
+        raise ValueError("checkout_recovery_admin_required")
+
+    from loja import db
+
+    try:
+        orders = find_recoverable_orders(
+            after_hours=after_hours,
+            limit=1,
+            lock=True,
+            order_id=order_id,
+        )
+        if not orders:
+            db.session.commit()
+            return False
+
+        order = orders[0]
+        order.recovery_email_skipped_at = utcnow()
+        order.recovery_email_skipped_by_user_id = admin_user_id
+        order.recovery_email_skip_reason = "admin_decision"
+        db.session.commit()
+        logger.info("checkout_recovery skipped=1")
+        return True
+    except Exception:
+        db.session.rollback()
+        raise
+
+
 __all__ = [
     "CheckoutRecoveryResult",
     "DEFAULT_AFTER_HOURS",
@@ -281,4 +324,5 @@ __all__ = [
     "run_checkout_recovery",
     "send_recovery_emails",
     "send_single_checkout_recovery",
+    "skip_single_checkout_recovery",
 ]
