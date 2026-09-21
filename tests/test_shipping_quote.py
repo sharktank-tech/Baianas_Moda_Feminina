@@ -1561,7 +1561,6 @@ def test_temporary_flat_rate_invalida_preserva_variante_cupom_e_gateway(
         code="FRETE-LIMITE",
         discount_type="fixed",
         discount_value="1.00",
-        usage_limit=10,
     )
     _login(client, user)
     monkeypatch.setitem(
