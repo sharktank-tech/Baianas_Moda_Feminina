@@ -22,7 +22,7 @@
   "crons": [
     {
       "path": "/internal/maintenance/release-expired-reservations",
-      "schedule": "17 * * * *"
+      "schedule": "17 9 * * *"
     }
   ]
 }
