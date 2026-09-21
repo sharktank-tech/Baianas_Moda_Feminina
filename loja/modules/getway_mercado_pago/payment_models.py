@@ -143,6 +143,9 @@ class Order(db.Model):
         index=True,
     )
     mp_checkout_url = db.Column(db.Text)
+    # Prazo exato enviado ao Mercado Pago. NULL em pedidos legados impede
+    # liberação automática: sem prova de expiração, a limpeza falha fechada.
+    mp_preference_expires_at = db.Column(db.DateTime, nullable=True, index=True)
     mp_payment_id = db.Column(db.String(100), index=True)
     mp_status = db.Column(db.String(50))
     mp_status_detail = db.Column(db.String(120))
