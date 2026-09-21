@@ -243,3 +243,73 @@ def test_checkout_failure_rolls_back_reservation(db, client, make_user, make_pro
     )
     assert "não foi possível abrir o pagamento" in resp.get_data(as_text=True).lower()
     assert product.stock == 5
+
+def test_cleanup_skips_legacy_order_without_persisted_expiry(
+    db, make_user, make_product
+):
+    from loja.services.stock_reservations import release_expired_stock_reservations
+
+    user = make_user()
+    product = make_product(stock=10)
+    order = _make_order(db, user, product, quantity=2)
+    order.created_at = utcnow() - timedelta(hours=72)
+    order.mp_preference_expires_at = None
+    pr._reserve_stock(_item_data(product, quantity=2))
+    db.session.commit()
+
+    result = release_expired_stock_reservations(hours=24)
+
+    assert result.released == 0
+    assert order.stock_reserved is True
+    assert product.stock == 8
+
+
+def test_cleanup_does_not_release_at_exact_deadline(
+    db, make_user, make_product
+):
+    from loja.services.stock_reservations import release_expired_stock_reservations
+
+    user = make_user()
+    product = make_product(stock=10)
+    order = _make_order(db, user, product, quantity=2)
+    deadline = utcnow().replace(microsecond=0)
+    order.mp_preference_expires_at = deadline
+    pr._reserve_stock(_item_data(product, quantity=2))
+    db.session.commit()
+
+    result = release_expired_stock_reservations(now=deadline)
+
+    assert result.released == 0
+    assert order.stock_reserved is True
+    assert product.stock == 8
+
+
+def test_cleanup_skips_canonical_approved_payment(
+    db, make_user, make_product
+):
+    from loja.modules.getway_mercado_pago.payment_models import Payment
+    from loja.services.stock_reservations import release_expired_stock_reservations
+
+    user = make_user()
+    product = make_product(stock=10)
+    order = _make_order(db, user, product, quantity=2)
+    order.mp_preference_expires_at = utcnow() - timedelta(minutes=1)
+    pr._reserve_stock(_item_data(product, quantity=2))
+    db.session.add(
+        Payment(
+            id=uuid.uuid4(),
+            order_id=order.id,
+            provider_payment_id="approved-cleanup-guard",
+            status="approved",
+            amount=order.total,
+            currency="BRL",
+        )
+    )
+    db.session.commit()
+
+    result = release_expired_stock_reservations()
+
+    assert result.released == 0
+    assert result.skipped == 1
+    assert order.stock_reserved is True
+    assert product.stock == 8
