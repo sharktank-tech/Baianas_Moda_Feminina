@@ -76,13 +76,35 @@ def _unavailable_message(code: str) -> str:
     )
 
 
-def quote_checkout_shipping(item_data, dest_cep):
-    """Frete total do checkout por cotação (nunca tarifa presumida).
+def _is_grouped_quote_enabled() -> bool:
+    from flask import current_app
 
-    A distinção entre cotação real e estimativa é estrutural: o total
-    deriva sempre de objetos Quote de provedores — inclusive R$ 10,00
-    cotado de verdade. O rótulo de estimativa nunca é parseado aqui.
+    return bool(current_app.config.get("SHIPPING_GROUPED_QUOTE_ENABLED"))
+
+
+def quote_checkout_shipping(item_data, dest_cep):
+    """Frete total do checkout. Com flag desligada, usa regra temporária
+    aprovada (flat 18,90 / grátis acima de 249) para não bloquear compras
+    até a fonte real (origem/tabela e cotações frescas AliExpress) estar
+    configurada. Com flag ligada, usa cotação por grupo (nunca tarifa
+    presumida).
     """
+    if not _is_grouped_quote_enabled():
+        # Regra temporária aprovada pelo proprietário (preserva checkout até
+        # a fonte real estar configurada). Não é tarifa por distância.
+        from loja.modules.getway_mercado_pago.payment_service import money
+
+        subtotal = sum(
+            (Decimal(str(item.get("line_total") or item.get("unit_price") or 0)) for item in item_data),
+            Decimal("0.00"),
+        )
+        # Usa subtotal para decidir grátis, como antes de 18.90/249.
+        flat = money(current_app.config.get("PAYMENT_FLAT_SHIPPING", "18.90"))
+        free_min = money(current_app.config.get("FREE_SHIPPING_MIN", "249.00"))
+        if free_min > 0 and subtotal >= free_min:
+            return Decimal("0.00")
+        return flat
+
     try:
         result = quote_for_items(item_data, dest_cep)
     except QuoteUnavailable as exc:
@@ -777,7 +799,10 @@ def create_mercado_pago_payment():
 
         customer_data = _get_customer_data()
         shipping = quote_checkout_shipping(item_data, customer_data["zip_code"])
-        _require_confirmed_quote(item_data, customer_data["zip_code"], shipping)
+        # Flag ligada exige confirmação agrupada por sessão; desligada usa
+        # regra temporária flat aprovada, sem confirmação de remessas.
+        if _is_grouped_quote_enabled():
+            _require_confirmed_quote(item_data, customer_data["zip_code"], shipping)
 
         total = money(
             max(

@@ -369,6 +369,7 @@ def test_group_lines_separa_nacional_fornecedor_e_desconhecido(db, make_product)
 # ── Integração: /calcular_frete e criação do pedido ─────────────────────
 
 def _rates_config(monkeypatch, client):
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True)
     monkeypatch.setitem(client.application.config, "SHIPPING_ORIGIN_CEP", ORIGIN)
     monkeypatch.setitem(
         client.application.config,
@@ -433,8 +434,9 @@ def test_calcular_frete_ceps_distintos(client, db, make_user, make_product, monk
     assert "expires_at" in r1.get_json()["grupos"][0]
 
 
-def test_calcular_frete_sem_origem_bloqueia(client, db, make_user, make_product):
+def test_calcular_frete_sem_origem_bloqueia(client, db, make_user, make_product, monkeypatch):
     _login(client, make_user())
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True)
     product = make_product()
     resp = client.post(
         "/calcular_frete",
@@ -453,6 +455,7 @@ def test_checkout_sem_cotacao_nao_cria_pedido(
     user = make_user()
     product = make_product(stock=5)
     _login(client, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True)
     chamadas = []
     monkeypatch.setattr(
         pr, "create_preference", lambda order: chamadas.append(order) or {
@@ -577,6 +580,7 @@ def test_checkout_fornecedor_cota_dez_reais_cria_pedido(
         prod.is_active = True
         db.session.commit()
     _login(client, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True)
     monkeypatch.setitem(
         client.application.config,
         "SHIPPING_ALIEXPRESS_FRESH_QUOTES",
@@ -673,6 +677,7 @@ def test_duas_origens_mesmo_destino_tarifas_distintas(
     user = make_user()
     _login(client, user)
     _, supplier_ids = _manual_supplier_cart(db, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True)
     monkeypatch.setitem(
         client.application.config, "SHIPPING_DOMESTIC_ORIGINS",
         {str(supplier_ids[0]): "01310100", str(supplier_ids[1]): "77100000"},
@@ -699,6 +704,9 @@ def test_falta_tarifa_para_uma_remessa_bloqueia_tudo(
     user = make_user()
     _login(client, user)
     _, supplier_ids = _manual_supplier_cart(db, user)
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True,
+    )
     monkeypatch.setitem(
         client.application.config, "SHIPPING_DOMESTIC_ORIGINS",
         {str(supplier_ids[0]): "01310100", str(supplier_ids[1]): "77100000"},
@@ -740,6 +748,7 @@ def test_primeiro_vencimento_recusa_checkout(
     user = make_user()
     _login(client, user)
     _, supplier_ids = _manual_supplier_cart(db, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True)
     monkeypatch.setitem(
         client.application.config, "SHIPPING_DOMESTIC_ORIGINS",
         {str(supplier_ids[0]): "01310100", str(supplier_ids[1]): "77100000"},
@@ -992,6 +1001,7 @@ def test_calcular_frete_ambíguo_bloqueia_e_nao_grava_confirmacao(client, db, ma
         db.session.flush()
         db.session.add(SupplierProduct(id=uuid.uuid4(), supplier_id=supplier.id, product_id=product.id, supplier_product_id=f"SP_{suffix}", cost=Decimal("8.00"), currency="BRL", is_active=True))
     db.session.commit()
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True)
     monkeypatch.setitem(client.application.config, "SHIPPING_ORIGIN_CEP", ORIGIN)
     monkeypatch.setitem(client.application.config, "SHIPPING_DOMESTIC_RATES", {("013", "013"): (Decimal("5.00"), 1, 2)})
     # Limpa qualquer cotação anterior
@@ -1021,6 +1031,7 @@ def test_checkout_ambíguo_nao_cria_pedido_nem_reserva(client, db, make_user, mo
         db.session.add(SupplierProduct(id=uuid.uuid4(), supplier_id=supplier.id, product_id=product.id, supplier_product_id=f"SP_{suffix}", cost=Decimal("8.00"), currency="BRL", is_active=True))
     db.session.commit()
     _login(client, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True)
     monkeypatch.setitem(client.application.config, "SHIPPING_ORIGIN_CEP", ORIGIN)
     monkeypatch.setitem(client.application.config, "SHIPPING_DOMESTIC_RATES", {("013", "013"): (Decimal("5.00"), 1, 2)})
     chamadas = []
@@ -1065,36 +1076,75 @@ def test_tarifa_estoque_proprio_nao_fallback_para_ambíguo(db, make_product, mon
     assert channel2 == "domestic" and key2 is None
 
 
-def test_variante_vinculada_escolhe_origem_correta(db, make_product, monkeypatch):
+def test_variante_vinculada_escolhe_origem_correta(client, db, monkeypatch):
     from loja.modules.models import Product, ProductVariant, Supplier, SupplierProduct
     from loja.services.shipping_quote import classify_line, resolve_group_origin
 
-    # Produto com dois fornecedores, mas variante aponta para um deles
+    # Produto com dois fornecedores; cria duas variantes, cada uma vinculada
+    # a um fornecedor diferente (cenário inequívoco por variante).
     product = Product(id=uuid.uuid4(), name="VarAmbig", price=Decimal("20.00"), stock=5, is_active=True)
     db.session.add(product)
     db.session.flush()
     suppliers = []
+    supplier_products = []
     for suffix in ("A", "B"):
         supplier = Supplier(id=uuid.uuid4(), name=f"Supp {suffix}", channel_type="manual")
         db.session.add(supplier)
         db.session.flush()
         suppliers.append(supplier)
-        db.session.add(SupplierProduct(id=uuid.uuid4(), supplier_id=supplier.id, product_id=product.id, supplier_product_id=f"SP_{suffix}", cost=Decimal("8.00"), currency="BRL", is_active=True))
+        sp = SupplierProduct(id=uuid.uuid4(), supplier_id=supplier.id, product_id=product.id, supplier_product_id=f"SP_{suffix}", cost=Decimal("8.00"), currency="BRL", is_active=True)
+        db.session.add(sp)
+        db.session.flush()
+        supplier_products.append(sp)
+    variants = []
+    for sp, sku in ((supplier_products[0], "SKU_A"), (supplier_products[1], "SKU_B")):
+        variant = ProductVariant(id=uuid.uuid4(), product_id=product.id, supplier_product_id=sp.id, supplier_sku_id=sku, stock=5, is_active=True)
+        db.session.add(variant)
+        db.session.flush()
+        variants.append(variant)
     db.session.commit()
-    # Variante vinculada ao primeiro fornecedor
-    sp_a = SupplierProduct.query.filter_by(product_id=product.id, supplier_id=suppliers[0].id).first()
-    variant = ProductVariant(id=uuid.uuid4(), product_id=product.id, supplier_product_id=sp_a.id, supplier_sku_id="SKU_A", stock=5, is_active=True)
-    db.session.add(variant)
-    db.session.commit()
-    channel, key = classify_line(product.id, variant.id)
+
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True)
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_DOMESTIC_ORIGINS",
+        {
+            str(suppliers[0].id): "01310100",
+            str(suppliers[1].id): "77100000",
+        },
+    )
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_DOMESTIC_RATES",
+        {("013", "771"): (Decimal("7.50"), 3, 5),
+         ("771", "771"): (Decimal("9.00"), 2, 4)},
+    )
+    # SHIPPING_ORIGIN_CEP existe só para estoque próprio; nunca é fallback
+    # de fornecedor ambíguo.
+    monkeypatch.setitem(client.application.config, "SHIPPING_ORIGIN_CEP", "99999999")
+
+    # Variante A vincula à origem de A; variante B, à de B.
+    channel, key = classify_line(product.id, variants[0].id)
     assert channel == "domestic" and key == suppliers[0].id
-    # Origem correta por remessa
-    monkeypatch = __import__("pytest").MonkeyPatch()
-    # Simula config
-    from flask import current_app
-    # Usa o app atual via db.session
-    # Para teste, basta verificar que a variante resolve corretamente
-    assert key == suppliers[0].id
+    assert resolve_group_origin(channel, key) == "01310100"
+    channel, key = classify_line(product.id, variants[1].id)
+    assert channel == "domestic" and key == suppliers[1].id
+    assert resolve_group_origin(channel, key) == "77100000"
+
+    # Vínculo da variante INATIVO: não determina origem; reavalia os ativos
+    # do produto. Como ainda há dois fornecedores manuais ativos sem variante
+    # inequívoca, o produto é ambíguo (fail-closed), nunca "own".
+    variants[0].is_active = False
+    db.session.commit()
+    channel, key = classify_line(product.id, variants[0].id)
+    assert channel == "unknown" and key is None
+    assert resolve_group_origin(channel, key) is None
+
+    # Even com uma variante ativa apontando para supplier B, variante B resolve
+    # normalmente (vínculo ativo + fornecedor válido).
+    variants[1].is_active = True
+    db.session.commit()
+    channel, key = classify_line(product.id, variants[1].id)
+    assert channel == "domestic" and key == suppliers[1].id
+    assert resolve_group_origin(channel, key) == "77100000"
 
 
 def test_produto_proprio_usa_own_e_origin_cep(client, db, make_user, monkeypatch):
@@ -1110,6 +1160,7 @@ def test_produto_proprio_usa_own_e_origin_cep(client, db, make_user, monkeypatch
     channel, key = classify_line(proprio.id, None)
     assert channel == "domestic" and key is None
     # Com SHIPPING_ORIGIN_CEP configurado, deve cotar
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True)
     monkeypatch.setitem(client.application.config, "SHIPPING_ORIGIN_CEP", ORIGIN)
     monkeypatch.setitem(client.application.config, "SHIPPING_DOMESTIC_RATES", {("013", "013"): (Decimal("5.00"), 1, 2)})
     resp = client.post("/calcular_frete", json={"cep": "01310100", "product_id": str(proprio.id), "quantity": 1})
@@ -1139,6 +1190,7 @@ def test_cotacao_anterior_nao_reutilizada_apos_ambiguidade(client, db, make_user
         from loja.services.shipping_quote import classify_line as _cl
 
         _, supplier_id = _cl(product.id, None)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True)
     # Origem por fornecedor (não SHIPPING_ORIGIN_CEP, que é só para estoque próprio)
     monkeypatch.setitem(
         client.application.config, "SHIPPING_DOMESTIC_ORIGINS",
@@ -1167,3 +1219,63 @@ def test_cotacao_anterior_nao_reutilizada_apos_ambiguidade(client, db, make_user
     assert "indisponível" in resp.get_data(as_text=True).lower()
     assert Order.query.count() == antes
     assert chamadas == []
+
+
+# ── Flag desligada (default): regra temporária flat aprovada ─────────────
+
+def test_flag_desligada_calcula_frete_flat(client, db, make_user, monkeypatch):
+    user = make_user()
+    _login(client, user)
+    _manual_supplier_cart(db, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False)
+    monkeypatch.setitem(client.application.config, "PAYMENT_FLAT_SHIPPING", "18.90")
+    monkeypatch.setitem(client.application.config, "FREE_SHIPPING_MIN", "249.00")
+    resp = client.post("/calcular_frete", json={"cart": True, "cep": "77100000"})
+    assert resp.status_code == 200
+    assert resp.get_json()["valor"] == "18.90"
+    # Sem confirmação agrupada: checkout flat não exige sessão.
+    with client.session_transaction() as sess:
+        sess.pop("shipping_quote", None)
+
+
+def test_flag_desligada_checkout_flat_cria_pedido(client, db, make_user, monkeypatch):
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order
+
+    user = make_user()
+    _login(client, user)
+    _manual_supplier_cart(db, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False)
+    monkeypatch.setitem(client.application.config, "PAYMENT_FLAT_SHIPPING", "18.90")
+    monkeypatch.setitem(client.application.config, "FREE_SHIPPING_MIN", "249.00")
+    chamadas = []
+    monkeypatch.setattr(pr, "create_preference", lambda order: chamadas.append(order) or {
+        "preference_id": "pref-flat", "checkout_url": "https://mp.example/flat",
+    })
+    antes = Order.query.count()
+    resp = client.post(
+        "/pagamentos/mercado-pago",
+        data=_cart_checkout_form(user, "77100000"),
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert Order.query.count() == antes + 1
+    assert Order.query.filter_by(user_id=user.id).one().shipping == Decimal("18.90")
+    assert len(chamadas) == 1
+
+
+def test_flag_desligada_frete_gratis_acima_do_minimo(client, db, make_user, monkeypatch):
+    user = make_user()
+    _login(client, user)
+    _manual_supplier_cart(db, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False)
+    monkeypatch.setitem(client.application.config, "PAYMENT_FLAT_SHIPPING", "18.90")
+    monkeypatch.setitem(client.application.config, "FREE_SHIPPING_MIN", "249.00")
+    from loja.modules.models import Cart, CartItem
+    cart = Cart.query.filter_by(user_id=user.id).first()
+    for item in CartItem.query.filter_by(cart_id=cart.id).all():
+        item.unit_price = Decimal("200.00")
+    db.session.commit()
+    resp = client.post("/calcular_frete", json={"cart": True, "cep": "77100000"})
+    assert resp.status_code == 200
+    assert resp.get_json()["valor"] == "0.00"

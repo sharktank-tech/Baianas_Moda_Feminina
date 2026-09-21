@@ -1866,8 +1866,27 @@ def calcular_frete():
             money(product.price) * quantity
         )
 
-    # Cotação por grupo de remessa (nunca tarifa presumida): o CEP é usado
-    # de verdade; sem cotação válida, erro explícito em vez de valor fixo.
+    # Flag desligada preserva regra temporária aprovada (flat) para não
+    # bloquear compras até fonte real estar configurada.
+    from flask import current_app as _current_app2
+
+    if not _current_app2.config.get("SHIPPING_GROUPED_QUOTE_ENABLED"):
+        from loja.modules.getway_mercado_pago.payment_service import money as _money2
+
+        flat = _money2(_current_app2.config.get("PAYMENT_FLAT_SHIPPING", "18.90"))
+        free_min = _money2(_current_app2.config.get("FREE_SHIPPING_MIN", "249.00"))
+        shipping = _money2(Decimal("0.00")) if free_min > 0 and subtotal >= free_min else flat
+        total = _money2(subtotal + shipping)
+        # Não grava confirmação de cotação agrupada; checkout com flag desligada usa flat direto
+        return jsonify({
+            "valor": f"{shipping:.2f}",
+            "subtotal": f"{subtotal:.2f}",
+            "total": f"{total:.2f}",
+            "quantity": quantity,
+            "cep": cep,
+            "grupos": [],
+        })
+
     lines = [
         ShipmentLine(
             product_id=item["product_id"],

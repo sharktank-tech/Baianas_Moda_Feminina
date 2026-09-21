@@ -316,16 +316,27 @@ def classify_line(product_id, variant_id=None):
     variant_supplier = None
     if variant_id is not None:
         variant = ProductVariant.query.filter_by(id=variant_id).first()
-        if variant is not None and variant.supplier_product_id:
+        if (
+            variant is not None
+            and variant.is_active
+            and variant.supplier_product_id
+        ):
             sp = SupplierProduct.query.filter_by(
                 id=variant.supplier_product_id
             ).first()
-            if sp is not None and sp.supplier_id is not None:
+            if (
+                sp is not None
+                and sp.is_active
+                and sp.supplier_id is not None
+            ):
                 supplier = Supplier.query.filter_by(id=sp.supplier_id).first()
-                if _supplier_is_aliexpress(supplier):
+                if supplier is not None and _supplier_is_aliexpress(supplier):
                     return "aliexpress", supplier.id
                 if supplier is not None:
+                    # Vínculo ativo e fornecedor válido: pode determinar origem.
                     variant_supplier = supplier.id
+            # Se o vínculo da variante está inativo/ausente/inválido, ignora
+            # e reavalia os vínculos ativos do produto.
     product = (
         Product.query.filter_by(id=product_id).first()
         if product_id is not None
