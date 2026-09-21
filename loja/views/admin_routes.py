@@ -484,6 +484,34 @@ def send_checkout_recovery(order_id):
 
 
 @admin_blueprint.route(
+    "/admin/recuperacao-checkout/<uuid:order_id>/ignorar",
+    methods=["POST"],
+)
+@admin_required
+def skip_checkout_recovery(order_id):
+    """Descarta somente o lembrete escolhido; não toca pagamento ou estoque."""
+    if request.form.get("confirm_skip") != "1":
+        flash("Confirme o descarte do lembrete antes de continuar.", "warning")
+        return redirect(url_for("admin.checkout_recovery"))
+
+    from loja.services.checkout_recovery import skip_single_checkout_recovery
+
+    skipped = skip_single_checkout_recovery(
+        order_id,
+        admin_user_id=current_user.id,
+    )
+    if skipped:
+        flash(
+            "Candidato removido da fila de lembretes. "
+            "Pedido, pagamento e reserva não foram alterados.",
+            "success",
+        )
+    else:
+        flash("Pedido não elegível ou já processado; nada foi alterado.", "warning")
+    return redirect(url_for("admin.checkout_recovery"))
+
+
+@admin_blueprint.route(
     "/admin/reservas-expiradas/liberar",
     methods=["POST"],
 )

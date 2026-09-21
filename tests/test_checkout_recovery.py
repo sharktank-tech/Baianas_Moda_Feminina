@@ -19,6 +19,7 @@ from loja.services.checkout_recovery import (
     load_after_hours,
     run_checkout_recovery,
     send_recovery_emails,
+    skip_single_checkout_recovery,
 )
 
 
@@ -542,3 +543,204 @@ def test_admin_page_keeps_batch_form_hidden_by_default(
     assert 'name="csrf_token"' in text
     assert "DESLIGADO (fail-closed). Exige CHECKOUT_RECOVERY_BATCH_ENABLED=1" in text
     assert 'action="/admin/recuperacao-checkout"' not in text
+
+
+def test_find_recoverable_orders_excludes_admin_skipped(db):
+    skipped = _order(
+        created_at=NOW - timedelta(hours=4),
+        recovery_email_skipped_at=NOW - timedelta(minutes=5),
+        recovery_email_skip_reason="admin_decision",
+    )
+    db.session.add(skipped)
+    db.session.commit()
+
+    rows = find_recoverable_orders(after_hours=2, now=NOW)
+
+    assert skipped.id not in {row.id for row in rows}
+
+
+def test_skip_single_candidate_is_audited_without_side_effects(
+    db, admin_user
+):
+    from loja.utils import utcnow
+
+    order = _order(
+        user_id=admin_user.id,
+        created_at=utcnow() - timedelta(hours=3),
+    )
+    original_status = order.status
+    original_reserved = order.stock_reserved
+    db.session.add(order)
+    db.session.commit()
+
+    skipped = skip_single_checkout_recovery(
+        order.id,
+        admin_user_id=admin_user.id,
+    )
+
+    assert skipped is True
+    db.session.refresh(order)
+    assert order.recovery_email_skipped_at is not None
+    assert order.recovery_email_skipped_by_user_id == admin_user.id
+    assert order.recovery_email_skip_reason == "admin_decision"
+    assert order.recovery_email_sent_at is None
+    assert order.status == original_status
+    assert order.stock_reserved is original_reserved
+
+
+def test_skip_single_candidate_is_idempotent(db, admin_user):
+    from loja.utils import utcnow
+
+    order = _order(
+        user_id=admin_user.id,
+        created_at=utcnow() - timedelta(hours=3),
+    )
+    db.session.add(order)
+    db.session.commit()
+
+    first = skip_single_checkout_recovery(
+        order.id,
+        admin_user_id=admin_user.id,
+    )
+    first_timestamp = order.recovery_email_skipped_at
+    second = skip_single_checkout_recovery(
+        order.id,
+        admin_user_id=admin_user.id,
+    )
+
+    assert first is True
+    assert second is False
+    db.session.refresh(order)
+    assert order.recovery_email_skipped_at == first_timestamp
+
+
+def test_skip_route_requires_explicit_confirmation(
+    client, admin_user, login, db
+):
+    from loja.utils import utcnow
+
+    order = _order(
+        user_id=admin_user.id,
+        created_at=utcnow() - timedelta(hours=3),
+    )
+    db.session.add(order)
+    db.session.commit()
+    login(admin_user.email, "senha123")
+
+    response = client.post(
+        f"/admin/recuperacao-checkout/{order.id}/ignorar",
+        data={},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    db.session.refresh(order)
+    assert order.recovery_email_skipped_at is None
+    assert order.recovery_email_sent_at is None
+
+
+def test_skip_route_discards_only_selected_without_email_or_stock_change(
+    client, admin_user, login, db, monkeypatch
+):
+    from loja.utils import utcnow
+    import loja.services.checkout_recovery as recovery
+
+    monkeypatch.delenv("CHECKOUT_RECOVERY_ENABLED", raising=False)
+
+    def _unexpected_email(*args, **kwargs):
+        raise AssertionError("email must not be sent while dismissing")
+
+    monkeypatch.setattr(recovery, "enviar_email", _unexpected_email)
+    selected = _order(
+        user_id=admin_user.id,
+        created_at=utcnow() - timedelta(hours=3),
+    )
+    untouched = _order(
+        user_id=admin_user.id,
+        created_at=utcnow() - timedelta(hours=3),
+    )
+    db.session.add_all([selected, untouched])
+    db.session.commit()
+    login(admin_user.email, "senha123")
+
+    response = client.post(
+        f"/admin/recuperacao-checkout/{selected.id}/ignorar",
+        data={"confirm_skip": "1"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    db.session.refresh(selected)
+    db.session.refresh(untouched)
+    assert selected.recovery_email_skipped_at is not None
+    assert selected.recovery_email_sent_at is None
+    assert selected.status == "pending_payment"
+    assert selected.stock_reserved is True
+    assert untouched.recovery_email_skipped_at is None
+    assert untouched.stock_reserved is True
+
+
+def test_skip_route_denies_anonymous_without_mutation(client, db):
+    from loja.utils import utcnow
+
+    order = _order(created_at=utcnow() - timedelta(hours=3))
+    db.session.add(order)
+    db.session.commit()
+
+    response = client.post(
+        f"/admin/recuperacao-checkout/{order.id}/ignorar",
+        data={"confirm_skip": "1"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code in (302, 303, 401, 403)
+    db.session.refresh(order)
+    assert order.recovery_email_skipped_at is None
+
+
+def test_skip_route_denies_non_admin_without_mutation(
+    client, regular_user, login, db
+):
+    from loja.utils import utcnow
+
+    order = _order(
+        user_id=regular_user.id,
+        created_at=utcnow() - timedelta(hours=3),
+    )
+    db.session.add(order)
+    db.session.commit()
+    login(regular_user.email, "senha123")
+
+    response = client.post(
+        f"/admin/recuperacao-checkout/{order.id}/ignorar",
+        data={"confirm_skip": "1"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code in (302, 303, 401, 403)
+    db.session.refresh(order)
+    assert order.recovery_email_skipped_at is None
+
+
+def test_admin_page_exposes_confirmed_skip_even_when_email_gate_is_off(
+    client, admin_user, login, db, monkeypatch
+):
+    from loja.utils import utcnow
+
+    monkeypatch.delenv("CHECKOUT_RECOVERY_ENABLED", raising=False)
+    order = _order(
+        user_id=admin_user.id,
+        created_at=utcnow() - timedelta(hours=3),
+    )
+    db.session.add(order)
+    db.session.commit()
+    login(admin_user.email, "senha123")
+
+    response = client.get("/admin/recuperacao-checkout")
+    text = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert f"/admin/recuperacao-checkout/{order.id}/ignorar" in text
+    assert 'name="confirm_skip" value="1"' in text
+    assert "Ignorar lembrete" in text
+    assert "pedido, o pagamento e a reserva não serão alterados" in text

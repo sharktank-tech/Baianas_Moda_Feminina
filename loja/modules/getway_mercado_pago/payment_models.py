@@ -161,6 +161,21 @@ class Order(db.Model):
     # abandonado (dedupe anti-spam). NULL = ainda não lembrado.
     recovery_email_sent_at = db.Column(db.DateTime, nullable=True)
 
+    # Descarte administrativo explícito da fila de recuperação. Não significa
+    # envio, pagamento, cancelamento ou liberação de estoque.
+    recovery_email_skipped_at = db.Column(db.DateTime, nullable=True)
+    recovery_email_skipped_by_user_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey(
+            "users.id",
+            name="orders_recovery_email_skipped_by_user_id_fkey",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+    recovery_email_skip_reason = db.Column(db.String(32), nullable=True)
+
     # FASE 8.3.0-H: ledger financeiro local; não substitui a autoridade
     # do webhook Mercado Pago sobre Order.status == "refunded".
     supplier_refund_state = db.Column(db.String(30), nullable=True)
@@ -192,7 +207,7 @@ class Order(db.Model):
         onupdate=utcnow,
     )
 
-    user = db.relationship("User", lazy="joined")
+    user = db.relationship("User", foreign_keys=[user_id], lazy="joined")
     coupon = db.relationship("Coupon", lazy="joined")
 
     items = db.relationship(
@@ -248,6 +263,11 @@ class Order(db.Model):
             "supplier_refund_state IS NULL OR supplier_refund_state IN "
             "('requested','pending_webhook','confirmed','failed','manual_review')",
             name="ck_orders_supplier_refund_state",
+        ),
+        db.CheckConstraint(
+            "recovery_email_skip_reason IS NULL OR "
+            "recovery_email_skip_reason = 'admin_decision'",
+            name="ck_orders_recovery_email_skip_reason",
         ),
         db.Index(
             "ix_orders_user_created",
