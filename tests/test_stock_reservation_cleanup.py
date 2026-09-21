@@ -231,3 +231,17 @@ def test_admin_action_denies_non_admin(
     assert response.status_code in {302, 403}
     db.session.refresh(order)
     assert order.stock_reserved is True
+
+
+def test_admin_dashboard_links_checkout_recovery_on_desktop_and_mobile(
+    client, admin_user, login
+):
+    login(admin_user.email)
+
+    response = client.get("/admin")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert html.count('href="/admin/recuperacao-checkout"') == 2
+    assert "Recuperação de checkout" in html
+    assert ">\n        Recuperação\n" in html
