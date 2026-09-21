@@ -93,11 +93,15 @@ class Config:
     )
     SHIPPING_ORIGIN_CEP = os.environ.get("SHIPPING_ORIGIN_CEP") or None
     SHIPPING_DOMESTIC_RATES = os.environ.get("SHIPPING_DOMESTIC_RATES") or None
-    # Liberação agendada de reservas vencidas. Fail-closed: o cron só muta
-    # estoque quando explicitamente habilitado; a ação admin continua sendo
-    # uma operação humana autenticada e protegida por CSRF.
+    # Liberação agendada e lote administrativo são gates independentes.
+    # A liberação individual continua exigindo admin + CSRF + confirmação e
+    # revalida prazo/pagamento sob lock.
     STOCK_RESERVATION_RELEASE_ENABLED = env_bool(
         "STOCK_RESERVATION_RELEASE_ENABLED",
+        False,
+    )
+    STOCK_RESERVATION_BATCH_RELEASE_ENABLED = env_bool(
+        "STOCK_RESERVATION_BATCH_RELEASE_ENABLED",
         False,
     )
     STOCK_RESERVATION_HOURS = os.environ.get(
