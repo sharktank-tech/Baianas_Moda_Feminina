@@ -14,12 +14,13 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Iterable, Optional
 
-from loja.modules.enviar_email import enviar_email
+from loja.modules.enviar_email import email_delivery_ready, enviar_email
 from loja.modules.getway_mercado_pago.payment_models import Order
 from loja.utils import utcnow
 
 
 ENABLED_ENV = "CHECKOUT_RECOVERY_ENABLED"
+BATCH_ENABLED_ENV = "CHECKOUT_RECOVERY_BATCH_ENABLED"
 AFTER_HOURS_ENV = "CHECKOUT_RECOVERY_AFTER_HOURS"
 DEFAULT_AFTER_HOURS = 2
 DEFAULT_RESERVATION_HOURS = 24
@@ -43,6 +44,10 @@ def is_recovery_enabled() -> bool:
     return os.environ.get(ENABLED_ENV, "") == "1"
 
 
+def is_batch_recovery_enabled() -> bool:
+    return os.environ.get(BATCH_ENABLED_ENV, "") == "1"
+
+
 def load_after_hours() -> int:
     raw = os.environ.get(AFTER_HOURS_ENV)
     if raw is None or raw == "":
@@ -61,6 +66,7 @@ def find_recoverable_orders(
     limit: Optional[int] = None,
     now=None,
     lock: bool = False,
+    order_id=None,
 ) -> list[Order]:
     """Seleciona apenas pedidos cuja reserva de 24h ainda não expirou.
 
@@ -94,8 +100,10 @@ def find_recoverable_orders(
         )
         .order_by(Order.created_at.asc())
     )
+    if order_id is not None:
+        query = query.filter(Order.id == order_id)
     if lock:
-        query = query.with_for_update(skip_locked=True)
+        query = query.with_for_update(of=Order, skip_locked=True)
     if limit is not None:
         query = query.limit(limit)
     return query.all()
@@ -152,6 +160,9 @@ def send_recovery_emails(
 
         order_detail_url_builder = _default_builder
 
+    if email_sender is None and not email_delivery_ready():
+        raise ValueError("checkout_recovery_email_unavailable")
+
     sender = email_sender or enviar_email
     candidates = list(orders)
     sent = failed = skipped_empty_email = 0
@@ -191,7 +202,7 @@ def run_checkout_recovery(
     after_hours: Optional[int] = None,
 ) -> CheckoutRecoveryResult:
     """Processa um lote limitado, fora dos webhooks e sob lock pessimista."""
-    if not is_recovery_enabled():
+    if not is_recovery_enabled() or not is_batch_recovery_enabled():
         return CheckoutRecoveryResult(False, 0, 0, 0, 0)
 
     from loja import db
@@ -215,14 +226,53 @@ def run_checkout_recovery(
         raise
 
 
+def send_single_checkout_recovery(
+    order_id,
+    *,
+    order_detail_url_builder=None,
+    email_sender=None,
+    after_hours: Optional[int] = None,
+) -> CheckoutRecoveryResult:
+    """Envia um único lembrete elegível, sob lock e com dedupe persistido."""
+    if not is_recovery_enabled():
+        return CheckoutRecoveryResult(False, 0, 0, 0, 0)
+    if email_sender is None and not email_delivery_ready():
+        raise ValueError("checkout_recovery_email_unavailable")
+
+    from loja import db
+
+    try:
+        orders = find_recoverable_orders(
+            after_hours=after_hours,
+            limit=1,
+            lock=True,
+            order_id=order_id,
+        )
+        if not orders:
+            return CheckoutRecoveryResult(True, 0, 0, 0, 0)
+        result = send_recovery_emails(
+            orders,
+            order_detail_url_builder=order_detail_url_builder,
+            email_sender=email_sender,
+            after_hours=after_hours,
+        )
+        db.session.commit()
+        return result
+    except Exception:
+        db.session.rollback()
+        raise
+
+
 __all__ = [
     "CheckoutRecoveryResult",
     "DEFAULT_AFTER_HOURS",
     "DEFAULT_BATCH_LIMIT",
     "DEFAULT_RESERVATION_HOURS",
     "find_recoverable_orders",
+    "is_batch_recovery_enabled",
     "is_recovery_enabled",
     "load_after_hours",
     "run_checkout_recovery",
     "send_recovery_emails",
+    "send_single_checkout_recovery",
 ]
