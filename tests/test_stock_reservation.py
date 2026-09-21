@@ -288,7 +288,9 @@ def test_cleanup_skips_canonical_approved_payment(
     db, make_user, make_product
 ):
     from loja.modules.getway_mercado_pago.payment_models import Payment
-    from loja.services.stock_reservations import release_expired_stock_reservations
+    from loja.services.stock_reservations import (
+        release_single_expired_stock_reservation,
+    )
 
     user = make_user()
     product = make_product(stock=10)
@@ -307,9 +309,8 @@ def test_cleanup_skips_canonical_approved_payment(
     )
     db.session.commit()
 
-    result = release_expired_stock_reservations()
+    released = release_single_expired_stock_reservation(order.id)
 
-    assert result.released == 0
-    assert result.skipped == 1
+    assert released is False
     assert order.stock_reserved is True
     assert product.stock == 8
