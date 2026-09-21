@@ -403,6 +403,11 @@ def checkout_recovery():
         load_after_hours,
         run_checkout_recovery,
     )
+    from loja.services.stock_reservations import (
+        find_expired_stock_reservations,
+        is_scheduled_release_enabled,
+        load_reservation_hours,
+    )
 
     enabled = is_recovery_enabled()
     result = None
@@ -420,13 +425,56 @@ def checkout_recovery():
     except ValueError:
         candidates = []
 
+    try:
+        reservation_hours = load_reservation_hours()
+        expired_reservations = find_expired_stock_reservations(
+            hours=reservation_hours,
+            limit=200,
+        )
+    except ValueError:
+        reservation_hours = None
+        expired_reservations = []
+
     return render_template(
         "admin/checkout_recovery.html",
         enabled=enabled,
         after_hours=after_hours,
         candidates=candidates,
         result=result,
+        reservation_release_enabled=is_scheduled_release_enabled(),
+        reservation_hours=reservation_hours,
+        expired_reservations=expired_reservations,
     )
+
+
+@admin_blueprint.route(
+    "/admin/reservas-expiradas/liberar",
+    methods=["POST"],
+)
+@admin_required
+def release_expired_reservations():
+    """Ação humana explícita; não depende da flag do cron."""
+    from loja.services.stock_reservations import (
+        release_expired_stock_reservations,
+    )
+
+    try:
+        result = release_expired_stock_reservations(source="admin")
+    except ValueError:
+        flash(
+            "Configuração da janela de reserva inválida; nenhuma reserva foi alterada.",
+            "danger",
+        )
+        return redirect(url_for("admin.checkout_recovery"))
+
+    flash(
+        (
+            f"Reservas vencidas processadas: {result.released} liberada(s), "
+            f"{result.skipped} ignorada(s)."
+        ),
+        "success",
+    )
+    return redirect(url_for("admin.checkout_recovery"))
 
 
 # -------------------------------------------------------------------
