@@ -1373,7 +1373,23 @@ def test_temporary_flat_rate_10_005_arredonda_para_10_01(client, db, make_user, 
     assert "10.005" not in resp_calc.get_data(as_text=True)
 
 
-@pytest.mark.parametrize("raw", ["abc", "-10", "NaN", "Infinity", ""])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "abc",
+        "-10",
+        "-0.01",
+        "NaN",
+        "sNaN",
+        "Infinity",
+        "-Infinity",
+        "",
+        "   ",
+        "9999.999",
+        "10000.00",
+        "1e999999",
+    ],
+)
 def test_temporary_flat_rate_config_invalida_bloqueia(client, db, make_user, monkeypatch, raw):
     import loja.views.payments_routes as pr
     from loja.modules.getway_mercado_pago.payment_models import Order
@@ -1381,7 +1397,7 @@ def test_temporary_flat_rate_config_invalida_bloqueia(client, db, make_user, mon
 
     user = make_user()
     _login(client, user)
-    _manual_supplier_cart(db, user)
+    cart, _ = _manual_supplier_cart(db, user)
     monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False)
     monkeypatch.setitem(client.application.config, "SHIPPING_TEMPORARY_FLAT_RATE", raw)
 
@@ -1402,8 +1418,11 @@ def test_temporary_flat_rate_config_invalida_bloqueia(client, db, make_user, mon
     monkeypatch.setattr(pr, "create_preference", lambda order: chamadas.append(order) or {
         "preference_id": "pref-bad", "checkout_url": "https://mp.example/bad",
     })
+    from loja.modules.models import CartItem
+
     product = Product.query.first()
     estoque_antes = product.stock if product else None
+    itens_carrinho_antes = CartItem.query.filter_by(cart_id=cart.id).count()
     antes = Order.query.count()
     resp = client.post(
         "/pagamentos/mercado-pago",
@@ -1412,6 +1431,7 @@ def test_temporary_flat_rate_config_invalida_bloqueia(client, db, make_user, mon
     )
     assert Order.query.count() == antes
     assert chamadas == []
+    assert CartItem.query.filter_by(cart_id=cart.id).count() == itens_carrinho_antes
     if product is not None and estoque_antes is not None:
         db.session.refresh(product)
         assert product.stock == estoque_antes
@@ -1424,7 +1444,10 @@ def test_temporary_flat_rate_config_invalida_bloqueia(client, db, make_user, mon
 def test_temporary_flat_rate_api_invalida_direta(app, monkeypatch):
     from loja.services.shipping_quote import QuoteUnavailable, temporary_flat_rate
 
-    for raw in ["abc", "-10", "NaN", "Infinity", ""]:
+    for raw in [
+        "abc", "-10", "-0.01", "NaN", "sNaN", "Infinity", "-Infinity",
+        "", "   ", "9999.999", "10000.00", "1e999999",
+    ]:
         monkeypatch.setitem(app.config, "SHIPPING_TEMPORARY_FLAT_RATE", raw)
         with app.app_context():
             try:
@@ -1438,3 +1461,74 @@ def test_temporary_flat_rate_api_invalida_direta(app, monkeypatch):
     monkeypatch.setitem(app.config, "SHIPPING_TEMPORARY_FLAT_RATE", "10.005")
     with app.app_context():
         assert temporary_flat_rate() == Decimal("10.01")
+
+
+def test_temporary_flat_rate_limites_e_default(app, monkeypatch):
+    from loja.services.shipping_quote import (
+        SHIPPING_TEMPORARY_FLAT_RATE_CFG,
+        SHIPPING_TEMPORARY_FLAT_RATE_DEFAULT,
+        SHIPPING_TEMPORARY_FLAT_RATE_MAX,
+        temporary_flat_rate,
+    )
+
+    # Variável ausente usa apenas o default comercial explícito.
+    monkeypatch.delitem(app.config, SHIPPING_TEMPORARY_FLAT_RATE_CFG, raising=False)
+    with app.app_context():
+        assert temporary_flat_rate() == SHIPPING_TEMPORARY_FLAT_RATE_DEFAULT
+        assert temporary_flat_rate() == Decimal("10.00")
+
+    # O valor exatamente no teto operacional é representável e válido.
+    monkeypatch.setitem(
+        app.config,
+        SHIPPING_TEMPORARY_FLAT_RATE_CFG,
+        str(SHIPPING_TEMPORARY_FLAT_RATE_MAX),
+    )
+    with app.app_context():
+        value = temporary_flat_rate()
+        assert value == Decimal("9999.99")
+        assert value.as_tuple().exponent == -2
+
+
+def test_temporary_flat_rate_no_limite_consistente_ponta_a_ponta(
+    client, db, make_user, monkeypatch
+):
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order
+
+    user = make_user()
+    _login(client, user)
+    _manual_supplier_cart(db, user)
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False
+    )
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_TEMPORARY_FLAT_RATE", "9999.99"
+    )
+
+    calculation = client.post(
+        "/calcular_frete", json={"cart": True, "cep": "77100000"}
+    )
+    assert calculation.status_code == 200
+    calculated = calculation.get_json()
+    assert calculated["valor"] == "9999.99"
+
+    preferences = []
+    monkeypatch.setattr(
+        pr,
+        "create_preference",
+        lambda order: preferences.append(order) or {
+            "preference_id": "pref-flat-limit",
+            "checkout_url": "https://mp.example/flat-limit",
+        },
+    )
+    response = client.post(
+        "/pagamentos/mercado-pago",
+        data=_cart_checkout_form(user, "77100000"),
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    order = Order.query.filter_by(user_id=user.id).one()
+    assert order.shipping == Decimal("9999.99")
+    assert order.total == Decimal(calculated["total"])
+    assert len(preferences) == 1
+    assert preferences[0].total == order.total
