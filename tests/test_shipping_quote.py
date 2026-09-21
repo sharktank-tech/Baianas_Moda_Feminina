@@ -31,30 +31,28 @@ from loja.utils import utcnow
 
 
 RATES = {
-    "013": (Decimal("5.00"), 1, 2),
-    "771": (Decimal("7.50"), 3, 5),
+    ("013", "013"): (Decimal("5.00"), 1, 2),
+    ("013", "771"): (Decimal("7.50"), 3, 5),
+    ("771", "771"): (Decimal("9.00"), 2, 4),
 }
 ORIGIN = "01310100"
 
 
-def _domestic_provider(origin=ORIGIN, rates=None):
-    return TableDomesticProvider(origin, rates if rates is not None else RATES)
-
-
-def _providers(origin=ORIGIN, rates=None):
+def _providers(rates=None):
     return {
-        "domestic": _domestic_provider(origin, rates),
+        "domestic": TableDomesticProvider(rates if rates is not None else RATES),
         "aliexpress": AliExpressSupplierProvider(),
     }
 
 
-def _group(channel="domestic", key=None, n=1):
+def _group(channel="domestic", key=None, n=1, origin=ORIGIN):
     return ShipmentGroup(
         key=key,
         channel=channel,
         lines=tuple(
             ShipmentLine(product_id=uuid.uuid4(), quantity=1) for _ in range(n)
         ),
+        origin_cep=origin,
     )
 
 
@@ -104,23 +102,22 @@ def test_ceps_distintos_cotacoes_distintas():
     assert r2["total"] == Decimal("7.50")
 
 
-def test_origens_distintas_cotacoes_distintas():
+def test_origens_distintas_mesmo_destino_tarifas_distintas():
+    # Mesma tabela, origens efetivas diferentes por remessa.
     dest = "77100000"
-    a = quote_groups([_group()], dest, _providers(origin="01310100"))
-    b = quote_groups([_group()], dest, _providers(origin="77100000"))
-    # Mesma tabela, origens diferentes: o provedor usa a origem configurada.
-    assert a["groups"][0]["carrier"] == "simulated-domestic"
-    assert b["groups"][0]["carrier"] == "simulated-domestic"
-    assert a["total"] == b["total"] == Decimal("7.50")
+    a = quote_groups([_group(origin="01310100")], dest, _providers())
+    b = quote_groups([_group(origin="77100000")], dest, _providers())
+    assert a["total"] == Decimal("7.50")
+    assert b["total"] == Decimal("9.00")
 
 
-def test_sem_origem_bloqueia():
+def test_sem_origem_na_remessa_bloqueia():
     with pytest.raises(QuoteUnavailable) as exc:
-        quote_groups([_group()], "01310100", _providers(origin=None))
+        quote_groups([_group(origin=None)], "01310100", _providers())
     assert exc.value.code == "missing_origin"
 
 
-def test_prefixo_desconhecido_bloqueia():
+def test_par_origem_destino_sem_tarifa_bloqueia():
     with pytest.raises(QuoteUnavailable) as exc:
         quote_groups([_group()], "99999999", _providers())
     assert exc.value.code == "provider_unavailable"
@@ -134,18 +131,52 @@ def test_destino_invalido_bloqueia():
 
 def test_dois_grupos_somam_e_mostram_prazos():
     groups = [
-        ShipmentGroup(key=None, channel="domestic", lines=(ShipmentLine(product_id=uuid.uuid4()),)),
-        ShipmentGroup(key=uuid.uuid4(), channel="domestic", lines=(ShipmentLine(product_id=uuid.uuid4()),)),
+        ShipmentGroup(key=None, channel="domestic", origin_cep="01310100",
+                      lines=(ShipmentLine(product_id=uuid.uuid4()),)),
+        ShipmentGroup(key=uuid.uuid4(), channel="domestic", origin_cep="77100000",
+                      lines=(ShipmentLine(product_id=uuid.uuid4()),)),
     ]
     providers = {
-        "domestic": TableDomesticProvider(ORIGIN, {"013": (Decimal("5.00"), 1, 2)}),
-        "other": TableDomesticProvider(ORIGIN, {"013": (Decimal("7.00"), 4, 9)}),
+        "domestic": TableDomesticProvider({
+            ("013", "013"): (Decimal("5.00"), 1, 2),
+            ("771", "013"): (Decimal("7.00"), 4, 9),
+        }),
+        "aliexpress": AliExpressSupplierProvider(),
     }
-    groups[1] = ShipmentGroup(key=groups[1].key, channel="other", lines=groups[1].lines)
     result = quote_groups(groups, "01310100", providers)
     assert result["total"] == Decimal("12.00")
     prazos = {(g["min_days"], g["max_days"]) for g in result["groups"]}
     assert prazos == {(1, 2), (4, 9)}
+
+
+def test_vencimento_total_e_o_minimo_dos_grupos():
+    # Duas remessas com validades diferentes: o total vence na primeira.
+    from loja.utils import utcnow as _now
+
+    class _StubProvider:
+        def __init__(self, quoted_at, ttl):
+            self.quoted_at = quoted_at
+            self.ttl = ttl
+
+        def quote(self, group, dest_cep, now=None):
+            from loja.services.shipping_quote import Quote as _Quote
+
+            return _Quote(cost=Decimal("5.00"), carrier="stub",
+                          quoted_at=self.quoted_at, ttl_seconds=self.ttl)
+
+    now = _now()
+    cedo = _StubProvider(now - timedelta(seconds=1700), 1800)
+    tarde = _StubProvider(now, 3600)
+    result = quote_groups(
+        [_group(channel="domestic"), _group(channel="other")],
+        "01310100",
+        {"domestic": cedo, "other": tarde,
+         "aliexpress": AliExpressSupplierProvider()},
+    )
+    expira = [g["expires_at"] for g in result["groups"]]
+    assert min(expira) == cedo.quoted_at + timedelta(seconds=1800)
+    assert max(expira) == tarde.quoted_at + timedelta(seconds=3600)
+    assert min(expira) < max(expira)
 
 
 def test_grupo_sem_provedor_bloqueia_tudo():
@@ -155,7 +186,7 @@ def test_grupo_sem_provedor_bloqueia_tudo():
 
 def test_arredondamento_decimal():
     providers = {
-        "domestic": TableDomesticProvider(ORIGIN, {"013": (Decimal("5.005"), 1, 2)}),
+        "domestic": TableDomesticProvider({("013", "013"): (Decimal("5.005"), 1, 2)}),
         "aliexpress": AliExpressSupplierProvider(),
     }
     result = quote_groups([_group()], "01310100", providers)
@@ -320,6 +351,12 @@ def test_group_lines_separa_nacional_fornecedor_e_desconhecido(db, make_product)
         ],
     )
     assert {g.channel for g in groups} == {"domestic", "aliexpress", "unknown"}
+    from dataclasses import replace
+
+    groups = [
+        replace(g, origin_cep="01310100") if g.channel == "domestic" else g
+        for g in groups
+    ]
     providers = _providers()
     providers["aliexpress"] = AliExpressSupplierProvider(
         fresh_quotes=_fresh(ae_variant.supplier_product_id)
@@ -336,7 +373,8 @@ def _rates_config(monkeypatch, client):
     monkeypatch.setitem(
         client.application.config,
         "SHIPPING_DOMESTIC_RATES",
-        {"013": (Decimal("5.00"), 1, 2), "771": (Decimal("7.50"), 3, 5)},
+        {("013", "013"): (Decimal("5.00"), 1, 2),
+         ("013", "771"): (Decimal("7.50"), 3, 5)},
     )
 
 
@@ -578,6 +616,167 @@ def test_checkout_fornecedor_cota_dez_reais_cria_pedido(
     order = Order.query.filter_by(user_id=user.id).one()
     assert order.shipping == Decimal("10.00")
     assert len(capturados) == 1
+
+
+def _manual_supplier_cart(db, user, suffixes=("A", "B")):
+    """Carrinho com dois fornecedores manuais distintos (duas remessas)."""
+    from loja.modules.models import (
+        Cart,
+        CartItem,
+        Product,
+        Supplier,
+        SupplierProduct,
+    )
+
+    cart = Cart(id=uuid.uuid4(), user_id=user.id)
+    db.session.add(cart)
+    db.session.flush()
+    supplier_ids = []
+    for suffix in suffixes:
+        supplier = Supplier(
+            id=uuid.uuid4(), name=f"Supp {suffix}", channel_type="manual",
+        )
+        db.session.add(supplier)
+        db.session.flush()
+        product = Product(
+            id=uuid.uuid4(), name=f"Prod {suffix}", price=Decimal("20.00"),
+            stock=5, is_active=True,
+        )
+        db.session.add(product)
+        db.session.flush()
+        db.session.add(SupplierProduct(
+            id=uuid.uuid4(), supplier_id=supplier.id, product_id=product.id,
+            supplier_product_id=f"SP_{suffix}", cost=Decimal("8.00"),
+            currency="BRL", is_active=True,
+        ))
+        db.session.flush()
+        db.session.add(CartItem(
+            id=uuid.uuid4(), cart_id=cart.id, product_id=product.id,
+            selected_size="M", quantity=1, unit_price=product.price,
+        ))
+        supplier_ids.append(supplier.id)
+    db.session.commit()
+    return cart, supplier_ids
+
+
+def _cart_checkout_form(user, cep):
+    return {
+        "checkout_type": "cart", "nome": "Cliente Teste", "email": user.email,
+        "cep": cep, "estado": "SP", "endereco": "Rua Teste", "numero": "10",
+        "bairro": "Centro", "cidade": "São Paulo",
+    }
+
+
+def test_duas_origens_mesmo_destino_tarifas_distintas(
+    client, db, make_user, monkeypatch
+):
+    user = make_user()
+    _login(client, user)
+    _, supplier_ids = _manual_supplier_cart(db, user)
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_DOMESTIC_ORIGINS",
+        {str(supplier_ids[0]): "01310100", str(supplier_ids[1]): "77100000"},
+    )
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_DOMESTIC_RATES",
+        {("013", "771"): (Decimal("7.50"), 3, 5),
+         ("771", "771"): (Decimal("9.00"), 2, 4)},
+    )
+    resp = client.post("/calcular_frete", json={"cart": True, "cep": "77100000"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    custos = sorted(g["cost"] for g in data["grupos"])
+    assert custos == ["7.50", "9.00"]
+    assert data["valor"] == "16.50"
+
+
+def test_falta_tarifa_para_uma_remessa_bloqueia_tudo(
+    client, db, make_user, monkeypatch
+):
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order
+
+    user = make_user()
+    _login(client, user)
+    _, supplier_ids = _manual_supplier_cart(db, user)
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_DOMESTIC_ORIGINS",
+        {str(supplier_ids[0]): "01310100", str(supplier_ids[1]): "77100000"},
+    )
+    # Tabela só cobre a primeira remessa.
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_DOMESTIC_RATES",
+        {("013", "771"): (Decimal("7.50"), 3, 5)},
+    )
+    resp = client.post("/calcular_frete", json={"cart": True, "cep": "77100000"})
+    assert resp.status_code == 409
+    assert "indisponível" in resp.get_json()["error"]
+
+    chamadas = []
+    monkeypatch.setattr(
+        pr, "create_preference",
+        lambda order: chamadas.append(order) or {
+            "preference_id": "pref-np", "checkout_url": "https://mp.example/np",
+        },
+    )
+    antes = Order.query.count()
+    resp = client.post(
+        "/pagamentos/mercado-pago",
+        data=_cart_checkout_form(user, "77100000"),
+        follow_redirects=True,
+    )
+    assert "indisponível" in resp.get_data(as_text=True).lower()
+    assert Order.query.count() == antes
+    assert chamadas == []
+
+
+def test_primeiro_vencimento_recusa_checkout(
+    client, db, make_user, monkeypatch
+):
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order
+    from loja.utils import utcnow
+
+    user = make_user()
+    _login(client, user)
+    _, supplier_ids = _manual_supplier_cart(db, user)
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_DOMESTIC_ORIGINS",
+        {str(supplier_ids[0]): "01310100", str(supplier_ids[1]): "77100000"},
+    )
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_DOMESTIC_RATES",
+        {("013", "771"): (Decimal("7.50"), 3, 5),
+         ("771", "771"): (Decimal("9.00"), 2, 4)},
+    )
+    resp = client.post("/calcular_frete", json={"cart": True, "cep": "77100000"})
+    assert resp.status_code == 200
+    assert len(resp.get_json()["grupos"]) == 2
+    # Primeira remessa vence agora; a segunda continua válida.
+    with client.session_transaction() as sess:
+        quote = sess["shipping_quote"]
+        quote["groups"][0]["expires_at"] = (
+            utcnow() - timedelta(seconds=10)
+        ).isoformat()
+        sess["shipping_quote"] = quote
+        sess.modified = True
+
+    chamadas = []
+    monkeypatch.setattr(
+        pr, "create_preference",
+        lambda order: chamadas.append(order) or {
+            "preference_id": "pref-nv", "checkout_url": "https://mp.example/nv",
+        },
+    )
+    antes = Order.query.count()
+    resp = client.post(
+        "/pagamentos/mercado-pago",
+        data=_cart_checkout_form(user, "77100000"),
+        follow_redirects=True,
+    )
+    assert "vencida" in resp.get_data(as_text=True).lower()
+    assert Order.query.count() == antes
+    assert chamadas == []
 
 
 def test_checkout_sem_confirmacao_bloqueia(

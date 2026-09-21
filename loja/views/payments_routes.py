@@ -109,13 +109,22 @@ def _require_confirmed_quote(item_data, dest_cep, shipping):
         raise ValueError(
             "Calcule o frete e confirme o valor antes de concluir."
         )
+    # Cada remessa tem sua validade: basta uma vencer para exigir nova cotação.
+    expiries = [stored.get("expires_at")]
+    groups = stored.get("groups") or []
+    if not isinstance(groups, list):
+        raise ValueError(
+            "Cotação de frete vencida. Calcule novamente e tente outra vez."
+        )
+    for group in groups:
+        expiries.append(group.get("expires_at") if isinstance(group, dict) else None)
     try:
-        expires_at = datetime.fromisoformat(stored.get("expires_at") or "")
+        deadlines = [datetime.fromisoformat(exp or "") for exp in expiries]
     except ValueError:
         raise ValueError(
             "Cotação de frete vencida. Calcule novamente e tente outra vez."
         ) from None
-    if expires_at <= utcnow():
+    if min(deadlines) <= utcnow():
         raise ValueError(
             "Cotação de frete vencida. Calcule novamente e tente outra vez."
         )

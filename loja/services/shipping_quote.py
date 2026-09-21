@@ -98,6 +98,7 @@ class ShipmentGroup:
     channel: str
     lines: tuple = field(default_factory=tuple)
     option: object = None
+    origin_cep: object = None
 
 
 @dataclass(frozen=True)
@@ -152,23 +153,25 @@ def assert_not_estimate(value) -> None:
 class TableDomesticProvider:
     """Simulador doméstico explícito (testes e operação assistida).
 
-    Recebe origem + tabela de tarifas por prefixo de CEP; sem origem ou sem
-    entrada para o destino, falha fechado. NÃO inventa tarifa por distância:
-    só responde o que está na tabela. Em produção, sem configuração, o
+    A tarifa é indexada pelo par (prefixo de origem, prefixo de destino):
+    só responde combinações presentes na tabela, para a origem efetiva da
+    remessa (`group.origin_cep`). Sem origem na remessa ou sem entrada para
+    o par, falha fechado. NÃO inventa tarifa por distância nem aplica uma
+    origem única a todos os fornecedores. Em produção, sem configuração, o
     checkout bloqueia (mensagem + retry) em vez de cobrar valor presumido.
     """
 
-    def __init__(self, origin_cep, rates: dict):
-        self.origin_cep = normalize_cep(origin_cep)
+    def __init__(self, rates: dict):
         self.rates = rates or {}
 
     def quote(self, group: ShipmentGroup, dest_cep: str, now=None) -> Quote:  # noqa: ARG002
         dest = normalize_cep(dest_cep)
         if dest is None:
             raise QuoteUnavailable("invalid_destination")
-        if self.origin_cep is None:
+        origin = normalize_cep(group.origin_cep)
+        if origin is None:
             raise QuoteUnavailable("missing_origin")
-        entry = self.rates.get(dest[:3]) or self.rates.get(dest[:2])
+        entry = self.rates.get((origin[:3], dest[:3]))
         if entry is None:
             raise QuoteUnavailable("provider_unavailable")
         cost, min_days, max_days = entry
@@ -298,17 +301,19 @@ def _supplier_is_aliexpress(supplier) -> bool:
 
 
 def classify_line(product_id, variant_id=None):
-    """Classifica um item em ("aliexpress", supplier_id), ("domestic", None)
-    ou ("unknown", None). Requer contexto da aplicação.
+    """Classifica um item em ("aliexpress", supplier_id),
+    ("domestic", supplier_id|None) ou ("unknown", None).
+    Requer contexto da aplicação.
 
-    Produto nacional com origem conhecida (source != "aliexpress") vai para
-    o grupo doméstico. Produto AliExpress sem fornecedor identificável
-    (vínculo ausente, ambíguo ou inválido) é "unknown" e bloqueia o fluxo —
-    nunca é classificado levianamente como envio nacional.
+    Produto nacional vai para grupo doméstico com o fornecedor manual
+    identificável como chave (ou None = estoque próprio). Produto
+    AliExpress sem fornecedor identificável (vínculo ausente, ambíguo ou
+    inválido) é "unknown" e bloqueia o fluxo — nunca é classificado
+    levianamente como envio nacional.
     """
     from loja.modules.models import Product, ProductVariant, Supplier, SupplierProduct
 
-    supplier_id = None
+    variant_supplier = None
     if variant_id is not None:
         variant = ProductVariant.query.filter_by(id=variant_id).first()
         if variant is not None and variant.supplier_product_id:
@@ -319,6 +324,8 @@ def classify_line(product_id, variant_id=None):
                 supplier = Supplier.query.filter_by(id=sp.supplier_id).first()
                 if _supplier_is_aliexpress(supplier):
                     return "aliexpress", supplier.id
+                if supplier is not None:
+                    variant_supplier = supplier.id
     product = (
         Product.query.filter_by(id=product_id).first()
         if product_id is not None
@@ -328,48 +335,99 @@ def classify_line(product_id, variant_id=None):
         actives = SupplierProduct.query.filter_by(
             product_id=product.id, is_active=True
         ).all()
-        valid = set()
+        valid_ali = set()
+        manual = set()
         for sp in actives:
             if sp.supplier_id is None:
                 continue
             supplier = Supplier.query.filter_by(id=sp.supplier_id).first()
             if _supplier_is_aliexpress(supplier):
-                valid.add(supplier.id)
-        if len(valid) == 1:
-            return "aliexpress", next(iter(valid))
+                valid_ali.add(supplier.id)
+            elif supplier is not None:
+                manual.add(supplier.id)
+        if len(valid_ali) == 1:
+            return "aliexpress", next(iter(valid_ali))
         if getattr(product, "source", None) != "aliexpress":
+            # Nacional: fornecedor manual identificável vira a chave da
+            # remessa (origem própria); sem vínculo, estoque próprio.
+            if variant_supplier is not None:
+                return "domestic", variant_supplier
+            if len(manual) == 1:
+                return "domestic", next(iter(manual))
             return "domestic", None
     return "unknown", None
 
 
 def rates_from_config(raw) -> dict:
-    """Tabela doméstica a partir da config; formato inválido vira {} (bloqueio)."""
+    """Tabela doméstica a partir da config; formato inválido vira {} (bloqueio).
+
+    Chaves são pares (prefixo_origem, prefixo_destino); valores
+    [custo, min_dias, max_dias]. Chaves vindas de JSON (listas) são
+    normalizadas para tuplas.
+    """
     if not raw:
         return {}
     if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, str):
+        items = raw.items()
+    elif isinstance(raw, str):
         import json
 
         try:
             parsed = json.loads(raw)
         except ValueError:
             return {}
-        if isinstance(parsed, dict):
-            # Normaliza valores [custo, min_dias, max_dias].
-            normalized = {}
-            for prefix, entry in parsed.items():
-                try:
-                    cost, min_days, max_days = entry
-                    normalized[str(prefix)] = (
-                        to_decimal(cost),
-                        int(min_days),
-                        int(max_days),
-                    )
-                except (TypeError, ValueError):
-                    continue
-            return normalized
-    return {}
+        if not isinstance(parsed, dict):
+            return {}
+        items = parsed.items()
+    else:
+        return {}
+    normalized = {}
+    for prefixes, entry in items:
+        try:
+            origin_prefix, dest_prefix = (
+                tuple(prefixes) if isinstance(prefixes, list) else prefixes
+            )
+            cost, min_days, max_days = entry
+            normalized[(str(origin_prefix), str(dest_prefix))] = (
+                to_decimal(cost),
+                int(min_days),
+                int(max_days),
+            )
+        except (TypeError, ValueError):
+            continue
+    return normalized
+
+
+def resolve_group_origin(channel, key):
+    """Origem efetiva da remessa (CEP) ou None.
+
+    Doméstico: mapa ``SHIPPING_DOMESTIC_ORIGINS`` por fornecedor
+    (chave str(supplier_id), ou "own" para estoque próprio); apenas o
+    estoque próprio pode usar ``SHIPPING_ORIGIN_CEP``. Um único CEP nunca
+    é aplicado a todos os fornecedores. Requer contexto da aplicação.
+    """
+    if channel != "domestic":
+        return None
+    from flask import current_app
+
+    origins = current_app.config.get("SHIPPING_DOMESTIC_ORIGINS") or {}
+    if not isinstance(origins, dict):
+        origins = {}
+    supplier_key = str(key) if key is not None else "own"
+    origin = origins.get(supplier_key)
+    if origin is None and key is None:
+        origin = current_app.config.get("SHIPPING_ORIGIN_CEP")
+    return normalize_cep(origin) if origin else None
+
+
+def assign_group_origins(groups) -> list:
+    """Preenche origin_cep de cada grupo (requer contexto da aplicação)."""
+    from dataclasses import replace
+
+    return [
+        replace(g, origin_cep=resolve_group_origin(g.channel, g.key))
+        for g in groups
+    ]
 
 
 def default_providers():
@@ -380,19 +438,21 @@ def default_providers():
     """
     from flask import current_app
 
-    origin = current_app.config.get("SHIPPING_ORIGIN_CEP")
     rates = rates_from_config(current_app.config.get("SHIPPING_DOMESTIC_RATES"))
     fresh = current_app.config.get("SHIPPING_ALIEXPRESS_FRESH_QUOTES") or {}
     if not isinstance(fresh, dict):
         fresh = {}
     return {
-        "domestic": TableDomesticProvider(origin, rates),
+        "domestic": TableDomesticProvider(rates),
         "aliexpress": AliExpressSupplierProvider(fresh_quotes=fresh),
     }
 
 
 def quote_for_items(item_dicts, dest_cep: str, now=None) -> dict:
-    """Cota itens de checkout (dicts com product_id/variant_id/quantity)."""
+    """Cota itens de checkout (dicts com product_id/variant_id/quantity).
+
+    Origens por remessa são resolvidas da config (requer contexto).
+    """
     lines = [
         ShipmentLine(
             product_id=item.get("product_id"),
@@ -401,7 +461,7 @@ def quote_for_items(item_dicts, dest_cep: str, now=None) -> dict:
         )
         for item in item_dicts
     ]
-    groups = group_lines(lines)
+    groups = assign_group_origins(group_lines(lines))
     return quote_groups(groups, dest_cep, default_providers(), now)
 
 
@@ -435,12 +495,9 @@ def group_lines(lines, classify=None) -> list:
     buckets: dict = {}
     for line in lines:
         channel, key = classify(line.product_id, line.variant_id)
-        if channel == "aliexpress":
-            bucket_key = ("aliexpress", key)
-        elif channel == "unknown":
-            bucket_key = ("unknown", None)
-        else:
-            bucket_key = ("domestic", None)
+        # Chave inclui o fornecedor: remessas distintas nunca se fundem.
+        # "unknown" tem key None e bloqueia adiante.
+        bucket_key = (channel, str(key) if key is not None else None)
         bucket = buckets.setdefault(
             bucket_key, {"channel": channel, "key": key, "lines": []}
         )
@@ -507,6 +564,8 @@ __all__ = [
     "TableDomesticProvider",
     "AliExpressSupplierProvider",
     "classify_line",
+    "resolve_group_origin",
+    "assign_group_origins",
     "default_providers",
     "quote_for_items",
     "group_lines",

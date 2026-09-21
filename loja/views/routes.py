@@ -1794,6 +1794,7 @@ def calcular_frete():
     from loja.services.shipping_quote import (
         QuoteUnavailable,
         ShipmentLine,
+        assign_group_origins,
         canonical_items,
         default_providers,
         group_lines,
@@ -1875,7 +1876,7 @@ def calcular_frete():
         )
         for item in item_dicts
     ]
-    groups = group_lines(lines)
+    groups = assign_group_origins(group_lines(lines))
     try:
         quoted = quote_groups(groups, cep, default_providers())
     except QuoteUnavailable:
@@ -1889,10 +1890,12 @@ def calcular_frete():
     shipping = money(quoted["total"])
     total = money(subtotal + shipping)
     quoted_at = utcnow()
-    expires_at = max(g["expires_at"] for g in quoted["groups"])
+    # Basta UMA remessa vencer para o total precisar de nova cotação.
+    expires_at = min(g["expires_at"] for g in quoted["groups"])
 
-    # Confirmação vinculada à sessão (assinada): CEP, itens, valor e validade.
-    # O checkout só gera a preferência se esta confirmação ainda valer.
+    # Confirmação vinculada à sessão (assinada): CEP, itens, valor,
+    # validade mínima e prazos por grupo. O checkout só gera a preferência
+    # se esta confirmação ainda valer integralmente.
     session["shipping_quote"] = {
         "cep": cep,
         "items": [
@@ -1906,6 +1909,14 @@ def calcular_frete():
         "shipping": f"{shipping:.2f}",
         "quoted_at": quoted_at.isoformat(),
         "expires_at": expires_at.isoformat(),
+        "groups": [
+            {
+                "channel": g["channel"],
+                "cost": f"{g['cost']:.2f}",
+                "expires_at": g["expires_at"].isoformat(),
+            }
+            for g in quoted["groups"]
+        ],
     }
     session.modified = True
 
