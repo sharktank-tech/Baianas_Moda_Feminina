@@ -44,6 +44,13 @@ QUOTE_TTL_SECONDS = 1800
 #: por CEP: é o valor assumido pela loja até existir fonte real.
 SHIPPING_TEMPORARY_FLAT_RATE_CFG = "SHIPPING_TEMPORARY_FLAT_RATE"
 
+#: Default comercial e teto operacional do fallback temporário. O teto não é
+#: política de preço: evita erro de configuração e deixa fretes excepcionais
+#: para o fluxo de cotação real por fornecedor.
+SHIPPING_TEMPORARY_FLAT_RATE_DEFAULT = Decimal("10.00")
+SHIPPING_TEMPORARY_FLAT_RATE_MAX = Decimal("9999.99")
+MONEY_QUANTUM = Decimal("0.01")
+
 _CEP_RE = re.compile(r"^\d{8}$")
 
 
@@ -61,8 +68,10 @@ def temporary_flat_rate() -> Decimal:
     fornecedor/distância nem oferece frete grátis. Pode divergir do custo
     real do fornecedor. Requer contexto da aplicação.
 
-    Validação estrita: precisa ser decimal válido, finito, ``>= 0`` e
-    arredondado em duas casas (``ROUND_HALF_UP``). Configuração inválida
+    Validação estrita: precisa ser decimal válido, finito, entre ``0`` e
+    ``9999.99`` e arredondado em duas casas (``ROUND_HALF_UP``). O teto é
+    operacional, não comercial: valores maiores exigem cotação real.
+    Configuração inválida
     levanta ``QuoteUnavailable("invalid_quote")`` de forma sanitizada —
     nunca vira frete zero.
     """
@@ -70,7 +79,10 @@ def temporary_flat_rate() -> Decimal:
 
     from flask import current_app
 
-    raw = current_app.config.get(SHIPPING_TEMPORARY_FLAT_RATE_CFG, "10.00")
+    raw = current_app.config.get(
+        SHIPPING_TEMPORARY_FLAT_RATE_CFG,
+        str(SHIPPING_TEMPORARY_FLAT_RATE_DEFAULT),
+    )
     if raw is None:
         raise QuoteUnavailable("invalid_quote")
     raw_str = str(raw).strip()
@@ -78,13 +90,25 @@ def temporary_flat_rate() -> Decimal:
         raise QuoteUnavailable("invalid_quote")
     try:
         value = Decimal(raw_str)
+        if (
+            not value.is_finite()
+            or value < 0
+            or value > SHIPPING_TEMPORARY_FLAT_RATE_MAX
+        ):
+            raise InvalidOperation
+        # O quantize também pode levantar InvalidOperation para expoentes
+        # extremos (ex.: 1e999999); permanece dentro da captura sanitizada.
+        value = value.quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+        if (
+            not value.is_finite()
+            or value < 0
+            or value > SHIPPING_TEMPORARY_FLAT_RATE_MAX
+            or value.as_tuple().exponent != MONEY_QUANTUM.as_tuple().exponent
+        ):
+            raise InvalidOperation
     except (InvalidOperation, ValueError, AttributeError, TypeError):
         raise QuoteUnavailable("invalid_quote") from None
-    if not value.is_finite():
-        raise QuoteUnavailable("invalid_quote")
-    if value < 0:
-        raise QuoteUnavailable("invalid_quote")
-    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return value
 
 
 def estimate_label() -> str:
