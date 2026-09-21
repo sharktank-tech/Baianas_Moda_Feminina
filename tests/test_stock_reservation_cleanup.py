@@ -187,10 +187,12 @@ def test_cron_requires_secret_and_gate(
 
 
 def test_admin_action_releases_without_provider_call(
-    client, db, admin_user, login, make_product, monkeypatch
+    client, app, db, admin_user, login, make_product, monkeypatch
 ):
     import loja.modules.getway_mercado_pago.payment_service as payment_service
 
+    app.config["STOCK_RESERVATION_HOURS"] = "24"
+    app.config["STOCK_RESERVATION_RELEASE_LIMIT"] = "100"
     product = make_product(stock=5)
     order = _reserved_order(db, admin_user, product)
     provider_calls = []
