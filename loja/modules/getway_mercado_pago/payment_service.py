@@ -94,7 +94,13 @@ def create_preference(order):
         raise PaymentConfigurationError(
             "Prazo da preferência de pagamento não foi definido."
         ) from error
-    if expires_at <= created_at:
+    try:
+        invalid_deadline = expires_at <= created_at
+    except TypeError as error:
+        raise PaymentConfigurationError(
+            "Prazo da preferência de pagamento é inválido."
+        ) from error
+    if invalid_deadline:
         raise PaymentConfigurationError(
             "Prazo da preferência de pagamento é inválido."
         )
