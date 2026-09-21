@@ -96,7 +96,7 @@ def test_release_skips_ineligible_orders(
     db, make_user, make_product, age_hours, status, reserved
 ):
     from loja.services.stock_reservations import (
-        release_expired_stock_reservations,
+        release_single_expired_stock_reservation,
     )
 
     user = make_user()
@@ -114,10 +114,13 @@ def test_release_skips_ineligible_orders(
         db.session.commit()
 
     before = product.stock
-    result = release_expired_stock_reservations(hours=24, source="test")
+    released = release_single_expired_stock_reservation(
+        order.id,
+        source="test",
+    )
     db.session.refresh(order)
     db.session.refresh(product)
-    assert result.released == 0
+    assert released is False
     assert order.stock_reserved is reserved
     assert product.stock == before
 
