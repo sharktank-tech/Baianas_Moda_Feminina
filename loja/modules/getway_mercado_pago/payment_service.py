@@ -85,8 +85,6 @@ def public_url(path):
 
 
 def create_preference(order):
-    sdk = get_sdk()
-
     created_at = getattr(order, "created_at", None)
     expires_at = getattr(order, "mp_preference_expires_at", None)
     try:
@@ -101,6 +99,7 @@ def create_preference(order):
             "Prazo da preferência de pagamento é inválido."
         )
 
+    sdk = get_sdk()
     name_parts = (order.customer_name or "").strip().split(maxsplit=1)
     first_name = name_parts[0] if name_parts else ""
     last_name = name_parts[1] if len(name_parts) > 1 else ""
