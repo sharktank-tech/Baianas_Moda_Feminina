@@ -149,7 +149,7 @@ def test_payment_lock_wins_cleanup_skips(pg_app):
             with pg_app.app_context():
                 order = (
                     Order.query.filter_by(id=order_id)
-                    .with_for_update()
+                    .with_for_update(of=Order)
                     .one()
                 )
                 payment_locked.set()
@@ -217,7 +217,7 @@ def test_cleanup_lock_wins_late_payment_reserves_once(pg_app, monkeypatch):
             with pg_app.app_context():
                 order = (
                     Order.query.filter_by(id=order_id)
-                    .with_for_update()
+                    .with_for_update(of=Order)
                     .one()
                 )
                 if not order.stock_reserved:
