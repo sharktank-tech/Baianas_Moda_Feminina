@@ -187,7 +187,7 @@ def release_expired_stock_reservations(
             order = (
                 Order.query
                 .filter_by(id=order_id)
-                .with_for_update(skip_locked=True)
+                .with_for_update(of=Order, skip_locked=True)
                 .first()
             )
             if (
