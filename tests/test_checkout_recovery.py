@@ -251,7 +251,7 @@ def test_recovery_route_admin_get(client, admin_user, login, db):
     response = client.get("/admin/recuperacao-checkout")
     assert response.status_code == 200
     assert "Recuperação de Checkout" in response.get_data(as_text=True)
-    assert 'name="csrf_token"' in response.get_data(as_text=True)
+    assert "Lote administrativo desligado" in response.get_data(as_text=True)
 
 
 def test_recovery_route_anonymous_redirect(client):
