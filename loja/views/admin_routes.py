@@ -391,14 +391,11 @@ def channel_metrics_dashboard():
 )
 @admin_required
 def checkout_recovery():
-    """Fila read-only de pedidos pending_payment com reserva ativa e lembrete
-    nunca enviado; POST aciona o envio de lembretes (gated por env).
-
-    GET não envia nada; POST só dispara se CHECKOUT_RECOVERY_ENABLED == 1
-    (fail-closed, espelha as rotinas de manutenção da FASE 8.3.0).
-    """
+    """Fila read-only e lote opcional, protegido por gate próprio."""
+    from loja.modules.enviar_email import email_delivery_ready
     from loja.services.checkout_recovery import (
         find_recoverable_orders,
+        is_batch_recovery_enabled,
         is_recovery_enabled,
         load_after_hours,
         run_checkout_recovery,
@@ -410,10 +407,18 @@ def checkout_recovery():
     )
 
     enabled = is_recovery_enabled()
+    batch_enabled = is_batch_recovery_enabled()
+    email_ready = email_delivery_ready()
     result = None
 
     if request.method == "POST":
-        result = run_checkout_recovery()
+        try:
+            result = run_checkout_recovery()
+        except ValueError:
+            flash(
+                "Entrega de e-mail indisponível; nenhum lembrete foi enviado.",
+                "danger",
+            )
 
     try:
         after_hours = load_after_hours()
@@ -438,6 +443,8 @@ def checkout_recovery():
     return render_template(
         "admin/checkout_recovery.html",
         enabled=enabled,
+        batch_enabled=batch_enabled,
+        email_ready=email_ready,
         after_hours=after_hours,
         candidates=candidates,
         result=result,
@@ -445,6 +452,35 @@ def checkout_recovery():
         reservation_hours=reservation_hours,
         expired_reservations=expired_reservations,
     )
+
+
+@admin_blueprint.route(
+    "/admin/recuperacao-checkout/<uuid:order_id>/enviar",
+    methods=["POST"],
+)
+@admin_required
+def send_checkout_recovery(order_id):
+    """Envia somente o candidato escolhido, com revalidação sob lock."""
+    from loja.services.checkout_recovery import send_single_checkout_recovery
+
+    try:
+        result = send_single_checkout_recovery(order_id)
+    except ValueError:
+        flash(
+            "Entrega de e-mail indisponível; nenhum lembrete foi enviado.",
+            "danger",
+        )
+        return redirect(url_for("admin.checkout_recovery"))
+
+    if not result.enabled:
+        flash("Envio individual está desligado.", "warning")
+    elif result.sent == 1:
+        flash("Lembrete individual enviado com sucesso.", "success")
+    elif result.failed:
+        flash("Falha sanitizada no envio; o pedido continua pendente.", "danger")
+    else:
+        flash("Pedido não elegível ou já processado; nada foi enviado.", "warning")
+    return redirect(url_for("admin.checkout_recovery"))
 
 
 @admin_blueprint.route(
