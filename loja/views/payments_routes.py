@@ -43,6 +43,7 @@ from loja.services.shipping_quote import (
     quote_for_items,
     temporary_flat_rate,
 )
+from loja.services.reservation_policy import reservation_deadline
 
 
 def _unavailable_message(code: str) -> str:
@@ -717,35 +718,6 @@ def _release_stock(order):
     order.stock_reserved = False
 
 
-def release_expired_stock_reservations(hours=24):
-    """Libera reservas de pedidos pendentes abandonados.
-
-    A chamada ocorre nos pontos de contato com o provedor (webhook e
-    retorno), mantendo a operação simples sem exigir um agendador.
-    """
-    cutoff = utcnow() - timedelta(hours=hours)
-
-    stale_orders = (
-        Order.query
-        .filter(
-            Order.stock_reserved.is_(True),
-            Order.status == "pending_payment",
-            Order.created_at < cutoff,
-        )
-        .all()
-    )
-
-    for order in stale_orders:
-        _release_stock(order)
-
-    if stale_orders:
-        current_app.logger.info(
-            "Liberada reserva de estoque de %s pedido(s) pendente(s).",
-            len(stale_orders),
-        )
-        db.session.commit()
-
-
 # ── Criar pagamento no Mercado Pago ─────────────────────────────────────────
 @payments_blueprint.route(
     "/pagamentos/mercado-pago",
@@ -807,6 +779,7 @@ def create_mercado_pago_payment():
         # item seja vendido para outro cliente enquanto o pagamento pende.
         _reserve_stock(item_data)
 
+        created_at = utcnow()
         order = Order(
             id=uuid.uuid4(),
             user_id=current_user.id,
@@ -819,6 +792,8 @@ def create_mercado_pago_payment():
             discount=discount,
             total=total,
             stock_reserved=True,
+            created_at=created_at,
+            mp_preference_expires_at=reservation_deadline(created_at),
             **customer_data,
             **acquisition_to_order_kwargs(
                 order_acquisition(session=session)
@@ -1220,7 +1195,8 @@ def mercado_pago_webhook():
         return jsonify({"ok": True}), 200
 
     try:
-        release_expired_stock_reservations()
+        # O evento recebido é sincronizado antes de qualquer manutenção ampla.
+        # A limpeza de reservas roda apenas por operação dedicada e protegida.
         _sync_payment(payment_id)
     except PaymentGatewayError:
         db.session.rollback()
@@ -1261,14 +1237,6 @@ def _valid_payment_id(value):
 @payments_blueprint.route("/pagamentos/retorno/<result>")
 @login_required
 def payment_return(result):
-    try:
-        release_expired_stock_reservations()
-    except Exception:
-        db.session.rollback()
-        current_app.logger.exception(
-            "Falha ao liberar reservas expiradas no retorno."
-        )
-
     payment_id = (
         _valid_payment_id(request.args.get("payment_id"))
         or _valid_payment_id(request.args.get("collection_id"))
