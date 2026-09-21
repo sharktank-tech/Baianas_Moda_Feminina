@@ -59,7 +59,7 @@ def _cleanup_session(db):
 
 def test_release_expired_pending_is_idempotent(db, make_user, make_product):
     from loja.services.stock_reservations import (
-        release_expired_stock_reservations,
+        release_single_expired_stock_reservation,
     )
 
     user = make_user()
@@ -67,27 +67,26 @@ def test_release_expired_pending_is_idempotent(db, make_user, make_product):
     order = _reserved_order(db, user, product)
     assert product.stock == 4
 
-    first = release_expired_stock_reservations(
-        hours=24,
+    first = release_single_expired_stock_reservation(
+        order.id,
         source="test",
         now=utcnow(),
     )
     db.session.refresh(order)
     db.session.refresh(product)
-    assert first.released == 1
+    assert first is True
     assert order.status == "pending_payment"
     assert order.stock_reserved is False
     assert product.stock == 5
 
-    second = release_expired_stock_reservations(
-        hours=24,
+    second = release_single_expired_stock_reservation(
+        order.id,
         source="test",
         now=utcnow(),
     )
     db.session.refresh(product)
-    assert second.released == 0
+    assert second is False
     assert product.stock == 5
-
 
 @pytest.mark.parametrize(
     ("age_hours", "status", "reserved"),
