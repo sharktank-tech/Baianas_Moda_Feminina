@@ -14,7 +14,7 @@ Mercado Pago, não consulta o provedor e não chama fornecedores.
 - `STOCK_RESERVATION_RELEASE_LIMIT=100`: lote entre 1 e 500 pedidos.
 - `CRON_SECRET`: segredo gerenciado pela Vercel. Nunca versionar ou imprimir.
 
-O cron chama a cada hora, no minuto 17:
+O cron chama uma vez por dia, às 09:17 UTC (06:17 em Palmas/TO), frequência compatível com o plano Vercel Hobby:
 
 `GET /internal/maintenance/release-expired-reservations`
 
