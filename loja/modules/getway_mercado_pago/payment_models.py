@@ -207,7 +207,7 @@ class Order(db.Model):
         onupdate=utcnow,
     )
 
-    user = db.relationship("User", lazy="joined")
+    user = db.relationship("User", foreign_keys=[user_id], lazy="joined")
     coupon = db.relationship("Coupon", lazy="joined")
 
     items = db.relationship(
