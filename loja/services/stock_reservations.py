@@ -104,11 +104,12 @@ def find_expired_stock_reservations(*, hours=None, limit=None, now=None):
         .limit(limit)
         .all()
     )
-    return [
-        order for order in candidates
-        if (_latest_payment(order.id) is None
-            or _latest_payment(order.id).status != "approved")
-    ]
+    eligible = []
+    for order in candidates:
+        payment = _latest_payment(order.id)
+        if payment is None or payment.status != "approved":
+            eligible.append(order)
+    return eligible
 
 
 def _release_stock_locked(order):
