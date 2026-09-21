@@ -203,6 +203,13 @@ def test_checkout_failure_rolls_back_reservation(db, client, make_user, make_pro
 
     # Cotação simulada: o foco aqui é o rollback da reserva, não a tarifa.
     monkeypatch.setattr(pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("18.90"))
+    from test_shipping_quote import preset_shipping_quote
+
+    preset_shipping_quote(
+        client, "01310100",
+        [{"product_id": product.id, "quantity": 2}],
+        "18.90",
+    )
 
     client.post(
         "/login",

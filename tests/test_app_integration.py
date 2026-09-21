@@ -213,6 +213,13 @@ def test_first_purchase_coupon_blocked_for_prior_buyer(
         "/login",
         data={"email": user.email, "password": "senha123"},
     )
+    from test_shipping_quote import preset_shipping_quote
+
+    preset_shipping_quote(
+        client, "01310100",
+        [{"product_id": product.id, "quantity": 1}],
+        "18.90",
+    )
     coupon = make_coupon(
         code="PRIMEIRACOMPRA",
         discount_value="10",

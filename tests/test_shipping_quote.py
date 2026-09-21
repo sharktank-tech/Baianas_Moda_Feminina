@@ -66,16 +66,20 @@ def test_normalize_cep():
     assert normalize_cep(None) is None
 
 
-def test_estimate_label_nunca_e_cobranca():
-    assert "estimativa" in estimate_label()
+def test_estimate_label_nao_sugere_tarifa():
+    assert estimate_label() == "Frete calculado após informar o CEP"
+    assert "10,00" not in estimate_label()
+
+
+def test_rotulo_exibicao_nunca_vira_cobranca():
+    # Texto de vitrine não parseável como dinheiro é rejeitado no limite.
     with pytest.raises(QuoteUnavailable):
-        assert_not_estimate(Decimal("10.00"))
-    with pytest.raises(QuoteUnavailable):
-        assert_not_estimate("10.00")
-    # Valor real igual por coincidência num Quote passa (é cotação, não rótulo).
-    assert_not_estimate(
-        Quote(cost=Decimal("10.00"), quoted_at=utcnow())
-    )
+        assert_not_estimate(estimate_label())
+    # Numéricos passam: a distinção real × estimativa é estrutural
+    # (só totais de Quote chegam à cobrança), nunca pelo valor.
+    assert_not_estimate(Decimal("10.00"))
+    assert_not_estimate("10.00")
+    assert_not_estimate(Quote(cost=Decimal("10.00"), quoted_at=utcnow()))
 
 
 def test_validate_quote_rejeita_vencida():
@@ -202,36 +206,84 @@ def _supplier_link(db, *, freight_status="available", shipping="4.00",
     return product, variant
 
 
-def test_aliexpress_usa_custo_do_fornecedor(db):
-    product, variant = _supplier_link(db)
-    group = ShipmentGroup(
+def _fresh(sp_id, *, cost="4.00", dest_prefix="013", option=None, qty=1,
+           currency="BRL", quoted_at=None, ttl=QUOTE_TTL_SECONDS,
+           min_days=2, max_days=6):
+    from loja.utils import utcnow as _now
+
+    return {
+        str(sp_id): {
+            "cost": Decimal(cost), "min_days": min_days, "max_days": max_days,
+            "dest_prefix": dest_prefix, "option": option, "qty": qty,
+            "currency": currency, "quoted_at": quoted_at or _now(),
+            "ttl_seconds": ttl,
+        }
+    }
+
+
+def _ae_group(product, variant, qty=1):
+    return ShipmentGroup(
         key=uuid.uuid4(), channel="aliexpress",
-        lines=(ShipmentLine(product_id=product.id, variant_id=variant.id),),
+        lines=(ShipmentLine(product_id=product.id, variant_id=variant.id,
+                            quantity=qty),),
     )
-    quote = AliExpressSupplierProvider().quote(group, "01310100")
+
+
+def test_aliexpress_custo_fresco_comprovado_cobra(db):
+    product, variant = _supplier_link(db)
+    sp_id = variant.supplier_product_id
+    quote = AliExpressSupplierProvider(
+        fresh_quotes=_fresh(sp_id)
+    ).quote(_ae_group(product, variant), "01310100")
     assert quote.cost == Decimal("4.00")
-    assert quote.min_days is None  # prazo não persistido: apresentar como do fornecedor
+    assert (quote.min_days, quote.max_days) == (2, 6)
 
 
-def test_aliexpress_frete_indisponivel_bloqueia(db):
-    product, variant = _supplier_link(db, freight_status="provider_unavailable")
-    group = ShipmentGroup(
-        key=uuid.uuid4(), channel="aliexpress",
-        lines=(ShipmentLine(product_id=product.id, variant_id=variant.id),),
+def test_aliexpress_sem_comprovacao_bloqueia(db):
+    # Custo persistido existe (4.00), mas sem contexto fresco não há prova
+    # de destino/opção/quantidade/momento: bloqueia em vez de assumir.
+    product, variant = _supplier_link(db)
+    with pytest.raises(QuoteUnavailable) as exc:
+        AliExpressSupplierProvider().quote(_ae_group(product, variant), "01310100")
+    assert exc.value.code == "unverified_cost"
+
+
+def test_aliexpress_outro_cep_ou_quantidade_bloqueia(db):
+    product, variant = _supplier_link(db)
+    sp_id = variant.supplier_product_id
+    provider = AliExpressSupplierProvider(fresh_quotes=_fresh(sp_id))
+    # Mesmo grupo, outro destino: custo anterior não continua válido.
+    with pytest.raises(QuoteUnavailable) as exc:
+        provider.quote(_ae_group(product, variant), "77100000")
+    assert exc.value.code == "unverified_cost"
+    # Mesma cotação, outra quantidade: também bloqueia.
+    with pytest.raises(QuoteUnavailable) as exc:
+        provider.quote(_ae_group(product, variant, qty=2), "01310100")
+    assert exc.value.code == "unverified_cost"
+
+
+def test_aliexpress_cotacao_vencida_bloqueia(db):
+    from loja.utils import utcnow as _now
+
+    product, variant = _supplier_link(db)
+    sp_id = variant.supplier_product_id
+    velha = _now() - timedelta(seconds=QUOTE_TTL_SECONDS + 60)
+    provider = AliExpressSupplierProvider(
+        fresh_quotes=_fresh(sp_id, quoted_at=velha)
     )
     with pytest.raises(QuoteUnavailable) as exc:
-        AliExpressSupplierProvider().quote(group, "01310100")
-    assert exc.value.code == "provider_unavailable"
+        provider.quote(_ae_group(product, variant), "01310100")
+    assert exc.value.code == "expired"
 
 
 def test_aliexpress_moeda_incompativel_bloqueia(db):
-    product, variant = _supplier_link(db, currency="USD", freight_currency="USD")
-    group = ShipmentGroup(
-        key=uuid.uuid4(), channel="aliexpress",
-        lines=(ShipmentLine(product_id=product.id, variant_id=variant.id),),
+    product, variant = _supplier_link(db)
+    sp_id = variant.supplier_product_id
+    provider = AliExpressSupplierProvider(
+        fresh_quotes=_fresh(sp_id, currency="USD")
     )
     with pytest.raises(QuoteUnavailable) as exc:
-        AliExpressSupplierProvider().quote(group, "01310100")
+        provider.quote(_ae_group(product, variant), "01310100")
     assert exc.value.code == "currency_mismatch"
 
 
@@ -246,19 +298,35 @@ def test_aliexpress_sem_vinculo_bloqueia(db, make_product):
     assert exc.value.code == "no_supplier_data"
 
 
-def test_group_lines_separa_nacional_e_fornecedor(db, make_product):
+def test_group_lines_separa_nacional_fornecedor_e_desconhecido(db, make_product):
     interno = make_product()
     ae_product, ae_variant = _supplier_link(db)
-    from loja.services.shipping_quote import resolve_supplier_id
+    # AliExpress sem nenhum vínculo de fornecedor: desconhecido, nunca nacional.
+    from loja.modules.models import Product
+
+    orphan = Product(
+        id=uuid.uuid4(), name="Órfão", price=Decimal("19.90"), stock=3,
+        is_active=False, is_draft=True, source="aliexpress",
+        external_id="EXT_ORPHAN",
+    )
+    db.session.add(orphan)
+    db.session.commit()
 
     groups = group_lines(
         [
             ShipmentLine(product_id=interno.id),
             ShipmentLine(product_id=ae_product.id, variant_id=ae_variant.id),
+            ShipmentLine(product_id=orphan.id),
         ],
-        lambda line: resolve_supplier_id(line.product_id, line.variant_id),
     )
-    assert {g.channel for g in groups} == {"domestic", "aliexpress"}
+    assert {g.channel for g in groups} == {"domestic", "aliexpress", "unknown"}
+    providers = _providers()
+    providers["aliexpress"] = AliExpressSupplierProvider(
+        fresh_quotes=_fresh(ae_variant.supplier_product_id)
+    )
+    with pytest.raises(QuoteUnavailable) as exc:
+        quote_groups(groups, "01310100", providers)
+    assert exc.value.code == "unknown_supplier"
 
 
 # ── Integração: /calcular_frete e criação do pedido ─────────────────────
@@ -278,6 +346,33 @@ def _login(client, user):
         data={"email": user.email, "password": "senha123"},
         follow_redirects=True,
     )
+
+
+def preset_shipping_quote(client, cep, items, shipping):
+    """Registra na sessão a confirmação que o /calcular_frete geraria."""
+    from loja.utils import utcnow
+
+    with client.session_transaction() as sess:
+        sess["shipping_quote"] = {
+            "cep": cep,
+            "items": [
+                {
+                    "product_id": str(item.get("product_id")),
+                    "variant_id": (
+                        str(item.get("variant_id"))
+                        if item.get("variant_id")
+                        else None
+                    ),
+                    "quantity": int(item.get("quantity") or 1),
+                }
+                for item in items
+            ],
+            "shipping": f"{Decimal(str(shipping)):.2f}",
+            "quoted_at": utcnow().isoformat(),
+            "expires_at": (
+                utcnow() + timedelta(seconds=QUOTE_TTL_SECONDS)
+            ).isoformat(),
+        }
 
 
 def test_calcular_frete_ceps_distintos(client, db, make_user, make_product, monkeypatch):
@@ -353,6 +448,10 @@ def test_checkout_cotacao_cupom_e_preferencia_consistentes(
     product = make_product(stock=5)
     _login(client, user)
     _rates_config(monkeypatch, client)
+    preset_shipping_quote(
+        client, "01310100",
+        [{"product_id": product.id, "quantity": 1}], "5.00",
+    )
     coupon = make_coupon(code="FRETE10", discount_type="fixed", discount_value="4")
     capturados = []
     monkeypatch.setattr(
@@ -402,7 +501,15 @@ def test_checkout_mudanca_endereco_recalcula(
         "email": user.email, "estado": "SP", "endereco": "Rua Teste",
         "numero": "10", "bairro": "Centro", "cidade": "São Paulo",
     }
+    preset_shipping_quote(
+        client, "01310100",
+        [{"product_id": product.id, "quantity": 1}], "5.00",
+    )
     client.post("/pagamentos/mercado-pago", data={**base, "cep": "01310100"})
+    preset_shipping_quote(
+        client, "77100000",
+        [{"product_id": product.id, "quantity": 1}], "7.50",
+    )
     client.post("/pagamentos/mercado-pago", data={**base, "cep": "77100000"})
     fretes = sorted(
         o.shipping for o in Order.query.filter_by(user_id=user.id).all()
@@ -410,7 +517,104 @@ def test_checkout_mudanca_endereco_recalcula(
     assert fretes == [Decimal("5.00"), Decimal("7.50")]
 
 
-def test_checkout_cotacao_vencida_ou_divergente_bloqueia(
+def test_checkout_fornecedor_cota_dez_reais_cria_pedido(
+    client, db, make_user, monkeypatch
+):
+    # R$ 10,00 cotado de verdade pelo fornecedor é legítimo: a distinção
+    # real × estimativa é estrutural (objetos Quote), nunca numérica.
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order
+    from loja.utils import utcnow
+
+    from loja.modules.models import Product as _Product
+
+    user = make_user()
+    product, variant = _supplier_link(db)
+    sp_id = str(variant.supplier_product_id)
+    # Checkout exige produto público; guarda exige priced+!draft p/ ativar.
+    with db.session.no_autoflush:
+        prod = db.session.get(_Product, product.id)
+        prod.is_draft = False
+        prod.pricing_status = "priced"
+        prod.is_active = True
+        db.session.commit()
+    _login(client, user)
+    monkeypatch.setitem(
+        client.application.config,
+        "SHIPPING_ALIEXPRESS_FRESH_QUOTES",
+        {sp_id: {
+            "cost": Decimal("10.00"), "min_days": 5, "max_days": 12,
+            "dest_prefix": "013", "option": None, "qty": 1,
+            "currency": "BRL", "quoted_at": utcnow(),
+            "ttl_seconds": QUOTE_TTL_SECONDS,
+        }},
+    )
+    preset_shipping_quote(
+        client, "01310100",
+        [{"product_id": product.id, "variant_id": variant.id, "quantity": 1}],
+        "10.00",
+    )
+    capturados = []
+    monkeypatch.setattr(
+        pr, "create_preference",
+        lambda order: capturados.append(order) or {
+            "preference_id": "pref-10", "checkout_url": "https://mp.example/10",
+        },
+    )
+    resp = client.post(
+        "/pagamentos/mercado-pago",
+        data={
+            "checkout_type": "product", "product_id": str(product.id),
+            "quantity": 1, "variant_id": str(variant.id),
+            "selected_size": "M", "nome": "Cliente Teste",
+            "email": user.email, "telefone": "11999999999",
+            "cep": "01310100", "estado": "SP",
+            "endereco": "Rua Teste", "numero": "10", "bairro": "Centro",
+            "cidade": "São Paulo",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    order = Order.query.filter_by(user_id=user.id).one()
+    assert order.shipping == Decimal("10.00")
+    assert len(capturados) == 1
+
+
+def test_checkout_sem_confirmacao_bloqueia(
+    client, db, make_user, make_product, monkeypatch
+):
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order
+
+    user = make_user()
+    product = make_product(stock=5)
+    _login(client, user)
+    _rates_config(monkeypatch, client)
+    chamadas = []
+    monkeypatch.setattr(
+        pr, "create_preference",
+        lambda order: chamadas.append(order) or {
+            "preference_id": "pref-w", "checkout_url": "https://mp.example/w",
+        },
+    )
+    antes = Order.query.count()
+    resp = client.post(
+        "/pagamentos/mercado-pago",
+        data={
+            "checkout_type": "product", "product_id": str(product.id),
+            "quantity": 1, "selected_size": "M", "nome": "Cliente Teste",
+            "email": user.email, "cep": "01310100", "estado": "SP",
+            "endereco": "Rua Teste", "numero": "10", "bairro": "Centro",
+            "cidade": "São Paulo",
+        },
+        follow_redirects=True,
+    )
+    assert "calcule o frete" in resp.get_data(as_text=True).lower()
+    assert Order.query.count() == antes
+    assert chamadas == []
+
+
+def test_checkout_confirmacao_vencida_ou_divergente_bloqueia(
     client, db, make_user, make_product, monkeypatch
 ):
     import loja.views.payments_routes as pr
@@ -433,23 +637,71 @@ def test_checkout_cotacao_vencida_ou_divergente_bloqueia(
         "cidade": "São Paulo",
     }
     antes = Order.query.count()
-    # Cotação vencida (ontem).
-    vencida = (utcnow() - timedelta(days=1)).isoformat()
+    items = [{"product_id": product.id, "quantity": 1}]
+    # Confirmação vencida (ontem).
+    with client.session_transaction() as sess:
+        sess["shipping_quote"] = {
+            "cep": "01310100", "items": [
+                {"product_id": str(product.id), "variant_id": None, "quantity": 1}
+            ],
+            "shipping": "5.00",
+            "quoted_at": (utcnow() - timedelta(days=1)).isoformat(),
+            "expires_at": (utcnow() - timedelta(hours=23)).isoformat(),
+        }
     resp = client.post(
-        "/pagamentos/mercado-pago",
-        data={**base, "shipping_quoted": "5.00", "shipping_quoted_at": vencida},
-        follow_redirects=True,
+        "/pagamentos/mercado-pago", data=base, follow_redirects=True,
     )
     assert "vencida" in resp.get_data(as_text=True).lower()
-    # Cotação divergente do recálculo.
+    # Confirmação divergente do recálculo.
+    preset_shipping_quote(client, "01310100", items, "1.00")
+    resp = client.post(
+        "/pagamentos/mercado-pago", data=base, follow_redirects=True,
+    )
+    assert "atualizado" in resp.get_data(as_text=True).lower()
+    assert Order.query.count() == antes
+
+
+def test_checkout_reconfirmacao_apos_mudanca_de_valor(
+    client, db, make_user, make_product, monkeypatch
+):
+    # Simula alteração entre a exibição (cotação) e a preferência:
+    # cliente viu frete 5.00, preço mudou, recálculo diverge da sessão.
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order
+
+    user = make_user()
+    product = make_product(stock=5)
+    _login(client, user)
+    _rates_config(monkeypatch, client)
+    chamadas = []
+    monkeypatch.setattr(
+        pr, "create_preference",
+        lambda order: chamadas.append(order) or {
+            "preference_id": "pref-v", "checkout_url": "https://mp.example/v",
+        },
+    )
+    cotacao = client.post(
+        "/calcular_frete",
+        json={"cep": "01310100", "product_id": str(product.id), "quantity": 1},
+    )
+    assert cotacao.status_code == 200
+    assert cotacao.get_json()["valor"] == "5.00"
+    # Quantidade muda depois da exibição (itens passam a não conferir).
+    antes = Order.query.count()
     resp = client.post(
         "/pagamentos/mercado-pago",
-        data={**base, "shipping_quoted": "1.00",
-              "shipping_quoted_at": utcnow().isoformat()},
+        data={
+            "checkout_type": "product", "product_id": str(product.id),
+            "quantity": 2, "selected_size": "M", "nome": "Cliente Teste",
+            "email": user.email, "cep": "01310100", "estado": "SP",
+            "endereco": "Rua Teste", "numero": "10", "bairro": "Centro",
+            "cidade": "São Paulo",
+        },
         follow_redirects=True,
     )
     assert "atualizado" in resp.get_data(as_text=True).lower()
     assert Order.query.count() == antes
+    assert chamadas == []
 
 
 # ── Vitrine: estimativa rotulada, nunca cobrança ─────────────────────────
@@ -469,7 +721,8 @@ def test_carrinho_mostra_estimativa_sem_cep(client, db, make_user, make_product)
     ))
     db.session.commit()
     html = client.get("/cart").get_data(as_text=True)
-    assert "a partir de R$ 10,00 (estimativa)" in html
+    assert "Frete calculado após informar o CEP" in html
+    assert "10,00" not in html
     assert "18,90" not in html
     assert "249" not in html
 
@@ -483,7 +736,8 @@ def test_checkout_sem_cep_mostra_estimativa(client, db, make_user, make_product)
             "product_id": str(product.id), "size": "M", "quantity": 1,
         }
     html = client.get(f"/checkout/{product.id}").get_data(as_text=True)
-    assert "a partir de R$ 10,00 (estimativa)" in html
+    assert "Frete calculado após informar o CEP" in html
+    assert "10,00" not in html
     assert "18,90" not in html
 
 

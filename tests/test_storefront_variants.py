@@ -981,6 +981,13 @@ def test_real_checkout_persists_variant_id_and_uses_product_price(
             "checkout_url": "https://mp.example/x",
         },
     )
+    from test_shipping_quote import preset_shipping_quote
+
+    preset_shipping_quote(
+        client, "01310100",
+        [{"product_id": product.id, "variant_id": rosa_m.id, "quantity": 2}],
+        "18.90",
+    )
 
     resp = client.post(
         "/pagamentos/mercado-pago",

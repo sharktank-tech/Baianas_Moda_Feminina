@@ -39,9 +39,7 @@ from loja.modules.getway_mercado_pago.payment_service import (
     validate_webhook_signature,
 )
 from loja.services.shipping_quote import (
-    QUOTE_TTL_SECONDS,
     QuoteUnavailable,
-    assert_not_estimate,
     quote_for_items,
 )
 
@@ -79,43 +77,69 @@ def _unavailable_message(code: str) -> str:
 
 
 def quote_checkout_shipping(item_data, dest_cep):
-    """Frete total do checkout por cotação (nunca tarifa presumida)."""
+    """Frete total do checkout por cotação (nunca tarifa presumida).
+
+    A distinção entre cotação real e estimativa é estrutural: o total
+    deriva sempre de objetos Quote de provedores — inclusive R$ 10,00
+    cotado de verdade. O rótulo de estimativa nunca é parseado aqui.
+    """
     try:
         result = quote_for_items(item_data, dest_cep)
     except QuoteUnavailable as exc:
         raise ValueError(_unavailable_message(exc.code)) from exc
-    shipping = result["total"]
-    assert_not_estimate(shipping)
-    return shipping
+    return result["total"]
 
 
-def _check_quoted_staleness(item_data, dest_cep, shipping):
-    """Recusa cobrança com cotação vencida ou divergente do recálculo.
+def _require_confirmed_quote(item_data, dest_cep, shipping):
+    """Exige confirmação explícita do frete exibido antes da preferência.
 
-    Recalcula sempre a partir de dados autoritativos (carrinho no banco +
-    CEP do formulário). Se o cliente enviou cotação (shipping_quoted[_at]),
-    ela precisa ser fresca e igual ao recálculo.
+    A confirmação é a cotação registrada na sessão (assinada) pelo
+    /calcular_frete: compara CEP, itens/quantidades, valor e validade com
+    o recálculo autoritativo (banco + CEP do formulário). Qualquer
+    divergência, ausência ou vencimento exige nova confirmação — nunca se
+    cobra em cima de inputs do navegador.
     """
     from datetime import datetime
 
+    from loja.services.shipping_quote import canonical_items
     from loja.utils import utcnow
 
-    raw_value = (request.form.get("shipping_quoted") or "").strip()
-    raw_at = (request.form.get("shipping_quoted_at") or "").strip()
-    if not raw_value and not raw_at:
-        return
+    stored = session.get("shipping_quote")
+    if not isinstance(stored, dict) or not stored:
+        raise ValueError(
+            "Calcule o frete e confirme o valor antes de concluir."
+        )
     try:
-        quoted_at = datetime.fromisoformat(raw_at) if raw_at else None
+        expires_at = datetime.fromisoformat(stored.get("expires_at") or "")
     except ValueError:
-        raise ValueError(_unavailable_message("invalid_quote")) from None
-    if quoted_at is not None and (utcnow() - quoted_at).total_seconds() > QUOTE_TTL_SECONDS:
-        raise ValueError(_unavailable_message("expired"))
+        raise ValueError(
+            "Cotação de frete vencida. Calcule novamente e tente outra vez."
+        ) from None
+    if expires_at <= utcnow():
+        raise ValueError(
+            "Cotação de frete vencida. Calcule novamente e tente outra vez."
+        )
+    if stored.get("cep") != dest_cep:
+        raise ValueError(
+            "O frete foi atualizado. Confira o novo valor e confirme novamente."
+        )
+    if stored.get("items") != [
+        {"product_id": pid, "variant_id": vid or None, "quantity": qty}
+        for pid, vid, qty in canonical_items(item_data)
+    ]:
+        raise ValueError(
+            "O frete foi atualizado. Confira o novo valor e confirme novamente."
+        )
     try:
-        quoted = money(raw_value)
+        confirmed = money(stored.get("shipping"))
     except Exception:
-        raise ValueError(_unavailable_message("invalid_quote")) from None
-    if quoted != money(shipping):
-        raise ValueError(_unavailable_message("invalid_quote"))
+        raise ValueError(
+            "O frete foi atualizado. Confira o novo valor e confirme novamente."
+        ) from None
+    if confirmed != money(shipping):
+        raise ValueError(
+            "O frete foi atualizado. Confira o novo valor e confirme novamente."
+        )
 from loja.integrations.aliexpress import (
     ensure_aliexpress_fulfillment,
     cancel_fulfillment_before_submission,
@@ -744,7 +768,7 @@ def create_mercado_pago_payment():
 
         customer_data = _get_customer_data()
         shipping = quote_checkout_shipping(item_data, customer_data["zip_code"])
-        _check_quoted_staleness(item_data, customer_data["zip_code"], shipping)
+        _require_confirmed_quote(item_data, customer_data["zip_code"], shipping)
 
         total = money(
             max(

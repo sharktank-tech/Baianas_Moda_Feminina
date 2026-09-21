@@ -1791,67 +1791,91 @@ def calcular_frete():
             "error": "Informe um CEP válido com 8 dígitos.",
         }), 400
 
-    if not product_id:
-        return jsonify({
-            "error": "product_id é obrigatório.",
-        }), 400
-
-    if quantity is None:
-        return jsonify({
-            "error": "Quantidade inválida.",
-        }), 400
-
-    try:
-        product_uuid = uuid.UUID(
-            str(product_id)
-        )
-    except (ValueError, TypeError, AttributeError):
-        return jsonify({
-            "error": "product_id inválido.",
-        }), 400
-
-    product = public_product_query().filter(
-        Product.id == product_uuid,
-    ).first()
-
-    if product is None:
-        return jsonify({
-            "error": "Produto não encontrado ou indisponível.",
-        }), 404
-
-    stock = getattr(product, "stock", None)
-
-    # Produtos com variante validam estoque por variante no checkout; aqui o
-    # frete só depende do subtotal financeiro.
-    if stock is not None and not _uses_variants(product) and quantity > stock:
-        return jsonify({
-            "error": "Quantidade maior que o estoque disponível.",
-        }), 400
-
     from loja.services.shipping_quote import (
         QuoteUnavailable,
         ShipmentLine,
+        canonical_items,
         default_providers,
         group_lines,
         quote_groups,
-        resolve_supplier_id,
     )
+    from loja.utils import utcnow
 
-    subtotal = money(
-        money(product.price) * quantity
-    )
+    # Compra direta (produto) ou carrinho completo: a cotação exibida fica
+    # registrada na sessão (assinada) para reconfirmação no checkout.
+    item_dicts = []
+    subtotal = Decimal("0.00")
+    if dados.get("cart"):
+        cart = _get_user_cart()
+        for item in _cart_items_as_list(cart):
+            item_dicts.append({
+                "product_id": item.product_id,
+                "variant_id": getattr(item, "variant_id", None),
+                "quantity": item.quantity,
+            })
+            subtotal += money(item.unit_price) * int(item.quantity or 1)
+        if not item_dicts:
+            return jsonify({
+                "error": "Carrinho vazio.",
+            }), 400
+        quantity = None
+    else:
+        if not product_id:
+            return jsonify({
+                "error": "product_id é obrigatório.",
+            }), 400
+
+        if quantity is None:
+            return jsonify({
+                "error": "Quantidade inválida.",
+            }), 400
+
+        try:
+            product_uuid = uuid.UUID(
+                str(product_id)
+            )
+        except (ValueError, TypeError, AttributeError):
+            return jsonify({
+                "error": "product_id inválido.",
+            }), 400
+
+        product = public_product_query().filter(
+            Product.id == product_uuid,
+        ).first()
+
+        if product is None:
+            return jsonify({
+                "error": "Produto não encontrado ou indisponível.",
+            }), 404
+
+        stock = getattr(product, "stock", None)
+
+        # Produtos com variante validam estoque por variante no checkout.
+        if stock is not None and not _uses_variants(product) and quantity > stock:
+            return jsonify({
+                "error": "Quantidade maior que o estoque disponível.",
+            }), 400
+
+        item_dicts.append({
+            "product_id": product.id,
+            "variant_id": None,
+            "quantity": quantity,
+        })
+        subtotal = money(
+            money(product.price) * quantity
+        )
 
     # Cotação por grupo de remessa (nunca tarifa presumida): o CEP é usado
     # de verdade; sem cotação válida, erro explícito em vez de valor fixo.
-    line = ShipmentLine(
-        product_id=product.id,
-        variant_id=None,
-        quantity=quantity,
-    )
-    groups = group_lines(
-        [line],
-        lambda ln: resolve_supplier_id(ln.product_id, ln.variant_id),
-    )
+    lines = [
+        ShipmentLine(
+            product_id=item["product_id"],
+            variant_id=item.get("variant_id"),
+            quantity=item["quantity"],
+        )
+        for item in item_dicts
+    ]
+    groups = group_lines(lines)
     try:
         quoted = quote_groups(groups, cep, default_providers())
     except QuoteUnavailable:
@@ -1864,6 +1888,26 @@ def calcular_frete():
 
     shipping = money(quoted["total"])
     total = money(subtotal + shipping)
+    quoted_at = utcnow()
+    expires_at = max(g["expires_at"] for g in quoted["groups"])
+
+    # Confirmação vinculada à sessão (assinada): CEP, itens, valor e validade.
+    # O checkout só gera a preferência se esta confirmação ainda valer.
+    session["shipping_quote"] = {
+        "cep": cep,
+        "items": [
+            {
+                "product_id": str(pid),
+                "variant_id": str(vid) if vid else None,
+                "quantity": qty,
+            }
+            for pid, vid, qty in canonical_items(item_dicts)
+        ],
+        "shipping": f"{shipping:.2f}",
+        "quoted_at": quoted_at.isoformat(),
+        "expires_at": expires_at.isoformat(),
+    }
+    session.modified = True
 
     return jsonify({
         "valor": f"{shipping:.2f}",
@@ -1871,6 +1915,7 @@ def calcular_frete():
         "total": f"{total:.2f}",
         "quantity": quantity,
         "cep": cep,
+        "expires_at": expires_at.isoformat(),
         "grupos": [
             {
                 "channel": g["channel"],

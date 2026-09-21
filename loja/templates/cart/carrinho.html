@@ -726,7 +726,7 @@
 
                 <span>
                     {% if shipping is none %}
-                        {{ shipping_estimate | default('a partir de R$ 10,00 (estimativa)') }}
+                        {{ shipping_estimate | default('Frete calculado após informar o CEP') }}
                     {% elif shipping == 0 %}
                         Grátis
                     {% else %}
