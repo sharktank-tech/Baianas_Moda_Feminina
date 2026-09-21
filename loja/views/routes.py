@@ -57,7 +57,7 @@ from loja.modules.tracking_status import (
 from loja.services.customer_tracking import build_customer_tracking
 
 from loja.modules.getway_mercado_pago.payment_service import money
-from loja.services.shipping_quote import estimate_label
+from loja.services.shipping_quote import estimate_label, temporary_flat_rate
 
 tracking_blueprint = Blueprint(
     "tracking",
@@ -960,6 +960,11 @@ def _calculate_display_totals(subtotal, discount=Decimal("0.00")):
 
 
 def _shipping_estimate_label() -> str:
+    # Flag desligada: regra comercial temporária (não é cálculo por CEP).
+    from flask import current_app
+
+    if not current_app.config.get("SHIPPING_GROUPED_QUOTE_ENABLED"):
+        return "Frete padrão temporário"
     return estimate_label()
 
 
@@ -1866,18 +1871,15 @@ def calcular_frete():
             money(product.price) * quantity
         )
 
-    # Flag desligada preserva regra temporária aprovada (flat) para não
-    # bloquear compras até fonte real estar configurada.
+    # Flag desligada (SHIPPING_GROUPED_QUOTE_ENABLED=False): tarifa comercial
+    # temporária única, assumida pela loja — não é cotação por CEP.
     from flask import current_app as _current_app2
 
     if not _current_app2.config.get("SHIPPING_GROUPED_QUOTE_ENABLED"):
-        from loja.modules.getway_mercado_pago.payment_service import money as _money2
-
-        flat = _money2(_current_app2.config.get("PAYMENT_FLAT_SHIPPING", "18.90"))
-        free_min = _money2(_current_app2.config.get("FREE_SHIPPING_MIN", "249.00"))
-        shipping = _money2(Decimal("0.00")) if free_min > 0 and subtotal >= free_min else flat
-        total = _money2(subtotal + shipping)
-        # Não grava confirmação de cotação agrupada; checkout com flag desligada usa flat direto
+        shipping = temporary_flat_rate()
+        total = money(subtotal + shipping)
+        # Não grava confirmação de cotação agrupada; checkout com flag desligada
+        # chama a mesma função (temporary_flat_rate).
         return jsonify({
             "valor": f"{shipping:.2f}",
             "subtotal": f"{subtotal:.2f}",

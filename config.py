@@ -76,11 +76,18 @@ class Config:
     # Frete por cotação (loja/services/shipping_quote.py) atrás de flag
     # desligada por padrão: sem SHIPPING_ORIGIN_CEP/tabela real e sem
     # SHIPPING_ALIEXPRESS_FRESH_QUOTES, todo checkout real bloquearia.
-    # Até a fonte real estar configurada, manter desligado preserva a regra
-    # temporária anterior (flat frete) aprovada pelo proprietário.
+    # Enquanto a integração real não existir, o checkout usa a tarifa
+    # comercial temporária única SHIPPING_TEMPORARY_FLAT_RATE — regra
+    # assumida pela loja, não cotação por CEP, sem frete grátis automático.
     SHIPPING_GROUPED_QUOTE_ENABLED = env_bool(
         "SHIPPING_GROUPED_QUOTE_ENABLED",
         False,
+    )
+    # Tarifa comercial temporária (não é cálculo por CEP). Cobrada igual
+    # para todo pedido; pode divergir do custo real do fornecedor.
+    SHIPPING_TEMPORARY_FLAT_RATE = os.environ.get(
+        "SHIPPING_TEMPORARY_FLAT_RATE",
+        "10.00",
     )
     SHIPPING_ORIGIN_CEP = os.environ.get("SHIPPING_ORIGIN_CEP") or None
     SHIPPING_DOMESTIC_RATES = os.environ.get("SHIPPING_DOMESTIC_RATES") or None

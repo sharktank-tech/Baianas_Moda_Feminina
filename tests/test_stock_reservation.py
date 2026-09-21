@@ -40,9 +40,9 @@ def _make_order(db, user, product, status="pending_payment", stock_reserved=True
         checkout_type="product",
         status=status,
         subtotal=unit_price * quantity,
-        shipping=Decimal("18.90"),
+        shipping=Decimal("10.00"),
         discount=Decimal("0.00"),
-        total=unit_price * quantity + Decimal("18.90"),
+        total=unit_price * quantity + Decimal("10.00"),
         stock_reserved=stock_reserved,
         customer_name="Cliente Teste",
         customer_email=user.email,
@@ -202,13 +202,13 @@ def test_checkout_failure_rolls_back_reservation(db, client, make_user, make_pro
     product = make_product(stock=5)
 
     # Cotação simulada: o foco aqui é o rollback da reserva, não a tarifa.
-    monkeypatch.setattr(pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("18.90"))
+    monkeypatch.setattr(pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("10.00"))
     from test_shipping_quote import preset_shipping_quote
 
     preset_shipping_quote(
         client, "01310100",
         [{"product_id": product.id, "quantity": 2}],
-        "18.90",
+        "10.00",
     )
 
     client.post(

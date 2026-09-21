@@ -143,9 +143,9 @@ def _make_variant_order(db, user, product, variant, quantity=2):
         checkout_type="product",
         status="pending_payment",
         subtotal=unit_price * quantity,
-        shipping=Decimal("18.90"),
+        shipping=Decimal("10.00"),
         discount=Decimal("0.00"),
-        total=unit_price * quantity + Decimal("18.90"),
+        total=unit_price * quantity + Decimal("10.00"),
         stock_reserved=True,
         customer_name="Cliente Teste",
         customer_email=user.email,
@@ -972,7 +972,7 @@ def test_real_checkout_persists_variant_id_and_uses_product_price(
 
     client.post("/login", data={"email": user.email, "password": "senha123"})
 
-    monkeypatch.setattr(pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("18.90"))
+    monkeypatch.setattr(pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("10.00"))
     monkeypatch.setattr(
         pr,
         "create_preference",
@@ -986,7 +986,7 @@ def test_real_checkout_persists_variant_id_and_uses_product_price(
     preset_shipping_quote(
         client, "01310100",
         [{"product_id": product.id, "variant_id": rosa_m.id, "quantity": 2}],
-        "18.90",
+        "10.00",
     )
 
     resp = client.post(
@@ -1173,9 +1173,9 @@ def _make_variantless_order(db, user, product, quantity=2, stock_reserved=True):
         checkout_type="product",
         status="pending_payment",
         subtotal=unit_price * quantity,
-        shipping=Decimal("18.90"),
+        shipping=Decimal("10.00"),
         discount=Decimal("0.00"),
-        total=unit_price * quantity + Decimal("18.90"),
+        total=unit_price * quantity + Decimal("10.00"),
         stock_reserved=stock_reserved,
         customer_name="Cliente Teste",
         customer_email=user.email,

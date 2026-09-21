@@ -912,14 +912,36 @@ def test_checkout_reconfirmacao_apos_mudanca_de_valor(
     assert chamadas == []
 
 
-# ── Vitrine: estimativa rotulada, nunca cobrança ─────────────────────────
+# ── Vitrine: rótulo temporário (flag off) ou estimativa (flag on), nunca cobrança ─
 
-def test_carrinho_mostra_estimativa_sem_cep(client, db, make_user, make_product):
+def test_carrinho_sem_cep_flag_off_mostra_frete_padrao_temporario(client, db, make_user, make_product):
     from loja.modules.models import Cart, CartItem
 
     user = make_user()
     product = make_product(stock=5)
     _login(client, user)
+    cart = Cart(id=uuid.uuid4(), user_id=user.id)
+    db.session.add(cart)
+    db.session.flush()
+    db.session.add(CartItem(
+        id=uuid.uuid4(), cart_id=cart.id, product_id=product.id,
+        selected_size="M", quantity=1, unit_price=product.price,
+    ))
+    db.session.commit()
+    html = client.get("/cart").get_data(as_text=True)
+    assert "Frete padrão temporário" in html
+    assert "10,00" not in html
+    assert "18,90" not in html
+    assert "249" not in html
+
+
+def test_carrinho_sem_cep_flag_on_mostra_estimativa(client, db, make_user, make_product, monkeypatch):
+    from loja.modules.models import Cart, CartItem
+
+    user = make_user()
+    product = make_product(stock=5)
+    _login(client, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True)
     cart = Cart(id=uuid.uuid4(), user_id=user.id)
     db.session.add(cart)
     db.session.flush()
@@ -935,7 +957,7 @@ def test_carrinho_mostra_estimativa_sem_cep(client, db, make_user, make_product)
     assert "249" not in html
 
 
-def test_checkout_sem_cep_mostra_estimativa(client, db, make_user, make_product):
+def test_checkout_sem_cep_mostra_frete_padrao_temporario(client, db, make_user, make_product):
     user = make_user()
     product = make_product(stock=5)
     _login(client, user)
@@ -944,7 +966,7 @@ def test_checkout_sem_cep_mostra_estimativa(client, db, make_user, make_product)
             "product_id": str(product.id), "size": "M", "quantity": 1,
         }
     html = client.get(f"/checkout/{product.id}").get_data(as_text=True)
-    assert "Frete calculado após informar o CEP" in html
+    assert "Frete padrão temporário" in html
     assert "10,00" not in html
     assert "18,90" not in html
 
@@ -1221,35 +1243,75 @@ def test_cotacao_anterior_nao_reutilizada_apos_ambiguidade(client, db, make_user
     assert chamadas == []
 
 
-# ── Flag desligada (default): regra temporária flat aprovada ─────────────
+# ── Flag desligada (default): tarifa comercial temporária única ──────────
 
-def test_flag_desligada_calcula_frete_flat(client, db, make_user, monkeypatch):
+def test_flag_desligada_calcula_frete_10(client, db, make_user, monkeypatch):
     user = make_user()
     _login(client, user)
     _manual_supplier_cart(db, user)
     monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False)
-    monkeypatch.setitem(client.application.config, "PAYMENT_FLAT_SHIPPING", "18.90")
-    monkeypatch.setitem(client.application.config, "FREE_SHIPPING_MIN", "249.00")
     resp = client.post("/calcular_frete", json={"cart": True, "cep": "77100000"})
     assert resp.status_code == 200
-    assert resp.get_json()["valor"] == "18.90"
+    assert resp.get_json()["valor"] == "10.00"
     # Sem confirmação agrupada: checkout flat não exige sessão.
     with client.session_transaction() as sess:
         sess.pop("shipping_quote", None)
 
 
-def test_flag_desligada_checkout_flat_cria_pedido(client, db, make_user, monkeypatch):
-    import loja.views.payments_routes as pr
-    from loja.modules.getway_mercado_pago.payment_models import Order
-
+def test_flag_desligada_subtotal_acima_249_paga_10(client, db, make_user, monkeypatch):
+    # Não há frete grátis automático: a tarifa temporária é única.
     user = make_user()
     _login(client, user)
     _manual_supplier_cart(db, user)
     monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False)
-    monkeypatch.setitem(client.application.config, "PAYMENT_FLAT_SHIPPING", "18.90")
-    monkeypatch.setitem(client.application.config, "FREE_SHIPPING_MIN", "249.00")
-    chamadas = []
-    monkeypatch.setattr(pr, "create_preference", lambda order: chamadas.append(order) or {
+    from loja.modules.models import Cart, CartItem
+    cart = Cart.query.filter_by(user_id=user.id).first()
+    for item in CartItem.query.filter_by(cart_id=cart.id).all():
+        item.unit_price = Decimal("200.00")
+    db.session.commit()
+    resp = client.post("/calcular_frete", json={"cart": True, "cep": "77100000"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["subtotal"] == "400.00"
+    assert data["valor"] == "10.00"
+    assert data["total"] == "410.00"
+
+
+def test_flag_desligada_quantidade_nao_altera_tarifa(client, db, make_user, make_product, monkeypatch):
+    # Quantidade altera subtotal, não a tarifa comercial temporária.
+    user = make_user()
+    product = make_product(stock=10)
+    _login(client, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False)
+    resp = client.post(
+        "/calcular_frete",
+        json={"cep": "01310100", "product_id": str(product.id), "quantity": 5},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["quantity"] == 5
+    assert data["valor"] == "10.00"
+    assert data["total"] == f"{float(data['subtotal']) + 10:.2f}"
+
+
+def test_flag_desligada_checkout_10_consistente(client, db, make_user, monkeypatch):
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order
+
+    # /calcular_frete, Order.shipping, Order.total e a preferência Mercado
+    # Pago usam exatamente o mesmo valor (R$ 10,00).
+    user = make_user()
+    _login(client, user)
+    _manual_supplier_cart(db, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False)
+
+    resp_calc = client.post("/calcular_frete", json={"cart": True, "cep": "77100000"})
+    assert resp_calc.status_code == 200
+    calc = resp_calc.get_json()
+    assert calc["valor"] == "10.00"
+
+    preferencias = []
+    monkeypatch.setattr(pr, "create_preference", lambda order: preferencias.append(order) or {
         "preference_id": "pref-flat", "checkout_url": "https://mp.example/flat",
     })
     antes = Order.query.count()
@@ -1260,22 +1322,9 @@ def test_flag_desligada_checkout_flat_cria_pedido(client, db, make_user, monkeyp
     )
     assert resp.status_code == 302
     assert Order.query.count() == antes + 1
-    assert Order.query.filter_by(user_id=user.id).one().shipping == Decimal("18.90")
-    assert len(chamadas) == 1
-
-
-def test_flag_desligada_frete_gratis_acima_do_minimo(client, db, make_user, monkeypatch):
-    user = make_user()
-    _login(client, user)
-    _manual_supplier_cart(db, user)
-    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False)
-    monkeypatch.setitem(client.application.config, "PAYMENT_FLAT_SHIPPING", "18.90")
-    monkeypatch.setitem(client.application.config, "FREE_SHIPPING_MIN", "249.00")
-    from loja.modules.models import Cart, CartItem
-    cart = Cart.query.filter_by(user_id=user.id).first()
-    for item in CartItem.query.filter_by(cart_id=cart.id).all():
-        item.unit_price = Decimal("200.00")
-    db.session.commit()
-    resp = client.post("/calcular_frete", json={"cart": True, "cep": "77100000"})
-    assert resp.status_code == 200
-    assert resp.get_json()["valor"] == "0.00"
+    order = Order.query.filter_by(user_id=user.id).one()
+    assert order.shipping == Decimal("10.00")
+    assert order.total == Decimal(calc["total"])
+    assert len(preferencias) == 1
+    # A preferência Mercado Pago cobra o total oficial (subtotal + frete 10,00).
+    assert preferencias[0].total == order.total

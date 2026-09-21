@@ -40,6 +40,11 @@ SHIPPING_ESTIMATE_REFERENCE = Decimal("10.00")
 #: Validade padrão de uma cotação exibida (segundos).
 QUOTE_TTL_SECONDS = 1800
 
+#: Config da tarifa comercial temporária usada com a flag de cotação
+#: agrupada desligada (SHIPPING_GROUPED_QUOTE_ENABLED=False). Não é cotação
+#: por CEP: é o valor assumido pela loja até existir fonte real.
+SHIPPING_TEMPORARY_FLAT_RATE_CFG = "SHIPPING_TEMPORARY_FLAT_RATE"
+
 _CEP_RE = re.compile(r"^\d{8}$")
 
 
@@ -47,6 +52,21 @@ def normalize_cep(value) -> Optional[str]:
     """Normaliza CEP para 8 dígitos ou retorna None."""
     digits = re.sub(r"\D", "", str(value or ""))
     return digits if _CEP_RE.match(digits) else None
+
+
+def temporary_flat_rate() -> Decimal:
+    """Tarifa comercial temporária (R$ 10,00 por padrão).
+
+    Usada somente com ``SHIPPING_GROUPED_QUOTE_ENABLED=False``. É uma regra
+    comercial assumida pela loja — não é cálculo por CEP, não considera
+    fornecedor/distância nem oferece frete grátis. Pode divergir do custo
+    real do fornecedor. Requer contexto da aplicação.
+    """
+    from flask import current_app
+
+    from loja.modules.getway_mercado_pago.payment_service import money
+
+    return money(current_app.config.get(SHIPPING_TEMPORARY_FLAT_RATE_CFG, "10.00"))
 
 
 def estimate_label() -> str:
@@ -566,11 +586,13 @@ def quote_groups(groups, dest_cep: str, providers: dict, now=None) -> dict:
 __all__ = [
     "SHIPPING_ESTIMATE_REFERENCE",
     "QUOTE_TTL_SECONDS",
+    "SHIPPING_TEMPORARY_FLAT_RATE_CFG",
     "QuoteUnavailable",
     "ShipmentGroup",
     "ShipmentLine",
     "Quote",
     "normalize_cep",
+    "temporary_flat_rate",
     "canonical_items",
     "estimate_label",
     "validate_quote",

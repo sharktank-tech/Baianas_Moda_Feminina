@@ -38,8 +38,6 @@ def test_create_preference_emits_sanitized_provider_telemetry(monkeypatch, caplo
     app = Flask(__name__)
     app.config.update(
         APP_PUBLIC_URL="https://example.test",
-        PAYMENT_FLAT_SHIPPING="18.90",
-        FREE_SHIPPING_MIN="249.00",
     )
 
     response = {

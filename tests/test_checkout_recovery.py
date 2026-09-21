@@ -30,9 +30,9 @@ def _order(**overrides):
         checkout_type="product",
         status="pending_payment",
         subtotal=Decimal("49.90"),
-        shipping=Decimal("18.90"),
+        shipping=Decimal("10.00"),
         discount=Decimal("0.00"),
-        total=Decimal("68.80"),
+        total=Decimal("59.90"),
         stock_reserved=True,
         customer_name="Cliente",
         customer_email="cliente@example.com",
@@ -235,7 +235,7 @@ def test_message_escapes_order_data(monkeypatch):
         order_detail_url_builder=lambda o: "https://pollo.local/conta/pedido",
     )
 
-    assert "R$ 68.80" in captured["corpo"]
+    assert "R$ 59.90" in captured["corpo"]
     assert "pollo.local" in captured["corpo"]
     assert str(order.id) not in captured["corpo"]
     assert "cliente@example.com" not in captured["corpo"]

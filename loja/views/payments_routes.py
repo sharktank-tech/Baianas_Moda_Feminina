@@ -41,6 +41,7 @@ from loja.modules.getway_mercado_pago.payment_service import (
 from loja.services.shipping_quote import (
     QuoteUnavailable,
     quote_for_items,
+    temporary_flat_rate,
 )
 
 
@@ -83,27 +84,15 @@ def _is_grouped_quote_enabled() -> bool:
 
 
 def quote_checkout_shipping(item_data, dest_cep):
-    """Frete total do checkout. Com flag desligada, usa regra temporária
-    aprovada (flat 18,90 / grátis acima de 249) para não bloquear compras
-    até a fonte real (origem/tabela e cotações frescas AliExpress) estar
-    configurada. Com flag ligada, usa cotação por grupo (nunca tarifa
-    presumida).
+    """Frete total do checkout.
+
+    Com flag desligada (SHIPPING_GROUPED_QUOTE_ENABLED=False), usa a tarifa
+    comercial temporária única (temporary_flat_rate) — regra assumida pela
+    loja, não cotação por CEP. Com flag ligada, usa cotação por grupo
+    (nunca tarifa presumida).
     """
     if not _is_grouped_quote_enabled():
-        # Regra temporária aprovada pelo proprietário (preserva checkout até
-        # a fonte real estar configurada). Não é tarifa por distância.
-        from loja.modules.getway_mercado_pago.payment_service import money
-
-        subtotal = sum(
-            (Decimal(str(item.get("line_total") or item.get("unit_price") or 0)) for item in item_data),
-            Decimal("0.00"),
-        )
-        # Usa subtotal para decidir grátis, como antes de 18.90/249.
-        flat = money(current_app.config.get("PAYMENT_FLAT_SHIPPING", "18.90"))
-        free_min = money(current_app.config.get("FREE_SHIPPING_MIN", "249.00"))
-        if free_min > 0 and subtotal >= free_min:
-            return Decimal("0.00")
-        return flat
+        return temporary_flat_rate()
 
     try:
         result = quote_for_items(item_data, dest_cep)

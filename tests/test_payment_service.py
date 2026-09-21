@@ -25,8 +25,9 @@ def test_money_rounds_to_two_places():
 
 
 def test_flat_shipping_removed_no_free_threshold():
-    """A tarifa fixa (R$ 18,90 / grátis acima de R$ 249) não existe mais:
-    o frete sai de cotação por grupo (loja.services.shipping_quote)."""
+    """Não existe mais calculadora de envio no payment_service: o frete vem de
+    cotação por grupo (loja.services.shipping_quote) ou da tarifa comercial
+    temporária única (SHIPPING_TEMPORARY_FLAT_RATE)."""
     assert not hasattr(payment_service, "calculate_shipping")
 
 

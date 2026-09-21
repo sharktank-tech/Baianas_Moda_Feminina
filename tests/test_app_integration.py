@@ -206,7 +206,7 @@ def test_first_purchase_coupon_blocked_for_prior_buyer(
     from loja.modules.getway_mercado_pago.payment_models import Order
 
     # Cotação simulada: o foco aqui é o cupom, não a tarifa.
-    monkeypatch.setattr(pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("18.90"))
+    monkeypatch.setattr(pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("10.00"))
 
     user = make_user()
     client.post(
@@ -218,7 +218,7 @@ def test_first_purchase_coupon_blocked_for_prior_buyer(
     preset_shipping_quote(
         client, "01310100",
         [{"product_id": product.id, "quantity": 1}],
-        "18.90",
+        "10.00",
     )
     coupon = make_coupon(
         code="PRIMEIRACOMPRA",
@@ -256,7 +256,7 @@ def test_first_purchase_coupon_blocked_for_prior_buyer(
             checkout_type="product",
             status="paid",
             subtotal=Decimal("49.90"),
-            shipping=Decimal("18.90"),
+            shipping=Decimal("10.00"),
             discount=Decimal("0.00"),
             total=Decimal("68.80"),
             customer_name="Cliente Teste",

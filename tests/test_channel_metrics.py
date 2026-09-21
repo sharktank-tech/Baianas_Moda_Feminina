@@ -26,7 +26,7 @@ def _complete_policy():
 def _order(
     *,
     status="paid",
-    total="68.80",
+    total="59.90",
     source=None,
     medium=None,
     referrer=None,
@@ -39,7 +39,7 @@ def _order(
         checkout_type="product",
         status=status,
         subtotal=Decimal("49.90"),
-        shipping=Decimal("18.90"),
+        shipping=Decimal("10.00"),
         discount=Decimal("0.00"),
         total=Decimal(total),
         stock_reserved=True,
@@ -57,7 +57,7 @@ def _order(
     )
 
 
-def _order_with_cost_snapshot(user_id, product, *, total="68.80", unit="40.00",
+def _order_with_cost_snapshot(user_id, product, *, total="59.90", unit="40.00",
                               shipping="10.00", source="google"):
     order = _order(total=total, source=source, user_id=user_id)
     order.items.append(
