@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -89,6 +90,8 @@ def test_create_preference_uses_absolute_https_callbacks(monkeypatch):
         customer_email="buyer@testuser.com",
         total=Decimal("99.90"),
         user_id="user-123",
+        created_at=datetime(2026, 9, 21, 12, 0, 0),
+        mp_preference_expires_at=datetime(2026, 9, 22, 12, 0, 0),
         items=[object()],
     )
 
@@ -99,6 +102,9 @@ def test_create_preference_uses_absolute_https_callbacks(monkeypatch):
     assert captured["notification_url"] == (
         "https://www.pollomodas.com.br/pagamentos/webhook"
     )
+    assert captured["expires"] is True
+    assert captured["expiration_date_from"] == "2026-09-21T12:00:00.000+00:00"
+    assert captured["expiration_date_to"] == "2026-09-22T12:00:00.000+00:00"
     assert captured["back_urls"] == {
         "success": (
             "https://www.pollomodas.com.br/pagamentos/retorno/sucesso"
@@ -113,6 +119,32 @@ def test_create_preference_uses_absolute_https_callbacks(monkeypatch):
             "?order_id=order-123"
         ),
     }
+
+
+def test_create_preference_rejects_missing_persisted_expiry(monkeypatch):
+    app = create_test_app()
+    app.config["APP_PUBLIC_URL"] = "http://127.0.0.1:5001"
+    monkeypatch.setattr(
+        payment_service,
+        "get_sdk",
+        lambda: pytest.fail("gateway must not be called"),
+    )
+    order = SimpleNamespace(
+        id="order-legacy",
+        customer_name="Teste",
+        customer_email="buyer@testuser.com",
+        total=Decimal("10.00"),
+        user_id="user-123",
+        created_at=datetime(2026, 9, 21, 12, 0, 0),
+        mp_preference_expires_at=None,
+        items=[object()],
+    )
+
+    with app.app_context(), pytest.raises(
+        PaymentConfigurationError,
+        match="Prazo da preferência",
+    ):
+        create_preference(order)
 
 
 def test_create_preference_uses_init_point_even_with_sandbox_flag(monkeypatch):
@@ -144,6 +176,8 @@ def test_create_preference_uses_init_point_even_with_sandbox_flag(monkeypatch):
         customer_email="buyer@testuser.com",
         total=Decimal("99.90"),
         user_id="user-123",
+        created_at=datetime(2026, 9, 21, 12, 0, 0),
+        mp_preference_expires_at=datetime(2026, 9, 22, 12, 0, 0),
         items=[object()],
     )
 

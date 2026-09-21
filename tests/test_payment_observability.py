@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -64,6 +65,8 @@ def test_create_preference_emits_sanitized_provider_telemetry(monkeypatch, caplo
         customer_email="buyer@example.com",
         total=Decimal("19.60"),
         user_id="user-123",
+        created_at=datetime(2026, 9, 21, 12, 0, 0),
+        mp_preference_expires_at=datetime(2026, 9, 22, 12, 0, 0),
         items=[object()],
     )
 

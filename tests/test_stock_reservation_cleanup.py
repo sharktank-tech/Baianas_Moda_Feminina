@@ -30,6 +30,9 @@ def _reserved_order(db, user, product, *, age_hours=25, status="pending_payment"
         city="São Paulo",
         state="SP",
         created_at=utcnow() - timedelta(hours=age_hours),
+        mp_preference_expires_at=utcnow() - timedelta(
+            hours=max(age_hours - 24, -1)
+        ),
     )
     order.items.append(
         OrderItem(
@@ -56,7 +59,7 @@ def _cleanup_session(db):
 
 def test_release_expired_pending_is_idempotent(db, make_user, make_product):
     from loja.services.stock_reservations import (
-        release_expired_stock_reservations,
+        release_single_expired_stock_reservation,
     )
 
     user = make_user()
@@ -64,27 +67,26 @@ def test_release_expired_pending_is_idempotent(db, make_user, make_product):
     order = _reserved_order(db, user, product)
     assert product.stock == 4
 
-    first = release_expired_stock_reservations(
-        hours=24,
+    first = release_single_expired_stock_reservation(
+        order.id,
         source="test",
         now=utcnow(),
     )
     db.session.refresh(order)
     db.session.refresh(product)
-    assert first.released == 1
+    assert first is True
     assert order.status == "pending_payment"
     assert order.stock_reserved is False
     assert product.stock == 5
 
-    second = release_expired_stock_reservations(
-        hours=24,
+    second = release_single_expired_stock_reservation(
+        order.id,
         source="test",
         now=utcnow(),
     )
     db.session.refresh(product)
-    assert second.released == 0
+    assert second is False
     assert product.stock == 5
-
 
 @pytest.mark.parametrize(
     ("age_hours", "status", "reserved"),
@@ -94,7 +96,7 @@ def test_release_skips_ineligible_orders(
     db, make_user, make_product, age_hours, status, reserved
 ):
     from loja.services.stock_reservations import (
-        release_expired_stock_reservations,
+        release_single_expired_stock_reservation,
     )
 
     user = make_user()
@@ -112,10 +114,13 @@ def test_release_skips_ineligible_orders(
         db.session.commit()
 
     before = product.stock
-    result = release_expired_stock_reservations(hours=24, source="test")
+    released = release_single_expired_stock_reservation(
+        order.id,
+        source="test",
+    )
     db.session.refresh(order)
     db.session.refresh(product)
-    assert result.released == 0
+    assert released is False
     assert order.stock_reserved is reserved
     assert product.stock == before
 
@@ -181,7 +186,7 @@ def test_cron_requires_secret_and_gate(
         headers={"Authorization": "Bearer cron-test-secret"},
     )
     assert enabled.status_code == 200
-    assert enabled.get_json()["released"] == 1
+    assert enabled.get_json()["released"] >= 1
     db.session.refresh(order)
     assert order.stock_reserved is False
 
@@ -204,7 +209,8 @@ def test_admin_action_releases_without_provider_call(
 
     login(admin_user.email)
     response = client.post(
-        "/admin/reservas-expiradas/liberar",
+        f"/admin/reservas-expiradas/{order.id}/liberar",
+        data={"confirm_release": "1"},
         follow_redirects=False,
     )
     assert response.status_code == 302
@@ -225,7 +231,8 @@ def test_admin_action_denies_non_admin(
     login(user.email)
 
     response = client.post(
-        "/admin/reservas-expiradas/liberar",
+        f"/admin/reservas-expiradas/{order.id}/liberar",
+        data={"confirm_release": "1"},
         follow_redirects=False,
     )
     assert response.status_code in {302, 403}

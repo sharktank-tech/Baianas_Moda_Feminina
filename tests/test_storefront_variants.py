@@ -497,11 +497,16 @@ def test_release_expired_reservations_variant(
     product, rosa_m, _ = ae_product
     order = _make_variant_order(db, user, product, rosa_m, quantity=2)
     order.created_at = utcnow() - timedelta(hours=48)
+    order.mp_preference_expires_at = utcnow() - timedelta(hours=24)
     db.session.commit()
     pr._reserve_stock(_variant_item(product, rosa_m, quantity=2))
     assert rosa_m.stock == 2
 
-    pr.release_expired_stock_reservations(hours=24)
+    from loja.services.stock_reservations import (
+        release_expired_stock_reservations,
+    )
+
+    release_expired_stock_reservations(hours=24)
 
     assert rosa_m.stock == 4
     assert product.stock == 9

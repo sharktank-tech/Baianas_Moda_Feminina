@@ -34,6 +34,7 @@ def _make_order(db, user, product, status="pending_payment", stock_reserved=True
     from loja.modules.getway_mercado_pago.payment_models import Order, OrderItem
 
     unit_price = Decimal(str(product.price))
+    created_at = utcnow()
     order = Order(
         id=uuid.uuid4(),
         user_id=user.id,
@@ -44,6 +45,8 @@ def _make_order(db, user, product, status="pending_payment", stock_reserved=True
         discount=Decimal("0.00"),
         total=unit_price * quantity + Decimal("10.00"),
         stock_reserved=stock_reserved,
+        created_at=created_at,
+        mp_preference_expires_at=created_at + timedelta(hours=24),
         customer_name="Cliente Teste",
         customer_email=user.email,
         zip_code="01310100",
@@ -180,6 +183,7 @@ def test_release_expired_reservations(db, make_user, make_product):
     product = make_product(stock=10)
     stale = _make_order(db, user, product, quantity=2)
     stale.created_at = utcnow() - timedelta(hours=48)
+    stale.mp_preference_expires_at = utcnow() - timedelta(hours=24)
     db.session.commit()
 
     fresh_product = make_product(stock=20, name="Camiseta Nova")
@@ -189,7 +193,11 @@ def test_release_expired_reservations(db, make_user, make_product):
     pr._reserve_stock(_item_data(product, quantity=2))
     assert product.stock == 8
 
-    pr.release_expired_stock_reservations(hours=24)
+    from loja.services.stock_reservations import (
+        release_expired_stock_reservations,
+    )
+
+    release_expired_stock_reservations(hours=24)
 
     assert product.stock == 10
     assert stale.stock_reserved is False
@@ -235,3 +243,74 @@ def test_checkout_failure_rolls_back_reservation(db, client, make_user, make_pro
     )
     assert "não foi possível abrir o pagamento" in resp.get_data(as_text=True).lower()
     assert product.stock == 5
+
+def test_cleanup_skips_legacy_order_without_persisted_expiry(
+    db, make_user, make_product
+):
+    from loja.services.stock_reservations import release_expired_stock_reservations
+
+    user = make_user()
+    product = make_product(stock=10)
+    order = _make_order(db, user, product, quantity=2)
+    order.created_at = utcnow() - timedelta(hours=72)
+    order.mp_preference_expires_at = None
+    pr._reserve_stock(_item_data(product, quantity=2))
+    db.session.commit()
+
+    result = release_expired_stock_reservations(hours=24)
+
+    assert result.released == 0
+    assert order.stock_reserved is True
+    assert product.stock == 8
+
+
+def test_cleanup_does_not_release_at_exact_deadline(
+    db, make_user, make_product
+):
+    from loja.services.stock_reservations import release_expired_stock_reservations
+
+    user = make_user()
+    product = make_product(stock=10)
+    order = _make_order(db, user, product, quantity=2)
+    deadline = utcnow().replace(microsecond=0)
+    order.mp_preference_expires_at = deadline
+    pr._reserve_stock(_item_data(product, quantity=2))
+    db.session.commit()
+
+    result = release_expired_stock_reservations(now=deadline)
+
+    assert result.released == 0
+    assert order.stock_reserved is True
+    assert product.stock == 8
+
+
+def test_cleanup_skips_canonical_approved_payment(
+    db, make_user, make_product
+):
+    from loja.modules.getway_mercado_pago.payment_models import Payment
+    from loja.services.stock_reservations import (
+        release_single_expired_stock_reservation,
+    )
+
+    user = make_user()
+    product = make_product(stock=10)
+    order = _make_order(db, user, product, quantity=2)
+    order.mp_preference_expires_at = utcnow() - timedelta(minutes=1)
+    pr._reserve_stock(_item_data(product, quantity=2))
+    db.session.add(
+        Payment(
+            id=uuid.uuid4(),
+            order_id=order.id,
+            provider_payment_id="approved-cleanup-guard",
+            status="approved",
+            amount=order.total,
+            currency="BRL",
+        )
+    )
+    db.session.commit()
+
+    released = release_single_expired_stock_reservation(order.id)
+
+    assert released is False
+    assert order.stock_reserved is True
+    assert product.stock == 8
