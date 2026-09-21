@@ -540,5 +540,5 @@ def test_admin_page_keeps_batch_form_hidden_by_default(
     assert response.status_code == 200
     assert f"/admin/recuperacao-checkout/{order.id}/enviar" in text
     assert 'name="csrf_token"' in text
-    assert "Envio em lote desabilitado" in text
+    assert "DESLIGADO (fail-closed). Exige CHECKOUT_RECOVERY_BATCH_ENABLED=1" in text
     assert 'action="/admin/recuperacao-checkout"' not in text
