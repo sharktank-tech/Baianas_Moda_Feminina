@@ -15,17 +15,17 @@
     </p>
   </div>
 
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
     <div class="bg-white rounded-2xl shadow p-5">
-      <div class="text-sm text-gray-500">Lembretes habilitados</div>
+      <div class="text-sm text-gray-500">Envio individual</div>
       <div class="text-2xl font-bold mt-1 {% if enabled %}text-green-700{% else %}text-red-700{% endif %}">
         {{ "SIM" if enabled else "NÃO (gated)" }}
       </div>
       <div class="text-xs text-gray-400 mt-1">
         {% if enabled %}
-          CHECKOUT_RECOVERY_ENABLED=1 — o POST abaixo envia e-mails reais.
+          CHECKOUT_RECOVERY_ENABLED=1 — cada envio exige uma ação individual.
         {% else %}
-          Fail-closed: envio está desligado mesmo que o GET abaixo seja usado.
+          Fail-closed: nenhuma ação envia e-mail enquanto o gate estiver desligado.
         {% endif %}
       </div>
     </div>
@@ -33,6 +33,13 @@
       <div class="text-sm text-gray-500">Idade mínima de espera</div>
       <div class="text-2xl font-bold mt-1">{% if after_hours is not none %}{{ after_hours }}h{% else %}—{% endif %}</div>
       <div class="text-xs text-gray-400 mt-1">CHECKOUT_RECOVERY_AFTER_HOURS</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Entrega SMTP</div>
+      <div class="text-2xl font-bold mt-1 {% if email_ready %}text-green-700{% else %}text-red-700{% endif %}">
+        {{ "PRONTA" if email_ready else "INDISPONÍVEL" }}
+      </div>
+      <div class="text-xs text-gray-400 mt-1">Verificação agregada; valores nunca são exibidos.</div>
     </div>
     <div class="bg-white rounded-2xl shadow p-5">
       <div class="text-sm text-gray-500">Candidatos pendentes</div>
@@ -106,17 +113,21 @@
     </p>
   </div>
 
-  <div class="mb-6">
-    <form method="POST" action="{{ url_for('admin.checkout_recovery') }}">
+  <div class="mb-6 bg-white rounded-2xl shadow p-5">
+    <h2 class="font-semibold text-gray-800">Envio em lote</h2>
+    {% if batch_enabled %}
+    <form method="POST" action="{{ url_for('admin.checkout_recovery') }}" class="mt-3">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit"
               class="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-sm">
-        Enviar lembretes pendentes
+        Enviar lote explicitamente habilitado
       </button>
     </form>
-    <p class="text-xs text-gray-500 mt-2">
-      Verifica CHECKOUT_RECOVERY_ENABLED no servidor; se desligado, nada é enviado.
+    {% else %}
+    <p class="text-sm text-gray-500 mt-2">
+      DESLIGADO (fail-closed). Exige CHECKOUT_RECOVERY_BATCH_ENABLED=1 além do gate individual.
     </p>
+    {% endif %}
   </div>
 
   <div class="bg-white rounded-2xl shadow overflow-hidden">
@@ -137,6 +148,7 @@
             <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Total</th>
             <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Criado em</th>
             <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Reserva ativa</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Ação</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-200">
@@ -148,9 +160,22 @@
             <td class="px-4 py-3 text-sm">R$ {{ order.total }}</td>
             <td class="px-4 py-3 text-sm">{{ order.created_at.strftime('%d/%m/%Y %H:%M') if order.created_at else "—" }}</td>
             <td class="px-4 py-3 text-sm text-green-700">{{ "sim" if order.stock_reserved else "não" }}</td>
+            <td class="px-4 py-3 text-sm">
+              {% if enabled and email_ready %}
+              <form method="POST" action="{{ url_for('admin.send_checkout_recovery', order_id=order.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit"
+                        class="px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-xs">
+                  Enviar lembrete
+                </button>
+              </form>
+              {% else %}
+              <span class="text-gray-400">Indisponível</span>
+              {% endif %}
+            </td>
           </tr>
           {% else %}
-          <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">Nenhum pedido aguardando lembrete.</td></tr>
+          <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">Nenhum pedido aguardando lembrete.</td></tr>
           {% endfor %}
         </tbody>
       </table>
