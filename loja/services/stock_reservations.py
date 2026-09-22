@@ -87,6 +87,55 @@ def _release_eligible(order, *, now):
     return payment is None or payment.status != "approved"
 
 
+def find_active_stock_reservations(*, limit=None, now=None):
+    """Lista reservas ativas com expiração comprovada futura, sem mutação.
+
+    Critério (somente leitura): status pending_payment, reserva ainda ativa
+    (``stock_reserved`` verdadeiro — não existe coluna de timestamp de
+    reserva/liberação, e nenhuma migração é criada aqui), expiração da
+    preferência persistida e ainda futura, e nenhum pagamento canônico
+    aprovado. Pedidos legados sem expiração (NULL) nunca entram aqui.
+    """
+    limit = load_release_limit(limit)
+    effective_now = now or utcnow()
+    candidates = (
+        Order.query
+        .filter(
+            Order.stock_reserved.is_(True),
+            Order.status == "pending_payment",
+            Order.mp_preference_expires_at.isnot(None),
+            Order.mp_preference_expires_at > effective_now,
+        )
+        .order_by(Order.mp_preference_expires_at.asc(), Order.id.asc())
+        .limit(limit)
+        .all()
+    )
+    eligible = []
+    for order in candidates:
+        payment = _latest_payment(order.id)
+        if payment is None or payment.status != "approved":
+            eligible.append(order)
+    return eligible
+
+
+def count_unproven_stock_reservations():
+    """Contagem fail-closed de reservas sem expiração comprovada.
+
+    Pedidos legados (``mp_preference_expires_at`` NULL) com reserva ativa
+    não são classificáveis: não entram nem em ativas nem em vencidas, e
+    nenhuma ação é oferecida para eles.
+    """
+    return (
+        Order.query
+        .filter(
+            Order.stock_reserved.is_(True),
+            Order.status == "pending_payment",
+            Order.mp_preference_expires_at.is_(None),
+        )
+        .count()
+    )
+
+
 def find_expired_stock_reservations(*, hours=None, limit=None, now=None):
     """Lista candidatos comprovadamente vencidos, sem mutação."""
     load_reservation_hours(hours)  # valida configuração; prazo persistido manda.

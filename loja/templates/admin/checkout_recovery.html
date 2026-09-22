@@ -79,6 +79,48 @@
   {% endif %}
 
   <div class="mb-8 bg-white rounded-2xl shadow p-5">
+    <h2 class="font-semibold text-gray-800">Reservas de estoque ativas</h2>
+    <p class="text-sm text-gray-500 mt-2">
+      Pedidos ainda em <span class="font-mono">pending_payment</span> com reserva
+      ativa e expiração da preferência comprovada e futura (horário de
+      America/Sao_Paulo). Seção somente leitura: reservas ativas não possuem
+      botão de liberação.
+    </p>
+    <div class="overflow-x-auto mt-4">
+      <table class="w-full">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Pedido</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Criado em</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Reserva expira em</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Estado</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for reservation in active_reservations %}
+          <tr>
+            <td class="px-3 py-2 text-sm">{{ reservation.order_number }}</td>
+            <td class="px-3 py-2 text-sm">{{ reservation.created_sp }}</td>
+            <td class="px-3 py-2 text-sm">{{ reservation.expires_sp }}</td>
+            <td class="px-3 py-2 text-sm font-semibold text-green-700">ATIVA</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="px-3 py-4 text-center text-gray-500">Nenhuma reserva ativa com expiração comprovada.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="mt-4 border-t border-gray-100 pt-4">
+      <div class="text-sm text-gray-500">Reservas sem expiração comprovada</div>
+      <div class="text-2xl font-bold mt-1">{{ unproven_reservations_count }}</div>
+      <p class="text-xs text-gray-500 mt-1">
+        Pedidos legados com reserva ativa mas sem prazo persistido: não são
+        classificados como ativos nem como vencidos, e nenhuma ação é oferecida.
+      </p>
+    </div>
+  </div>
+
+  <div class="mb-8 bg-white rounded-2xl shadow p-5">
     <h2 class="font-semibold text-gray-800">Reservas de estoque vencidas</h2>
     <p class="text-sm text-gray-500 mt-2">
       Pedidos ainda em <span class="font-mono">pending_payment</span> com reserva

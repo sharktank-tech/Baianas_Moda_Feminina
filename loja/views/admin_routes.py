@@ -16,6 +16,7 @@ from werkzeug.security import generate_password_hash
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from loja.utils.decorators import admin_required
+from loja.utils import as_sao_paulo
 from loja.modules.footer_links import is_safe_footer_url
 from loja.modules.services import get_layout_data
 
@@ -401,6 +402,8 @@ def checkout_recovery():
         run_checkout_recovery,
     )
     from loja.services.stock_reservations import (
+        count_unproven_stock_reservations,
+        find_active_stock_reservations,
         find_expired_stock_reservations,
         is_scheduled_release_enabled,
         load_reservation_hours,
@@ -436,9 +439,20 @@ def checkout_recovery():
             hours=reservation_hours,
             limit=200,
         )
+        active_reservations = [
+            {
+                "order_number": order.order_number,
+                "created_sp": _format_sp(order.created_at),
+                "expires_sp": _format_sp(order.mp_preference_expires_at),
+            }
+            for order in find_active_stock_reservations(limit=200)
+        ]
+        unproven_reservations_count = count_unproven_stock_reservations()
     except ValueError:
         reservation_hours = None
         expired_reservations = []
+        active_reservations = []
+        unproven_reservations_count = 0
 
     return render_template(
         "admin/checkout_recovery.html",
@@ -457,7 +471,20 @@ def checkout_recovery():
         ),
         reservation_hours=reservation_hours,
         expired_reservations=expired_reservations,
+        active_reservations=active_reservations,
+        unproven_reservations_count=unproven_reservations_count,
     )
+
+
+def _format_sp(value):
+    """Formata datetime (naive UTC do banco) em America/Sao_Paulo.
+
+    Retorna "dd/mm/aaaa às HH:MM" ou "—" quando ausente.
+    """
+    local = as_sao_paulo(value)
+    if local is None:
+        return "—"
+    return local.strftime("%d/%m/%Y às %H:%M")
 
 
 @admin_blueprint.route(
