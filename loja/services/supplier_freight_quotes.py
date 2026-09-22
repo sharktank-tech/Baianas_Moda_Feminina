@@ -15,7 +15,7 @@ from typing import Callable, Mapping, Optional
 from flask import current_app
 from sqlalchemy import inspect, text
 
-from loja.extensions import db
+from loja import db
 from loja.services.shipping_quote import (
     QuoteUnavailable,
     normalize_cep,
