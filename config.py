@@ -105,6 +105,12 @@ class Config:
     SALES_READINESS_SHIPPING_OPTION = (
         os.environ.get("SALES_READINESS_SHIPPING_OPTION") or None
     )
+    # Boundary administrativa de consulta de frete de referência.
+    # Desligada por padrão; não habilita compra nem fulfillment.
+    ALIEXPRESS_REFERENCE_QUOTE_ENABLED = env_bool(
+        "ALIEXPRESS_REFERENCE_QUOTE_ENABLED",
+        False,
+    )
     # Liberação agendada e lote administrativo são gates independentes.
     # A liberação individual continua exigindo admin + CSRF + confirmação e
     # revalida prazo/pagamento sob lock.
