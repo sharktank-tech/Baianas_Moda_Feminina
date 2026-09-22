@@ -108,11 +108,12 @@ def find_valid_reference_quotes(*, dest_cep, option=None, qty=1, now=None) -> di
             "ttl_seconds": int((expires_at - quoted_at).total_seconds()),
         }
         try:
-            validate_reference_fresh_quote(
+            validated_cost = validate_reference_fresh_quote(
                 fresh, dest_cep=dest, option=option, qty=qty, now=current
             )
         except QuoteUnavailable:
             continue
+        fresh["cost"] = validated_cost
         snapshot[str(row["supplier_product_id"])] = fresh
     return snapshot
 
