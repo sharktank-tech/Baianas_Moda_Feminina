@@ -412,6 +412,48 @@ def sales_readiness():
 
 
 @admin_blueprint.route(
+    "/admin/prontidao-vendas/cotar/<uuid:supplier_product_id>",
+    methods=["POST"],
+)
+@admin_required
+def request_sales_readiness_quote(supplier_product_id):
+    """Boundary individual, gateada e read-only no fornecedor.
+
+    Sem gate ou provider revisado, falha fechado e não grava. CSRF global e
+    admin_required protegem o POST. A função não importa compra/fulfillment.
+    """
+    if not current_app.config.get("ALIEXPRESS_REFERENCE_QUOTE_ENABLED", False):
+        flash("Cotação de referência desabilitada.", "warning")
+        return redirect(url_for("admin.sales_readiness"))
+
+    from loja.services.sales_readiness import load_reference_scenario
+    from loja.services.supplier_freight_quotes import (
+        ReferenceQuoteUnavailable,
+        request_reference_freight_quote,
+    )
+
+    dest_cep, option = load_reference_scenario()
+    provider = current_app.config.get("ALIEXPRESS_REFERENCE_QUOTE_PROVIDER")
+    if not dest_cep or not callable(provider):
+        flash("Cotação de referência indisponível.", "warning")
+        return redirect(url_for("admin.sales_readiness"))
+
+    try:
+        request_reference_freight_quote(
+            supplier_product_id=supplier_product_id,
+            dest_cep=dest_cep,
+            option=option,
+            qty=1,
+            provider=provider,
+        )
+    except ReferenceQuoteUnavailable:
+        flash("Não foi possível comprovar o frete de referência.", "warning")
+    else:
+        flash("Cotação de referência atualizada.", "success")
+    return redirect(url_for("admin.sales_readiness"))
+
+
+@admin_blueprint.route(
     "/admin/recuperacao-checkout",
     methods=["GET", "POST"],
 )
