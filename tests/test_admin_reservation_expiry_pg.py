@@ -8,7 +8,7 @@ chamada a provedor.
 import secrets
 import threading
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -16,6 +16,17 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
 from conftest import ORIGINAL_DATABASE_URL
+
+# Mesmo relógio congelado dos testes SQLite: nada depende da data real.
+FROZEN_NOW = datetime(2030, 6, 15, 10, 0)  # naive UTC
+
+
+@pytest.fixture(autouse=True)
+def frozen_now(monkeypatch):
+    monkeypatch.setattr(
+        "loja.services.stock_reservations.utcnow", lambda: FROZEN_NOW
+    )
+    return FROZEN_NOW
 
 DATABASE_URL = ORIGINAL_DATABASE_URL
 try:
@@ -80,7 +91,6 @@ def _materialize(app):
         Payment,
     )
     from loja.modules.models import Product, User
-    from loja.utils import utcnow
 
     with app.app_context():
         user = User(
@@ -122,7 +132,7 @@ def _materialize(app):
                 neighborhood="Centro",
                 city="São Paulo",
                 state="SP",
-                created_at=utcnow() - timedelta(hours=1),
+                created_at=FROZEN_NOW - timedelta(hours=1),
                 mp_preference_expires_at=expires_at,
             )
             order.items.append(
@@ -140,12 +150,11 @@ def _materialize(app):
             db.session.flush()
             return order
 
-        now = utcnow()
-        active = _order(now + timedelta(hours=5))
-        _order(now - timedelta(hours=1))
+        active = _order(FROZEN_NOW + timedelta(hours=5))
+        _order(FROZEN_NOW - timedelta(hours=1))
         _order(None)
-        _order(now + timedelta(hours=5), status="paid")
-        approved = _order(now + timedelta(hours=5))
+        _order(FROZEN_NOW + timedelta(hours=5), status="paid")
+        approved = _order(FROZEN_NOW + timedelta(hours=5))
         db.session.add(
             Payment(
                 id=uuid.uuid4(),

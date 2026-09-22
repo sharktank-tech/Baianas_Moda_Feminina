@@ -12,13 +12,23 @@ from decimal import Decimal
 
 import pytest
 
-from loja.utils import utcnow
-
-# Datas fixas com folga no futuro (UTC-3 o ano todo em São Paulo, sem DST).
+# Relógio congelado: nenhum teste depende da data real de execução.
+# São Paulo está em UTC-3 o ano todo (sem DST), então as conversões abaixo
+# são determinísticas.
+FROZEN_NOW = datetime(2030, 6, 15, 10, 0)  # naive UTC
 FIXED_EXPIRY_UTC = datetime(2030, 6, 15, 15, 30)  # naive UTC
 FIXED_EXPIRY_SP = "15/06/2030 às 12:30"
 FIXED_CREATED_UTC = datetime(2030, 6, 10, 12, 0)  # naive UTC
 FIXED_CREATED_SP = "10/06/2030 às 09:00"
+
+
+@pytest.fixture(autouse=True)
+def frozen_now(monkeypatch):
+    """Congela o relógio do serviço de reservas no FROZEN_NOW."""
+    monkeypatch.setattr(
+        "loja.services.stock_reservations.utcnow", lambda: FROZEN_NOW
+    )
+    return FROZEN_NOW
 
 SECRET_CPF = "52998224725"
 SECRET_PHONE = "+5563987654321"
@@ -82,7 +92,7 @@ def _reservation_order(
         neighborhood="Centro",
         city="São Paulo",
         state="SP",
-        created_at=created_at or utcnow(),
+        created_at=created_at or FROZEN_NOW,
         mp_preference_id=secrets["preference_id"],
         mp_checkout_url=secrets["checkout_url"],
         mp_payment_id=secrets["mp_payment_id"],
@@ -168,7 +178,7 @@ def test_active_section_has_no_release_controls(
 ):
     user = admin_user
     product = make_product(stock=5)
-    _reservation_order(db, user, product, expires_at=utcnow() + timedelta(hours=5))
+    _reservation_order(db, user, product, expires_at=FROZEN_NOW + timedelta(hours=5))
     login(user.email, "senha123")
 
     html = client.get("/admin/recuperacao-checkout").get_data(as_text=True)
@@ -186,7 +196,7 @@ def test_expired_only_in_expired_table(
     user = admin_user
     product = make_product(stock=5)
     order = _reservation_order(
-        db, user, product, expires_at=utcnow() - timedelta(hours=1)
+        db, user, product, expires_at=FROZEN_NOW - timedelta(hours=1)
     )
     login(user.email, "senha123")
 
@@ -225,14 +235,14 @@ def test_paid_and_released_absent_everywhere(
         db,
         user,
         product,
-        expires_at=utcnow() + timedelta(hours=5),
+        expires_at=FROZEN_NOW + timedelta(hours=5),
         status="paid",
     )
     released = _reservation_order(
         db,
         user,
         product,
-        expires_at=utcnow() + timedelta(hours=5),
+        expires_at=FROZEN_NOW + timedelta(hours=5),
         reserved=False,
     )
     login(user.email, "senha123")
@@ -252,7 +262,7 @@ def test_approved_payment_absent_from_active(
         db,
         user,
         product,
-        expires_at=utcnow() + timedelta(hours=5),
+        expires_at=FROZEN_NOW + timedelta(hours=5),
         with_payment="approved",
     )
     login(user.email, "senha123")
@@ -271,7 +281,7 @@ def test_get_performs_no_mutations(
     user = admin_user
     product = make_product(stock=5)
     order = _reservation_order(
-        db, user, product, expires_at=utcnow() + timedelta(hours=5)
+        db, user, product, expires_at=FROZEN_NOW + timedelta(hours=5)
     )
     null_order = _reservation_order(db, user, product, expires_at=None)
     login(user.email, "senha123")
@@ -299,34 +309,47 @@ def test_get_performs_no_mutations(
     ) == before
 
 
+def _arm_boundary_sentinels(monkeypatch):
+    """Sentinelas explícitos: qualquer toque em fronteira externa é registrado."""
+    import smtplib
+
+    import loja.integrations.aliexpress.fulfillment as fulfillment
+    import loja.modules.getway_mercado_pago.payment_service as payment_service
+
+    calls = []
+
+    def _recorder(name):
+        def _record(*args, **kwargs):
+            calls.append(name)
+            raise AssertionError(f"fronteira externa tocada: {name}")
+
+        return _record
+
+    monkeypatch.setattr(
+        payment_service, "create_preference", _recorder("mp.create_preference")
+    )
+    monkeypatch.setattr(
+        payment_service, "get_payment", _recorder("mp.get_payment")
+    )
+    monkeypatch.setattr(payment_service, "get_sdk", _recorder("mp.get_sdk"))
+    monkeypatch.setattr(
+        fulfillment,
+        "ensure_aliexpress_fulfillment",
+        _recorder("aliexpress.ensure_fulfillment"),
+    )
+    monkeypatch.setattr(smtplib, "SMTP", _recorder("smtp.SMTP"))
+    return calls
+
+
 def test_get_calls_no_external_boundaries(
     client, db, admin_user, login, make_product, monkeypatch
 ):
-    import smtplib
-
-    import loja.modules.getway_mercado_pago.payment_service as payment_service
-
     user = admin_user
     product = make_product(stock=5)
-    _reservation_order(db, user, product, expires_at=utcnow() + timedelta(hours=5))
+    _reservation_order(db, user, product, expires_at=FROZEN_NOW + timedelta(hours=5))
     login(user.email, "senha123")
 
-    calls = []
-    monkeypatch.setattr(
-        payment_service,
-        "create_preference",
-        lambda *args, **kwargs: calls.append("create_preference"),
-    )
-    monkeypatch.setattr(
-        payment_service,
-        "get_payment",
-        lambda *args, **kwargs: calls.append("get_payment"),
-    )
-    monkeypatch.setattr(
-        smtplib,
-        "SMTP",
-        lambda *args, **kwargs: calls.append("smtp"),
-    )
+    calls = _arm_boundary_sentinels(monkeypatch)
 
     response = client.get("/admin/recuperacao-checkout")
 
@@ -343,7 +366,7 @@ def test_no_sensitive_data_in_html_or_logs(
         db,
         user,
         product,
-        expires_at=utcnow() + timedelta(hours=5),
+        expires_at=FROZEN_NOW + timedelta(hours=5),
         with_payment="pending",
     )
     login(user.email, "senha123")
@@ -367,7 +390,7 @@ def test_batch_release_gate_stays_off(
     user = admin_user
     product = make_product(stock=5)
     order = _reservation_order(
-        db, user, product, expires_at=utcnow() - timedelta(hours=1)
+        db, user, product, expires_at=FROZEN_NOW - timedelta(hours=1)
     )
     before = product.stock
     login(user.email, "senha123")
@@ -394,7 +417,7 @@ def test_forged_single_release_refused(
 
     user = admin_user
     product = make_product(stock=10)
-    kwargs = {"expires_at": utcnow() + timedelta(hours=5)}
+    kwargs = {"expires_at": FROZEN_NOW + timedelta(hours=5)}
     if case == "null_expiry":
         kwargs = {"expires_at": None}
     elif case == "paid":
@@ -432,10 +455,10 @@ def test_service_finder_parity(db, make_user, make_product):
     user = make_user()
     product = make_product(stock=10)
     active = _reservation_order(
-        db, user, product, expires_at=utcnow() + timedelta(hours=5)
+        db, user, product, expires_at=FROZEN_NOW + timedelta(hours=5)
     )
     expired = _reservation_order(
-        db, user, product, expires_at=utcnow() - timedelta(hours=1)
+        db, user, product, expires_at=FROZEN_NOW - timedelta(hours=1)
     )
     legacy = _reservation_order(db, user, product, expires_at=None)
 
@@ -466,3 +489,190 @@ def test_service_finder_parity(db, make_user, make_product):
     }
     assert legacy.id in mine_unproven
     assert count_unproven_stock_reservations() >= 1
+
+
+def test_expiry_equal_now_is_active_not_releasable(
+    client, db, admin_user, login, make_product, frozen_now
+):
+    """expires_at == now: ativa (vigente) e nunca liberável."""
+    from loja.modules.getway_mercado_pago.payment_models import Order
+    from loja.services.stock_reservations import (
+        find_active_stock_reservations,
+        find_expired_stock_reservations,
+        release_single_expired_stock_reservation,
+    )
+
+    user = admin_user
+    product = make_product(stock=5)
+    order = _reservation_order(db, user, product, expires_at=frozen_now)
+    login(user.email, "senha123")
+
+    with db.session.no_autoflush:
+        assert order.id in [o.id for o in find_active_stock_reservations()]
+        assert order.id not in [
+            o.id for o in find_expired_stock_reservations(hours=24)
+        ]
+
+    html = client.get("/admin/recuperacao-checkout").get_data(as_text=True)
+    assert order.order_number in _active_section(html)
+
+    assert (
+        release_single_expired_stock_reservation(order.id, now=frozen_now)
+        is False
+    )
+    db.session.refresh(order)
+    db.session.refresh(product)
+    assert order.stock_reserved is True
+    assert product.stock == 4
+
+    response = client.post(
+        f"/admin/reservas-expiradas/{order.id}/liberar",
+        data={"confirm_release": "1"},
+        follow_redirects=True,
+    )
+    assert "nenhum estoque foi alterado" in response.get_data(as_text=True).lower()
+    db.session.refresh(order)
+    assert order.stock_reserved is True
+    assert Order.query.filter_by(id=order.id).count() == 1
+
+
+def test_null_with_approved_latest_excluded_from_count(
+    db, make_user, make_product, frozen_now
+):
+    from loja.services.stock_reservations import count_unproven_stock_reservations
+
+    user = make_user()
+    product = make_product(stock=10)
+    before = count_unproven_stock_reservations()
+    _reservation_order(
+        db, user, product, expires_at=None, with_payment="approved"
+    )
+
+    # Pagamento latest-first aprovado decide: fora da contagem fail-closed.
+    assert count_unproven_stock_reservations() == before
+
+
+def test_latest_first_approved_old_rejected_new(
+    db, make_user, make_product, frozen_now
+):
+    import loja.services.stock_reservations as reservations
+    from loja.modules.getway_mercado_pago.payment_models import Payment
+
+    user = make_user()
+    product = make_product(stock=5)
+    order = _reservation_order(
+        db, user, product, expires_at=frozen_now + timedelta(hours=5)
+    )
+    db.session.add(
+        Payment(
+            id=uuid.uuid4(),
+            order_id=order.id,
+            provider_payment_id="prov-old-approved-%s" % uuid.uuid4().hex,
+            status="approved",
+            amount=Decimal("30.00"),
+            currency="BRL",
+            raw_payload={},
+            created_at=frozen_now - timedelta(hours=2),
+        )
+    )
+    db.session.add(
+        Payment(
+            id=uuid.uuid4(),
+            order_id=order.id,
+            provider_payment_id="prov-new-rejected-%s" % uuid.uuid4().hex,
+            status="rejected",
+            amount=Decimal("30.00"),
+            currency="BRL",
+            raw_payload={},
+            created_at=frozen_now - timedelta(hours=1),
+        )
+    )
+    db.session.commit()
+
+    # Latest-first: o rejected mais recente vence; pedido segue ativo.
+    assert order.id in [o.id for o in reservations.find_active_stock_reservations()]
+
+
+def test_created_at_tie_resolved_by_id_desc(db, make_user, make_product, frozen_now):
+    import loja.services.stock_reservations as reservations
+    from loja.modules.getway_mercado_pago.payment_models import Payment
+
+    user = make_user()
+    product = make_product(stock=5)
+    order = _reservation_order(
+        db, user, product, expires_at=frozen_now + timedelta(hours=5)
+    )
+    tied_at = frozen_now - timedelta(minutes=30)
+    db.session.add(
+        Payment(
+            id=uuid.UUID(int=1),
+            order_id=order.id,
+            provider_payment_id="prov-tie-approved",
+            status="approved",
+            amount=Decimal("30.00"),
+            currency="BRL",
+            raw_payload={},
+            created_at=tied_at,
+        )
+    )
+    db.session.add(
+        Payment(
+            id=uuid.UUID(int=2),
+            order_id=order.id,
+            provider_payment_id="prov-tie-rejected",
+            status="rejected",
+            amount=Decimal("30.00"),
+            currency="BRL",
+            raw_payload={},
+            created_at=tied_at,
+        )
+    )
+    db.session.commit()
+
+    # Mesmo created_at: vence o maior id (rejected) → pedido segue ativo.
+    assert order.id in [o.id for o in reservations.find_active_stock_reservations()]
+
+
+def test_payment_lookups_bounded_not_linear(db, make_user, make_product, frozen_now):
+    """Consultas de pagamento não crescem com o nº de pedidos (sem N+1)."""
+    from sqlalchemy import event
+
+    from loja import db as _db
+    from loja.modules.getway_mercado_pago.payment_models import Order
+    from loja.services.stock_reservations import (
+        count_unproven_stock_reservations,
+        find_active_stock_reservations,
+    )
+
+    user = make_user()
+    product = make_product(stock=1000)
+    for _ in range(200):
+        _reservation_order(
+            db, user, product, expires_at=frozen_now + timedelta(hours=5)
+        )
+
+    def _counted(fn):
+        seen = []
+
+        def _before(conn, cursor, statement, parameters, context, executemany):
+            seen.append(statement)
+
+        event.listen(_db.engine, "before_cursor_execute", _before)
+        try:
+            result = fn()
+        finally:
+            event.remove(_db.engine, "before_cursor_execute", _before)
+        return result, len(seen)
+
+    _, small_find = _counted(
+        lambda: find_active_stock_reservations(limit=10)
+    )
+    found, big_find = _counted(
+        lambda: find_active_stock_reservations(limit=500)
+    )
+    _, big_count = _counted(count_unproven_stock_reservations)
+
+    assert len(found) >= 200
+    assert big_find == small_find  # constante, não linear
+    assert big_find <= 3  # pedidos + pagamentos (+1 de folga)
+    assert big_count <= 3

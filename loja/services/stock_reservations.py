@@ -74,6 +74,33 @@ def _latest_payment(order_id):
     )
 
 
+def _latest_payments_by_order(order_ids):
+    """Último pagamento por pedido em uma única consulta (sem N+1).
+
+    Preserva exatamente a política latest-first: ORDER BY order_id,
+    created_at DESC, id DESC — a primeira linha de cada pedido vence,
+    com empate de created_at resolvido pelo maior id.
+    """
+    ids = list(dict.fromkeys(order_ids))
+    if not ids:
+        return {}
+    rows = (
+        Payment.query
+        .filter(Payment.order_id.in_(ids))
+        .order_by(
+            Payment.order_id,
+            Payment.created_at.desc(),
+            Payment.id.desc(),
+        )
+        .all()
+    )
+    latest = {}
+    for payment in rows:
+        if payment.order_id not in latest:
+            latest[payment.order_id] = payment
+    return latest
+
+
 def _release_eligible(order, *, now):
     if (
         order is None
@@ -93,8 +120,10 @@ def find_active_stock_reservations(*, limit=None, now=None):
     Critério (somente leitura): status pending_payment, reserva ainda ativa
     (``stock_reserved`` verdadeiro — não existe coluna de timestamp de
     reserva/liberação, e nenhuma migração é criada aqui), expiração da
-    preferência persistida e ainda futura, e nenhum pagamento canônico
-    aprovado. Pedidos legados sem expiração (NULL) nunca entram aqui.
+    preferência persistida e ainda vigente (``>= now``: expiração exatamente
+    igual a now conta como ativa e nunca é liberável), e nenhum pagamento
+    canônico aprovado (política latest-first). Pedidos legados sem
+    expiração (NULL) nunca entram aqui.
     """
     limit = load_release_limit(limit)
     effective_now = now or utcnow()
@@ -104,15 +133,16 @@ def find_active_stock_reservations(*, limit=None, now=None):
             Order.stock_reserved.is_(True),
             Order.status == "pending_payment",
             Order.mp_preference_expires_at.isnot(None),
-            Order.mp_preference_expires_at > effective_now,
+            Order.mp_preference_expires_at >= effective_now,
         )
         .order_by(Order.mp_preference_expires_at.asc(), Order.id.asc())
         .limit(limit)
         .all()
     )
+    latest_by_order = _latest_payments_by_order([o.id for o in candidates])
     eligible = []
     for order in candidates:
-        payment = _latest_payment(order.id)
+        payment = latest_by_order.get(order.id)
         if payment is None or payment.status != "approved":
             eligible.append(order)
     return eligible
@@ -123,16 +153,32 @@ def count_unproven_stock_reservations():
 
     Pedidos legados (``mp_preference_expires_at`` NULL) com reserva ativa
     não são classificáveis: não entram nem em ativas nem em vencidas, e
-    nenhuma ação é oferecida para eles.
+    nenhuma ação é oferecida para eles. Pedidos cujo pagamento latest-first
+    já está aprovado saem da contagem (pagamento decide, não a ausência
+    de prazo).
     """
-    return (
-        Order.query
-        .filter(
-            Order.stock_reserved.is_(True),
-            Order.status == "pending_payment",
-            Order.mp_preference_expires_at.is_(None),
+    candidate_ids = [
+        row[0]
+        for row in (
+            db.session.query(Order.id)
+            .filter(
+                Order.stock_reserved.is_(True),
+                Order.status == "pending_payment",
+                Order.mp_preference_expires_at.is_(None),
+            )
+            .all()
         )
-        .count()
+    ]
+    if not candidate_ids:
+        return 0
+    latest_by_order = _latest_payments_by_order(candidate_ids)
+    return sum(
+        1
+        for order_id in candidate_ids
+        if (
+            latest_by_order.get(order_id) is None
+            or latest_by_order.get(order_id).status != "approved"
+        )
     )
 
 
@@ -153,9 +199,10 @@ def find_expired_stock_reservations(*, hours=None, limit=None, now=None):
         .limit(limit)
         .all()
     )
+    latest_by_order = _latest_payments_by_order([o.id for o in candidates])
     eligible = []
     for order in candidates:
-        payment = _latest_payment(order.id)
+        payment = latest_by_order.get(order.id)
         if payment is None or payment.status != "approved":
             eligible.append(order)
     return eligible
@@ -269,6 +316,8 @@ def release_expired_stock_reservations(
 
     released = 0
     skipped = 0
+    # Sem prefetch aqui de propósito: o pagamento é relido sob o lock da
+    # linha (serializa com o webhook), em vez de uma foto anterior ao lock.
     try:
         for order_id in candidate_ids:
             order = (
