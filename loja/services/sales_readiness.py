@@ -560,19 +560,32 @@ def evaluate_product_readiness(
     )
 
 
-def load_fresh_quotes_snapshot():
-    """Fotografia única e validada das cotações frescas (sem provider).
+def load_fresh_quotes_snapshot(*, dest_cep=None, option=None, now=None):
+    """Fotografia única de cotações válidas, sem consultar fornecedor.
 
-    Fonte canônica: ``SHIPPING_ALIEXPRESS_FRESH_QUOTES``. Ausente ou
-    inválida (não-dict) vira ``{}`` fail-closed. O entrypoint lê uma vez
-    e repassa a mesma fotografia a todos os produtos do GET.
+    A configuração em memória permanece apenas para compatibilidade de testes.
+    Quando o cenário de referência existe, linhas persistidas e ainda válidas
+    são carregadas em uma única consulta e prevalecem por vínculo. Tabela
+    ausente falha fechado sem quebrar o painel.
     """
     from flask import current_app
 
     raw = current_app.config.get("SHIPPING_ALIEXPRESS_FRESH_QUOTES")
-    if not isinstance(raw, dict):
-        return {}
-    return raw
+    snapshot = dict(raw) if isinstance(raw, dict) else {}
+    if dest_cep:
+        from loja.services.supplier_freight_quotes import (
+            find_valid_reference_quotes,
+        )
+
+        snapshot.update(
+            find_valid_reference_quotes(
+                dest_cep=dest_cep,
+                option=option,
+                qty=REFERENCE_QTY,
+                now=now,
+            )
+        )
+    return snapshot
 
 
 def evaluate_sales_readiness(*, limit=READY_LIMIT) -> SalesReadinessSummary:
@@ -582,7 +595,9 @@ def evaluate_sales_readiness(*, limit=READY_LIMIT) -> SalesReadinessSummary:
     from loja.modules.models import Product
 
     ref_dest_cep, ref_option = load_reference_scenario()
-    fresh_snapshot = load_fresh_quotes_snapshot()
+    fresh_snapshot = load_fresh_quotes_snapshot(
+        dest_cep=ref_dest_cep, option=ref_option
+    )
     products = (
         Product.query.order_by(Product.name.asc(), Product.id.asc())
         .limit(limit)

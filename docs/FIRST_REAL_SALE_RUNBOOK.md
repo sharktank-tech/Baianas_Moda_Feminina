@@ -39,3 +39,19 @@ etapa é automática: cada verificação exige conferência humana explícita.
   (CEP comercial + opção + quantidade 1 configurados), nunca para
   qualquer endereço do Brasil: antes de divulgar para outra região,
   reavalie a prova de frete para o destino aplicável.
+
+
+## Cotação persistida do cenário de referência
+
+- A tarifa temporária de R$ 10,00 continua sendo cobrança comercial; nunca prova
+  custo do fornecedor.
+- O painel lê somente cotações vigentes da tabela canônica por vínculo, prefixo
+  de CEP, opção e quantidade. O GET não consulta AliExpress.
+- Uma consulta futura só pode entrar por provider read-only explicitamente
+  injetado e gateado. Não existe provider padrão nesta entrega.
+- A cotação não habilita fulfillment, placeOrder, Mercado Pago, reserva de
+  estoque, alteração de preço ou publicação.
+- PRONTO vale somente para o prefixo/opção/quantidade comprovados. Cotação
+  vencida, moeda divergente ou janela inválida falha fechado.
+- Rollback local nunca desfaz uma operação externa; por isso nenhuma compra é
+  executada durante a coleta de evidência logística.
