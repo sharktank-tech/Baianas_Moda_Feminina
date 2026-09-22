@@ -1927,3 +1927,32 @@ def test_http_flat_com_evidencia_vende(client, db, make_user, monkeypatch, duty,
     assert order.items[0].supplier_icms_snapshot == Decimal(icms)
     assert order.items[0].supplier_landed_cost_snapshot == Decimal('28.50') + Decimal(duty) + Decimal(icms)
     assert order.items[0].supplier_cost_evidence_snapshot['version'] == 2
+
+
+@pytest.mark.parametrize("raw", ["1e999999", "10000.00"])
+def test_temporary_flat_rate_invalida_sem_confirmacao_utilizavel(
+    client, db, make_user, monkeypatch, raw,
+):
+    # /calcular_frete com tarifa inválida: HTTP 409 exato, mensagem
+    # sanitizada e nenhuma confirmação de frete utilizável na sessão.
+    user = make_user()
+    _login(client, user)
+    _manual_supplier_cart(db, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False)
+    monkeypatch.setitem(client.application.config, "SHIPPING_TEMPORARY_FLAT_RATE", raw)
+
+    with client.session_transaction() as sess:
+        sess.pop("shipping_quote", None)
+
+    resp = client.post("/calcular_frete", json={"cart": True, "cep": "77100000"})
+    assert resp.status_code == 409
+    body = resp.get_json() or {}
+    assert "error" in body
+    assert body.get("valor") is None
+    texto = resp.get_data(as_text=True)
+    assert raw.lower() not in texto.lower()
+    for termo in ("InvalidOperation", "traceback", "SHIPPING_TEMPORARY_FLAT_RATE"):
+        assert termo.lower() not in texto.lower()
+    with client.session_transaction() as sess:
+        assert not sess.get("shipping_quote")
+
