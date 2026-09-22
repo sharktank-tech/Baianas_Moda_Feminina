@@ -102,17 +102,24 @@ def capture_acquisition_origin():
 # para também atender templates de outros blueprints, como tracking/admin.
 @main_blueprint.app_context_processor
 def inject_site_config():
+    from types import SimpleNamespace
+
     site = get_cached("site_config")
     if site is None:
-        site = SiteConfig.query.first()
-        if site is None:
+        row = SiteConfig.query.first()
+        if row is None:
             # Fallback pra não quebrar a aplicação se a tabela ainda estiver vazia
             class _SiteFallback:
                 name = "Pollo Modas"
                 meta_description = "Moda feminina, masculina e infantil com os melhores preços."
             site = _SiteFallback()
         else:
-            # Modelo "flat" (sem relacionamentos): seguro cachear entre requests.
+            # Snapshot somente-leitura: nunca cachear o ORM vivo entre
+            # requests — a instância desvincula da sessão e quebra o render
+            # seguinte com DetachedInstanceError.
+            site = SimpleNamespace(
+                name=row.name, meta_description=row.meta_description
+            )
             set_cached("site_config", site, ttl=600)
     return {"site": site}
 
