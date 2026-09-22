@@ -55,3 +55,17 @@ etapa é automática: cada verificação exige conferência humana explícita.
   vencida, moeda divergente ou janela inválida falha fechado.
 - Rollback local nunca desfaz uma operação externa; por isso nenhuma compra é
   executada durante a coleta de evidência logística.
+
+## Contrato para um futuro provider de referência
+
+- A resposta deve trazer explicitamente `dest_prefix` (três dígitos), `option`
+  (inclusive `None` para a opção padrão) e `qty`. Esses campos precisam
+  corresponder à requisição; a persistência nunca os completa ou sobrescreve.
+- Quantidade é um inteiro positivo no intervalo do PostgreSQL; booleanos e
+  valores fracionários são rejeitados antes de consultar o provider.
+- `ttl_seconds` deve ser inteiro positivo explícito. No instante exato de
+  expiração, a cotação já é inválida tanto para gravação como para leitura.
+- Resposta ausente ou divergente não altera a cotação anterior.
+- Este contrato não prova disponibilidade de uma API real. O bloqueio
+  documentado em `loja/integrations/aliexpress/FREIGHT_PROBE.md` permanece;
+  qualquer retomada de investigação live exige autorização específica.
