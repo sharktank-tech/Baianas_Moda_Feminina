@@ -432,6 +432,25 @@ def request_sales_readiness_quote(supplier_product_id):
         request_reference_freight_quote,
     )
 
+    from loja.modules.models import Supplier, SupplierProduct
+
+    link = SupplierProduct.query.filter_by(
+        id=supplier_product_id, is_active=True
+    ).first()
+    supplier = (
+        Supplier.query.filter_by(id=link.supplier_id).first()
+        if link is not None and link.supplier_id is not None
+        else None
+    )
+    if (
+        link is None
+        or supplier is None
+        or supplier.channel_type != "aliexpress"
+        or not supplier.seller_id
+    ):
+        flash("Vínculo de fornecedor indisponível.", "warning")
+        return redirect(url_for("admin.sales_readiness"))
+
     dest_cep, option = load_reference_scenario()
     provider = current_app.config.get("ALIEXPRESS_REFERENCE_QUOTE_PROVIDER")
     if not dest_cep or not callable(provider):
