@@ -253,3 +253,72 @@ def test_readiness_snapshot_uses_persisted_quote(db, app, monkeypatch):
     )
 
     assert str(sp_id) in snapshot
+
+
+def test_admin_quote_post_gate_off_never_calls_provider(
+    client, admin_user, login, app, db, monkeypatch
+):
+    calls = []
+    monkeypatch.setitem(app.config, "ALIEXPRESS_REFERENCE_QUOTE_ENABLED", False)
+    monkeypatch.setitem(
+        app.config,
+        "ALIEXPRESS_REFERENCE_QUOTE_PROVIDER",
+        lambda **kwargs: calls.append(kwargs),
+    )
+    login(admin_user.email, "senha123")
+    sp_id = uuid.uuid4()
+
+    response = client.post(
+        f"/admin/prontidao-vendas/cotar/{sp_id}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code in (302, 303)
+    assert calls == []
+    assert db.session.execute(
+        text(
+            "SELECT count(*) FROM supplier_reference_freight_quotes "
+            "WHERE supplier_product_id = :sp"
+        ),
+        {"sp": str(sp_id)},
+    ).scalar() == 0
+
+
+def test_admin_quote_post_without_reviewed_provider_fails_closed(
+    client, admin_user, login, app, db, monkeypatch
+):
+    monkeypatch.setitem(app.config, "ALIEXPRESS_REFERENCE_QUOTE_ENABLED", True)
+    monkeypatch.setitem(app.config, "SALES_READINESS_DESTINATION_CEP", "77000000")
+    monkeypatch.delitem(
+        app.config, "ALIEXPRESS_REFERENCE_QUOTE_PROVIDER", raising=False
+    )
+    login(admin_user.email, "senha123")
+    sp_id = uuid.uuid4()
+
+    response = client.post(
+        f"/admin/prontidao-vendas/cotar/{sp_id}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code in (302, 303)
+    assert db.session.execute(
+        text(
+            "SELECT count(*) FROM supplier_reference_freight_quotes "
+            "WHERE supplier_product_id = :sp"
+        ),
+        {"sp": str(sp_id)},
+    ).scalar() == 0
+
+
+def test_admin_quote_post_requires_admin(
+    client, regular_user, login, app, monkeypatch
+):
+    monkeypatch.setitem(app.config, "ALIEXPRESS_REFERENCE_QUOTE_ENABLED", True)
+    login(regular_user.email, "senha123")
+
+    response = client.post(
+        f"/admin/prontidao-vendas/cotar/{uuid.uuid4()}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code in (302, 303, 403)
