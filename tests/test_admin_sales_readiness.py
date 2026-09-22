@@ -621,7 +621,7 @@ def test_route_counts_match_rows(client, db, admin_user, login, full_policy):  #
     pronto = _card("Produtos PRONTOS")
     revisao = _card("Em REVISÃO")
     bloqueado = _card("BLOQUEADOS")
-    evaluated = _card("Ativos avaliados")
+    evaluated = _card("Produtos avaliados")
     assert pronto + revisao + bloqueado == evaluated
     assert evaluated >= 1
     assert "Pronto Alpha" in html
@@ -673,3 +673,197 @@ def test_recovery_expired_text_fixed(client, admin_user, login, db):
 
     assert "reserva ativa há mais de" not in html
     assert "expiração persistida já vencida" in html
+
+
+# ── Frete fresco manda na economia; persistido divergente bloqueia ──────
+
+def _stale_product(db, *, cost, shipping, landed, fresh_shipping):
+    product = _product(db, source="aliexpress")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(
+        db,
+        product,
+        supplier,
+        cost=Decimal(cost),
+        shipping_cost=Decimal(shipping),
+        landed_cost=Decimal(landed),
+    )
+    fresh = _fresh(link.id)
+    fresh[str(link.id)]["cost"] = fresh_shipping
+    return product, fresh
+
+
+def test_stale_persisted_above_fresh_blocked(db, full_policy):
+    """Persistido 15, fresco produz 25: diverge > 0,01 → BLOQUEADO."""
+    from loja.services import sales_readiness as sr
+
+    product, fresh = _stale_product(
+        db, cost="10.00", shipping="5.00", landed="15.00", fresh_shipping="15.00"
+    )
+
+    result = _evaluate(product, fresh_quotes=fresh)
+
+    assert result.state == sr.BLOCKED
+    assert "landed_cost_stale" in result.reasons
+    assert result.proven_cost_display == "R$ 25,00"
+    assert result.proven_logistic_display == "R$ 15,00"
+
+
+def test_stale_persisted_below_fresh_blocked(db, full_policy):
+    """Persistido 35, fresco produz 25: diverge > 0,01 → BLOQUEADO."""
+    from loja.services import sales_readiness as sr
+
+    product, fresh = _stale_product(
+        db, cost="20.00", shipping="15.00", landed="35.00", fresh_shipping="5.00"
+    )
+
+    result = _evaluate(product, fresh_quotes=fresh)
+
+    assert result.state == sr.BLOCKED
+    assert "landed_cost_stale" in result.reasons
+    assert result.proven_cost_display == "R$ 25,00"
+
+
+def test_margin_uses_fresh_current_landed(db, full_policy):
+    """Persistido 25, fresco confirma 25: margem calculada sobre 25."""
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress", price=Decimal("49.90"))
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(
+        db,
+        product,
+        supplier,
+        cost=Decimal("20.00"),
+        shipping_cost=Decimal("5.00"),
+        landed_cost=Decimal("25.00"),
+    )
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.READY
+    assert result.proven_cost_display == "R$ 25,00"
+    assert result.margin_display == "49,90%"
+
+
+def test_absent_fresh_explicitly_never_pronto(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="internal", name="Sem Prova")
+    supplier = _supplier(db, channel="manual")
+    _link(db, product, supplier)
+
+    result = _evaluate(product, fresh_quotes={})
+
+    assert result.state != sr.READY
+    assert result.state == sr.REVIEW
+
+
+def test_invalid_fresh_config_fails_closed(app, db, full_policy, monkeypatch):
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress", name="Config Invalida")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    _link(db, product, supplier)
+    monkeypatch.setitem(
+        app.config, "SHIPPING_ALIEXPRESS_FRESH_QUOTES", ["nao-eh-dict"]
+    )
+
+    summary = sr.evaluate_sales_readiness(limit=500)
+    mine = [r for r in summary.rows if r.product_id == product.id]
+
+    assert len(mine) == 1
+    assert mine[0].state != sr.READY
+
+
+def test_fresh_snapshot_read_once_per_get(app, db, full_policy, monkeypatch):
+    from loja.services import sales_readiness as sr
+
+    for suffix in ("Um", "Dois", "Tres"):
+        product = _product(db, source="aliexpress", name=f"Snap {suffix}")
+        supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+        _link(db, product, supplier)
+    monkeypatch.setitem(app.config, "SHIPPING_ALIEXPRESS_FRESH_QUOTES", {})
+
+    calls = []
+    original_get = app.config.get
+
+    def counting_get(key, *args, **kwargs):
+        if key == "SHIPPING_ALIEXPRESS_FRESH_QUOTES":
+            calls.append(key)
+        return original_get(key, *args, **kwargs)
+
+    monkeypatch.setattr(app.config, "get", counting_get)
+    sr.evaluate_sales_readiness(limit=50)
+
+    assert calls == ["SHIPPING_ALIEXPRESS_FRESH_QUOTES"]
+
+
+def test_multi_link_variants_stay_blocked(db, full_policy):
+    """Sem avaliação por variante nesta versão: múltiplos vínculos bloqueiam."""
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="internal", name="Multi Vinculo")
+    link_a = _link(db, product, _supplier(db, name="Sup A"), supplier_product_id="SP-A")
+    link_b = _link(db, product, _supplier(db, name="Sup B"), supplier_product_id="SP-B")
+    _variant(db, product, link_a, stock=3)
+    _variant(db, product, link_b, stock=2)
+
+    result = _evaluate(product, fresh_quotes={})
+
+    assert result.state == sr.BLOCKED
+    assert "ambiguous_supplier" in result.reasons
+
+
+def _row_state(html, name):
+    import re
+
+    # Escopo restrito à tabela principal (após "Avaliação por produto"):
+    # a tabela de candidatos repete nomes sem coluna de estado.
+    main = html.split("Avaliação por produto", 1)[1]
+    match = re.search(
+        re.escape(name)
+        + r"</td>(?:\s*<td[^>]*>.*?</td>){8}\s*<td[^>]*>(PRONTO|REVISÃO|BLOQUEADO)",
+        main,
+        re.DOTALL,
+    )
+    assert match, name
+    return match.group(1)
+
+
+def test_route_fresh_config_drives_pronto_then_regresses(
+    client, db, admin_user, login, full_policy, monkeypatch
+):
+    import loja.integrations.aliexpress.fulfillment as fulfillment
+    import loja.modules.getway_mercado_pago.payment_service as payment_service
+    import smtplib
+
+    product = _product(db, source="aliexpress", name="Rota Fresh Zeta")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(db, product, supplier)
+    monkeypatch.setitem(
+        client.application.config,
+        "SHIPPING_ALIEXPRESS_FRESH_QUOTES",
+        _fresh(link.id),
+    )
+    calls = []
+    for module, name in [
+        (payment_service, "create_preference"),
+        (payment_service, "get_payment"),
+        (payment_service, "get_sdk"),
+        (fulfillment, "ensure_aliexpress_fulfillment"),
+    ]:
+        monkeypatch.setattr(module, name, lambda *a, **k: calls.append(True))
+    monkeypatch.setattr(smtplib, "SMTP", lambda *a, **k: calls.append(True))
+    login(admin_user.email, "senha123")
+
+    html = client.get("/admin/prontidao-vendas").get_data(as_text=True)
+    assert _row_state(html, "Rota Fresh Zeta") == "PRONTO"
+
+    monkeypatch.delitem(
+        client.application.config, "SHIPPING_ALIEXPRESS_FRESH_QUOTES", raising=False
+    )
+    html = client.get("/admin/prontidao-vendas").get_data(as_text=True)
+    assert _row_state(html, "Rota Fresh Zeta") == "REVISÃO"
+
+    assert calls == []

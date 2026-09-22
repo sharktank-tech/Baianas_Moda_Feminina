@@ -31,6 +31,11 @@ Mapa de campos canônicos utilizados (conferidos em modelos/migrations):
 Estados: PRONTO (tudo comprovado), REVISÃO (sem falha definitiva, falta
 evidência operacional), BLOQUEADO (inconsistência, dado inválido ou risco
 financeiro). Ausência de informação nunca gera PRONTO.
+
+Múltiplos vínculos: avaliação por variante NÃO é implementada nesta
+versão. Produtos (com ou sem variantes) que apresentem mais de um vínculo
+ativo permanecem BLOQUEADOS (ambiguous_supplier); cada variante vendável
+precisa resolver para o vínculo único aplicável do produto.
 """
 
 from __future__ import annotations
@@ -384,7 +389,7 @@ def evaluate_product_readiness(
         else:
             shipping = to_decimal(getattr(link, "shipping_cost", None))
             landed = to_decimal(getattr(link, "landed_cost", None))
-            if (
+            persisted_ok = (
                 landed is not None
                 and landed.is_finite()
                 and landed > 0
@@ -393,25 +398,29 @@ def evaluate_product_readiness(
                 and shipping >= 0
                 and getattr(link, "freight_status", None) == "available"
                 and landed == (cost + shipping).quantize(Decimal("0.01"))
-            ):
-                proven_cost = landed
+            )
             # Prova logística fresca, independente do snapshot persistido.
+            # A margem SEMPRE usa current_landed (custo do item + frete
+            # fresco); o persistido serve só para detectar divergência.
             fresh_cost, fresh_reason = _fresh_logistic_cost(
                 link.id, fresh_quotes, effective_now
             )
             if fresh_cost is not None:
                 proven_logistic = fresh_cost
-                if proven_cost is None:
-                    proven_cost = (cost + fresh_cost).quantize(Decimal("0.01"))
+                current_landed = (cost + fresh_cost).quantize(Decimal("0.01"))
+                if persisted_ok and abs(landed - current_landed) > Decimal("0.01"):
+                    _add("landed_cost_stale")
+                proven_cost = current_landed
             elif fresh_reason == "currency_mismatch":
                 _add("currency_mismatch")
             elif fresh_reason == "shipping_quote_expired":
                 _add("shipping_quote_expired")
-            elif proven_cost is None:
-                _add("missing_cost")
-            else:
+            elif persisted_ok:
+                proven_cost = landed
                 # Item comprovado, falta só a prova logística → REVISÃO.
                 review.append("shipping_cost_unproven")
+            else:
+                _add("missing_cost")
     elif source != "aliexpress" and len(links) == 0:
         item_cost = to_decimal(getattr(product, "cost", None))
         if item_cost is None or not item_cost.is_finite() or item_cost <= 0:
@@ -495,17 +504,34 @@ def evaluate_product_readiness(
     )
 
 
+def load_fresh_quotes_snapshot():
+    """Fotografia única e validada das cotações frescas (sem provider).
+
+    Fonte canônica: ``SHIPPING_ALIEXPRESS_FRESH_QUOTES``. Ausente ou
+    inválida (não-dict) vira ``{}`` fail-closed. O entrypoint lê uma vez
+    e repassa a mesma fotografia a todos os produtos do GET.
+    """
+    from flask import current_app
+
+    raw = current_app.config.get("SHIPPING_ALIEXPRESS_FRESH_QUOTES")
+    if not isinstance(raw, dict):
+        return {}
+    return raw
+
+
 def evaluate_sales_readiness(*, limit=READY_LIMIT) -> SalesReadinessSummary:
     """Avalia o catálogo (somente leitura). Requer contexto da aplicação."""
     from loja.modules.models import Product
 
+    fresh_snapshot = load_fresh_quotes_snapshot()
     products = (
         Product.query.order_by(Product.name.asc(), Product.id.asc())
         .limit(limit)
         .all()
     )
     return summarize_readiness(
-        evaluate_product_readiness(product) for product in products
+        evaluate_product_readiness(product, fresh_quotes=fresh_snapshot)
+        for product in products
     )
 
 
@@ -520,6 +546,7 @@ __all__ = [
     "ProductReadiness",
     "SalesReadinessSummary",
     "summarize_readiness",
+    "load_fresh_quotes_snapshot",
     "evaluate_product_readiness",
     "evaluate_sales_readiness",
 ]
