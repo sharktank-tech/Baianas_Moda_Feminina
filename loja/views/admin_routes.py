@@ -387,6 +387,31 @@ def channel_metrics_dashboard():
 
 
 @admin_blueprint.route(
+    "/admin/prontidao-vendas",
+    methods=["GET"],
+)
+@admin_required
+def sales_readiness():
+    """Painel somente leitura de prontidão para a primeira venda real.
+
+    Apenas GET, sem commit, sem chamadas a provedores e sem formulários
+    de mutação. PRONTO significa pronto para receber venda — nunca
+    autorização para compra automática no fornecedor.
+    """
+    from loja.services.sales_readiness import (
+        REASON_LABELS,
+        evaluate_sales_readiness,
+    )
+
+    summary = evaluate_sales_readiness()
+    return render_template(
+        "admin/sales_readiness.html",
+        summary=summary,
+        reason_labels=REASON_LABELS,
+    )
+
+
+@admin_blueprint.route(
     "/admin/recuperacao-checkout",
     methods=["GET", "POST"],
 )

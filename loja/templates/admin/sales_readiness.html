@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Prontidão para vendas — Pollo Modas{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-8">
+  <div class="mb-8">
+    <a href="{{ url_for('admin.dashboard') }}" class="text-sm text-gray-500 hover:underline">&larr; Painel administrativo</a>
+    <h1 class="text-3xl font-bold text-gray-800 mt-2">Prontidão para vendas</h1>
+    <p class="text-gray-500 mt-2 max-w-3xl">
+      Verificação exclusivamente de leitura: identifica produtos que podem
+      receber divulgação sem risco conhecido de fornecedor, frete, preço ou
+      margem. Não habilita fulfillment, não compra no fornecedor e não altera
+      preços. A ausência de informação nunca gera PRONTO.
+    </p>
+    <p class="mt-3 inline-block px-3 py-2 rounded-lg bg-amber-100 text-amber-900 text-sm font-semibold">
+      Fulfillment automático desligado — Tratamento manual obrigatório após pagamento.
+      PRONTO significa pronto para receber venda, não autorização para compra automática.
+    </p>
+    <p class="mt-2 text-sm text-gray-600">
+      {% if summary.reference_configured %}Destino de referência configurado (prefixo {{ summary.reference_masked }}){% else %}Destino de referência pendente{% endif %} —
+      PRONTO vale apenas para o cenário logístico de referência, não para qualquer endereço do Brasil.
+    </p>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Produtos PRONTOS</div>
+      <div class="text-2xl font-bold mt-1 text-green-700">{{ summary.pronto }}</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Em REVISÃO</div>
+      <div class="text-2xl font-bold mt-1 text-amber-700">{{ summary.revisao }}</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">BLOQUEADOS</div>
+      <div class="text-2xl font-bold mt-1 text-red-700">{{ summary.bloqueado }}</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-5">
+      <div class="text-sm text-gray-500">Produtos avaliados</div>
+      <div class="text-2xl font-bold mt-1">{{ summary.evaluated }}</div>
+    </div>
+  </div>
+
+  {% if summary.pronto == 0 %}
+  <div class="mb-8 bg-white rounded-2xl shadow p-5">
+    <p class="font-semibold text-gray-800">Nenhum produto está comprovadamente pronto para divulgação.</p>
+  </div>
+  {% endif %}
+
+  <div class="mb-8 bg-white rounded-2xl shadow p-5">
+    <h2 class="font-semibold text-gray-800">Candidatos para primeira campanha</h2>
+    <p class="text-sm text-gray-500 mt-2">
+      Somente informativa: até cinco produtos PRONTOS, por maior margem
+      comprovada, depois maior estoque, depois identificador. Não cria
+      campanha, anúncio ou publicação automática.
+    </p>
+    <div class="overflow-x-auto mt-4">
+      <table class="w-full">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Produto</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Margem</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Estoque</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for row in summary.candidates %}
+          <tr>
+            <td class="px-3 py-2 text-sm">{{ row.name }}</td>
+            <td class="px-3 py-2 text-sm">{{ row.margin_display }}</td>
+            <td class="px-3 py-2 text-sm">{{ row.stock }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="px-3 py-4 text-center text-gray-500">Sem candidatos: nenhum produto PRONTO.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow overflow-hidden">
+    <div class="p-5 border-b border-gray-200">
+      <h2 class="font-semibold text-gray-800">Avaliação por produto</h2>
+      <p class="text-xs text-gray-500 mt-1">
+        Tarifa cobrada do cliente é receita temporária configurada, não
+        prova do custo logístico. Custo logístico comprovado exige cotação
+        fresca do vínculo.
+      </p>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Produto</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Origem</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Fornecedor</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Preço</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Custo comprovado</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Frete cobrado do cliente</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Custo logístico comprovado</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Margem</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Estoque</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Estado</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Motivos</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for row in summary.rows %}
+          <tr>
+            <td class="px-3 py-2 text-sm">{{ row.name }}</td>
+            <td class="px-3 py-2 text-sm">{{ row.origin }}</td>
+            <td class="px-3 py-2 text-sm">{{ row.supplier_name }}</td>
+            <td class="px-3 py-2 text-sm">{{ row.price_display }}</td>
+            <td class="px-3 py-2 text-sm">{{ row.proven_cost_display }}</td>
+            <td class="px-3 py-2 text-sm">{{ row.charged_freight_display }}</td>
+            <td class="px-3 py-2 text-sm">{{ row.proven_logistic_display }}</td>
+            <td class="px-3 py-2 text-sm">{{ row.margin_display }}</td>
+            <td class="px-3 py-2 text-sm">{{ row.stock }}</td>
+            <td class="px-3 py-2 text-sm font-semibold">{{ row.state }}</td>
+            <td class="px-3 py-2 text-sm">{% for code in row.reasons %}{{ reason_labels.get(code, code) }}{% if not loop.last %}; {% endif %}{% endfor %}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="11" class="px-3 py-4 text-center text-gray-500">Nenhum produto avaliado.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

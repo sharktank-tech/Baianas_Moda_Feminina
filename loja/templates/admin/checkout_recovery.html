@@ -123,10 +123,11 @@
   <div class="mb-8 bg-white rounded-2xl shadow p-5">
     <h2 class="font-semibold text-gray-800">Reservas de estoque vencidas</h2>
     <p class="text-sm text-gray-500 mt-2">
-      Pedidos ainda em <span class="font-mono">pending_payment</span> com reserva
-      ativa há mais de {{ reservation_hours if reservation_hours is not none else "—" }}
-      hora(s). A limpeza restitui somente o estoque; não cancela o pedido, a
-      preferência ou o pagamento no Mercado Pago.
+      Pedidos ainda em <span class="font-mono">pending_payment</span> com
+      expiração persistida já vencida. A limpeza restitui somente o estoque;
+      não cancela o pedido, a preferência ou o pagamento no Mercado Pago.
+      Política padrão configurada: {{ reservation_hours if reservation_hours is not none else "—" }}
+      hora(s) (referência; a data persistida é a fonte canônica).
     </p>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
       <div>
