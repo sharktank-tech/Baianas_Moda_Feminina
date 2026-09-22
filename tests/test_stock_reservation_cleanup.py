@@ -156,7 +156,7 @@ def test_cron_requires_secret_and_gate(
     order = _reserved_order(db, user, product)
 
     monkeypatch.setenv("CRON_SECRET", "cron-test-secret")
-    app.config["STOCK_RESERVATION_RELEASE_ENABLED"] = False
+    monkeypatch.setitem(app.config, "STOCK_RESERVATION_RELEASE_ENABLED", False)
 
     assert client.get(
         "/internal/maintenance/release-expired-reservations"
@@ -179,8 +179,8 @@ def test_cron_requires_secret_and_gate(
     db.session.refresh(order)
     assert order.stock_reserved is True
 
-    app.config["STOCK_RESERVATION_RELEASE_ENABLED"] = True
-    app.config["STOCK_RESERVATION_HOURS"] = "24"
+    monkeypatch.setitem(app.config, "STOCK_RESERVATION_RELEASE_ENABLED", True)
+    monkeypatch.setitem(app.config, "STOCK_RESERVATION_HOURS", "24")
     enabled = client.get(
         "/internal/maintenance/release-expired-reservations",
         headers={"Authorization": "Bearer cron-test-secret"},
@@ -196,8 +196,8 @@ def test_admin_action_releases_without_provider_call(
 ):
     import loja.modules.getway_mercado_pago.payment_service as payment_service
 
-    app.config["STOCK_RESERVATION_HOURS"] = "24"
-    app.config["STOCK_RESERVATION_RELEASE_LIMIT"] = "100"
+    monkeypatch.setitem(app.config, "STOCK_RESERVATION_HOURS", "24")
+    monkeypatch.setitem(app.config, "STOCK_RESERVATION_RELEASE_LIMIT", "100")
     product = make_product(stock=5)
     order = _reserved_order(db, admin_user, product)
     provider_calls = []
