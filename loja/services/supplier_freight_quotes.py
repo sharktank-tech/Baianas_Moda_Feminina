@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import Callable, Mapping, Optional
 
 from flask import current_app
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, text\nfrom sqlalchemy.exc import SQLAlchemyError
 
 from loja import db
 from loja.services.shipping_quote import (
@@ -157,9 +157,10 @@ def store_reference_freight_quote(
         raise ReferenceQuoteUnavailable("invalid_provider")
     ref_hash = hashlib.sha256(str(evidence_ref).encode()).hexdigest() if evidence_ref else None
     table = _qualified_table()
-    db.session.execute(
-        text(
-            f"""INSERT INTO {table}
+    try:
+        db.session.execute(
+            text(
+                f"""INSERT INTO {table}
                 (supplier_product_id, dest_prefix, option_key, quantity,
                  currency, cost, min_days, max_days, quoted_at, expires_at,
                  provider_method, evidence_ref_hash, updated_at)
@@ -192,9 +193,12 @@ def store_reference_freight_quote(
             "provider_method": method,
             "evidence_ref_hash": ref_hash,
             "updated_at": current,
-        },
-    )
-    db.session.commit()
+            },
+        )
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        raise ReferenceQuoteUnavailable("storage_error") from None
     return fresh
 
 
