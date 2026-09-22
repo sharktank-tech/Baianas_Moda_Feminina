@@ -354,6 +354,80 @@ class AliExpressSupplierProvider:
         return None
 
 
+#: Tolerância de relógio para cotação fresca com quoted_at no futuro.
+#: Acima disso, a prova é tratada como não verificada (fail-closed).
+REFERENCE_QUOTE_CLOCK_SKEW_SECONDS = 300
+
+
+def validate_reference_fresh_quote(
+    fresh, *, dest_cep, option=None, qty=1, now=None
+):
+    """Valida prova fresca contra um cenário logístico explícito.
+
+    Versão estrita e pública de ``_check_fresh`` (cujo contrato legado no
+    checkout é preservado intacto): exige prefixo de destino compatível,
+    opção e quantidade exatas, moeda BRL **explicitamente presente** (nunca
+    presumida), custo decimal finito ``>= 0``, ``quoted_at`` presente,
+    ``ttl_seconds`` explícito ``> 0`` e dentro da validade, com tolerância
+    documentada para relógio adiantado. Retorna o custo quantizado em duas
+    casas ou levanta ``QuoteUnavailable`` com código canônico
+    (``unverified_cost`` / ``currency_mismatch`` / ``expired`` /
+    ``invalid_destination``). Puro: sem HTTP, sem provider, sem mutação.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    effective_now = now or utcnow()
+    if getattr(effective_now, "tzinfo", None) is not None:
+        effective_now = effective_now.astimezone(timezone.utc).replace(tzinfo=None)
+    dest = normalize_cep(dest_cep)
+    if dest is None:
+        raise QuoteUnavailable("invalid_destination")
+    if not isinstance(fresh, dict):
+        raise QuoteUnavailable("unverified_cost")
+    prefix = str(fresh.get("dest_prefix") or "")
+    if not prefix or not dest.startswith(prefix):
+        raise QuoteUnavailable("unverified_cost")
+    if (fresh.get("option") or None) != (option or None):
+        raise QuoteUnavailable("unverified_cost")
+    try:
+        fresh_qty = int(fresh.get("qty"))
+    except (TypeError, ValueError):
+        raise QuoteUnavailable("unverified_cost") from None
+    if fresh_qty != int(qty):
+        raise QuoteUnavailable("unverified_cost")
+    raw_currency = fresh.get("currency")
+    if (
+        not isinstance(raw_currency, str)
+        or not raw_currency.strip()
+        or raw_currency.strip().upper() != "BRL"
+    ):
+        raise QuoteUnavailable("currency_mismatch")
+    try:
+        cost = to_decimal(fresh.get("cost"))
+    except Exception:
+        raise QuoteUnavailable("unverified_cost") from None
+    if cost is None or not cost.is_finite() or cost < 0:
+        raise QuoteUnavailable("unverified_cost")
+    try:
+        ttl = int(fresh.get("ttl_seconds"))
+    except (TypeError, ValueError):
+        raise QuoteUnavailable("unverified_cost") from None
+    if ttl <= 0:
+        raise QuoteUnavailable("unverified_cost")
+    quoted_at = fresh.get("quoted_at")
+    if not isinstance(quoted_at, datetime):
+        raise QuoteUnavailable("unverified_cost")
+    if quoted_at.tzinfo is not None:
+        quoted_at = quoted_at.astimezone(timezone.utc).replace(tzinfo=None)
+    if quoted_at > effective_now + timedelta(
+        seconds=REFERENCE_QUOTE_CLOCK_SKEW_SECONDS
+    ):
+        raise QuoteUnavailable("unverified_cost")
+    if effective_now - quoted_at > timedelta(seconds=ttl):
+        raise QuoteUnavailable("expired")
+    return cost.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def _supplier_is_aliexpress(supplier) -> bool:
     return (
         supplier is not None
@@ -627,7 +701,9 @@ def quote_groups(groups, dest_cep: str, providers: dict, now=None) -> dict:
 
 __all__ = [
     "QUOTE_TTL_SECONDS",
+    "REFERENCE_QUOTE_CLOCK_SKEW_SECONDS",
     "SHIPPING_TEMPORARY_FLAT_RATE_CFG",
+    "validate_reference_fresh_quote",
     "QuoteUnavailable",
     "ShipmentGroup",
     "ShipmentLine",

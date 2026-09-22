@@ -123,24 +123,49 @@ def _variant(db, product, link=None, *, stock=3, active=True):
     return variant
 
 
-def _fresh(link_id, *, minutes_ago=10, currency="BRL", cost="5.00"):
-    return {
-        str(link_id): {
-            "cost": cost,
-            "dest_prefix": "013",
-            "option": None,
-            "qty": 1,
-            "currency": currency,
-            "quoted_at": FROZEN_NOW - timedelta(minutes=minutes_ago),
-            "ttl_seconds": 1800,
-        }
+REF_CEP = "01310100"
+
+
+def _fresh(
+    link_id,
+    *,
+    minutes_ago=10,
+    currency="BRL",
+    cost="5.00",
+    dest_prefix="013",
+    option=None,
+    qty=1,
+    ttl_seconds=1800,
+    quoted_at=None,
+    drop_currency=False,
+):
+    entry = {
+        "cost": cost,
+        "dest_prefix": dest_prefix,
+        "option": option,
+        "qty": qty,
+        "currency": currency,
+        "quoted_at": (
+            quoted_at
+            if quoted_at is not None
+            else FROZEN_NOW - timedelta(minutes=minutes_ago)
+        ),
+        "ttl_seconds": ttl_seconds,
     }
+    if drop_currency:
+        del entry["currency"]
+    return {str(link_id): entry}
 
 
 def _evaluate(product, **kwargs):
     from loja.services.sales_readiness import evaluate_product_readiness
 
-    params = {"now": FROZEN_NOW, "charged_freight": Decimal("10.00")}
+    params = {
+        "now": FROZEN_NOW,
+        "charged_freight": Decimal("10.00"),
+        "ref_dest_cep": REF_CEP,
+        "ref_option": None,
+    }
     params.update(kwargs)
     return evaluate_product_readiness(product, **params)
 
@@ -777,6 +802,8 @@ def test_invalid_fresh_config_fails_closed(app, db, full_policy, monkeypatch):
 
 
 def test_fresh_snapshot_read_once_per_get(app, db, full_policy, monkeypatch):
+    from collections import Counter
+
     from loja.services import sales_readiness as sr
 
     for suffix in ("Um", "Dois", "Tres"):
@@ -784,19 +811,32 @@ def test_fresh_snapshot_read_once_per_get(app, db, full_policy, monkeypatch):
         supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
         _link(db, product, supplier)
     monkeypatch.setitem(app.config, "SHIPPING_ALIEXPRESS_FRESH_QUOTES", {})
+    monkeypatch.setitem(app.config, "SALES_READINESS_DESTINATION_CEP", REF_CEP)
 
     calls = []
     original_get = app.config.get
 
     def counting_get(key, *args, **kwargs):
-        if key == "SHIPPING_ALIEXPRESS_FRESH_QUOTES":
-            calls.append(key)
+        calls.append(key)
         return original_get(key, *args, **kwargs)
 
     monkeypatch.setattr(app.config, "get", counting_get)
     sr.evaluate_sales_readiness(limit=50)
 
-    assert calls == ["SHIPPING_ALIEXPRESS_FRESH_QUOTES"]
+    tracked = Counter(
+        key
+        for key in calls
+        if key
+        in {
+            "SHIPPING_ALIEXPRESS_FRESH_QUOTES",
+            "SALES_READINESS_DESTINATION_CEP",
+            "SALES_READINESS_SHIPPING_OPTION",
+        }
+    )
+    # Cada configuração do cenário é lida exatamente uma vez por GET.
+    assert tracked["SHIPPING_ALIEXPRESS_FRESH_QUOTES"] == 1
+    assert tracked["SALES_READINESS_DESTINATION_CEP"] == 1
+    assert tracked["SALES_READINESS_SHIPPING_OPTION"] == 1
 
 
 def test_multi_link_variants_stay_blocked(db, full_policy):
@@ -842,6 +882,9 @@ def test_route_fresh_config_drives_pronto_then_regresses(
     supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
     link = _link(db, product, supplier)
     monkeypatch.setitem(
+        client.application.config, "SALES_READINESS_DESTINATION_CEP", REF_CEP
+    )
+    monkeypatch.setitem(
         client.application.config,
         "SHIPPING_ALIEXPRESS_FRESH_QUOTES",
         _fresh(link.id),
@@ -867,3 +910,158 @@ def test_route_fresh_config_drives_pronto_then_regresses(
     assert _row_state(html, "Rota Fresh Zeta") == "REVISÃO"
 
     assert calls == []
+
+
+# ── Cenário de referência: prova só vale para CEP/opção/qty ─────────────
+
+def _scenario_product(db, **overrides):
+    product = _product(db, source="aliexpress", **overrides)
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(db, product, supplier)
+    return product, link
+
+
+def test_other_prefix_never_pronto(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product, link = _scenario_product(db)
+
+    result = _evaluate(
+        product, fresh_quotes=_fresh(link.id, dest_prefix="771")
+    )
+
+    assert result.state != sr.READY
+    assert result.state == sr.REVIEW
+
+
+def test_qty_mismatch_never_pronto(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product, link = _scenario_product(db)
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id, qty=2))
+
+    assert result.state != sr.READY
+    assert result.state == sr.REVIEW
+
+
+def test_option_mismatch_never_pronto(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product, link = _scenario_product(db)
+
+    result = _evaluate(
+        product, fresh_quotes=_fresh(link.id, option="expressa")
+    )
+
+    assert result.state != sr.READY
+    assert result.state == sr.REVIEW
+
+
+def test_missing_currency_never_pronto(db, full_policy):
+    """Moeda ausente falha fechado: nunca presumir BRL."""
+    from loja.services import sales_readiness as sr
+
+    product, link = _scenario_product(db)
+
+    result = _evaluate(
+        product, fresh_quotes=_fresh(link.id, drop_currency=True)
+    )
+
+    assert result.state != sr.READY
+    assert result.state == sr.BLOCKED
+    assert "currency_mismatch" in result.reasons
+
+
+def test_explicit_brl_proceeds(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product, link = _scenario_product(db)
+
+    result = _evaluate(
+        product, fresh_quotes=_fresh(link.id, currency="brl")
+    )
+
+    assert result.state == sr.READY
+
+
+def test_no_reference_caps_at_revisao(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product, link = _scenario_product(db)
+
+    result = _evaluate(
+        product, fresh_quotes=_fresh(link.id), ref_dest_cep=None
+    )
+
+    assert result.state == sr.REVIEW
+    assert "shipping_destination_unproven" in result.reasons
+
+
+def test_invalid_reference_cep_caps_at_revisao(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product, link = _scenario_product(db)
+
+    result = _evaluate(
+        product, fresh_quotes=_fresh(link.id), ref_dest_cep="12"
+    )
+
+    assert result.state == sr.REVIEW
+    assert "shipping_destination_unproven" in result.reasons
+
+
+def test_future_quote_beyond_skew_never_pronto(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product, link = _scenario_product(db)
+
+    result = _evaluate(
+        product,
+        fresh_quotes=_fresh(
+            link.id, quoted_at=FROZEN_NOW + timedelta(minutes=10)
+        ),
+    )
+
+    assert result.state != sr.READY
+
+
+def test_zero_ttl_rejected(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product, link = _scenario_product(db)
+
+    result = _evaluate(
+        product, fresh_quotes=_fresh(link.id, ttl_seconds=0)
+    )
+
+    assert result.state != sr.READY
+
+
+@pytest.mark.parametrize("cost", ["NaN", "Infinity"])
+def test_nonfinite_cost_rejected(db, full_policy, cost):
+    from loja.services import sales_readiness as sr
+
+    product, link = _scenario_product(db)
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id, cost=cost))
+
+    assert result.state != sr.READY
+
+
+def test_reference_status_labels(client, db, admin_user, login, monkeypatch):
+    login(admin_user.email, "senha123")
+
+    monkeypatch.setitem(
+        client.application.config, "SALES_READINESS_DESTINATION_CEP", REF_CEP
+    )
+    html = client.get("/admin/prontidao-vendas").get_data(as_text=True)
+    assert "Destino de referência configurado" in html
+    assert "013•••••" in html
+    assert "01310100" not in html  # CEP completo nunca exibido
+
+    monkeypatch.delitem(
+        client.application.config, "SALES_READINESS_DESTINATION_CEP", raising=False
+    )
+    html = client.get("/admin/prontidao-vendas").get_data(as_text=True)
+    assert "Destino de referência pendente" in html

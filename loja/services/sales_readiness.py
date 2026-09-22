@@ -20,10 +20,13 @@ Mapa de campos canônicos utilizados (conferidos em modelos/migrations):
   supplier_product_id; Supplier NÃO possui is_active — aplicabilidade
   do fornecedor vem do vínculo ativo + existência da linha.
 - estoque: Product.stock / soma das variantes vendáveis.
-- frete/cotação: ``SHIPPING_ALIEXPRESS_FRESH_QUOTES`` (prova fresca por
-  vínculo: cost, currency, quoted_at, ttl_seconds), QUOTE_TTL_SECONDS
-  como TTL padrão; ``SHIPPING_TEMPORARY_FLAT_RATE`` (R$ 10) é
-  receita/cobrança temporária e NUNCA prova de custo logístico.
+- frete/cotação: ``SHIPPING_ALIEXPRESS_FRESH_QUOTES`` (fotografia única
+  por GET via ``load_fresh_quotes_snapshot``), validada SOMENTE pelo
+  helper canônico ``validate_reference_fresh_quote`` contra o cenário de
+  referência (``SALES_READINESS_DESTINATION_CEP`` comercial + opção
+  opcional + quantidade 1); ``SHIPPING_TEMPORARY_FLAT_RATE`` é
+  receita/cobrança temporária e NUNCA prova de custo logístico. PRONTO
+  vale apenas para o cenário de referência, nunca para qualquer endereço.
 - origem: mesma semântica de ``classify_line`` (aliexpress / domestic /
   unknown); estoque próprio exige origem 'own' comprovada via
   ``resolve_group_origin``.
@@ -72,6 +75,7 @@ REASON_SEVERITY = {
     "currency_mismatch": BLOCKING,
     "landed_cost_stale": BLOCKING,
     "shipping_cost_unproven": REVIEW_ONLY,
+    "shipping_destination_unproven": REVIEW_ONLY,
     "shipping_quote_expired": BLOCKING,
     "economics_incomplete": BLOCKING,
     "negative_margin": BLOCKING,
@@ -94,6 +98,7 @@ REASON_LABELS = {
     "currency_mismatch": "Moeda diferente de BRL",
     "landed_cost_stale": "Custo total inconsistente (custo + frete)",
     "shipping_cost_unproven": "Custo logístico sem prova fresca",
+    "shipping_destination_unproven": "Destino de referência não configurado",
     "shipping_quote_expired": "Cotação de frete vencida",
     "economics_incomplete": "Economia unitária incompleta",
     "negative_margin": "Margem negativa (prejuízo)",
@@ -102,6 +107,9 @@ REASON_LABELS = {
 
 READY_LIMIT = 500
 CANDIDATE_LIMIT = 5
+
+#: Quantidade de referência do cenário logístico (constante, sem env).
+REFERENCE_QTY = 1
 
 
 def _brl(value) -> str:
@@ -141,6 +149,8 @@ class SalesReadinessSummary:
     bloqueado: int = 0
     evaluated: int = 0
     candidates: tuple = ()
+    reference_configured: bool = False
+    reference_masked: Optional[str] = None
 
 
 def summarize_readiness(rows) -> SalesReadinessSummary:
@@ -169,45 +179,75 @@ def summarize_readiness(rows) -> SalesReadinessSummary:
     )
 
 
-def _fresh_logistic_cost(link_id, fresh_quotes, now):
-    """Custo logístico comprovado por cotação fresca do vínculo.
+def load_reference_scenario():
+    """Cenário logístico de referência (CEP comercial + opção opcional).
 
-    Retorna (valor|None, motivo|None). Ausência de prova é REVISÃO;
-    prova vencida ou em moeda incompatível é BLOQUEADO. Nunca estima.
+    Uma leitura por chamada. CEP ausente/inválido retorna (None, option):
+    sem destino de referência, nenhum produto dependente de frete chega a
+    PRONTO. Nunca endereço de cliente, CPF ou CEP pessoal.
     """
-    from loja.services.shipping_quote import QUOTE_TTL_SECONDS
+    from flask import current_app
 
-    entry = (fresh_quotes or {}).get(str(link_id))
-    if not isinstance(entry, dict):
-        return None, "shipping_cost_unproven"
-    if str(entry.get("currency") or "BRL").strip().upper() != "BRL":
-        return None, "currency_mismatch"
-    from loja.services.pricing import to_decimal
+    from loja.services.shipping_quote import normalize_cep
+
+    raw_cep = current_app.config.get("SALES_READINESS_DESTINATION_CEP")
+    dest = normalize_cep(raw_cep) if raw_cep else None
+    raw_option = current_app.config.get("SALES_READINESS_SHIPPING_OPTION")
+    option = str(raw_option).strip() or None if raw_option is not None else None
+    return dest, option
+
+
+def mask_reference_cep(dest):
+    """Mascara o CEP de referência (exibe só o prefixo, sem PII)."""
+    if not dest:
+        return None
+    return "%s•••••" % str(dest)[:3]
+
+
+def _proven_fresh_cost(link_id, fresh_quotes, *, dest_cep, option, now):
+    """Custo logístico via validador canônico (sem lógica duplicada).
+
+    Retorna (valor|None, motivo|None). Prova ausente/não verificada é
+    REVISÃO; moeda incompatível ou prova vencida é BLOQUEADO.
+    """
+    from loja.services.shipping_quote import (
+        QuoteUnavailable,
+        validate_reference_fresh_quote,
+    )
 
     try:
-        cost = to_decimal(entry.get("cost"))
-    except Exception:
-        return None, "shipping_cost_unproven"
-    if cost is None or not cost.is_finite() or cost < 0:
-        return None, "shipping_cost_unproven"
-    try:
-        quoted_at = entry.get("quoted_at")
-        ttl = int(entry.get("ttl_seconds") or QUOTE_TTL_SECONDS)
-        if quoted_at is None or now - quoted_at > timedelta(seconds=ttl):
+        cost = validate_reference_fresh_quote(
+            (fresh_quotes or {}).get(str(link_id)),
+            dest_cep=dest_cep,
+            option=option,
+            qty=REFERENCE_QTY,
+            now=now,
+        )
+    except QuoteUnavailable as exc:
+        if exc.code == "currency_mismatch":
+            return None, "currency_mismatch"
+        if exc.code == "expired":
             return None, "shipping_quote_expired"
-    except (TypeError, ValueError):
         return None, "shipping_cost_unproven"
-    return cost.quantize(Decimal("0.01")), None
+    return cost, None
 
 
 def evaluate_product_readiness(
-    product, *, policy=None, fresh_quotes=None, now=None, charged_freight=None
+    product,
+    *,
+    policy=None,
+    fresh_quotes=None,
+    now=None,
+    charged_freight=None,
+    ref_dest_cep=None,
+    ref_option=None,
 ):
     """Avalia um produto. Requer contexto da aplicação (config/origens)."""
     from datetime import timezone
 
     from loja.services.pricing import normalize_currency, to_decimal
     from loja.services.shipping_quote import (
+        normalize_cep,
         resolve_group_origin,
         temporary_flat_rate,
     )
@@ -222,6 +262,7 @@ def evaluate_product_readiness(
     effective_now = now or utcnow()
     if effective_now.tzinfo is not None:
         effective_now = effective_now.astimezone(timezone.utc).replace(tzinfo=None)
+    ref_dest_valid = normalize_cep(ref_dest_cep) if ref_dest_cep else None
 
     blocking = []
     review = []
@@ -399,28 +440,43 @@ def evaluate_product_readiness(
                 and getattr(link, "freight_status", None) == "available"
                 and landed == (cost + shipping).quantize(Decimal("0.01"))
             )
-            # Prova logística fresca, independente do snapshot persistido.
-            # A margem SEMPRE usa current_landed (custo do item + frete
-            # fresco); o persistido serve só para detectar divergência.
-            fresh_cost, fresh_reason = _fresh_logistic_cost(
-                link.id, fresh_quotes, effective_now
-            )
-            if fresh_cost is not None:
-                proven_logistic = fresh_cost
-                current_landed = (cost + fresh_cost).quantize(Decimal("0.01"))
-                if persisted_ok and abs(landed - current_landed) > Decimal("0.01"):
-                    _add("landed_cost_stale")
-                proven_cost = current_landed
-            elif fresh_reason == "currency_mismatch":
-                _add("currency_mismatch")
-            elif fresh_reason == "shipping_quote_expired":
-                _add("shipping_quote_expired")
-            elif persisted_ok:
-                proven_cost = landed
-                # Item comprovado, falta só a prova logística → REVISÃO.
-                review.append("shipping_cost_unproven")
+            if not ref_dest_valid:
+                # Sem cenário de referência: teto REVISÃO para dependentes
+                # de frete; sem base persistida, custo ausente.
+                if persisted_ok:
+                    proven_cost = landed
+                    review.append("shipping_destination_unproven")
+                else:
+                    _add("missing_cost")
             else:
-                _add("missing_cost")
+                # Prova logística pelo validador canônico. A margem SEMPRE
+                # usa current_landed (custo do item + frete fresco); o
+                # persistido serve só para detectar divergência.
+                fresh_cost, fresh_reason = _proven_fresh_cost(
+                    link.id,
+                    fresh_quotes,
+                    dest_cep=ref_dest_valid,
+                    option=ref_option,
+                    now=effective_now,
+                )
+                if fresh_cost is not None:
+                    proven_logistic = fresh_cost
+                    current_landed = (cost + fresh_cost).quantize(Decimal("0.01"))
+                    if persisted_ok and (
+                        abs(landed - current_landed) > Decimal("0.01")
+                    ):
+                        _add("landed_cost_stale")
+                    proven_cost = current_landed
+                elif fresh_reason == "currency_mismatch":
+                    _add("currency_mismatch")
+                elif fresh_reason == "shipping_quote_expired":
+                    _add("shipping_quote_expired")
+                elif persisted_ok:
+                    proven_cost = landed
+                    # Item comprovado, falta só a prova logística → REVISÃO.
+                    review.append("shipping_cost_unproven")
+                else:
+                    _add("missing_cost")
     elif source != "aliexpress" and len(links) == 0:
         item_cost = to_decimal(getattr(product, "cost", None))
         if item_cost is None or not item_cost.is_finite() or item_cost <= 0:
@@ -521,17 +577,30 @@ def load_fresh_quotes_snapshot():
 
 def evaluate_sales_readiness(*, limit=READY_LIMIT) -> SalesReadinessSummary:
     """Avalia o catálogo (somente leitura). Requer contexto da aplicação."""
+    import dataclasses
+
     from loja.modules.models import Product
 
+    ref_dest_cep, ref_option = load_reference_scenario()
     fresh_snapshot = load_fresh_quotes_snapshot()
     products = (
         Product.query.order_by(Product.name.asc(), Product.id.asc())
         .limit(limit)
         .all()
     )
-    return summarize_readiness(
-        evaluate_product_readiness(product, fresh_quotes=fresh_snapshot)
+    summary = summarize_readiness(
+        evaluate_product_readiness(
+            product,
+            fresh_quotes=fresh_snapshot,
+            ref_dest_cep=ref_dest_cep,
+            ref_option=ref_option,
+        )
         for product in products
+    )
+    return dataclasses.replace(
+        summary,
+        reference_configured=bool(ref_dest_cep),
+        reference_masked=mask_reference_cep(ref_dest_cep),
     )
 
 
@@ -547,6 +616,9 @@ __all__ = [
     "SalesReadinessSummary",
     "summarize_readiness",
     "load_fresh_quotes_snapshot",
+    "load_reference_scenario",
+    "mask_reference_cep",
+    "REFERENCE_QTY",
     "evaluate_product_readiness",
     "evaluate_sales_readiness",
 ]

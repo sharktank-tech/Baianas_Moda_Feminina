@@ -17,6 +17,10 @@
       Fulfillment automático desligado — Tratamento manual obrigatório após pagamento.
       PRONTO significa pronto para receber venda, não autorização para compra automática.
     </p>
+    <p class="mt-2 text-sm text-gray-600">
+      {% if summary.reference_configured %}Destino de referência configurado (prefixo {{ summary.reference_masked }}){% else %}Destino de referência pendente{% endif %} —
+      PRONTO vale apenas para o cenário logístico de referência, não para qualquer endereço do Brasil.
+    </p>
   </div>
 
   <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">

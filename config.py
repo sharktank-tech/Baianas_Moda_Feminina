@@ -93,6 +93,18 @@ class Config:
     )
     SHIPPING_ORIGIN_CEP = os.environ.get("SHIPPING_ORIGIN_CEP") or None
     SHIPPING_DOMESTIC_RATES = os.environ.get("SHIPPING_DOMESTIC_RATES") or None
+    # Cenário logístico de referência para prontidão de vendas
+    # (loja/services/sales_readiness.py): CEP comercial da região avaliada
+    # — nunca endereço de cliente, CPF ou CEP pessoal — e opção de envio
+    # opcional. Quantidade de referência é sempre 1 (constante
+    # SALES_READINESS_REFERENCE_QTY). PRONTO só vale para esse cenário.
+    # Ausente/inválido: nenhum produto dependente de frete chega a PRONTO.
+    SALES_READINESS_DESTINATION_CEP = (
+        os.environ.get("SALES_READINESS_DESTINATION_CEP") or None
+    )
+    SALES_READINESS_SHIPPING_OPTION = (
+        os.environ.get("SALES_READINESS_SHIPPING_OPTION") or None
+    )
     # Liberação agendada e lote administrativo são gates independentes.
     # A liberação individual continua exigindo admin + CSRF + confirmação e
     # revalida prazo/pagamento sob lock.

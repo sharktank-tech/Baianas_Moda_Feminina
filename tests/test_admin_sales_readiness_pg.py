@@ -180,17 +180,20 @@ def test_readiness_correctness_pg(pg_app):
         good = db.session.get(Product, good_id)
         bad = db.session.get(Product, bad_id)
         fresh = _fresh(link_id)
+        ref = {"ref_dest_cep": "01310100", "ref_option": None}
         good_result = sr.evaluate_product_readiness(
             good,
             fresh_quotes=fresh,
             now=FROZEN_NOW,
             charged_freight=Decimal("10.00"),
+            **ref,
         )
         bad_result = sr.evaluate_product_readiness(
             bad,
             fresh_quotes=fresh,
             now=FROZEN_NOW,
             charged_freight=Decimal("10.00"),
+            **ref,
         )
 
     assert good_result.state == sr.READY
@@ -220,6 +223,8 @@ def test_concurrent_evaluate_no_mutation_pg(pg_app):
                         fresh_quotes=_fresh(link_id),
                         now=FROZEN_NOW,
                         charged_freight=Decimal("10.00"),
+                        ref_dest_cep="01310100",
+                        ref_option=None,
                     )
                 )
         except Exception as exc:  # noqa: BLE001 - prova que nada travou

@@ -35,3 +35,7 @@ etapa é automática: cada verificação exige conferência humana explícita.
 - A tarifa temporária de R$ 10,00 é receita/cobrança, não prova de custo
   logístico; divergências contra o custo real são esperadas e devem ser
   conferidas no passo 6.
+- PRONTO no painel vale apenas para o cenário logístico de referência
+  (CEP comercial + opção + quantidade 1 configurados), nunca para
+  qualquer endereço do Brasil: antes de divulgar para outra região,
+  reavalie a prova de frete para o destino aplicável.
