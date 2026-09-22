@@ -595,7 +595,9 @@ def evaluate_sales_readiness(*, limit=READY_LIMIT) -> SalesReadinessSummary:
     from loja.modules.models import Product
 
     ref_dest_cep, ref_option = load_reference_scenario()
-    fresh_snapshot = load_fresh_quotes_snapshot(\n        dest_cep=ref_dest_cep, option=ref_option\n    )
+    fresh_snapshot = load_fresh_quotes_snapshot(
+        dest_cep=ref_dest_cep, option=ref_option
+    )
     products = (
         Product.query.order_by(Product.name.asc(), Product.id.asc())
         .limit(limit)
