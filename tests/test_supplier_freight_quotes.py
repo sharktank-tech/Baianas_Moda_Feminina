@@ -322,3 +322,41 @@ def test_admin_quote_post_requires_admin(
     )
 
     assert response.status_code in (302, 303, 403)
+
+
+def test_admin_quote_post_rejects_unknown_link_before_provider(
+    client, admin_user, login, app, monkeypatch
+):
+    calls = []
+    monkeypatch.setitem(app.config, "ALIEXPRESS_REFERENCE_QUOTE_ENABLED", True)
+    monkeypatch.setitem(app.config, "SALES_READINESS_DESTINATION_CEP", "77000000")
+    monkeypatch.setitem(
+        app.config,
+        "ALIEXPRESS_REFERENCE_QUOTE_PROVIDER",
+        lambda **kwargs: calls.append(kwargs),
+    )
+    login(admin_user.email, "senha123")
+
+    response = client.post(
+        f"/admin/prontidao-vendas/cotar/{uuid.uuid4()}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code in (302, 303)
+    assert calls == []
+
+
+def test_admin_quote_post_without_csrf_is_rejected(
+    client, admin_user, login, app, monkeypatch
+):
+    monkeypatch.setitem(app.config, "ALIEXPRESS_REFERENCE_QUOTE_ENABLED", True)
+    login(admin_user.email, "senha123")
+    app.config["WTF_CSRF_ENABLED"] = True
+    try:
+        response = client.post(
+            f"/admin/prontidao-vendas/cotar/{uuid.uuid4()}",
+            follow_redirects=False,
+        )
+        assert response.status_code == 400
+    finally:
+        app.config["WTF_CSRF_ENABLED"] = False
