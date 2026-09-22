@@ -183,7 +183,7 @@ def store_reference_freight_quote(
             "option_key": str(option or ""),
             "quantity": int(qty),
             "currency": "BRL",
-            "cost": Decimal(cost),
+            "cost": format(Decimal(cost), "f"),
             "min_days": fresh.get("min_days"),
             "max_days": fresh.get("max_days"),
             "quoted_at": quoted_at,
