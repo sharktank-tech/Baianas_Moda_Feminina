@@ -113,7 +113,8 @@ jobs:
           tests/test_aliexpress_submission_pg.py
           tests/test_draft_import_pg.py
           tests/test_stock_reservation_cleanup_pg.py
-          tests/test_checkout_recovery_skip_pg.py\n          tests/test_supplier_freight_quotes_pg.py
+          tests/test_checkout_recovery_skip_pg.py
+          tests/test_supplier_freight_quotes_pg.py
 
       - name: Prova observável do bloqueio (2o INSERT aguardando unicidade)
         run: >
