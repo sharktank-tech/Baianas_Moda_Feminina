@@ -72,10 +72,29 @@ def _coerce_row_datetime(value):
     return None
 
 
+def _reference_scenario(dest_cep, option, qty):
+    """Valida o cenário antes de chamar provider ou acessar a persistência."""
+    dest = normalize_cep(dest_cep)
+    if (
+        dest is None
+        or isinstance(qty, bool)
+        or not isinstance(qty, (int, str))
+        or not re.fullmatch(r"[0-9]{1,10}", str(qty))
+        or not 1 <= int(qty) <= 2147483647
+        or (option is not None and not isinstance(option, str))
+        or (isinstance(option, str) and len(option) > 120)
+    ):
+        raise ReferenceQuoteUnavailable("invalid_quote")
+    return dest, option or None, int(qty)
+
+
 def find_valid_reference_quotes(*, dest_cep, option=None, qty=1, now=None) -> dict:
     """Carrega uma fotografia válida em uma única consulta, sem provider."""
-    dest = normalize_cep(dest_cep)
-    if dest is None or not _table_exists():
+    try:
+        dest, option, qty = _reference_scenario(dest_cep, option, qty)
+    except ReferenceQuoteUnavailable:
+        return {}
+    if not _table_exists():
         return {}
     current = _naive_utc(now or utcnow())
     option_key = str(option or "")
@@ -85,11 +104,12 @@ def find_valid_reference_quotes(*, dest_cep, option=None, qty=1, now=None) -> di
                        currency, cost, min_days, max_days, quoted_at, expires_at
                 FROM {_qualified_table()}
                 WHERE quantity = :qty
+                  AND dest_prefix = :dest_prefix
                   AND option_key = :option_key
                   AND expires_at > :now
                 ORDER BY supplier_product_id"""
         ),
-        {"qty": int(qty), "option_key": option_key, "now": current},
+        {"qty": qty, "dest_prefix": dest[:3], "option_key": option_key, "now": current},
     ).mappings().all()
     snapshot = {}
     for row in rows:
@@ -131,31 +151,32 @@ def store_reference_freight_quote(
     now=None,
 ) -> dict:
     """Valida e grava uma única cotação vigente por cenário."""
-    if not _table_exists():
-        raise ReferenceQuoteUnavailable("storage_unavailable")
-    dest = normalize_cep(dest_cep)
-    if dest is None or not isinstance(quote, Mapping):
+    dest, option, qty = _reference_scenario(dest_cep, option, qty)
+    if not isinstance(quote, Mapping):
         raise ReferenceQuoteUnavailable("invalid_quote")
     current = _naive_utc(now or utcnow())
     fresh = dict(quote)
-    fresh.update(
-        {"dest_prefix": dest[:3], "option": str(option).strip() if option else None, "qty": int(qty)}
-    )
+    # O provider deve comprovar o cenário: nunca preencher ou sobrescrever
+    # esses campos com os valores solicitados antes de validar a resposta.
+    if not {"dest_prefix", "option", "qty"}.issubset(fresh):
+        raise ReferenceQuoteUnavailable("invalid_quote")
     fresh["quoted_at"] = _naive_utc(fresh.get("quoted_at"))
     try:
         cost = validate_reference_fresh_quote(
             fresh, dest_cep=dest, option=option, qty=qty, now=current
         )
         ttl_seconds = int(fresh["ttl_seconds"])
-    except (QuoteUnavailable, TypeError, ValueError, KeyError):
+        expires_at = fresh["quoted_at"] + timedelta(seconds=ttl_seconds)
+    except (QuoteUnavailable, TypeError, ValueError, KeyError, OverflowError):
         raise ReferenceQuoteUnavailable("invalid_quote") from None
     quoted_at = fresh["quoted_at"]
-    expires_at = quoted_at + timedelta(seconds=ttl_seconds)
     if expires_at <= quoted_at:
         raise ReferenceQuoteUnavailable("invalid_window")
     method = str(provider_method or "").strip()
     if not method or len(method) > 120:
         raise ReferenceQuoteUnavailable("invalid_provider")
+    if not _table_exists():
+        raise ReferenceQuoteUnavailable("storage_unavailable")
     ref_hash = hashlib.sha256(str(evidence_ref).encode()).hexdigest() if evidence_ref else None
     table = _qualified_table()
     try:
@@ -207,6 +228,7 @@ def request_reference_freight_quote(
     *, supplier_product_id, dest_cep, provider: Callable, option=None, qty=1, now=None
 ) -> dict:
     """Executa somente o provider injetado e persiste resposta validada."""
+    dest_cep, option, qty = _reference_scenario(dest_cep, option, qty)
     if not callable(provider):
         raise ReferenceQuoteUnavailable("provider_unavailable")
     try:

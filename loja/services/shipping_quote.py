@@ -384,16 +384,26 @@ def validate_reference_fresh_quote(
         raise QuoteUnavailable("invalid_destination")
     if not isinstance(fresh, dict):
         raise QuoteUnavailable("unverified_cost")
-    prefix = str(fresh.get("dest_prefix") or "")
-    if not prefix or not dest.startswith(prefix):
+    prefix = fresh.get("dest_prefix")
+    if (
+        not isinstance(prefix, str)
+        or not re.fullmatch(r"[0-9]{3}", prefix)
+        or dest[:3] != prefix
+    ):
+        raise QuoteUnavailable("unverified_cost")
+    if any(value is not None and not isinstance(value, str)
+           for value in (fresh.get("option"), option)):
         raise QuoteUnavailable("unverified_cost")
     if (fresh.get("option") or None) != (option or None):
         raise QuoteUnavailable("unverified_cost")
-    try:
-        fresh_qty = int(fresh.get("qty"))
-    except (TypeError, ValueError):
-        raise QuoteUnavailable("unverified_cost") from None
-    if fresh_qty != int(qty):
+    fresh_qty = fresh.get("qty")
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, str))
+        or not re.fullmatch(r"[0-9]{1,10}", str(value))
+        or not 1 <= int(value) <= 2147483647
+        for value in (fresh_qty, qty)
+    ) or int(fresh_qty) != int(qty):
         raise QuoteUnavailable("unverified_cost")
     raw_currency = fresh.get("currency")
     if (
@@ -408,12 +418,15 @@ def validate_reference_fresh_quote(
         raise QuoteUnavailable("unverified_cost") from None
     if cost is None or not cost.is_finite() or cost < 0:
         raise QuoteUnavailable("unverified_cost")
-    try:
-        ttl = int(fresh.get("ttl_seconds"))
-    except (TypeError, ValueError):
-        raise QuoteUnavailable("unverified_cost") from None
-    if ttl <= 0:
+    raw_ttl = fresh.get("ttl_seconds")
+    if (
+        isinstance(raw_ttl, bool)
+        or not isinstance(raw_ttl, (int, str))
+        or not re.fullmatch(r"[0-9]{1,10}", str(raw_ttl))
+        or int(raw_ttl) <= 0
+    ):
         raise QuoteUnavailable("unverified_cost")
+    ttl = int(raw_ttl)
     quoted_at = fresh.get("quoted_at")
     if not isinstance(quoted_at, datetime):
         raise QuoteUnavailable("unverified_cost")
@@ -423,7 +436,7 @@ def validate_reference_fresh_quote(
         seconds=REFERENCE_QUOTE_CLOCK_SKEW_SECONDS
     ):
         raise QuoteUnavailable("unverified_cost")
-    if effective_now - quoted_at > timedelta(seconds=ttl):
+    if effective_now - quoted_at >= timedelta(seconds=ttl):
         raise QuoteUnavailable("expired")
     return cost.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 

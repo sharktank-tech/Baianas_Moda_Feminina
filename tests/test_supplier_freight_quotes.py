@@ -37,12 +37,16 @@ def reference_quote_table(db):
             )"""
         )
     )
+    db.session.execute(text("DELETE FROM supplier_reference_freight_quotes"))
     db.session.commit()
     yield
 
 
 def _quote(**overrides):
     value = {
+        "dest_prefix": "770",
+        "option": None,
+        "qty": 1,
         "currency": "BRL",
         "cost": "12.34",
         "quoted_at": FROZEN_NOW,
@@ -69,6 +73,115 @@ def _store(db, **overrides):
     }
     values.update(overrides)
     return store_reference_freight_quote(**values)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("dest_prefix", "771"), ("dest_prefix", "77"),
+    ("dest_prefix", "77000000"), ("option", "other-service"),
+    ("option", False), ("option", 0),
+    ("qty", 2), ("qty", 1.5), ("qty", True),
+    ("ttl_seconds", True), ("ttl_seconds", 1.5),
+    ("ttl_seconds", 10**100),
+])
+def test_invalid_response_context_never_overwrites_valid_quote(db, field, value):
+    from loja.services.supplier_freight_quotes import ReferenceQuoteUnavailable
+
+    sp_id = uuid.uuid4()
+    _store(db, supplier_product_id=sp_id)
+    with pytest.raises(ReferenceQuoteUnavailable, match="^invalid_quote$"):
+        _store(db, supplier_product_id=sp_id, quote=_quote(**{field: value, "cost": "99.00"}))
+    rows = db.session.execute(text(
+        "SELECT cost FROM supplier_reference_freight_quotes WHERE supplier_product_id = :sp"
+    ), {"sp": str(sp_id)}).all()
+    assert len(rows) == 1
+    assert Decimal(str(rows[0][0])) == Decimal("12.34")
+
+
+@pytest.mark.parametrize("field", ["dest_prefix", "option", "qty"])
+def test_response_must_explicitly_confirm_scenario(db, field):
+    from loja.services.supplier_freight_quotes import ReferenceQuoteUnavailable
+
+    quote = _quote()
+    del quote[field]
+    sp_id = uuid.uuid4()
+    with pytest.raises(ReferenceQuoteUnavailable, match="^invalid_quote$"):
+        _store(db, supplier_product_id=sp_id, quote=quote)
+    assert db.session.execute(text(
+        "SELECT count(*) FROM supplier_reference_freight_quotes WHERE supplier_product_id = :sp"
+    ), {"sp": str(sp_id)}).scalar() == 0
+
+
+@pytest.mark.parametrize("overrides", [
+    {"dest_cep": "invalid"}, {"qty": 0}, {"qty": -1},
+    {"qty": True}, {"qty": 1.5}, {"qty": "1.5"},
+    {"qty": 2147483648}, {"option": 123}, {"option": "x" * 121},
+])
+def test_invalid_request_never_calls_provider(db, overrides):
+    from loja.services.supplier_freight_quotes import (
+        ReferenceQuoteUnavailable, request_reference_freight_quote,
+    )
+
+    calls = []
+    args = dict(supplier_product_id=uuid.uuid4(), dest_cep="77000000",
+                provider=lambda **kwargs: calls.append(kwargs), now=FROZEN_NOW)
+    args.update(overrides)
+    with pytest.raises(ReferenceQuoteUnavailable, match="^invalid_quote$"):
+        request_reference_freight_quote(**args)
+    assert calls == []
+
+
+def test_provider_mismatched_context_is_not_persisted(db):
+    from loja.services.supplier_freight_quotes import (
+        ReferenceQuoteUnavailable, request_reference_freight_quote,
+    )
+
+    calls = []
+    sp_id = uuid.uuid4()
+
+    def provider(**kwargs):
+        calls.append(kwargs)
+        return {**_quote(dest_prefix="771"), "provider_method": "read-only-test"}
+
+    with pytest.raises(ReferenceQuoteUnavailable, match="^invalid_quote$"):
+        request_reference_freight_quote(supplier_product_id=sp_id,
+                                       dest_cep="77000000", provider=provider,
+                                       now=FROZEN_NOW)
+    assert len(calls) == 1
+    assert db.session.execute(text(
+        "SELECT count(*) FROM supplier_reference_freight_quotes WHERE supplier_product_id = :sp"
+    ), {"sp": str(sp_id)}).scalar() == 0
+
+
+def test_exact_expiry_rejected_by_store_and_snapshot(db):
+    from loja.services.supplier_freight_quotes import (
+        ReferenceQuoteUnavailable, find_valid_reference_quotes,
+    )
+
+    sp_id = uuid.uuid4()
+    _store(db, supplier_product_id=sp_id)
+    expiry = FROZEN_NOW + timedelta(seconds=1800)
+    assert str(sp_id) in find_valid_reference_quotes(
+        dest_cep="77000000", now=expiry - timedelta(microseconds=1))
+    assert str(sp_id) not in find_valid_reference_quotes(dest_cep="77000000", now=expiry)
+    with pytest.raises(ReferenceQuoteUnavailable, match="^invalid_quote$"):
+        _store(db, now=expiry)
+
+
+def test_snapshot_separates_destination_option_and_quantity(db):
+    from loja.services.supplier_freight_quotes import find_valid_reference_quotes
+
+    sp_id = uuid.uuid4()
+    for prefix, option, qty, cost in [
+        ("770", None, 1, "12.34"), ("771", None, 1, "21.00"),
+        ("770", "express", 1, "35.00"), ("770", None, 2, "45.00"),
+    ]:
+        _store(db, supplier_product_id=sp_id, dest_cep=prefix + "00000",
+               option=option, qty=qty,
+               quote=_quote(dest_prefix=prefix, option=option, qty=qty, cost=cost))
+        result = find_valid_reference_quotes(dest_cep=prefix + "00000",
+                                             option=option, qty=qty, now=FROZEN_NOW)
+        assert result[str(sp_id)]["cost"] == Decimal(cost)
+    assert find_valid_reference_quotes(dest_cep="77200000", now=FROZEN_NOW) == {}
 
 
 def test_valid_window_is_stored_and_loaded(db):
