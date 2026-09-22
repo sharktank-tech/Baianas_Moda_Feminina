@@ -13,7 +13,8 @@ from decimal import Decimal
 from typing import Callable, Mapping, Optional
 
 from flask import current_app
-from sqlalchemy import inspect, text\nfrom sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from loja import db
 from loja.services.shipping_quote import (
