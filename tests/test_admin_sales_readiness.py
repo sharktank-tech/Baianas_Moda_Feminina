@@ -1,0 +1,675 @@
+"""Prontidão para primeira venda real (somente leitura, fail-closed).
+
+Relógio congelado: nenhuma data depende da execução real. Configurações
+via monkeypatch (restauração automática). Sem compra, sem provider, sem
+mutação.
+"""
+
+import uuid
+from datetime import datetime, timedelta
+from decimal import Decimal
+
+import pytest
+
+# Relógio congelado (UTC-3 o ano todo em São Paulo, sem DST).
+FROZEN_NOW = datetime(2030, 6, 15, 10, 0)  # naive UTC
+
+POLICY_VARS = (
+    "UNIT_ECONOMICS_GATEWAY_FEE_PERCENT",
+    "UNIT_ECONOMICS_INSTALLMENT_COST_PERCENT",
+    "UNIT_ECONOMICS_TAX_PERCENT",
+    "UNIT_ECONOMICS_ACQUISITION_COST_PER_ORDER",
+    "UNIT_ECONOMICS_REFUND_RESERVE_PERCENT",
+)
+
+
+@pytest.fixture(autouse=True)
+def frozen_now(monkeypatch):
+    # O serviço importa utcnow de loja.utils dentro da função.
+    monkeypatch.setattr("loja.utils.utcnow", lambda: FROZEN_NOW)
+    return FROZEN_NOW
+
+
+@pytest.fixture()
+def full_policy(monkeypatch):
+    for var in POLICY_VARS:
+        monkeypatch.setenv(var, "0")
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_session(db):
+    yield
+    db.session.rollback()
+    db.session.remove()
+
+
+def _product(db, **overrides):
+    from loja.modules.models import Product
+
+    params = {
+        "id": uuid.uuid4(),
+        "name": "Produto Pronto",
+        "description": "Descrição completa do produto",
+        "price": Decimal("49.90"),
+        "image1": "https://exemplo.com/img.png",
+        "stock": 10,
+        "is_active": True,
+        "is_draft": False,
+        "source": "internal",
+        "currency": "BRL",
+        "target_margin_percent": Decimal("30.00"),
+        "pricing_status": "priced",
+    }
+    params.update(overrides)
+    product = Product(**params)
+    db.session.add(product)
+    db.session.flush()
+    return product
+
+
+def _supplier(db, *, channel="manual", seller_id=None, **overrides):
+    from loja.modules.models import Supplier
+
+    params = {
+        "id": uuid.uuid4(),
+        "name": "Fornecedor Teste",
+        "channel_type": channel,
+        "seller_id": seller_id,
+    }
+    params.update(overrides)
+    supplier = Supplier(**params)
+    db.session.add(supplier)
+    db.session.flush()
+    return supplier
+
+
+def _link(db, product, supplier, **overrides):
+    from loja.modules.models import SupplierProduct
+
+    params = {
+        "id": uuid.uuid4(),
+        "supplier_id": supplier.id,
+        "product_id": product.id,
+        "supplier_product_id": "SP-CANONICO-1",
+        "cost": Decimal("20.00"),
+        "currency": "BRL",
+        "freight_status": "available",
+        "shipping_cost": Decimal("5.00"),
+        "landed_cost": Decimal("25.00"),
+        "freight_currency": "BRL",
+        "is_active": True,
+    }
+    params.update(overrides)
+    link = SupplierProduct(**params)
+    db.session.add(link)
+    db.session.flush()
+    return link
+
+
+def _variant(db, product, link=None, *, stock=3, active=True):
+    from loja.modules.models import ProductVariant
+
+    variant = ProductVariant(
+        id=uuid.uuid4(),
+        product_id=product.id,
+        color="Rosa",
+        size="M",
+        stock=stock,
+        is_active=active,
+        supplier_product_id=link.id if link is not None else None,
+    )
+    db.session.add(variant)
+    db.session.flush()
+    return variant
+
+
+def _fresh(link_id, *, minutes_ago=10, currency="BRL", cost="5.00"):
+    return {
+        str(link_id): {
+            "cost": cost,
+            "dest_prefix": "013",
+            "option": None,
+            "qty": 1,
+            "currency": currency,
+            "quoted_at": FROZEN_NOW - timedelta(minutes=minutes_ago),
+            "ttl_seconds": 1800,
+        }
+    }
+
+
+def _evaluate(product, **kwargs):
+    from loja.services.sales_readiness import evaluate_product_readiness
+
+    params = {"now": FROZEN_NOW, "charged_freight": Decimal("10.00")}
+    params.update(kwargs)
+    return evaluate_product_readiness(product, **params)
+
+
+# ── Serviço: estados ────────────────────────────────────────────────────
+
+def test_complete_product_is_pronto(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(db, product, supplier)
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.READY
+    assert result.reasons == ("manual_fulfillment_required",)
+    assert result.proven_cost_display == "R$ 25,00"
+    assert result.proven_logistic_display == "R$ 5,00"
+    assert result.charged_freight_display == "R$ 10,00"
+    assert result.origin == "AliExpress"
+
+
+def test_national_single_supplier_can_be_pronto(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="internal")
+    supplier = _supplier(db, channel="manual")
+    link = _link(db, product, supplier)
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.READY
+    assert result.origin == "Nacional"
+
+
+@pytest.mark.parametrize(
+    "override,code",
+    [
+        ({"is_active": False}, "product_inactive"),
+        ({"is_draft": True}, "product_draft"),
+        ({"pricing_status": "ready"}, "pricing_not_ready"),
+        ({"price": Decimal("0.00")}, "missing_sale_price"),
+        ({"description": None}, "missing_description"),
+        ({"stock": 0}, "no_stock"),
+    ],
+)
+def test_product_blocks(db, full_policy, override, code):
+    from loja.services import sales_readiness as sr
+
+    # source internal: o guarda de banco impede draft/não-priced em
+    # AliExpress; as checagens de produto independem da origem.
+    product = _product(db, source="internal", **override)
+    supplier = _supplier(db, channel="manual")
+    link = _link(db, product, supplier)
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.BLOCKED
+    assert code in result.reasons
+
+
+def test_missing_image_is_revisao_not_block(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress", image1="")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(db, product, supplier)
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.REVIEW
+    assert "missing_image" in result.reasons
+
+
+def test_aliexpress_without_link_is_blocked(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress")
+
+    result = _evaluate(product, fresh_quotes={})
+
+    assert result.state == sr.BLOCKED
+    assert "missing_supplier" in result.reasons
+
+
+def test_aliexpress_ambiguous_links_blocked(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    _link(db, product, supplier, supplier_product_id="SP-A")
+    _link(db, product, supplier, supplier_product_id="SP-B")
+
+    result = _evaluate(product, fresh_quotes={})
+
+    assert result.state == sr.BLOCKED
+    assert "ambiguous_supplier" in result.reasons
+
+
+def test_national_ambiguous_suppliers_blocked(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="internal")
+    _link(db, product, _supplier(db, name="Sup A"), supplier_product_id="SP-A")
+    _link(db, product, _supplier(db, name="Sup B"), supplier_product_id="SP-B")
+
+    result = _evaluate(product, fresh_quotes={})
+
+    assert result.state == sr.BLOCKED
+    assert "ambiguous_supplier" in result.reasons
+
+
+def test_missing_sku_blocked(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(db, product, supplier, supplier_product_id=None)
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.BLOCKED
+    assert "missing_sku" in result.reasons
+
+
+def test_missing_cost_blocked(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(db, product, supplier, cost=None, landed_cost=None)
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.BLOCKED
+    assert "missing_cost" in result.reasons
+
+
+def test_non_brl_currency_blocked(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress", currency="USD")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(db, product, supplier, currency="USD", freight_currency="USD")
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.BLOCKED
+    assert "currency_mismatch" in result.reasons
+
+
+def test_expired_quote_blocked(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(db, product, supplier)
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id, minutes_ago=120))
+
+    assert result.state == sr.BLOCKED
+    assert "shipping_quote_expired" in result.reasons
+
+
+def test_unproven_logistic_never_pronto(db, full_policy):
+    """R$ 10 cobrados não são prova: sem fresh, no máximo REVISÃO."""
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    _link(db, product, supplier)
+
+    result = _evaluate(product, fresh_quotes={})
+
+    assert result.state == sr.REVIEW
+    assert "shipping_cost_unproven" in result.reasons
+    assert result.charged_freight_display == "R$ 10,00"
+    assert result.proven_logistic_display == "—"
+
+
+def test_negative_margin_blocked(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress", price=Decimal("20.00"))
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(db, product, supplier)
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.BLOCKED
+    assert "negative_margin" in result.reasons
+
+
+def test_economics_incomplete_without_policy(db):
+    """Sem política de custos configurada, economia não se prova."""
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(db, product, supplier)
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.BLOCKED
+    assert "economics_incomplete" in result.reasons
+
+
+def test_own_stock_capped_at_revisao(db, app, full_policy, monkeypatch):
+    from loja.services import sales_readiness as sr
+
+    monkeypatch.setitem(app.config, "SHIPPING_ORIGIN_CEP", "01310100")
+    product = _product(db, source="internal", cost=Decimal("20.00"))
+
+    result = _evaluate(product, fresh_quotes={})
+
+    assert result.state == sr.REVIEW
+    assert result.origin == "Estoque próprio"
+    assert "shipping_cost_unproven" in result.reasons
+
+
+def test_own_stock_without_origin_blocked(db, app, full_policy, monkeypatch):
+    from loja.services import sales_readiness as sr
+
+    monkeypatch.setitem(app.config, "SHIPPING_ORIGIN_CEP", None)
+    monkeypatch.setitem(app.config, "SHIPPING_DOMESTIC_ORIGINS", {})
+    product = _product(db, source="internal", cost=Decimal("20.00"))
+
+    result = _evaluate(product, fresh_quotes={})
+
+    assert result.state == sr.BLOCKED
+    assert "missing_origin" in result.reasons
+
+
+def test_invalid_variant_surfaced_not_hidden(db, full_policy):
+    """Uma variante inválida aparece nos motivos; com vendável, REVISÃO."""
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(db, product, supplier)
+    _variant(db, product, link, stock=3)
+    _variant(db, product, link, stock=0)
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.REVIEW
+    assert "no_stock" in result.reasons  # da variante zerada, visível
+    assert result.stock == 3
+
+
+def test_all_variants_invalid_blocked(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(db, product, supplier)
+    _variant(db, product, link, stock=0)
+    _variant(db, product, link, stock=2, active=False)
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.BLOCKED
+    assert "no_stock" in result.reasons
+
+
+def test_variant_bound_to_other_link_blocked(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product = _product(db, source="aliexpress")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(db, product, supplier)
+    other = _link(
+        db, product, supplier, supplier_product_id="SP-OUTRO", is_active=False
+    )
+    _variant(db, product, link, stock=3)
+    _variant(db, product, other, stock=2)
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.BLOCKED
+    assert "missing_supplier" in result.reasons
+
+
+def test_candidates_deterministic_order():
+    from loja.services.sales_readiness import (
+        ProductReadiness,
+        summarize_readiness,
+    )
+
+    def _row(name, margin, stock, pid):
+        return ProductReadiness(
+            product_id=pid,
+            name=name,
+            origin="Nacional",
+            supplier_name="Sup",
+            price_display="R$ 49,90",
+            proven_cost_display="R$ 25,00",
+            charged_freight_display="R$ 10,00",
+            proven_logistic_display="R$ 5,00",
+            margin_display="—",
+            stock=stock,
+            state="PRONTO",
+            reasons=("manual_fulfillment_required",),
+            margin_sort=Decimal(margin),
+        )
+
+    rows = [
+        _row("F", "10.00", 100, uuid.UUID(int=6)),
+        _row("A", "50.00", 5, uuid.UUID(int=1)),
+        _row("B", "50.00", 9, uuid.UUID(int=2)),
+        _row("C", "50.00", 9, uuid.UUID(int=3)),
+        _row("D", "40.00", 50, uuid.UUID(int=4)),
+        _row("E", "30.00", 60, uuid.UUID(int=5)),
+    ]
+    first = [r.name for r in summarize_readiness(rows).candidates]
+    second = [r.name for r in summarize_readiness(list(reversed(rows))).candidates]
+
+    assert first == ["B", "C", "A", "D", "E"]
+    assert second == first
+
+
+def test_summarize_empty():
+    from loja.services.sales_readiness import summarize_readiness
+
+    summary = summarize_readiness([])
+
+    assert (summary.pronto, summary.revisao, summary.bloqueado) == (0, 0, 0)
+    assert summary.evaluated == 0
+    assert summary.candidates == ()
+
+
+# ── Rota/admin ──────────────────────────────────────────────────────────
+
+def _snapshot(db):
+    from loja.modules.getway_mercado_pago.payment_models import Order, OrderItem
+    from loja.modules.models import Product, Supplier, SupplierProduct
+
+    return {
+        "products": Product.query.count(),
+        "suppliers": Supplier.query.count(),
+        "links": SupplierProduct.query.count(),
+        "orders": Order.query.count(),
+        "items": OrderItem.query.count(),
+        "prices": sorted(str(p.price) for p in Product.query.all()),
+        "stocks": sorted(int(p.stock or 0) for p in Product.query.all()),
+    }
+
+
+def test_route_requires_admin(client, regular_user, login, db, make_product):
+    make_product()
+    login(regular_user.email, "senha123")
+
+    response = client.get("/admin/prontidao-vendas")
+
+    assert response.status_code in (302, 303, 403)
+
+
+def test_route_anonymous_redirect(client, db, make_product):
+    make_product()
+
+    response = client.get("/admin/prontidao-vendas")
+
+    assert response.status_code in (302, 303)
+
+
+def test_route_get_no_commit_no_mutation(
+    client, db, admin_user, login, make_product, full_policy
+):
+    from loja.services import sales_readiness as sr
+
+    product = make_product()
+    login(admin_user.email, "senha123")
+    before = _snapshot(db)
+
+    response = client.get("/admin/prontidao-vendas")
+
+    assert response.status_code == 200
+    db.session.expire_all()
+    assert _snapshot(db) == before
+    assert b"Prontid\xc3\xa3o para vendas" in response.data
+
+
+def test_route_get_no_external_boundaries(
+    client, db, admin_user, login, make_product, monkeypatch
+):
+    import smtplib
+
+    import loja.integrations.aliexpress.fulfillment as fulfillment
+    import loja.modules.getway_mercado_pago.payment_service as payment_service
+
+    make_product()
+    login(admin_user.email, "senha123")
+    calls = []
+    def _recorder(name):
+        def _record(*args, **kwargs):
+            calls.append(name)
+
+        return _record
+
+    for module, name in [
+        (payment_service, "create_preference"),
+        (payment_service, "get_payment"),
+        (payment_service, "get_sdk"),
+        (fulfillment, "ensure_aliexpress_fulfillment"),
+    ]:
+        monkeypatch.setattr(module, name, _recorder(name))
+    monkeypatch.setattr(
+        smtplib, "SMTP", lambda *a, **k: calls.append("smtp.SMTP")
+    )
+
+    response = client.get("/admin/prontidao-vendas")
+
+    assert response.status_code == 200
+    assert calls == []
+
+
+def test_route_no_mutation_forms_and_no_sensitive_data(
+    client, db, admin_user, login, make_product, make_user, caplog
+):
+    user = make_user()
+    product = make_product()
+    supplier = _supplier(
+        db,
+        channel="aliexpress",
+        seller_id="SELLER-SECRET-1",
+        api_key="sk-secret-key",
+        api_secret="ss-secret",
+        access_token="tok-secret",
+    )
+    _link(db, product, supplier)
+    login(admin_user.email, "senha123")
+
+    with caplog.at_level("WARNING"):
+        html = client.get("/admin/prontidao-vendas").get_data(as_text=True)
+
+    assert "method=\"post\"" not in html.lower()
+    assert product.name in html
+    for secret in (
+        "SELLER-SECRET-1",
+        "sk-secret-key",
+        "ss-secret",
+        "tok-secret",
+        user.email,
+    ):
+        assert secret not in html
+        assert secret not in caplog.text
+
+
+def test_route_counts_match_rows(client, db, admin_user, login, full_policy):  # noqa: ARG002
+    import re
+
+    from loja.services import sales_readiness as sr
+
+    user_product = _product(db, source="aliexpress", name="Pronto Alpha")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    _link(db, user_product, supplier)
+    # Sem fresh: item comprovado, só falta prova logística → REVISÃO.
+    assert (
+        sr.evaluate_product_readiness(
+            user_product,
+            fresh_quotes={},
+            now=FROZEN_NOW,
+            charged_freight=Decimal("10.00"),
+        ).state
+        == sr.REVIEW
+    )
+    login(admin_user.email, "senha123")
+    html = client.get("/admin/prontidao-vendas").get_data(as_text=True)
+
+    def _card(label):
+        match = re.search(
+            label + r"</div>\s*<div[^>]*>(\d+)<", html
+        )
+        assert match, label
+        return int(match.group(1))
+
+    pronto = _card("Produtos PRONTOS")
+    revisao = _card("Em REVISÃO")
+    bloqueado = _card("BLOQUEADOS")
+    evaluated = _card("Ativos avaliados")
+    assert pronto + revisao + bloqueado == evaluated
+    assert evaluated >= 1
+    assert "Pronto Alpha" in html
+    assert ("Nenhum produto está comprovadamente pronto" in html) == (
+        pronto == 0
+    )
+
+
+def test_route_empty_message_when_nothing_ready(
+    client, db, admin_user, login, monkeypatch
+):
+    from loja.services import sales_readiness as sr
+
+    calls = {"n": 0}
+
+    def _only_blocked():
+        from loja.services.sales_readiness import ProductReadiness
+
+        calls["n"] += 1
+        row = ProductReadiness(
+            product_id=uuid.uuid4(),
+            name="Travado",
+            origin="Desconhecida",
+            supplier_name="—",
+            price_display="R$ 10,00",
+            proven_cost_display="—",
+            charged_freight_display="R$ 10,00",
+            proven_logistic_display="—",
+            margin_display="—",
+            stock=0,
+            state=sr.BLOCKED,
+            reasons=("no_stock",),
+        )
+        return sr.summarize_readiness([row])
+
+    monkeypatch.setattr(sr, "evaluate_sales_readiness", _only_blocked)
+    login(admin_user.email, "senha123")
+
+    html = client.get("/admin/prontidao-vendas").get_data(as_text=True)
+
+    assert calls["n"] == 1
+    assert "Nenhum produto está comprovadamente pronto para divulgação." in html
+
+
+def test_recovery_expired_text_fixed(client, admin_user, login, db):
+    login(admin_user.email, "senha123")
+
+    html = client.get("/admin/recuperacao-checkout").get_data(as_text=True)
+
+    assert "reserva ativa há mais de" not in html
+    assert "expiração persistida já vencida" in html

@@ -192,6 +192,14 @@
           Recuperação de checkout
         </a>
 
+        <a
+          class="adm-nav-link"
+          href="{{ url_for('admin.sales_readiness') }}"
+        >
+          <span class="adm-icon">✓</span>
+          Prontidão para vendas
+        </a>
+
       </div>
 
     </nav>
@@ -318,6 +326,13 @@
         href="{{ url_for('admin.checkout_recovery') }}"
       >
         Recuperação
+      </a>
+
+      <a
+        class="adm-nav-link"
+        href="{{ url_for('admin.sales_readiness') }}"
+      >
+        Prontidão
       </a>
 
     </nav>
