@@ -87,10 +87,11 @@ Efeitos:
   (`payment_models.py:421-458`). A evidência candidata é
   `Payment.raw_payload` (`:454-458`), que persiste o objeto JSON completo da
   API de pagamento do Mercado Pago (`payments_routes.py:934/944`).
-- A API de pagamento do Mercado Pago expõe o campo `installments`, mas **isto
-  ainda não foi verificado contra um payload persistido real**. O resolvedor e
-  fixtures de teste cobrem o contrato; a verificação em produção é a pendência
-  P1 (script read-only abaixo).
+- A API de pagamento do Mercado Pago expõe o campo `installments`. A
+  verificação read-only em produção (P1) foi executada em 2026-09-24 com
+  credencial autorizada: schema `pollomodas`, exit 0, `status: OK`,
+  `mp_approved_valid_installments: 1` (ver status abaixo). O resolvedor e
+  fixtures de teste continuam cobrindo o contrato em CI.
 - `Payment.payment_type_id` (`payment_models.py:452`) existe, mas é evidência
   **insuficiente**: `credit_card` não distingue compra de 1x (à vista) de
   parcelada, e tipos como transferência não comprovam a contagem de parcelas
@@ -161,6 +162,8 @@ Por consumidor:
   (contrato de evidência + agregados de produto).
 - `tests/test_verify_payment_evidence_readonly_pg.py` — suíte PG descartável
   do script (sintética; CI `pytest-pricing-pg`).
+- `tests/test_verify_payment_evidence_readonly.py` — testes de unidade do
+  classificador, do CASE no SQL e do exit 2 em falha de conexão (sem PG).
 - `tests/*` — cobertura dos caminhos novos/revisados (adapter, canal,
   dashboard, gate).
 
@@ -180,21 +183,25 @@ Legenda de status:
 
 | # | Pendência | Status |
 | --- | --- | --- |
-| 1 | Payload MP real com `installments` inteiro (P1) | **implementado + testado-sintético** — script `scripts/verify_payment_evidence_readonly.py` corrigido e coberto por `tests/test_verify_payment_evidence_readonly_pg.py` (8 testes PG, schema descartável). **production-verified: NÃO** — sem `DATABASE_URL` de produção nesta sessão; execução em produção permanece **pendente para o agente remoto**. |
+| 1 | Payload MP real com `installments` inteiro (P1) | **production-verified** — script `scripts/verify_payment_evidence_readonly.py` executado em 2026-09-24 contra produção (schema `pollomodas`, credencial autorizada nesta sessão, sem credencial em chat/docs): exit 0, `status: OK`, `total_payments: 2`, `mp_approved_valid_installments: 1`, `installments_min/max: 1`. Também coberto por `tests/test_verify_payment_evidence_readonly_pg.py` (sintético) e `tests/test_verify_payment_evidence_readonly.py` (unidade). |
 | 2 | Pedidos sem evidência → fail-closed | **implementado + testado-sintético** (suíte SQLite; `unknown_components`, `margin_known`). |
 | 3 | Seleção de Payment por pedido | **implementado + testado-sintético** (`select_order_payment` + wiring de canal). |
 | 4 | Gate de publicação cenário duplo | **implementado + testado-sintético**; permanece hard-off (`UNIT_ECONOMICS_PUBLICATION_GUARD_ENABLED` ausente / só literal `1`). |
 | 5 | Dashboard colunas à vista / parcelada | **implementado + testado-sintético**. |
-| 6 | Revalidar números de produto/custo/estoque (P6) | **implementado + testado-sintético** — mesma saída do script P1. **production-verified: NÃO** — mesma pendência de execução em produção. |
+| 6 | Revalidar números de produto/custo/estoque (P6) | **production-verified** — mesma execução do script P1 em 2026-09-24 (schema `pollomodas`): `total_products: 20`, `with_positive_price: 20`, `active_products: 17`, `draft_products: 3`, `total_active_links: 20`, `with_landed_cost: 17`, `total_variants: 325`, `variants_in_stock: 325`, `total_stock_units: 338819`. |
 | 7 | Frete / custo logístico (P7) | **blocked** — `loja/integrations/aliexpress/FREIGHT_PROBE.md`; `SHIPPING_TEMPORARY_FLAT_RATE` R$ 10 não é prova de custo. |
-| 8 | Abrir PR e CI verde (P8) | **production-verified (entrega de PR)** — [PR #75](https://github.com/sharktank-tech/PolloModas/pull/75) aberto em `master`, mergeable; workflow `Pytest` **success** nos jobs `pytest`, `pytest-postgres` e `pytest-pricing-pg` no SHA `5a1c7cd`. |
+| 8 | Abrir PR e CI verde (P8) | **production-verified (entrega de PR)** — [PR #75](https://github.com/sharktank-tech/PolloModas/pull/75) aberto em `master`, mergeable; workflow `Pytest` **success** nos jobs `pytest`, `pytest-postgres` e `pytest-pricing-pg`. SHA da correção de revisão: `59e2ec6`. |
 
 ### O que o script P1/P6 **não** afirma
 
-- Não lê produção; valores de agregados locais/CI são sintéticos.
-- `status: SKIP` (tabela vazia) é **inconclusivo**, não confirma o payload real.
-- `status: OK` em schema descartável prova o contrato SQL, não o conteúdo do
-  Mercado Pago em produção.
+- A execução de produção em 2026-09-24 leu apenas agregados (sem payload
+  individual, PII ou credencial na saída); saída completa não é persistida no
+  repositório.
+- `status: SKIP` (tabela vazia) é **inconclusivo**, não confirma o payload real
+  (ex.: schema `pollomodas_preview` retornou SKIP na mesma sessão).
+- `status: OK` prova presença de `installments` inteiro ≥ 1 em pagamento MP
+  aprovado **naquele recorte**; não prova cobertura de todos os futuros
+  pagamentos nem o conteúdo completo do payload.
 
 ### Adapter de pedido (reforço desta entrega)
 
@@ -213,15 +220,15 @@ Retenção observada continua com prioridade sobre `installments`.
 
 ## Pendências (detalhe operacional)
 
-1. **P1 produção**: executar
+1. **P1 produção**: **Concluído** — executado 2026-09-24 com
    `DATABASE_URL=... POLLOMODAS_SCHEMA=pollomodas python scripts/verify_payment_evidence_readonly.py`
-   com credencial autorizada (não colar senha em chat/docs). Exit 0 = evidência
-   OK ou SKIP inconclusivo; exit 1 = payments sem evidência válida; exit 2 =
-   config/consulta.
+   (credencial autorizada; não colada em chat/docs). Exit 0 / `status: OK`;
+   `mp_approved_valid_installments: 1`.
 2. Itens 2–5: **Resolvido** (testes na suíte SQLite / job `pytest`).
-3. **P6 produção**: mesmo comando do item 1.
+3. **P6 produção**: **Concluído** — mesma execução do item 1 (agregados de
+   produto/custo/estoque acima).
 4. **P7 frete**: bloqueado no fornecedor — não alterado.
 5. **P8 PR**: **Concluído** — https://github.com/sharktank-tech/PolloModas/pull/75
    (branch `audit/payment-scenario-consumers` → `master`); CI workflow `Pytest`
-   verde (`pytest`, `pytest-postgres`, `pytest-pricing-pg`) no SHA final
-   `5a1c7cd0446c5c76a280c76f07924b7a79538599`.
+   verde (`pytest`, `pytest-postgres`, `pytest-pricing-pg`) — SHA da correção
+   de revisão `59e2ec6`.

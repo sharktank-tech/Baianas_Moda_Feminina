@@ -39,5 +39,5 @@ nem novas variáveis nesta entrega de prontidão.
 
 Ver também `PAYMENT_SCENARIOS_LEGACY_AUDIT.md` (inventário dos consumidores
 legados de `payment_scenario` e status das correções — inclui o que é
-implementado, testado com dados sintéticos e o que ainda depende de execução
-em produção).
+implementado, testado com dados sintéticos e o que foi verificado em
+produção; P1 e P6 já rodam production-verified com o script read-only).
