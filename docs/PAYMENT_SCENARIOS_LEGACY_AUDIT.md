@@ -149,54 +149,79 @@ Por consumidor:
 
 - `docs/PAYMENT_SCENARIOS_LEGACY_AUDIT.md` (este documento).
 - `loja/services/payment_scenario.py` — resolvedor + `select_order_payment`.
-- `loja/services/order_unit_economics.py` — `payment_scenario` + fail-closed
-  em `_with_payment`.
+- `loja/services/order_unit_economics.py` — `payment_scenario` + elegibilidade
+  / consistência / fail-closed em `_with_payment`.
 - `loja/services/channel_metrics.py` + `loja/views/admin_routes.py` — wiring
   com Payment eager.
 - `loja/services/publication_unit_economics.py` — gate cenário duplo.
 - `loja/services/publication_unit_economics_dashboard.py` +
   `loja/templates/admin/unit_economics_dashboard.html` — colunas de cenário.
 - `loja/services/unit_economics_policy.py` — constantes de cenário.
-- `scripts/verify_payment_evidence_readonly.py` — P1/P6 read-only.
-- `tests/*` — cobertura dos caminhos novos/revisados.
+- `scripts/verify_payment_evidence_readonly.py` — P1/P6 read-only
+  (contrato de evidência + agregados de produto).
+- `tests/test_verify_payment_evidence_readonly_pg.py` — suíte PG descartável
+  do script (sintética; CI `pytest-pricing-pg`).
+- `tests/*` — cobertura dos caminhos novos/revisados (adapter, canal,
+  dashboard, gate).
 
 Fora do escopo (propositalmente): migração, novas variáveis, consultas a
 provider, alteração de fulfillment/checkout/preço, cotação de frete ao vivo.
 
-## Pendências
+## Status por pendência (honesto)
 
-Status nesta sessão (correções implementadas no branch
-`audit/payment-scenario-consumers`):
+Legenda de status:
 
-1. **Verificar num payload Mercado Pago persistido real** que
-   `raw_payload["installments"]` existe e é inteiro.
-   **Pendente de execução** (sem `DATABASE_URL` neste ambiente): script
-   somente leitura `scripts/verify_payment_evidence_readonly.py` (P1 + P6),
-   schema-qualificado, agregado, sem PII.
-2. Tratamento de pedidos **sem** evidência: **Resolvido** — fail-closed
-   (`evaluate_order_unit_economics_with_payment` zera os campos de pagamento
-   da política; componentes `unknown`; nunca aditivo). Afeta
-   `/admin/metricas-por-canal` (`margin_known` só com Payment elegível).
-3. Regra de seleção do Payment por pedido: **Resolvido** —
-   `select_order_payment` em `loja/services/payment_scenario.py`
-   (Mercado Pago + `approved` + `amount == order.total`, mais recente;
-   sem candidato → `None`). Ligado em `channel_metrics` + eager
-   `Order.payments` na rota.
-4. Autorização para o gate de publicação (cenário duplo): **Resolvido**
-   (autorizado; implementado). `evaluate_product_net_margin` avalia cash e
-   installment e exige a margem mínima em **ambos**; pior cenário alimenta
-   `evaluation`. Gate continua hard-off (`UNIT_ECONOMICS_PUBLICATION_GUARD_ENABLED`
-   só com literal `1`).
-5. Redesign de colunas do dashboard `/admin/unit-economics`: **Resolvido** —
-   colunas à vista / parcelada + margem consolidada = pior cenário quando
-   ambos completos (`unit_economics_dashboard.html`).
-6. Revalidar a auditoria anterior de produtos/custos/estoque:
-   **Script pronto, execução pendente** — mesma saída do item 1
-   (`scripts/verify_payment_evidence_readonly.py`).
-7. Fornecedor de frete segue bloqueado (`loja/integrations/aliexpress/FREIGHT_PROBE.md`
-   no início de qualquer sessão de cotação): sem cotação ao vivo nesta entrega;
-   `SHIPPING_TEMPORARY_FLAT_RATE` R$ 10,00 continua sendo receita temporária,
-   nunca prova de custo logístico. **Inalterado.**
-8. `gh` CLI indisponível nesta sessão: o PR será aberto pela URL de comparação
-   do GitHub após o push do branch.
+- **implementado**: código no branch com testes de unidade/SQLite;
+- **testado-sintético**: script/consumer exercitado em PostgreSQL local ou CI
+  com dados sintéticos em schema descartável — **não** é leitura de produção;
+- **production-verified**: executado contra o banco/ambiente de produção com
+  credencial autorizada nesta entrega;
+- **blocked**: dependência externa (provider, credencial, CLI) não resolvida.
+
+| # | Pendência | Status |
+| --- | --- | --- |
+| 1 | Payload MP real com `installments` inteiro (P1) | **implementado + testado-sintético** — script `scripts/verify_payment_evidence_readonly.py` corrigido e coberto por `tests/test_verify_payment_evidence_readonly_pg.py` (8 testes PG, schema descartável). **production-verified: NÃO** — sem `DATABASE_URL` de produção nesta sessão; execução em produção permanece **pendente para o agente remoto**. |
+| 2 | Pedidos sem evidência → fail-closed | **implementado + testado-sintético** (suíte SQLite; `unknown_components`, `margin_known`). |
+| 3 | Seleção de Payment por pedido | **implementado + testado-sintético** (`select_order_payment` + wiring de canal). |
+| 4 | Gate de publicação cenário duplo | **implementado + testado-sintético**; permanece hard-off (`UNIT_ECONOMICS_PUBLICATION_GUARD_ENABLED` ausente / só literal `1`). |
+| 5 | Dashboard colunas à vista / parcelada | **implementado + testado-sintético**. |
+| 6 | Revalidar números de produto/custo/estoque (P6) | **implementado + testado-sintético** — mesma saída do script P1. **production-verified: NÃO** — mesma pendência de execução em produção. |
+| 7 | Frete / custo logístico (P7) | **blocked** — `loja/integrations/aliexpress/FREIGHT_PROBE.md`; `SHIPPING_TEMPORARY_FLAT_RATE` R$ 10 não é prova de custo. |
+| 8 | Abrir PR e CI verde (P8) | **blocked nesta sessão** sem `gh`/token — branch empurrado; PR pela URL de comparação ou pelo agente autenticado. |
+
+### O que o script P1/P6 **não** afirma
+
+- Não lê produção; valores de agregados locais/CI são sintéticos.
+- `status: SKIP` (tabela vazia) é **inconclusivo**, não confirma o payload real.
+- `status: OK` em schema descartável prova o contrato SQL, não o conteúdo do
+  Mercado Pago em produção.
+
+### Adapter de pedido (reforço desta entrega)
+
+`evaluate_order_unit_economics_with_payment` valida antes de qualquer caminho
+financeiro:
+
+- vínculo pedido↔pagamento e valor cobrado (`payment_order_mismatch`,
+  `payment_charged_amount_mismatch`, `payment_amount_missing`);
+- consistência do payload (`transaction_amount`, `currency_id`) quando
+  presentes (`payment_payload_*_mismatch`);
+- elegibilidade: só Mercado Pago + `approved` usa retenção/cenário; demais
+  provider/status → avaliação **incompleta** (não erro, não aditivo);
+- `PaymentNetReceiptError` → `OrderUnitEconomicsError` (fail-closed explícito).
+
+Retenção observada continua com prioridade sobre `installments`.
+
+## Pendências (detalhe operacional)
+
+1. **P1 produção**: executar
+   `DATABASE_URL=... POLLOMODAS_SCHEMA=pollomodas python scripts/verify_payment_evidence_readonly.py`
+   com credencial autorizada (não colar senha em chat/docs). Exit 0 = evidência
+   OK ou SKIP inconclusivo; exit 1 = payments sem evidência válida; exit 2 =
+   config/consulta.
+2. Itens 2–5: **Resolvido** (testes na suíte SQLite / job `pytest`).
+3. **P6 produção**: mesmo comando do item 1.
+4. **P7 frete**: bloqueado no fornecedor — não alterado.
+5. **P8 PR**: branch `audit/payment-scenario-consumers`;
    https://github.com/sharktank-tech/PolloModas/pull/new/audit/payment-scenario-consumers
+   — abrir com credencial GitHub quando disponível; CI workflow `Pytest`
+   (`pytest`, `pytest-postgres`, `pytest-pricing-pg`).
