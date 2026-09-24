@@ -7,9 +7,14 @@ O landed cost precisa vir de uma fonte canônica congelada pelo caller. Quando
 ausente, a avaliação fica incompleta; ele nunca é inferido do catálogo atual.
 
 Contrato de evidência de pagamento (``evaluate_order_unit_economics_with_payment``):
-retenção observada primeiro; na ausência, o cenário da modalidade
-(``raw_payload.installments``); sem nenhuma evidência, os custos de pagamento
-ficam ``unknown`` (fail-closed) — nunca o aditivo legado e nunca zero.
+1. elegibilidade e consistência do Payment com o Order (vínculo, valor, moeda e
+   payload) antes de qualquer caminho financeiro;
+2. retenção observada tem prioridade;
+3. na ausência, o cenário da modalidade (``raw_payload.installments``);
+4. sem evidência utilizável, os custos de pagamento ficam ``unknown``
+   (fail-closed) — nunca aditivo e nunca zero.
+Evidência contraditória (valor/moeda/payload incompatível) é rejeição
+explícita (``OrderUnitEconomicsError``); informação ausente é incompleta.
 """
 
 from __future__ import annotations
@@ -18,8 +23,11 @@ from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
-from .payment_net_receipt import resolve_payment_net_receipt
-from .payment_scenario import resolve_payment_scenario
+from .payment_net_receipt import PaymentNetReceiptError, resolve_payment_net_receipt
+from .payment_scenario import (
+    MERCADO_PAGO_PROVIDER,
+    resolve_payment_scenario,
+)
 from .unit_economics import UnitEconomicsResult, evaluate_unit_economics
 from .unit_economics_policy import (
     PAYMENT_SCENARIO_CASH,
@@ -246,17 +254,91 @@ def evaluate_order_unit_economics_from_snapshot(
 
 
 
+def _payload_currency(payment) -> Optional[str]:
+    payload = getattr(payment, "raw_payload", None)
+    if not isinstance(payload, dict):
+        return None
+    raw = payload.get("currency_id")
+    if raw is None or raw == "":
+        return None
+    return str(raw).strip().upper()
+
+
+def _payload_transaction_amount(payment) -> Optional[Decimal]:
+    payload = getattr(payment, "raw_payload", None)
+    if not isinstance(payload, dict):
+        return None
+    raw = payload.get("transaction_amount")
+    if raw is None:
+        return None
+    return _money(raw, "payload_transaction_amount")
+
+
+def _is_approved_mp_payment(payment) -> bool:
+    provider = str(getattr(payment, "provider", "") or "").strip()
+    status = str(getattr(payment, "status", "") or "").strip().lower()
+    return provider == MERCADO_PAGO_PROVIDER and status == "approved"
+
+
+def _validate_payment_link_and_amount(order, payment) -> Decimal:
+    """Vínculo e valor cobrado: contradição é erro explícito."""
+    order_id = getattr(order, "id", None)
+    payment_order_id = getattr(payment, "order_id", None)
+    if (
+        order_id is not None
+        and payment_order_id is not None
+        and str(order_id) != str(payment_order_id)
+    ):
+        raise OrderUnitEconomicsError("payment_order_mismatch")
+
+    charged = _money(getattr(order, "total", None), "order_total")
+    payment_amount_raw = getattr(payment, "amount", None)
+    if payment_amount_raw is None:
+        raise OrderUnitEconomicsError("payment_amount_missing")
+    payment_amount = _money(payment_amount_raw, "payment_amount")
+    if payment_amount != charged:
+        raise OrderUnitEconomicsError("payment_charged_amount_mismatch")
+    return charged
+
+
+def _validate_payload_consistency(payment, payment_amount: Decimal) -> None:
+    """Campos presentes no payload precisam bater com o Payment persistido."""
+    payload = getattr(payment, "raw_payload", None)
+    if not isinstance(payload, dict):
+        return
+
+    payload_amount = _payload_transaction_amount(payment)
+    if payload_amount is not None and payload_amount != payment_amount:
+        raise OrderUnitEconomicsError("payment_payload_amount_mismatch")
+
+    payload_currency = _payload_currency(payment)
+    if payload_currency is not None:
+        persisted_currency = str(
+            getattr(payment, "currency", "") or ""
+        ).strip().upper()
+        if (
+            len(persisted_currency) != 3
+            or len(payload_currency) != 3
+            or payload_currency != persisted_currency
+        ):
+            raise OrderUnitEconomicsError("payment_payload_currency_mismatch")
+
+
 def evaluate_order_unit_economics_with_payment(
     order,
     payment,
     *,
     policy: Optional[UnitEconomicsCostPolicy] = None,
 ) -> OrderUnitEconomicsResult:
-    """Evidência de pagamento em precedência: retenção → cenário → desconhecido.
+    """Evidência de pagamento em precedência: elegibilidade → retenção → cenário → desconhecido.
 
     O Payment e o Order precisam representar a mesma cobrança. Nenhum dado é
     buscado no provider e nenhum objeto é mutado.
 
+    - vínculo/valor/payload inconsistentes → ``OrderUnitEconomicsError``
+      (rejeição explícita; distingue contradição de ausência);
+    - Payment não elegível (provider/status) → sem evidência utilizável
+      (avaliação incompleta, não erro);
     - retenção observada (``resolve_payment_net_receipt``) substitui as
       estimativas;
     - sem retenção, o cenário da modalidade (``resolve_payment_scenario``)
@@ -266,29 +348,28 @@ def evaluate_order_unit_economics_with_payment(
       ``unknown``: a avaliação fica incompleta. O aditivo legado (somar
       gateway + parcelamento) NÃO é usado neste caminho.
     """
-    order_id = getattr(order, "id", None)
-    if payment is not None:
-        payment_order_id = getattr(payment, "order_id", None)
-        if (
-            order_id is not None
-            and payment_order_id is not None
-            and str(order_id) != str(payment_order_id)
-        ):
-            raise OrderUnitEconomicsError("payment_order_mismatch")
-
     active_policy = policy or load_unit_economics_cost_policy()
     retained = None
     scenario = None
 
     if payment is not None:
-        receipt = resolve_payment_net_receipt(payment)
-        if receipt is not None:
-            charged = _money(getattr(order, "total", None), "order_total")
-            if receipt.charged_amount != charged:
-                raise OrderUnitEconomicsError("payment_charged_amount_mismatch")
-            retained = receipt.processor_retained_amount
-        else:
-            scenario = resolve_payment_scenario(payment)
+        charged = _validate_payment_link_and_amount(order, payment)
+        _validate_payload_consistency(payment, charged)
+
+        if _is_approved_mp_payment(payment):
+            try:
+                receipt = resolve_payment_net_receipt(payment)
+            except PaymentNetReceiptError as exc:
+                raise OrderUnitEconomicsError(str(exc)) from None
+            if receipt is not None:
+                if receipt.charged_amount != charged:
+                    raise OrderUnitEconomicsError(
+                        "payment_charged_amount_mismatch"
+                    )
+                retained = receipt.processor_retained_amount
+            else:
+                scenario = resolve_payment_scenario(payment)
+        # provider/status não elegíveis → sem evidência (incompleto)
 
     if retained is None and scenario is None:
         active_policy = replace(
