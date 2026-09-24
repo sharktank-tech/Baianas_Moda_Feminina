@@ -3,9 +3,10 @@
 Escopo desta auditoria: inventariar todo consumidor de produção de
 `build_unit_economics_components` / `evaluate_unit_economics`, quantificar o
 contrato aditivo legado com a configuração operacional confirmada, inventariar
-a evidência de modalidade persistida por pagamento e apresentar a proposta de
-correção por consumidor. O contrato legado foi mantido de propósito pelo PR #74
-(ver `PAYMENT_SCENARIOS_READINESS.md`); esta auditoria é o passo seguinte.
+a evidência de modalidade persistida por pagamento e registrar o status das
+correções. O contrato legado do construtor foi mantido de propósito pelo PR #74
+(ver `PAYMENT_SCENARIOS_READINESS.md`); as correções ficam nos
+consumidores/adapters (branch `audit/payment-scenario-consumers`).
 
 ## Configuração operacional confirmada
 
@@ -28,9 +29,9 @@ si. Sem `payment_scenario`, o construtor aplica as duas (`gateway_fee` +
 
 ## Inventário de consumidores
 
-`build_unit_economics_components` vive em `loja/services/unit_economics_policy.py:130-208`.
-Ramos relevantes: retenção observada `:174-187`, cenário único `:161-164`,
-legado aditivo `:165-173`.
+`build_unit_economics_components` vive em `loja/services/unit_economics_policy.py`.
+Ramos relevantes: retenção observada, cenário único (`payment_scenario`),
+legado aditivo (`payment_scenario is None`).
 
 | # | Consumidor | Local | Entrada / rota | `payment_scenario` | Comportamento |
 | --- | --- | --- | --- | --- | --- |
@@ -42,16 +43,13 @@ legado aditivo `:165-173`.
 
 Notas do inventário:
 
-- `_with_payment` (`order_unit_economics.py:224`) é o único adapter que
-  qualquer dia usa retenção observada (`resolve_payment_net_receipt`), mas tem
-  **zero chamadores de produção** — só `tests/test_order_unit_economics.py`.
-  Quando a retenção não existe (payload sem
-  `transaction_details.net_received_amount`), ele cai no aditivo legado.
-- O único caminho de produção que avalia margem por pedido é o `channel_metrics`
-  via `_from_snapshot`, que não recebe Payment algum.
+- `_with_payment` é o adapter com precedência retenção → cenário →
+  fail-closed; hoje tem chamador de produção: `channel_metrics`.
+- `_from_snapshot` (sem Payment) permanece aditivo legado e é usado apenas
+  por chamadores que não passam evidência — não é o caminho do painel de canal.
 - Nenhum consumidor altera fatos do pedido: subtotal, shipping, desconto, total
   e os snapshots de custo dos itens são lidos como estão; margens são derivadas
-  e recalculadas a cada leitura nos três painéis administrativos.
+  e recalculadas a cada leitura nos painéis administrativos.
 
 ## Impacto do contrato aditivo legado (configuração confirmada)
 
@@ -90,10 +88,9 @@ Efeitos:
   `Payment.raw_payload` (`:454-458`), que persiste o objeto JSON completo da
   API de pagamento do Mercado Pago (`payments_routes.py:934/944`).
 - A API de pagamento do Mercado Pago expõe o campo `installments`, mas **isto
-  ainda não foi verificado contra um payload persistido real**: não há
-  ocorrência de `installments` em código Python do repositório (apenas
-  `max_installments` de precificação de produto em `models.py:56` e CSS), nem
-  fixture de teste. É pendência explícita (abaixo).
+  ainda não foi verificado contra um payload persistido real**. O resolvedor e
+  fixtures de teste cobrem o contrato; a verificação em produção é a pendência
+  P1 (script read-only abaixo).
 - `Payment.payment_type_id` (`payment_models.py:452`) existe, mas é evidência
   **insuficiente**: `credit_card` não distingue compra de 1x (à vista) de
   parcelada, e tipos como transferência não comprovam a contagem de parcelas
@@ -101,9 +98,8 @@ Efeitos:
 - `resolve_payment_net_receipt` (`payment_net_receipt.py`) devolve a retenção
   observada do processador para pagamentos Mercado Pago aprovados com
   `transaction_details.net_received_amount`; é independente de modalidade e
-  tem precedência sobre qualquer estimativa — mas hoje só é acionada pelo
-  adapter `evaluate_order_unit_economics_with_payment`, que não tem chamador
-  de produção.
+  tem precedência sobre qualquer estimativa — acionada por
+  `evaluate_order_unit_economics_with_payment` (hoje via `channel_metrics`).
 - Vínculo pedido↔pagamento existe: `Order.payments`
   (`payment_models.py:226-232`) e `Payment.order_id`.
 
@@ -117,14 +113,13 @@ Efeitos:
 - A proposta não altera preço, checkout, reserva de estoque, fulfillment,
   publicação automática, chamadas a provider nem variáveis novas.
 
-## Proposta de correção
+## Correção aplicada (precedência)
 
-Contrato de precedência proposto para **pedidos** (mesma semântica já usada
-pelo PR #74 e pelo próprio construtor):
+Contrato de precedência para **pedidos** (mesma semântica do PR #74 e do
+construtor):
 
 1. **Retenção observada** (`resolve_payment_net_receipt`) quando o Payment
-   aprovado a comprova → substitui as estimativas (já implementado no
-   construtor, ainda não ligado em produção).
+   aprovado a comprova → substitui as estimativas.
 2. Senão **evidência de modalidade** (`raw_payload["installments"]` inteiro ≥ 1)
    → um único `payment_fee` da modalidade correspondente.
 3. Senão → custos de pagamento **desconhecidos** (componentes `unknown`) → margem
@@ -134,47 +129,39 @@ Nunca: somar as duas taxas; inferir modalidade sem evidência; inventar valores.
 
 Por consumidor:
 
-1. **Painel de prontidão** — já correto. Nenhuma mudança.
-2. **Adapter de pedido** — estender `evaluate_order_unit_economics` com
-   `payment_scenario` opcional (pass-through ao construtor). Em
-   `_with_payment`: quando a retenção observada não existir, resolver o
-   cenário a partir do mesmo Payment antes de cair no legado; sem retenção e
-   sem cenário, avaliar com política cujos campos de pagamento são `None`
-   (componentes `unknown`) em vez do aditivo. Isso muda o contrato atual do
-   teste `test_missing_observed_retention_falls_back_to_policy_estimates`
-   (`tests/test_order_unit_economics.py:291-310`), que codifica o legado e
-   precisa ser revisado no PR de wiring.
-3. **Métricas por canal** — carregar `Order.payments` (eager), selecionar o
-   pagamento aprovado correspondente à cobrança do pedido (regra de seleção
-   entre múltiplos pagamentos é pendência de design) e usar o adapter com
-   Payment. Pedido sem Payment utilizável → margem desconhecida, não aditivo.
-4. **Gate de publicação** — avaliar explicitamente **os dois cenários** e exigir
-   a margem mínima em ambos (mesma semântica do painel de prontidão). Não
-   precisa de evidência de modalidade (produto ainda não tem pedido). **Não
-   alterado nesta entrega**: exige autorização explícita de gate; o gate está
-   hard-off.
-5. **Dashboard `/admin/unit-economics`** — substituir a coluna única de margem
-   pelas colunas à vista / parcelada / menor, espelhando
-   `sales_readiness.html:122-124`. Mudança de apresentação, PR separado.
-6. **`resolve_payment_scenario` (novo, nesta entrega)** — resolvedor read-only
-   e fail-closed da modalidade a partir do `Payment` persistido:
-   `loja/services/payment_scenario.py`. Não é ligado a nenhum consumidor
-   nesta entrega; é a base para os itens 2-3.
+1. **Painel de prontidão** — já correto (PR #74). Nenhuma mudança.
+2. **Adapter de pedido** — `payment_scenario` opcional em
+   `evaluate_order_unit_economics`; `_with_payment` usa retenção → cenário →
+   fail-closed (campos de pagamento da política viram `None`). O teste legado
+   de fallback aditivo foi revisado.
+3. **Métricas por canal** — `Order.payments` eager na rota,
+   `select_order_payment` + `_with_payment`. Pedido sem Payment elegível →
+   margem desconhecida, não aditivo.
+4. **Gate de publicação** — avalia **os dois cenários** e exige a margem mínima
+   em ambos (hard-off até `UNIT_ECONOMICS_PUBLICATION_GUARD_ENABLED=1`).
+5. **Dashboard `/admin/unit-economics`** — colunas à vista / parcelada;
+   consolidado = pior cenário quando ambos completos.
+6. **`resolve_payment_scenario` + `select_order_payment`** — resolvedores
+   read-only e fail-closed em `loja/services/payment_scenario.py`, ligados nos
+   consumidores acima.
 
-## Alterações desta entrega (delimitadas)
+## Alterações desta entrega (branch `audit/payment-scenario-consumers`)
 
 - `docs/PAYMENT_SCENARIOS_LEGACY_AUDIT.md` (este documento).
-- `loja/services/payment_scenario.py` — resolvedor read-only, sem chamadores
-  de produção ainda.
-- `loja/services/unit_economics_policy.py` — constantes
-  `PAYMENT_SCENARIO_CASH` / `PAYMENT_SCENARIO_INSTALLMENT` / `PAYMENT_SCENARIOS`
-  (mesmos literais de sempre; nenhuma mudança de comportamento).
-- `tests/test_payment_scenario.py` — testes do resolvedor + contrato de
-  precedência (cenário seleciona taxa única; cenário desconhecido preserva o
-  aditivo legado).
+- `loja/services/payment_scenario.py` — resolvedor + `select_order_payment`.
+- `loja/services/order_unit_economics.py` — `payment_scenario` + fail-closed
+  em `_with_payment`.
+- `loja/services/channel_metrics.py` + `loja/views/admin_routes.py` — wiring
+  com Payment eager.
+- `loja/services/publication_unit_economics.py` — gate cenário duplo.
+- `loja/services/publication_unit_economics_dashboard.py` +
+  `loja/templates/admin/unit_economics_dashboard.html` — colunas de cenário.
+- `loja/services/unit_economics_policy.py` — constantes de cenário.
+- `scripts/verify_payment_evidence_readonly.py` — P1/P6 read-only.
+- `tests/*` — cobertura dos caminhos novos/revisados.
 
-Fora do escopo (propositalmente): wiring em qualquer consumidor, mudança de
-gate, mudança de template, migração, novas variáveis, consultas a provider.
+Fora do escopo (propositalmente): migração, novas variáveis, consultas a
+provider, alteração de fulfillment/checkout/preço, cotação de frete ao vivo.
 
 ## Pendências
 
