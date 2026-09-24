@@ -187,7 +187,7 @@ Legenda de status:
 | 5 | Dashboard colunas à vista / parcelada | **implementado + testado-sintético**. |
 | 6 | Revalidar números de produto/custo/estoque (P6) | **implementado + testado-sintético** — mesma saída do script P1. **production-verified: NÃO** — mesma pendência de execução em produção. |
 | 7 | Frete / custo logístico (P7) | **blocked** — `loja/integrations/aliexpress/FREIGHT_PROBE.md`; `SHIPPING_TEMPORARY_FLAT_RATE` R$ 10 não é prova de custo. |
-| 8 | Abrir PR e CI verde (P8) | **blocked nesta sessão** sem `gh`/token — branch empurrado; PR pela URL de comparação ou pelo agente autenticado. |
+| 8 | Abrir PR e CI verde (P8) | **production-verified (entrega de PR)** — [PR #75](https://github.com/sharktank-tech/PolloModas/pull/75) aberto em `master`, mergeable; workflow `Pytest` **success** nos jobs `pytest`, `pytest-postgres` e `pytest-pricing-pg` no SHA `5a1c7cd`. |
 
 ### O que o script P1/P6 **não** afirma
 
@@ -221,7 +221,7 @@ Retenção observada continua com prioridade sobre `installments`.
 2. Itens 2–5: **Resolvido** (testes na suíte SQLite / job `pytest`).
 3. **P6 produção**: mesmo comando do item 1.
 4. **P7 frete**: bloqueado no fornecedor — não alterado.
-5. **P8 PR**: branch `audit/payment-scenario-consumers`;
-   https://github.com/sharktank-tech/PolloModas/pull/new/audit/payment-scenario-consumers
-   — abrir com credencial GitHub quando disponível; CI workflow `Pytest`
-   (`pytest`, `pytest-postgres`, `pytest-pricing-pg`).
+5. **P8 PR**: **Concluído** — https://github.com/sharktank-tech/PolloModas/pull/75
+   (branch `audit/payment-scenario-consumers` → `master`); CI workflow `Pytest`
+   verde (`pytest`, `pytest-postgres`, `pytest-pricing-pg`) no SHA final
+   `5a1c7cd0446c5c76a280c76f07924b7a79538599`.
