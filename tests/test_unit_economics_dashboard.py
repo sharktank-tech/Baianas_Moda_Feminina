@@ -77,16 +77,19 @@ def test_dashboard_row_compute_margins(db):
     assert row.complete is True
     assert row.sale_price == Decimal("100.00")
     assert row.landed_cost == Decimal("70.00")
-    # variáveis: gateway 3% + parcelamento 1% + desconto 0 + imposto 2% = 6.00
-    assert row.known_variable_costs == Decimal("6.00")
-    # operacionais: CAC 1.00 + reserva reembolso 1% = 2.00
+    # à vista: gateway 3% + desconto 0 + imposto 2% = 5.00
+    assert row.cash_margin == Decimal("23.00")
+    assert row.cash_margin_percent == Decimal("23.00")
+    # parcelada: parcelamento 1% + desconto 0 + imposto 2% = 3.00
+    assert row.installment_margin == Decimal("25.00")
+    assert row.installment_margin_percent == Decimal("25.00")
+    # pior cenário (à vista) alimenta a margem consolidada
+    assert row.known_variable_costs == Decimal("5.00")
     assert row.known_operational_costs == Decimal("2.00")
-    # contribuição = 100 - 70 - 6 = 24 (24%)
-    assert row.contribution_margin == Decimal("24.00")
-    assert row.contribution_margin_percent == Decimal("24.00")
-    # operacional = 24 - 2 = 22 (22%)
-    assert row.operational_margin == Decimal("22.00")
-    assert row.operational_margin_percent == Decimal("22.00")
+    assert row.contribution_margin == Decimal("25.00")
+    assert row.contribution_margin_percent == Decimal("25.00")
+    assert row.operational_margin == Decimal("23.00")
+    assert row.operational_margin_percent == Decimal("23.00")
     assert row.unknown_components == ()
 
 
@@ -107,9 +110,11 @@ def test_dashboard_incomplete_when_policy_unknown(db):
     assert row.status == "unit_economics_incomplete"
     assert row.contribution_margin is None
     assert row.operational_margin is None
+    assert row.known_variable_costs is None
     assert row.sale_price == Decimal("100.00")
     assert row.landed_cost == Decimal("70.00")
-    assert "gateway_fee" in row.unknown_components
+    assert "payment_fee" in row.unknown_components
+    assert "tax" in row.unknown_components
 
 
 def test_dashboard_supplier_missing(db):

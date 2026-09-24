@@ -288,7 +288,7 @@ def test_observed_processor_retention_replaces_gateway_estimates():
     assert "installment_cost" not in result.unknown_components
 
 
-def test_missing_observed_retention_falls_back_to_policy_estimates():
+def test_missing_payment_evidence_fails_closed_not_additive():
     from loja.services.order_unit_economics import (
         evaluate_order_unit_economics_with_payment,
     )
@@ -305,9 +305,71 @@ def test_missing_observed_retention_falls_back_to_policy_estimates():
         policy=_complete_policy(),
     )
 
+    assert result.complete is False
+    assert result.evaluation is not None
+    assert result.evaluation.operational_margin is None
+    assert "gateway_fee" in result.unknown_components
+    assert "installment_cost" in result.unknown_components
+    assert "payment_fee" not in result.unknown_components
+
+
+def test_payment_none_fails_closed_without_additive():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_with_payment,
+    )
+
+    order = _order(id="order-1", items=[_snapshot_item()])
+    result = evaluate_order_unit_economics_with_payment(
+        order,
+        None,
+        policy=_complete_policy(),
+    )
+
+    assert result.complete is False
+    assert "gateway_fee" in result.unknown_components
+    assert "installment_cost" in result.unknown_components
+
+
+def test_payment_scenario_cash_uses_gateway_total_fee():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_with_payment,
+    )
+
+    order = _order(id="order-1", items=[_snapshot_item()])
+    payment = _approved_payment(order, raw_payload={"installments": 1})
+
+    result = evaluate_order_unit_economics_with_payment(
+        order,
+        payment,
+        policy=_complete_policy(),
+    )
+
     assert result.complete is True
     assert result.evaluation is not None
+    # 90 * 5% = 4.50 (único payment_fee) + desconto 10 + imposto 0
     assert result.evaluation.known_variable_costs == Decimal("14.50")
+    assert "gateway_fee" not in result.unknown_components
+    assert "installment_cost" not in result.unknown_components
+
+
+def test_payment_scenario_installment_uses_installment_total_fee():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_with_payment,
+    )
+
+    order = _order(id="order-1", items=[_snapshot_item()])
+    payment = _approved_payment(order, raw_payload={"installments": 6})
+
+    result = evaluate_order_unit_economics_with_payment(
+        order,
+        payment,
+        policy=_complete_policy(),
+    )
+
+    assert result.complete is True
+    assert result.evaluation is not None
+    # 90 * 0% = 0 (único payment_fee) + desconto 10 + imposto 0
+    assert result.evaluation.known_variable_costs == Decimal("10.00")
 
 
 def test_observed_retention_removes_gateway_unknowns_only():
@@ -366,3 +428,206 @@ def test_payment_must_match_order_and_charged_amount():
             ),
             policy=_complete_policy(),
         )
+
+
+def test_amount_mismatch_without_retention_is_rejected():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_with_payment,
+    )
+
+    order = _order(id="order-1", items=[_snapshot_item()])
+    payment = _approved_payment(order, amount="80.00", raw_payload={})
+
+    with pytest.raises(
+        OrderUnitEconomicsError,
+        match="payment_charged_amount_mismatch",
+    ):
+        evaluate_order_unit_economics_with_payment(
+            order,
+            payment,
+            policy=_complete_policy(),
+        )
+
+
+def test_payload_transaction_amount_mismatch_without_net_is_rejected():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_with_payment,
+    )
+
+    order = _order(id="order-1", items=[_snapshot_item()])
+    payment = _approved_payment(
+        order,
+        raw_payload={"transaction_amount": "80.00", "currency_id": "BRL"},
+    )
+
+    with pytest.raises(
+        OrderUnitEconomicsError,
+        match="payment_payload_amount_mismatch",
+    ):
+        evaluate_order_unit_economics_with_payment(
+            order,
+            payment,
+            policy=_complete_policy(),
+        )
+
+
+def test_payload_currency_mismatch_is_rejected():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_with_payment,
+    )
+
+    order = _order(id="order-1", items=[_snapshot_item()])
+    payment = _approved_payment(
+        order,
+        raw_payload={
+            "transaction_amount": str(order.total),
+            "currency_id": "USD",
+            "installments": 1,
+        },
+    )
+
+    with pytest.raises(
+        OrderUnitEconomicsError,
+        match="payment_payload_currency_mismatch",
+    ):
+        evaluate_order_unit_economics_with_payment(
+            order,
+            payment,
+            policy=_complete_policy(),
+        )
+
+
+def test_pending_payment_is_incomplete_not_complete():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_with_payment,
+    )
+
+    order = _order(id="order-1", items=[_snapshot_item()])
+    payment = _approved_payment(
+        order,
+        status="pending",
+        raw_payload={"installments": 1},
+    )
+
+    result = evaluate_order_unit_economics_with_payment(
+        order,
+        payment,
+        policy=_complete_policy(),
+    )
+
+    assert result.complete is False
+    assert result.evaluation is not None
+    assert result.evaluation.operational_margin is None
+    assert "gateway_fee" in result.unknown_components
+
+
+def test_non_mercadopago_provider_is_incomplete():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_with_payment,
+    )
+
+    order = _order(id="order-1", items=[_snapshot_item()])
+    payment = _approved_payment(
+        order,
+        provider="other",
+        raw_payload={"installments": 1},
+    )
+
+    result = evaluate_order_unit_economics_with_payment(
+        order,
+        payment,
+        policy=_complete_policy(),
+    )
+
+    assert result.complete is False
+    assert "gateway_fee" in result.unknown_components
+
+
+def test_missing_payment_amount_is_rejected():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_with_payment,
+    )
+
+    order = _order(id="order-1", items=[_snapshot_item()])
+    payment = _approved_payment(order, amount=None, raw_payload={})
+
+    with pytest.raises(
+        OrderUnitEconomicsError,
+        match="payment_amount_missing",
+    ):
+        evaluate_order_unit_economics_with_payment(
+            order,
+            payment,
+            policy=_complete_policy(),
+        )
+
+
+def test_invalid_modality_evidence_stays_incomplete():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_with_payment,
+    )
+
+    order = _order(id="order-1", items=[_snapshot_item()])
+    payment = _approved_payment(order, raw_payload={"installments": "3"})
+
+    result = evaluate_order_unit_economics_with_payment(
+        order,
+        payment,
+        policy=_complete_policy(),
+    )
+
+    assert result.complete is False
+    assert "gateway_fee" in result.unknown_components
+
+
+def test_retention_still_priority_over_installments():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_with_payment,
+    )
+
+    order = _order(id="order-1", items=[_snapshot_item()])
+    payment = _approved_payment(
+        order,
+        net_received="84.00",
+        raw_payload={
+            "transaction_amount": str(order.total),
+            "currency_id": "BRL",
+            "installments": 6,
+            "transaction_details": {"net_received_amount": "84.00"},
+        },
+    )
+
+    result = evaluate_order_unit_economics_with_payment(
+        order,
+        payment,
+        policy=_complete_policy(),
+    )
+
+    assert result.complete is True
+    assert result.evaluation is not None
+    # retenção 6.00 + desconto 10 (não usa taxa de parcelamento)
+    assert result.evaluation.known_variable_costs == Decimal("16.00")
+
+
+def test_with_payment_does_not_mutate_order_or_payment():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_with_payment,
+    )
+
+    item = _snapshot_item()
+    order = _order(id="order-1", items=[item])
+    payment = _approved_payment(order, raw_payload={"installments": 1})
+    before_order = dict(vars(order))
+    before_payment = dict(vars(payment))
+    before_payload = dict(payment.raw_payload)
+
+    evaluate_order_unit_economics_with_payment(
+        order,
+        payment,
+        policy=_complete_policy(),
+    )
+
+    assert vars(order) == before_order
+    assert vars(payment) == before_payment
+    assert payment.raw_payload == before_payload
+    assert vars(item) == dict(vars(item))

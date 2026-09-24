@@ -32,6 +32,10 @@ TAX_PERCENT_ENV = "UNIT_ECONOMICS_TAX_PERCENT"
 ACQUISITION_COST_PER_ORDER_ENV = "UNIT_ECONOMICS_ACQUISITION_COST_PER_ORDER"
 REFUND_RESERVE_PERCENT_ENV = "UNIT_ECONOMICS_REFUND_RESERVE_PERCENT"
 
+PAYMENT_SCENARIO_CASH = "cash"
+PAYMENT_SCENARIO_INSTALLMENT = "installment"
+PAYMENT_SCENARIOS = (PAYMENT_SCENARIO_CASH, PAYMENT_SCENARIO_INSTALLMENT)
+
 
 class UnitEconomicsPolicyError(ValueError):
     """Configuração inválida de custo operacional."""
@@ -155,12 +159,15 @@ def build_unit_economics_components(
     charged = _money_fact(charged_amount, "charged_amount")
     discount = _money_fact(discount_amount, "discount_amount")
 
-    if payment_scenario not in (None, "cash", "installment"):
+    if payment_scenario not in (None, *PAYMENT_SCENARIOS):
         raise UnitEconomicsPolicyError("payment_scenario_invalid")
 
     if processor_retained_amount is None and payment_scenario is not None:
-        percent = (policy.gateway_fee_percent if payment_scenario == "cash"
-                   else policy.installment_cost_percent)
+        percent = (
+            policy.gateway_fee_percent
+            if payment_scenario == PAYMENT_SCENARIO_CASH
+            else policy.installment_cost_percent
+        )
         payment_costs = (_percent_cost("payment_fee", charged, percent),)
     elif processor_retained_amount is None:
         payment_costs = (
@@ -214,6 +221,9 @@ __all__ = [
     "TAX_PERCENT_ENV",
     "ACQUISITION_COST_PER_ORDER_ENV",
     "REFUND_RESERVE_PERCENT_ENV",
+    "PAYMENT_SCENARIO_CASH",
+    "PAYMENT_SCENARIO_INSTALLMENT",
+    "PAYMENT_SCENARIOS",
     "UnitEconomicsPolicyError",
     "UnitEconomicsCostPolicy",
     "load_unit_economics_cost_policy",

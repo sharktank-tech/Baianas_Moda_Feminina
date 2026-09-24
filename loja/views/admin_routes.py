@@ -364,7 +364,10 @@ def channel_metrics_dashboard():
 
     session_counts = session_counts_by_channel()
     measurement_start = first_session_day()
-    query = Order.query.options(selectinload(Order.items))
+    query = Order.query.options(
+        selectinload(Order.items),
+        selectinload(Order.payments),
+    )
     if measurement_start is not None:
         query = query.filter(
             Order.created_at >= datetime.combine(

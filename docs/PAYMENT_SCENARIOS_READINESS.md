@@ -26,8 +26,18 @@ parcelada, com arredondamento de cada componente a centavos.
 ## Escopo e compatibilidade
 
 A seleção é explícita pelo argumento `payment_scenario` do construtor de custos.
-Sem esse argumento, permanece o contrato aditivo legado dos consumidores de
-pedidos e publicação. Esta entrega corrige exclusivamente a simulação de
-prontidão; não reinterpreta pedidos sem evidência da modalidade nem altera gates
-de publicação. A retenção real do processador, quando fornecida, substitui as
-estimativas em qualquer cenário. Não há migração nem novas variáveis.
+Sem esse argumento, o construtor preserva o contrato aditivo legado (compatível
+com consumidores antigos); os consumidores de produção de pedidos/publicação já
+foram corrigidos no branch `audit/payment-scenario-consumers` (ver
+`PAYMENT_SCENARIOS_LEGACY_AUDIT.md`): métricas por canal usam evidência de
+pagamento fail-closed (elegibilidade MP+approved, vínculo/valor/payload
+consistentes), o gate de publicação avalia os dois cenários (hard-off até
+`UNIT_ECONOMICS_PUBLICATION_GUARD_ENABLED=1`) e o dashboard de unit economics
+expõe colunas à vista/parcelada. A retenção real do processador, quando
+fornecida, substitui as estimativas em qualquer cenário. Não há migração
+nem novas variáveis nesta entrega de prontidão.
+
+Ver também `PAYMENT_SCENARIOS_LEGACY_AUDIT.md` (inventário dos consumidores
+legados de `payment_scenario` e status das correções — inclui o que é
+implementado, testado com dados sintéticos e o que foi verificado em
+produção; P1 e P6 já rodam production-verified com o script read-only).

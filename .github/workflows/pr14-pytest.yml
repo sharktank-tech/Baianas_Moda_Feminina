@@ -173,5 +173,9 @@ jobs:
       - name: Check diff whitespace
         run: git diff --check
 
-      - name: Run pricing PostgreSQL suite (6 testes, validacao 23514+constraint)
-        run: python -m pytest -v tests/test_pricing_publication_pg.py tests/test_verify_future_canary_readonly_pg.py
+      - name: Run pricing PostgreSQL suite (validacao 23514+constraint + scripts readonly)
+        run: >
+          python -m pytest -v
+          tests/test_pricing_publication_pg.py
+          tests/test_verify_future_canary_readonly_pg.py
+          tests/test_verify_payment_evidence_readonly_pg.py

@@ -3,12 +3,14 @@
 Somente leitura: não altera Product, não publica, não consulta provider e não
 persiste configuração. Reutiliza o avaliador canônico e a política explícita de
 custos para expor, por produto: receita bruta, custo (landed), margem de
-contribuição e margem líquida operacional.
+contribuição e margem líquida operacional por cenário de pagamento (à vista e
+parcelada). A margem consolidada usa o pior cenário quando ambos estão
+completos; caso contrário permanece ``None``.
 
 Sanitização:
 - nunca devolve supplier_sku_id, external ids, tokens ou payload bruto;
 - valores ausentes/incompletos permanecem ``None``, nunca zero silencioso;
-- a avaliação só fica ``complete`` quando todos os componentes são conhecidos.
+- a avaliação só fica ``complete`` quando os dois cenários são completos.
 """
 
 from __future__ import annotations
@@ -21,6 +23,9 @@ from loja.modules.models import Product
 
 from .unit_economics import UnitEconomicsResult, evaluate_unit_economics
 from .unit_economics_policy import (
+    PAYMENT_SCENARIO_CASH,
+    PAYMENT_SCENARIO_INSTALLMENT,
+    PAYMENT_SCENARIOS,
     UnitEconomicsCostPolicy,
     build_unit_economics_components,
     load_unit_economics_cost_policy,
@@ -33,12 +38,16 @@ class DashboardUnitEconomicsRow:
     product_name: str
     sale_price: Optional[Decimal]
     landed_cost: Optional[Decimal]
-    known_variable_costs: Decimal
+    known_variable_costs: Optional[Decimal]
     known_operational_costs: Decimal
     contribution_margin: Optional[Decimal]
     contribution_margin_percent: Optional[Decimal]
     operational_margin: Optional[Decimal]
     operational_margin_percent: Optional[Decimal]
+    cash_margin: Optional[Decimal]
+    cash_margin_percent: Optional[Decimal]
+    installment_margin: Optional[Decimal]
+    installment_margin_percent: Optional[Decimal]
     complete: bool
     unknown_components: Tuple[str, ...]
     status: str
@@ -113,12 +122,16 @@ def build_unit_economics_dashboard(
                     product_name=product.name or "",
                     sale_price=sale_price,
                     landed_cost=landed_cost if status == "landed_cost_missing_or_invalid" else None,
-                    known_variable_costs=Decimal("0.00"),
+                    known_variable_costs=None,
                     known_operational_costs=Decimal("0.00"),
                     contribution_margin=None,
                     contribution_margin_percent=None,
                     operational_margin=None,
                     operational_margin_percent=None,
+                    cash_margin=None,
+                    cash_margin_percent=None,
+                    installment_margin=None,
+                    installment_margin_percent=None,
                     complete=False,
                     unknown_components=(),
                     status=status,
@@ -126,35 +139,78 @@ def build_unit_economics_dashboard(
             )
             continue
 
-        variable, operational = build_unit_economics_components(
-            charged_amount=sale_price,
-            discount_amount=Decimal("0.00"),
-            policy=active_policy,
-        )
-        evaluation: UnitEconomicsResult = evaluate_unit_economics(
-            sale_price=sale_price,
-            landed_cost=landed_cost,
-            variable_costs=variable,
-            operational_costs=operational,
-        )
+        evaluations: dict[str, UnitEconomicsResult] = {}
+        for scenario in PAYMENT_SCENARIOS:
+            variable, operational = build_unit_economics_components(
+                charged_amount=sale_price,
+                discount_amount=Decimal("0.00"),
+                policy=active_policy,
+                payment_scenario=scenario,
+            )
+            evaluations[scenario] = evaluate_unit_economics(
+                sale_price=sale_price,
+                landed_cost=landed_cost,
+                variable_costs=variable,
+                operational_costs=operational,
+            )
+
+        unknown_union: list[str] = []
+        for scenario in PAYMENT_SCENARIOS:
+            for name in evaluations[scenario].unknown_components:
+                if name not in unknown_union:
+                    unknown_union.append(name)
+
+        cash = evaluations[PAYMENT_SCENARIO_CASH]
+        installment = evaluations[PAYMENT_SCENARIO_INSTALLMENT]
+        both_complete = cash.complete and installment.complete
+
+        if both_complete:
+            assert cash.operational_margin_percent is not None
+            assert installment.operational_margin_percent is not None
+            worst = (
+                cash
+                if cash.operational_margin_percent
+                <= installment.operational_margin_percent
+                else installment
+            )
+        else:
+            worst = None
 
         rows.append(
             DashboardUnitEconomicsRow(
                 product_id=str(product.id),
                 product_name=product.name or "",
-                sale_price=evaluation.sale_price,
-                landed_cost=evaluation.landed_cost,
-                known_variable_costs=evaluation.known_variable_costs,
-                known_operational_costs=evaluation.known_operational_costs,
-                contribution_margin=evaluation.contribution_margin,
-                contribution_margin_percent=evaluation.contribution_margin_percent,
-                operational_margin=evaluation.operational_margin,
-                operational_margin_percent=evaluation.operational_margin_percent,
-                complete=evaluation.complete,
-                unknown_components=evaluation.unknown_components,
+                sale_price=cash.sale_price,
+                landed_cost=cash.landed_cost,
+                known_variable_costs=(
+                    worst.known_variable_costs if worst is not None else None
+                ),
+                known_operational_costs=cash.known_operational_costs,
+                contribution_margin=(
+                    worst.contribution_margin if worst is not None else None
+                ),
+                contribution_margin_percent=(
+                    worst.contribution_margin_percent
+                    if worst is not None
+                    else None
+                ),
+                operational_margin=(
+                    worst.operational_margin if worst is not None else None
+                ),
+                operational_margin_percent=(
+                    worst.operational_margin_percent
+                    if worst is not None
+                    else None
+                ),
+                cash_margin=cash.operational_margin,
+                cash_margin_percent=cash.operational_margin_percent,
+                installment_margin=installment.operational_margin,
+                installment_margin_percent=installment.operational_margin_percent,
+                complete=both_complete,
+                unknown_components=tuple(unknown_union),
                 status=(
                     "unit_economics_incomplete"
-                    if not evaluation.complete
+                    if not both_complete
                     else "ready"
                 ),
             )
