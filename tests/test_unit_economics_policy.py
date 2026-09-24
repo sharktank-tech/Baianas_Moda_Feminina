@@ -200,3 +200,32 @@ def test_observed_processor_retention_cannot_exceed_charged_amount():
             policy=policy,
             processor_retained_amount="100.01",
         )
+
+
+
+@pytest.mark.parametrize('scenario,expected', [('cash', '22.41'), ('installment', '14.15')])
+def test_alternative_payment_rates(scenario, expected):
+    policy = load_unit_economics_cost_policy({
+        GATEWAY_FEE_PERCENT_ENV: '4.98', INSTALLMENT_COST_PERCENT_ENV: '10',
+        TAX_PERCENT_ENV: '5', ACQUISITION_COST_PER_ORDER_ENV: '3.98',
+        REFUND_RESERVE_PERCENT_ENV: '3.98',
+    })
+    variable, operational = build_unit_economics_components(
+        charged_amount='164.56', discount_amount='0', policy=policy,
+        payment_scenario=scenario,
+    )
+    result = evaluate_unit_economics(sale_price='164.56', landed_cost='115.19',
+                                    variable_costs=variable, operational_costs=operational)
+    assert result.operational_margin == Decimal(expected)
+    variable, _ = build_unit_economics_components(
+        charged_amount='164.56', discount_amount='0', policy=policy,
+        payment_scenario=scenario, processor_retained_amount='7.00',
+    )
+    assert variable[0].name == 'processor_retention'
+    assert variable[0].amount == Decimal('7.00')
+
+
+def test_invalid_payment_scenario_rejected():
+    with pytest.raises(UnitEconomicsPolicyError, match='payment_scenario_invalid'):
+        build_unit_economics_components(charged_amount='100', discount_amount='0',
+            policy=load_unit_economics_cost_policy({}), payment_scenario='unknown')

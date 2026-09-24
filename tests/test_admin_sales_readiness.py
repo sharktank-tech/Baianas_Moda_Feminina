@@ -1065,3 +1065,28 @@ def test_reference_status_labels(client, db, admin_user, login, monkeypatch):
     )
     html = client.get("/admin/prontidao-vendas").get_data(as_text=True)
     assert "Destino de referência pendente" in html
+
+
+@pytest.mark.parametrize('cash,installment,expected,state', [
+    ('4.98', '10', '39,90%', 'PRONTO'),
+    ('10', '4.98', '39,90%', 'PRONTO'),
+    ('4.98', '60', '-10,10%', 'BLOQUEADO'),
+    ('4.98', '', '—', 'BLOQUEADO'),
+])
+def test_readiness_requires_both_payment_scenarios(db, full_policy, monkeypatch,
+                                                 cash, installment, expected, state):
+    monkeypatch.setenv(POLICY_VARS[0], cash)
+    monkeypatch.setenv(POLICY_VARS[1], installment)
+    product = _product(db, source='aliexpress')
+    supplier = _supplier(db, channel='aliexpress', seller_id='SELLER-1')
+    link = _link(db, product, supplier, cost=Decimal('20.00'),
+                 shipping_cost=Decimal('5.00'), landed_cost=Decimal('25.00'))
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+    assert result.state == state
+    assert result.margin_display == expected
+    assert result.cash_margin_display != '—'
+    if not installment:
+        assert result.installment_margin_display == '—'
+        assert 'economics_incomplete' in result.reasons
+    elif installment == '60':
+        assert 'negative_margin' in result.reasons
