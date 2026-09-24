@@ -52,7 +52,7 @@
     <h2 class="font-semibold text-gray-800">Candidatos para primeira campanha</h2>
     <p class="text-sm text-gray-500 mt-2">
       Somente informativa: até cinco produtos PRONTOS, por maior margem
-      comprovada, depois maior estoque, depois identificador. Não cria
+      entre os dois cenários, depois maior estoque, depois identificador. Não cria
       campanha, anúncio ou publicação automática.
     </p>
     <div class="overflow-x-auto mt-4">
@@ -60,7 +60,7 @@
         <thead class="bg-gray-50">
           <tr>
             <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Produto</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Margem</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Menor margem</th>
             <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Estoque</th>
           </tr>
         </thead>
@@ -85,7 +85,9 @@
       <p class="text-xs text-gray-500 mt-1">
         Tarifa cobrada do cliente é receita temporária configurada, não
         prova do custo logístico. Custo logístico comprovado exige cotação
-        fresca do vínculo.
+        fresca do vínculo. As margens à vista e parcelada usam taxas alternativas
+        sobre o preço do produto, sem somá-las. O frete cobrado do cliente não
+        entra nesta simulação. PRONTO exige margem não negativa nos dois cenários.
       </p>
     </div>
     <div class="overflow-x-auto">
@@ -99,7 +101,9 @@
             <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Custo comprovado</th>
             <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Frete cobrado do cliente</th>
             <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Custo logístico comprovado</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Margem</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Margem à vista</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Margem parcelada</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Menor margem</th>
             <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Estoque</th>
             <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Estado</th>
             <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Motivos</th>
@@ -115,13 +119,15 @@
             <td class="px-3 py-2 text-sm">{{ row.proven_cost_display }}</td>
             <td class="px-3 py-2 text-sm">{{ row.charged_freight_display }}</td>
             <td class="px-3 py-2 text-sm">{{ row.proven_logistic_display }}</td>
+            <td class="px-3 py-2 text-sm">{{ row.cash_margin_display }}</td>
+            <td class="px-3 py-2 text-sm">{{ row.installment_margin_display }}</td>
             <td class="px-3 py-2 text-sm">{{ row.margin_display }}</td>
             <td class="px-3 py-2 text-sm">{{ row.stock }}</td>
             <td class="px-3 py-2 text-sm font-semibold">{{ row.state }}</td>
             <td class="px-3 py-2 text-sm">{% for code in row.reasons %}{{ reason_labels.get(code, code) }}{% if not loop.last %}; {% endif %}{% endfor %}</td>
           </tr>
           {% else %}
-          <tr><td colspan="11" class="px-3 py-4 text-center text-gray-500">Nenhum produto avaliado.</td></tr>
+          <tr><td colspan="13" class="px-3 py-4 text-center text-gray-500">Nenhum produto avaliado.</td></tr>
           {% endfor %}
         </tbody>
       </table>

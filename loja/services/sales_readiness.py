@@ -139,6 +139,8 @@ class ProductReadiness:
     state: str
     reasons: tuple = ()
     margin_sort: Optional[Decimal] = None
+    cash_margin_display: str = "—"
+    installment_margin_display: str = "—"
 
 
 @dataclass(frozen=True)
@@ -417,6 +419,7 @@ def evaluate_product_readiness(
     proven_cost = None
     proven_logistic = None
     margin_percent = None
+    scenario_margins = {}
     if link is not None:
         cost = to_decimal(getattr(link, "cost", None))
         if cost is None or not cost.is_finite() or cost <= 0:
@@ -503,32 +506,33 @@ def evaluate_product_readiness(
                     policy if policy is not None
                     else load_unit_economics_cost_policy()
                 )
-                variable, operational = build_unit_economics_components(
-                    charged_amount=price,
-                    discount_amount=Decimal("0.00"),
-                    policy=active_policy,
-                )
-                from loja.services.unit_economics import UnitEconomicsError
-
-                evaluation = evaluate_unit_economics(
-                    sale_price=price,
-                    landed_cost=proven_cost,
-                    variable_costs=variable,
-                    operational_costs=operational,
-                )
+                for scenario in ("cash", "installment"):
+                    variable, operational = build_unit_economics_components(
+                        charged_amount=price,
+                        discount_amount=Decimal("0.00"),
+                        policy=active_policy,
+                        payment_scenario=scenario,
+                    )
+                    evaluation = evaluate_unit_economics(
+                        sale_price=price,
+                        landed_cost=proven_cost,
+                        variable_costs=variable,
+                        operational_costs=operational,
+                    )
+                    if (
+                        not evaluation.complete
+                        or evaluation.operational_margin is None
+                        or evaluation.operational_margin_percent is None
+                    ):
+                        _add("economics_incomplete")
+                        continue
+                    scenario_margins[scenario] = evaluation.operational_margin_percent
+                    if evaluation.operational_margin < 0:
+                        _add("negative_margin")
+                if len(scenario_margins) == 2:
+                    margin_percent = min(scenario_margins.values())
             except Exception:
-                evaluation = None
-            if (
-                evaluation is None
-                or not evaluation.complete
-                or evaluation.operational_margin is None
-                or evaluation.operational_margin_percent is None
-            ):
                 _add("economics_incomplete")
-            elif evaluation.operational_margin < 0:
-                _add("negative_margin")
-            else:
-                margin_percent = evaluation.operational_margin_percent
     elif price is not None and "missing_cost" not in blocking:
         # Preço existe mas custo não foi comprovado por outro motivo.
         if "currency_mismatch" not in blocking:
@@ -557,6 +561,8 @@ def evaluate_product_readiness(
         state=state,
         reasons=reasons,
         margin_sort=margin_percent,
+        cash_margin_display=_percent(scenario_margins.get("cash")),
+        installment_margin_display=_percent(scenario_margins.get("installment")),
     )
 
 

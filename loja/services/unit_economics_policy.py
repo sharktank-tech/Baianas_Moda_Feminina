@@ -133,6 +133,7 @@ def build_unit_economics_components(
     discount_amount,
     policy: UnitEconomicsCostPolicy,
     processor_retained_amount=None,
+    payment_scenario: Optional[str] = None,
 ) -> tuple[tuple[CostComponent, ...], tuple[CostComponent, ...]]:
     """Converte política + fatos do pedido em componentes canônicos.
 
@@ -142,6 +143,10 @@ def build_unit_economics_components(
     Quando ``processor_retained_amount`` é informado, o fato observado
     substitui as estimativas de gateway e parcelamento, nunca soma com elas.
 
+    ``payment_scenario`` seleciona "cash" ou "installment": cada taxa é o
+    custo total da modalidade, sem soma. None preserva o contrato legado dos
+    consumidores de pedidos/publicação. Retenção observada tem precedência.
+
     IMPORTANTE: ao passar estes componentes para ``evaluate_unit_economics``, o
     ``sale_price`` deve ser a receita bruta ANTES do desconto, por exemplo
     ``Order.subtotal + Order.shipping``. Usar ``Order.total`` como ``sale_price``
@@ -150,7 +155,14 @@ def build_unit_economics_components(
     charged = _money_fact(charged_amount, "charged_amount")
     discount = _money_fact(discount_amount, "discount_amount")
 
-    if processor_retained_amount is None:
+    if payment_scenario not in (None, "cash", "installment"):
+        raise UnitEconomicsPolicyError("payment_scenario_invalid")
+
+    if processor_retained_amount is None and payment_scenario is not None:
+        percent = (policy.gateway_fee_percent if payment_scenario == "cash"
+                   else policy.installment_cost_percent)
+        payment_costs = (_percent_cost("payment_fee", charged, percent),)
+    elif processor_retained_amount is None:
         payment_costs = (
             _percent_cost("gateway_fee", charged, policy.gateway_fee_percent),
             _percent_cost(
