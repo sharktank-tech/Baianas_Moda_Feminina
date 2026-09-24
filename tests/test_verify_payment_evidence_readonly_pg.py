@@ -249,10 +249,75 @@ def test_invalid_evidence_types_fail_closed_audit(audit_schema):
         conn.commit()
 
     result = _run(audit_schema)
+    # CASE WHEN intercepta casts inválidos: não pode ser exit 2 (erro SQL)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "status: FAIL" in result.stdout
     assert "valid_installments_gte_1: 0" in result.stdout
+    assert "mp_approved_valid_installments: 0" in result.stdout
     assert "total_payments: 9" in result.stdout
+    assert "consulta de auditoria" not in result.stderr
+
+
+def test_zero_mp_approved_valid_with_type_valid_rows_is_fail(audit_schema):
+    """Revisão P1: OK exige mp_approved_valid_installments > 0.
+
+    Aqui há installments inteiros válidos, mas só em pending ou provider
+    não-MP → deve falhar (exit 1), nunca declarar OK.
+    """
+    eng = create_engine(DATABASE_URL)
+    with eng.connect() as conn:
+        _insert_payment(
+            conn,
+            audit_schema,
+            payload_json='{"installments": 6}',
+            status="pending",
+        )
+        _insert_payment(
+            conn,
+            audit_schema,
+            payload_json='{"installments": 3}',
+            provider="other",
+            status="approved",
+        )
+        conn.commit()
+
+    result = _run(audit_schema)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "status: FAIL" in result.stdout
+    assert "P1 OK" not in result.stdout
+    assert "mp_approved_valid_installments: 0" in result.stdout
+    assert "valid_installments_gte_1: 2" in result.stdout
+    assert "mp_approved_valid_installments = 0" in result.stderr
+
+
+def test_sql_survives_string_and_null_installments_without_query_error(
+    audit_schema,
+):
+    """Strings/nulas no cast: CASE protege; script não aborta com exit 2."""
+    eng = create_engine(DATABASE_URL)
+    payloads = [
+        '{"installments": "abc"}',
+        '{"installments": ""}',
+        '{"installments": null}',
+        '{"installments": [1, 2]}',
+        '{"installments": {"n": 1}}',
+        "null",
+        "{}",
+        '{"installments": "3"}',
+        '{"installments": 1.5}',
+    ]
+    with eng.connect() as conn:
+        for payload in payloads:
+            _insert_payment(conn, audit_schema, payload_json=payload)
+        conn.commit()
+
+    result = _run(audit_schema)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "status: FAIL" in result.stdout
+    assert "consulta de auditoria" not in result.stderr
+    assert "invalid input syntax" not in result.stderr
+    assert "mp_approved_valid_installments: 0" in result.stdout
+
 
 
 def test_mixed_evidence_counts_only_valid(audit_schema):
@@ -350,6 +415,29 @@ def test_missing_database_url_exits_2(audit_schema):
     )
     assert result.returncode == 2
     assert "DATABASE_URL" in result.stderr
+
+
+def test_connection_refused_exits_2_sanitized(audit_schema):
+    """engine.connect() falhando (host morto) → exit 2, sem senha na saída."""
+    secret = "connect-fail-secret-pass"
+    env = os.environ.copy()
+    env["DATABASE_URL"] = (
+        f"postgresql+psycopg2://user:{secret}@127.0.0.1:1/pollotest"
+    )
+    env["POLLOMODAS_SCHEMA"] = audit_schema
+    result = subprocess.run(
+        [sys.executable, "scripts/verify_payment_evidence_readonly.py"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 2
+    combined = result.stdout + result.stderr
+    assert secret not in combined
+    assert "postgresql://" not in combined
+    assert "ERRO" in result.stderr
+    assert "conexao" in result.stderr.lower() or "falha" in result.stderr.lower()
 
 
 def test_forbidden_schema_rejected(audit_schema):

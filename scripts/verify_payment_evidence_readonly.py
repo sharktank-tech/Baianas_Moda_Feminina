@@ -15,12 +15,13 @@ Garantias:
   - SOMENTE LEITURA: transação READ ONLY verificada + ROLLBACK;
   - consultas qualificadas pelo schema (padrão ``pollomodas``);
   - saída agregada, sem payloads, tokens, PII ou credenciais;
-  - erros de conexão são redigidos (senha da URL nunca impressa).
+  - erros de URL/conexão são capturados e redigidos (senha nunca impressa);
+  - sucesso (OK) exige ``mp_approved_valid_installments > 0``.
 
 Códigos de saída:
-  - 0: consulta concluída (OK com evidência válida, ou SKIP em tabela vazia);
-  - 1: há payments mas nenhuma evidência válida de modalidade (FAIL);
-  - 2: configuração/consulta/transação inválida.
+  - 0: OK (evidência MP aprovada válida) ou SKIP (tabela vazia, inconclusivo);
+  - 1: há payments mas zero evidência aprovada válida no Mercado Pago (FAIL);
+  - 2: configuração/URL/conexão/consulta/transação inválida.
 
 Uso:
   DATABASE_URL=postgresql://... python scripts/verify_payment_evidence_readonly.py
@@ -42,12 +43,20 @@ SCHEMA_ENV = "POLLOMODAS_SCHEMA"
 DEFAULT_SCHEMA = "pollomodas"
 SCHEMA_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
-# JSON number rendered as integer digits only (no '.', exponent, sign).
-# Combined with jsonb_typeof = 'number' this rejects strings/bools/fractions.
+# Cast numérico protegido: só converte quando o tipo é number e os dígitos
+# batem com o regex; caso contrário NULL. Não depende de short-circuit AND.
+_INSTALLMENTS_NUMERIC_CASE = (
+    "(CASE"
+    " WHEN jsonb_typeof({col} -> 'installments') = 'number'"
+    " AND ({col} -> 'installments')::text ~ '^[0-9]+$'"
+    " THEN ({col} -> 'installments')::text::numeric"
+    " ELSE NULL END)"
+)
+
 _INSTALLMENTS_VALID = (
     "jsonb_typeof({col} -> 'installments') = 'number'"
     " AND ({col} -> 'installments')::text ~ '^[0-9]+$'"
-    " AND ({col} -> 'installments')::text::numeric >= 1"
+    " AND {numeric} >= 1"
 )
 
 
@@ -70,15 +79,26 @@ def _err(message: str, password: Optional[str] = None) -> None:
     print(_redact(message, password), file=sys.stderr)
 
 
+def _exc_label(exc: BaseException) -> str:
+    """Rótulo sanitizado: só o tipo, nunca a mensagem completa (pode ter URL)."""
+    return type(exc).__name__
+
+
 def _jsonb_expr(column: str) -> str:
     return f"({column}::jsonb)"
+
+
+def _installments_valid_predicate(col: str) -> str:
+    numeric = _INSTALLMENTS_NUMERIC_CASE.format(col=col)
+    return _INSTALLMENTS_VALID.format(col=col, numeric=numeric)
 
 
 def build_payments_audit_sql(schema: str) -> str:
     """SQL agregado: gerais, MP elegíveis e evidência de modalidade."""
     col = "raw_payload"
     j = _jsonb_expr(col)
-    valid = _INSTALLMENTS_VALID.format(col=j)
+    valid = _installments_valid_predicate(j)
+    safe_numeric = _INSTALLMENTS_NUMERIC_CASE.format(col=j)
     return f"""
     SELECT
       count(*)::bigint AS total_payments,
@@ -101,12 +121,8 @@ def build_payments_audit_sql(schema: str) -> str:
           AND lower(status) = 'approved'
           AND {valid}
       )::bigint AS mp_approved_valid_installments,
-      min(({col} -> 'installments')::text::numeric) FILTER (
-        WHERE {valid}
-      ) AS installments_min,
-      max(({col} -> 'installments')::text::numeric) FILTER (
-        WHERE {valid}
-      ) AS installments_max
+      min({safe_numeric}) AS installments_min,
+      max({safe_numeric}) AS installments_max
     FROM {schema}.payments
     """
 
@@ -149,12 +165,18 @@ def build_stock_audit_sql(schema: str) -> str:
 
 
 def classify_payment_evidence(payments: Mapping[str, Any]) -> tuple[str, int]:
-    """Retorna (status, exit_code) para a evidência de modalidade."""
-    total = int(payments["total_payments"] or 0)
-    valid = int(payments["valid_installments_gte_1"] or 0)
+    """Retorna (status, exit_code) para a evidência de modalidade.
+
+    - SKIP (0): tabela payments vazia — inconclusivo;
+    - FAIL (1): há payments mas zero evidência aprovada válida no Mercado Pago
+      (``mp_approved_valid_installments <= 0``);
+    - OK (0): somente com ``mp_approved_valid_installments > 0``.
+    """
+    total = int(payments.get("total_payments") or 0)
+    mp_approved_valid = int(payments.get("mp_approved_valid_installments") or 0)
     if total == 0:
         return "SKIP", 0
-    if valid == 0:
+    if mp_approved_valid <= 0:
         return "FAIL", 1
     return "OK", 0
 
@@ -165,74 +187,103 @@ def main() -> int:
         _err("ERRO: defina DATABASE_URL (postgresql://...)")
         return 2
 
-    url = make_url(database_url)
-    password = url.password
-    if url.get_backend_name() != "postgresql":
-        _err(
-            f"ERRO: DATABASE_URL nao e postgresql ({url.get_backend_name()})",
-            password,
-        )
+    password: Optional[str] = None
+    try:
+        url = make_url(database_url)
+        password = url.password
+        backend = url.get_backend_name()
+        if backend != "postgresql":
+            _err(
+                f"ERRO: DATABASE_URL nao e postgresql ({backend})",
+                password,
+            )
+            return 2
+        schema = _schema()
+    except SystemExit:
+        raise
+    except Exception as exc:
+        _err(f"ERRO: DATABASE_URL invalida ({_exc_label(exc)})", password)
         return 2
-
-    schema = _schema()
 
     try:
         engine = create_engine(database_url)
     except Exception as exc:
-        _err(f"ERRO: falha ao criar engine: {exc}", password)
+        _err(f"ERRO: falha ao criar engine ({_exc_label(exc)})", password)
         return 2
 
-    with engine.connect() as conn:
-        trans = conn.begin()
-        try:
-            conn.execute(text("SET TRANSACTION READ ONLY"))
-            ro = conn.execute(
-                text("SELECT current_setting('transaction_read_only')")
-            ).scalar()
-            if str(ro).lower() != "on":
-                _err(f"FAIL: transaction_read_only != on ({ro!r})", password)
-                trans.rollback()
+    payments: Optional[Mapping[str, Any]] = None
+    products: Optional[Mapping[str, Any]] = None
+    links: Optional[Mapping[str, Any]] = None
+    stock: Optional[Mapping[str, Any]] = None
+
+    try:
+        with engine.connect() as conn:
+            trans = conn.begin()
+            try:
+                conn.execute(text("SET TRANSACTION READ ONLY"))
+                ro = conn.execute(
+                    text("SELECT current_setting('transaction_read_only')")
+                ).scalar()
+                if str(ro).lower() != "on":
+                    _err(
+                        f"FAIL: transaction_read_only != on ({ro!r})",
+                        password,
+                    )
+                    trans.rollback()
+                    return 2
+                # Busca qualificada por schema permanece a fonte de verdade;
+                # search_path é apenas compatibilidade adicional.
+                conn.execute(text(f"SET search_path TO {schema}"))
+            except Exception as exc:
+                try:
+                    trans.rollback()
+                except Exception:
+                    pass
+                _err(
+                    f"FAIL: nao foi possivel estabelecer READ ONLY "
+                    f"({_exc_label(exc)})",
+                    password,
+                )
                 return 2
-            # Busca qualificada por schema permanece a fonte de verdade;
-            # search_path é apenas compatibilidade adicional.
-            conn.execute(text(f"SET search_path TO {schema}"))
-        except Exception as exc:
+
+            try:
+                payments = conn.execute(
+                    text(build_payments_audit_sql(schema))
+                ).mappings().one()
+                products = conn.execute(
+                    text(build_products_audit_sql(schema))
+                ).mappings().one()
+                links = conn.execute(
+                    text(build_links_audit_sql(schema))
+                ).mappings().one()
+                stock = conn.execute(
+                    text(build_stock_audit_sql(schema))
+                ).mappings().one()
+            except Exception as exc:
+                try:
+                    trans.rollback()
+                except Exception:
+                    pass
+                _err(
+                    f"FAIL: consulta de auditoria ({_exc_label(exc)})",
+                    password,
+                )
+                return 2
+
             try:
                 trans.rollback()
-            except Exception:
-                pass
-            _err(
-                f"FAIL: nao foi possivel estabelecer READ ONLY: {exc}",
-                password,
-            )
-            return 2
+            except Exception as exc:
+                _err(f"FAIL: rollback ({_exc_label(exc)})", password)
+                return 2
+    except Exception as exc:
+        # make_url/connect e falhas de rede/banco caem aqui com exit 2
+        # e rótulo sanitizado (sem credenciais).
+        _err(f"ERRO: falha de conexao ({_exc_label(exc)})", password)
+        return 2
 
-        try:
-            payments = conn.execute(
-                text(build_payments_audit_sql(schema))
-            ).mappings().one()
-            products = conn.execute(
-                text(build_products_audit_sql(schema))
-            ).mappings().one()
-            links = conn.execute(
-                text(build_links_audit_sql(schema))
-            ).mappings().one()
-            stock = conn.execute(
-                text(build_stock_audit_sql(schema))
-            ).mappings().one()
-        except Exception as exc:
-            try:
-                trans.rollback()
-            except Exception:
-                pass
-            _err(f"FAIL: consulta de auditoria: {exc}", password)
-            return 2
-
-        try:
-            trans.rollback()
-        except Exception as exc:
-            _err(f"FAIL: rollback: {exc}", password)
-            return 2
+    if payments is None or products is None or links is None or stock is None:
+        _err("ERRO: consulta de auditoria nao retornou resultado")
+        return 2
 
     evidence_status, evidence_code = classify_payment_evidence(payments)
 
@@ -249,13 +300,13 @@ def main() -> int:
         )
     elif evidence_status == "FAIL":
         _err(
-            "P1 FAIL: ha payments mas nenhuma linha com installments "
-            "inteiro >= 1 (contrato do resolvedor)"
+            "P1 FAIL: ha payments mas nenhuma evidencia valida aprovada "
+            "no Mercado Pago (mp_approved_valid_installments = 0)"
         )
     else:
         print(
-            "P1 OK (agregado): installments inteiro >= 1 presente "
-            "no contrato do resolvedor"
+            "P1 OK (agregado): installments inteiro >= 1 em pagamento "
+            "Mercado Pago aprovado (mp_approved_valid_installments > 0)"
         )
 
     print("\n== P6: numeros de produto/custo/estoque (agregados) ==")
