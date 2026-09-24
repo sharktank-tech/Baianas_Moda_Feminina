@@ -31,3 +31,6 @@ pedidos e publicação. Esta entrega corrige exclusivamente a simulação de
 prontidão; não reinterpreta pedidos sem evidência da modalidade nem altera gates
 de publicação. A retenção real do processador, quando fornecida, substitui as
 estimativas em qualquer cenário. Não há migração nem novas variáveis.
+
+Ver também `PAYMENT_SCENARIOS_LEGACY_AUDIT.md` (inventário dos consumidores
+legados de `payment_scenario` e proposta de correção).
