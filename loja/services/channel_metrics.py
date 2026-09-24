@@ -5,9 +5,12 @@ Agrega pedidos em grupos por origem de tráfego capturada no checkout
 inventada: sem sessão de navegação persistida não existe "sessões" e sem dados
 de investimento publicitário não existe CAC — esses campos permanecem ausentes.
 
-A margem por pedido reutiliza o avaliador canônico congelado (FASE 8.2.0-C);
-pedidos com snapshot de custo incompleto contribuem com margem ``None`` e são
-contabilizados em ``margin_known``. Nunca consulta provider e nunca muta nada.
+A margem por pedido usa a precedência de evidência de pagamento
+(``evaluate_order_unit_economics_with_payment``): retenção observada, depois
+cenário da modalidade, senão custos de pagamento ``unknown``. Pedidos sem
+evidência utilizável ou com snapshot incompleto contribuem com margem ``None``
+e são contabilizados em ``margin_known`` apenas quando a avaliação fica
+completa. Nunca consulta provider e nunca muta nada.
 """
 
 from __future__ import annotations
@@ -19,8 +22,9 @@ from typing import Iterable, Optional
 from ..modules.getway_mercado_pago.payment_models import Order
 from .order_unit_economics import (
     OrderUnitEconomicsError,
-    evaluate_order_unit_economics_from_snapshot,
+    evaluate_order_unit_economics_with_payment,
 )
+from .payment_scenario import select_order_payment
 from .unit_economics_policy import load_unit_economics_cost_policy
 
 
@@ -126,8 +130,10 @@ def build_channel_metrics(
                 group["paid_customers"].add(email)
 
         try:
-            result = evaluate_order_unit_economics_from_snapshot(
+            payment = select_order_payment(order)
+            result = evaluate_order_unit_economics_with_payment(
                 order,
+                payment,
                 policy=active_policy,
             )
             if result.complete and result.evaluation is not None:

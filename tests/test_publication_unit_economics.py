@@ -5,6 +5,7 @@ from loja.services.publication_unit_economics import (
     evaluate_product_net_margin,
 )
 from loja.services.unit_economics_policy import (
+    UnitEconomicsCostPolicy,
     load_unit_economics_cost_policy,
 )
 
@@ -62,6 +63,33 @@ def test_blocks_product_below_minimum_operational_margin():
     assert decision.evaluation.operational_margin_percent == Decimal("13.00")
 
 
+def test_blocks_when_installment_scenario_below_minimum():
+    policy = UnitEconomicsCostPolicy(
+        gateway_fee_percent=Decimal("5.00"),
+        installment_cost_percent=Decimal("30.00"),
+        tax_percent=Decimal("10.00"),
+        acquisition_cost_per_order=Decimal("5.00"),
+        refund_reserve_percent=Decimal("2.00"),
+    )
+    decision = evaluate_product_net_margin(
+        _product(),
+        policy=policy,
+        minimum_operational_margin_percent="10.00",
+    )
+
+    assert decision.allowed is False
+    assert decision.reasons == ("operational_margin_below_minimum",)
+    assert decision.evaluation is not None
+    assert decision.evaluation.operational_margin_percent < Decimal("10.00")
+    cash_fee = (Decimal("150.00") * Decimal("5.00") / Decimal("100")).quantize(
+        Decimal("0.01")
+    )
+    installment_fee = (
+        Decimal("150.00") * Decimal("30.00") / Decimal("100")
+    ).quantize(Decimal("0.01"))
+    assert installment_fee > cash_fee
+
+
 def test_unknown_costs_never_allow_publication():
     decision = evaluate_product_net_margin(
         _product(),
@@ -72,12 +100,30 @@ def test_unknown_costs_never_allow_publication():
     assert decision.allowed is False
     assert decision.reasons == ("unit_economics_incomplete",)
     assert decision.unknown_components == (
-        "gateway_fee",
-        "installment_cost",
+        "payment_fee",
         "tax",
         "acquisition_cost",
         "refund_reserve",
     )
+
+
+def test_installment_fee_unknown_keeps_gate_incomplete():
+    policy = UnitEconomicsCostPolicy(
+        gateway_fee_percent=Decimal("5.00"),
+        installment_cost_percent=None,
+        tax_percent=Decimal("10.00"),
+        acquisition_cost_per_order=Decimal("5.00"),
+        refund_reserve_percent=Decimal("2.00"),
+    )
+    decision = evaluate_product_net_margin(
+        _product(),
+        policy=policy,
+        minimum_operational_margin_percent="10.00",
+    )
+
+    assert decision.allowed is False
+    assert decision.reasons == ("unit_economics_incomplete",)
+    assert decision.unknown_components == ("payment_fee",)
 
 
 def test_missing_or_invalid_minimum_margin_blocks():

@@ -34,11 +34,11 @@ legado aditivo `:165-173`.
 
 | # | Consumidor | Local | Entrada / rota | `payment_scenario` | Comportamento |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Painel de prontidão | `sales_readiness.py:509-515` | `GET /admin/prontidao-vendas` (`admin_routes.py:389-394`) | loop `"cash"` + `"installment"` | **Corrigido (PR #74)**: duas margens + menor; PRONTO exige ambas |
-| 2 | Adapter de pedido | `order_unit_economics.py:104-109` | `evaluate_order_unit_economics` (`:76`), `_from_snapshot` (`:210-220`), `_with_payment` (`:224-257`) | nunca informado | Aditivo legado (com exceção da retenção observada, quando presente) |
-| 3 | Métricas por canal | `channel_metrics.py:129-132` → `_from_snapshot` | `GET /admin/metricas-por-canal` (`admin_routes.py:355-379`) | nunca informado | Aditivo legado |
-| 4 | Gate de publicação | `publication_unit_economics.py:112-116` | `publication.py:163-173`, só com `UNIT_ECONOMICS_PUBLICATION_GUARD_ENABLED=1` | nunca informado | Aditivo legado (hard-off por padrão) |
-| 5 | Dashboard de unit economics | `publication_unit_economics_dashboard.py:129-133` | `GET /admin/unit-economics` (`admin_routes.py:331-341`) | nunca informado | Aditivo legado |
+| 1 | Painel de prontidão | `sales_readiness.py` | `GET /admin/prontidao-vendas` | loop `"cash"` + `"installment"` | **Corrigido (PR #74)**: duas margens + menor; PRONTO exige ambas |
+| 2 | Adapter de pedido | `order_unit_economics.py` (`evaluate_order_unit_economics` / `_with_payment`) | consumidores com Payment | retém legado em `_from_snapshot`; `_with_payment` usa retenção → cenário → fail-closed | **Corrigido no wiring** (`_with_payment`); legado preservado só no caminho sem evidência |
+| 3 | Métricas por canal | `channel_metrics.py` → `select_order_payment` + `_with_payment` | `GET /admin/metricas-por-canal` | evidência por pedido | **Corrigido**: retenção → cenário → `unknown` (nunca aditivo) |
+| 4 | Gate de publicação | `publication_unit_economics.py` | `publication.py`, só com `UNIT_ECONOMICS_PUBLICATION_GUARD_ENABLED=1` | loop cash + installment | **Corrigido (hard-off)**: margem mínima em ambos; pior cenário em `evaluation` |
+| 5 | Dashboard de unit economics | `publication_unit_economics_dashboard.py` | `GET /admin/unit-economics` | loop cash + installment | **Corrigido**: colunas à vista/parcelada; consolidado = pior cenário |
 
 Notas do inventário:
 
@@ -178,22 +178,38 @@ gate, mudança de template, migração, novas variáveis, consultas a provider.
 
 ## Pendências
 
+Status nesta sessão (correções implementadas no branch
+`audit/payment-scenario-consumers`):
+
 1. **Verificar num payload Mercado Pago persistido real** que
-   `raw_payload["installments"]` existe e é inteiro (consulta read-only ao
-   banco ou sessão admin). Sem isso, o resolvedor devolverá `None` para todos
-   os pagamentos e o wiring só ativaria o caminho de retenção observada.
-2. Decidir o tratamento de pedidos **sem** evidência: desconhecido
-   (recomendado, fail-closed) ou manter aditivo temporariamente. Afeta quantas
-   linhas de `/admin/metricas-por-canal` deixam de ter margem conhecida.
-3. Regra de seleção do Payment por pedido quando houver múltiplos pagamentos
-   (reembolso, nova tentativa): definir antes de ligar o `channel_metrics`.
-4. Autorização explícita para alterar o gate de publicação (cenário duplo).
-5. Redesign de colunas do dashboard `/admin/unit-economics`.
-6. Revalidar a auditoria anterior de produtos/custos/estoque (números
-   potencialmente desatualizados).
+   `raw_payload["installments"]` existe e é inteiro.
+   **Pendente de execução** (sem `DATABASE_URL` neste ambiente): script
+   somente leitura `scripts/verify_payment_evidence_readonly.py` (P1 + P6),
+   schema-qualificado, agregado, sem PII.
+2. Tratamento de pedidos **sem** evidência: **Resolvido** — fail-closed
+   (`evaluate_order_unit_economics_with_payment` zera os campos de pagamento
+   da política; componentes `unknown`; nunca aditivo). Afeta
+   `/admin/metricas-por-canal` (`margin_known` só com Payment elegível).
+3. Regra de seleção do Payment por pedido: **Resolvido** —
+   `select_order_payment` em `loja/services/payment_scenario.py`
+   (Mercado Pago + `approved` + `amount == order.total`, mais recente;
+   sem candidato → `None`). Ligado em `channel_metrics` + eager
+   `Order.payments` na rota.
+4. Autorização para o gate de publicação (cenário duplo): **Resolvido**
+   (autorizado; implementado). `evaluate_product_net_margin` avalia cash e
+   installment e exige a margem mínima em **ambos**; pior cenário alimenta
+   `evaluation`. Gate continua hard-off (`UNIT_ECONOMICS_PUBLICATION_GUARD_ENABLED`
+   só com literal `1`).
+5. Redesign de colunas do dashboard `/admin/unit-economics`: **Resolvido** —
+   colunas à vista / parcelada + margem consolidada = pior cenário quando
+   ambos completos (`unit_economics_dashboard.html`).
+6. Revalidar a auditoria anterior de produtos/custos/estoque:
+   **Script pronto, execução pendente** — mesma saída do item 1
+   (`scripts/verify_payment_evidence_readonly.py`).
 7. Fornecedor de frete segue bloqueado (`loja/integrations/aliexpress/FREIGHT_PROBE.md`
    no início de qualquer sessão de cotação): sem cotação ao vivo nesta entrega;
    `SHIPPING_TEMPORARY_FLAT_RATE` R$ 10,00 continua sendo receita temporária,
-   nunca prova de custo logístico.
+   nunca prova de custo logístico. **Inalterado.**
 8. `gh` CLI indisponível nesta sessão: o PR será aberto pela URL de comparação
    do GitHub após o push do branch.
+   https://github.com/sharktank-tech/PolloModas/pull/new/audit/payment-scenario-consumers

@@ -42,8 +42,10 @@
       <h2 class="font-semibold text-gray-800">Produtos</h2>
       <p class="text-xs text-gray-500 mt-1">
         Margem de contribuição: receita bruta menos landed cost e custos
-        variáveis. Margem líquida operacional: contribuição menos custos
-        operacionais. Custos desconhecidos nunca são tratados como zero.
+        variáveis. Margens à vista e parcelada usam a taxa total de cada
+        cenário (nunca somadas). Margem líquida operacional consolidada: o pior
+        cenário quando ambos estão completos. Custos desconhecidos nunca são
+        tratados como zero.
       </p>
     </div>
     <div class="overflow-x-auto">
@@ -54,6 +56,8 @@
             <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Receita bruta</th>
             <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Custo (landed)</th>
             <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Margem de contribuição</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Margem à vista</th>
+            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Margem parcelada</th>
             <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Margem líquida operacional</th>
             <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Status</th>
           </tr>
@@ -68,6 +72,18 @@
               {% if row.contribution_margin is not none %}
                 R$ {{ row.contribution_margin }}
                 {% if row.contribution_margin_percent is not none %}({{ row.contribution_margin_percent }}%){% endif %}
+              {% else %}—{% endif %}
+            </td>
+            <td class="px-4 py-3 text-sm">
+              {% if row.cash_margin is not none %}
+                R$ {{ row.cash_margin }}
+                {% if row.cash_margin_percent is not none %}({{ row.cash_margin_percent }}%){% endif %}
+              {% else %}—{% endif %}
+            </td>
+            <td class="px-4 py-3 text-sm">
+              {% if row.installment_margin is not none %}
+                R$ {{ row.installment_margin }}
+                {% if row.installment_margin_percent is not none %}({{ row.installment_margin_percent }}%){% endif %}
               {% else %}—{% endif %}
             </td>
             <td class="px-4 py-3 text-sm font-semibold {% if row.operational_margin is not none and row.operational_margin < 0 %}text-red-700{% elif row.operational_margin is not none and row.operational_margin == 0 %}text-orange-700{% else %}text-gray-700{% endif %}">
@@ -89,7 +105,7 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">Nenhum produto com supplier ativo.</td></tr>
+          <tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">Nenhum produto com supplier ativo.</td></tr>
           {% endfor %}
         </tbody>
       </table>

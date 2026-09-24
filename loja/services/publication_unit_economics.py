@@ -3,6 +3,12 @@
 Avaliação pura e explícita para simular a venda de uma unidade antes de publicar.
 Não altera Product, não publica, não consulta provider e não usa defaults
 financeiros implícitos.
+
+Cenários de pagamento (Pendência 4 da auditoria): a decisão exige a margem
+mínima em AMBOS os cenários — à vista (``PAYMENT_SCENARIO_CASH``) e parcelada
+(``PAYMENT_SCENARIO_INSTALLMENT``) — com a mesma semântica do painel de
+prontidão. O pior cenário alimenta ``evaluation``. O gate continua hard-off
+(``UNIT_ECONOMICS_PUBLICATION_GUARD_ENABLED`` só com o literal ``1``).
 """
 
 from __future__ import annotations
@@ -13,6 +19,9 @@ from typing import Optional
 
 from .unit_economics import UnitEconomicsResult, evaluate_unit_economics
 from .unit_economics_policy import (
+    PAYMENT_SCENARIO_CASH,
+    PAYMENT_SCENARIO_INSTALLMENT,
+    PAYMENT_SCENARIOS,
     UnitEconomicsCostPolicy,
     build_unit_economics_components,
 )
@@ -109,37 +118,54 @@ def evaluate_product_net_margin(
             evaluation=None,
         )
 
-    variable, operational = build_unit_economics_components(
-        charged_amount=sale_price,
-        discount_amount=Decimal("0.00"),
-        policy=policy,
-    )
-    evaluation = evaluate_unit_economics(
-        sale_price=sale_price,
-        landed_cost=landed_cost,
-        variable_costs=variable,
-        operational_costs=operational,
-    )
+    evaluations: dict[str, UnitEconomicsResult] = {}
+    for scenario in PAYMENT_SCENARIOS:
+        variable, operational = build_unit_economics_components(
+            charged_amount=sale_price,
+            discount_amount=Decimal("0.00"),
+            policy=policy,
+            payment_scenario=scenario,
+        )
+        evaluations[scenario] = evaluate_unit_economics(
+            sale_price=sale_price,
+            landed_cost=landed_cost,
+            variable_costs=variable,
+            operational_costs=operational,
+        )
 
-    if not evaluation.complete:
+    unknown_union: list[str] = []
+    incomplete_evaluation: Optional[UnitEconomicsResult] = None
+    for scenario in PAYMENT_SCENARIOS:
+        result = evaluations[scenario]
+        if not result.complete and incomplete_evaluation is None:
+            incomplete_evaluation = result
+        for name in result.unknown_components:
+            if name not in unknown_union:
+                unknown_union.append(name)
+
+    if unknown_union:
         return NetMarginPublicationDecision(
             allowed=False,
             reasons=("unit_economics_incomplete",),
-            unknown_components=evaluation.unknown_components,
+            unknown_components=tuple(unknown_union),
             minimum_operational_margin_percent=minimum,
-            evaluation=evaluation,
+            evaluation=incomplete_evaluation,
         )
 
+    worst = min(
+        (evaluations[s] for s in PAYMENT_SCENARIOS),
+        key=lambda result: result.operational_margin_percent,
+    )
     if (
-        evaluation.operational_margin_percent is None
-        or evaluation.operational_margin_percent < minimum
+        worst.operational_margin_percent is None
+        or worst.operational_margin_percent < minimum
     ):
         return NetMarginPublicationDecision(
             allowed=False,
             reasons=("operational_margin_below_minimum",),
             unknown_components=(),
             minimum_operational_margin_percent=minimum,
-            evaluation=evaluation,
+            evaluation=worst,
         )
 
     return NetMarginPublicationDecision(
@@ -147,7 +173,7 @@ def evaluate_product_net_margin(
         reasons=(),
         unknown_components=(),
         minimum_operational_margin_percent=minimum,
-        evaluation=evaluation,
+        evaluation=worst,
     )
 
 

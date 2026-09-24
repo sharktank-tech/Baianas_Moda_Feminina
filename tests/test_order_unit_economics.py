@@ -288,7 +288,7 @@ def test_observed_processor_retention_replaces_gateway_estimates():
     assert "installment_cost" not in result.unknown_components
 
 
-def test_missing_observed_retention_falls_back_to_policy_estimates():
+def test_missing_payment_evidence_fails_closed_not_additive():
     from loja.services.order_unit_economics import (
         evaluate_order_unit_economics_with_payment,
     )
@@ -305,9 +305,71 @@ def test_missing_observed_retention_falls_back_to_policy_estimates():
         policy=_complete_policy(),
     )
 
+    assert result.complete is False
+    assert result.evaluation is not None
+    assert result.evaluation.operational_margin is None
+    assert "gateway_fee" in result.unknown_components
+    assert "installment_cost" in result.unknown_components
+    assert "payment_fee" not in result.unknown_components
+
+
+def test_payment_none_fails_closed_without_additive():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_with_payment,
+    )
+
+    order = _order(id="order-1", items=[_snapshot_item()])
+    result = evaluate_order_unit_economics_with_payment(
+        order,
+        None,
+        policy=_complete_policy(),
+    )
+
+    assert result.complete is False
+    assert "gateway_fee" in result.unknown_components
+    assert "installment_cost" in result.unknown_components
+
+
+def test_payment_scenario_cash_uses_gateway_total_fee():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_with_payment,
+    )
+
+    order = _order(id="order-1", items=[_snapshot_item()])
+    payment = _approved_payment(order, raw_payload={"installments": 1})
+
+    result = evaluate_order_unit_economics_with_payment(
+        order,
+        payment,
+        policy=_complete_policy(),
+    )
+
     assert result.complete is True
     assert result.evaluation is not None
+    # 90 * 5% = 4.50 (único payment_fee) + desconto 10 + imposto 0
     assert result.evaluation.known_variable_costs == Decimal("14.50")
+    assert "gateway_fee" not in result.unknown_components
+    assert "installment_cost" not in result.unknown_components
+
+
+def test_payment_scenario_installment_uses_installment_total_fee():
+    from loja.services.order_unit_economics import (
+        evaluate_order_unit_economics_with_payment,
+    )
+
+    order = _order(id="order-1", items=[_snapshot_item()])
+    payment = _approved_payment(order, raw_payload={"installments": 6})
+
+    result = evaluate_order_unit_economics_with_payment(
+        order,
+        payment,
+        policy=_complete_policy(),
+    )
+
+    assert result.complete is True
+    assert result.evaluation is not None
+    # 90 * 0% = 0 (único payment_fee) + desconto 10 + imposto 0
+    assert result.evaluation.known_variable_costs == Decimal("10.00")
 
 
 def test_observed_retention_removes_gateway_unknowns_only():

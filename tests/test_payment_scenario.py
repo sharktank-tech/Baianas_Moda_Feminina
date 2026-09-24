@@ -3,7 +3,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from loja.services.payment_scenario import resolve_payment_scenario
+from loja.services.payment_scenario import (
+    resolve_payment_scenario,
+    select_order_payment,
+)
 from loja.services.unit_economics_policy import (
     PAYMENT_SCENARIO_CASH,
     PAYMENT_SCENARIO_INSTALLMENT,
@@ -156,3 +159,79 @@ def test_unknown_scenario_preserves_legacy_additive_contract():
     ]
     assert variable[0].amount == Decimal("8.20")
     assert variable[1].amount == Decimal("16.46")
+
+
+def _eligible_payment(**overrides):
+    from datetime import datetime
+
+    values = {
+        "provider": "mercado_pago",
+        "status": "approved",
+        "amount": Decimal("90.00"),
+        "created_at": datetime(2026, 1, 1, 12, 0, 0),
+        "raw_payload": {"installments": 1},
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def _order(total="90.00", payments=None):
+    return SimpleNamespace(
+        id="order-1",
+        total=Decimal(total),
+        payments=list(payments or []),
+    )
+
+
+def test_select_order_payment_returns_eligible_approved_payment():
+    payment = _eligible_payment()
+    selected = select_order_payment(_order(payments=[payment]))
+    assert selected is payment
+
+
+def test_select_order_payment_prefers_newest_created_at():
+    from datetime import datetime
+
+    older = _eligible_payment(created_at=datetime(2026, 1, 1, 12, 0, 0))
+    newer = _eligible_payment(created_at=datetime(2026, 2, 1, 12, 0, 0))
+    selected = select_order_payment(_order(payments=[older, newer]))
+    assert selected is newer
+
+
+def test_select_order_payment_rejects_amount_mismatch():
+    payment = _eligible_payment(amount=Decimal("80.00"))
+    assert select_order_payment(_order(payments=[payment])) is None
+
+
+def test_select_order_payment_rejects_non_approved_or_other_provider():
+    assert (
+        select_order_payment(
+            _order(payments=[_eligible_payment(status="pending")])
+        )
+        is None
+    )
+    assert (
+        select_order_payment(
+            _order(payments=[_eligible_payment(provider="other")])
+        )
+        is None
+    )
+
+
+def test_select_order_payment_none_without_candidates():
+    assert select_order_payment(_order(payments=[])) is None
+    assert select_order_payment(SimpleNamespace(total=Decimal("90.00"))) is None
+    assert (
+        select_order_payment(SimpleNamespace(total=None, payments=[])) is None
+    )
+
+
+def test_select_order_payment_does_not_mutate_order_or_payments():
+    payment = _eligible_payment()
+    order = _order(payments=[payment])
+    before_payments = list(order.payments)
+
+    select_order_payment(order)
+
+    assert order.payments == before_payments
+    assert order.total == Decimal("90.00")

@@ -8,7 +8,11 @@ from decimal import Decimal
 
 import pytest
 
-from loja.modules.getway_mercado_pago.payment_models import Order, OrderItem
+from loja.modules.getway_mercado_pago.payment_models import (
+    Order,
+    OrderItem,
+    Payment,
+)
 from loja.services.channel_metrics import build_channel_metrics
 from loja.services.unit_economics_policy import UnitEconomicsCostPolicy
 
@@ -57,8 +61,24 @@ def _order(
     )
 
 
+def _attach_payment(order, *, installments=1):
+    payment = Payment(
+        id=uuid.uuid4(),
+        order_id=order.id,
+        provider="mercado_pago",
+        provider_payment_id="test-" + uuid.uuid4().hex,
+        status="approved",
+        amount=order.total,
+        currency="BRL",
+        raw_payload={"installments": installments},
+    )
+    order.payments.append(payment)
+    return order
+
+
 def _order_with_cost_snapshot(user_id, product, *, total="59.90", unit="40.00",
-                              shipping="10.00", source="google"):
+                              shipping="10.00", source="google",
+                              installments=1):
     order = _order(total=total, source=source, user_id=user_id)
     order.items.append(
         OrderItem(
@@ -75,6 +95,8 @@ def _order_with_cost_snapshot(user_id, product, *, total="59.90", unit="40.00",
             supplier_cost_currency_snapshot="BRL",
         )
     )
+    if installments is not None:
+        _attach_payment(order, installments=installments)
     return order
 
 
@@ -135,7 +157,7 @@ def test_margin_uses_cost_snapshot_and_fail_closed(db, make_product):
     orders = [
         _order_with_cost_snapshot(user_id, product),  # margem conhecida
         _order_with_cost_snapshot(user_id, product),
-        _order(user_id=user_id, source="google"),  # sem snapshot items -> desconhecida
+        _order(user_id=user_id, source="google"),  # sem snapshot/payment -> desconhecida
     ]
     rows, totals = build_channel_metrics(orders, policy=_complete_policy())
     row = rows[0]
@@ -145,6 +167,33 @@ def test_margin_uses_cost_snapshot_and_fail_closed(db, make_product):
     assert row.avg_margin > Decimal("0.00")
     assert totals.margin_known_orders == 2
     assert totals.margin_known_value is not None
+
+
+def test_orders_without_payment_evidence_are_margin_unknown(db, make_product):
+    product = make_product(stock=5)
+    user_id = uuid.uuid4()
+    orders = [
+        _order_with_cost_snapshot(user_id, product, installments=None),
+        _order_with_cost_snapshot(user_id, product, installments=None),
+    ]
+    rows, totals = build_channel_metrics(orders, policy=_complete_policy())
+
+    assert rows[0].margin_known == 0
+    assert rows[0].avg_margin is None
+    assert totals.margin_known_orders == 0
+    assert totals.margin_known_value is None
+
+
+def test_installment_payment_evidence_yields_known_margin(db, make_product):
+    product = make_product(stock=5)
+    orders = [
+        _order_with_cost_snapshot(uuid.uuid4(), product, installments=6),
+    ]
+    rows, totals = build_channel_metrics(orders, policy=_complete_policy())
+
+    assert rows[0].margin_known == 1
+    assert rows[0].avg_margin is not None
+    assert totals.margin_known_orders == 1
 
 
 def test_margin_incomplete_kept_out_of_avg(db, make_product):
