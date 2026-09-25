@@ -217,6 +217,45 @@ def admin_catalog(client, admin_user, login, catalog, ae_env):
     yield client
 
 
+@pytest.fixture(autouse=True)
+def reference_quote_table(db):
+    from sqlalchemy import text
+
+    db.session.execute(
+        text(
+            """CREATE TABLE IF NOT EXISTS supplier_reference_freight_quotes (
+                supplier_product_id VARCHAR(36) NOT NULL,
+                dest_prefix VARCHAR(3) NOT NULL,
+                option_key VARCHAR(120) NOT NULL DEFAULT '',
+                quantity INTEGER NOT NULL,
+                currency VARCHAR(3) NOT NULL,
+                cost NUMERIC(12,2) NOT NULL,
+                min_days INTEGER,
+                max_days INTEGER,
+                quoted_at DATETIME NOT NULL,
+                expires_at DATETIME NOT NULL,
+                provider_method VARCHAR(120) NOT NULL,
+                evidence_ref_hash VARCHAR(64),
+                updated_at DATETIME NOT NULL,
+                dest_cep VARCHAR(8),
+                dest_cep_end VARCHAR(8),
+                variant_scope VARCHAR(64),
+                covers_all_variants BOOLEAN NOT NULL DEFAULT 0,
+                qty_max INTEGER,
+                PRIMARY KEY (supplier_product_id, dest_prefix, option_key, quantity),
+                CHECK (length(dest_prefix) = 3),
+                CHECK (quantity > 0),
+                CHECK (currency = 'BRL'),
+                CHECK (cost >= 0),
+                CHECK (expires_at > quoted_at)
+            )"""
+        )
+    )
+    db.session.execute(text("DELETE FROM supplier_reference_freight_quotes"))
+    db.session.commit()
+    yield
+
+
 # --------------------------------------------------------------------------
 # Ações helpers (via HTTP conforme o fluxo real)
 # --------------------------------------------------------------------------
@@ -225,10 +264,38 @@ def _import(client, product_id=PRODUCT_ID):
     return client.post(f"{PREFIX}/{product_id}/importar", follow_redirects=True)
 
 
-def _frete(client, product_id=PRODUCT_ID, shipping="20.00", currency="BRL", follow=True):
+def _frete(client, product_id=PRODUCT_ID, shipping="20.00", currency="BRL", follow=True,
+           dest_cep="77000000", ttl_days="30", evidence_ref="COT-TEST-001",
+           variant_scope="all", qty_max="1", extra=None):
+    data = {
+        "shipping_cost": shipping, "freight_currency": currency,
+        "freight_dest_cep": dest_cep, "freight_ttl_days": ttl_days,
+        "freight_evidence_ref": evidence_ref,
+        "freight_variant_scope": variant_scope, "freight_qty_max": qty_max,
+    }
+    if extra:
+        data.update(extra)
     return client.post(
         f"{PREFIX}/rascunho/{product_id}/frete",
-        data={"shipping_cost": shipping, "freight_currency": currency},
+        data=data,
+        follow_redirects=follow,
+    )
+
+
+def _renovar(client, product_id=PRODUCT_ID, shipping="20.00", currency="BRL", follow=True,
+             dest_cep="77000000", ttl_days="30", evidence_ref="COT-TEST-001",
+             variant_scope="all", qty_max="1", extra=None):
+    data = {
+        "shipping_cost": shipping, "freight_currency": currency,
+        "freight_dest_cep": dest_cep, "freight_ttl_days": ttl_days,
+        "freight_evidence_ref": evidence_ref,
+        "freight_variant_scope": variant_scope, "freight_qty_max": qty_max,
+    }
+    if extra:
+        data.update(extra)
+    return client.post(
+        f"{PREFIX}/publicado/{product_id}/frete",
+        data=data,
         follow_redirects=follow,
     )
 
@@ -1089,3 +1156,169 @@ def test_csrf_enforced_when_enabled(app, client, admin_user, login, ae_env, fake
     finally:
         app.config["WTF_CSRF_ENABLED"] = False
 
+
+
+# --------------------------------------------------------------------------
+# 11) Evidência de frete obrigatória + renovação de publicado (P7, ITENS 1/2/4)
+# --------------------------------------------------------------------------
+
+def _quote_rows(db, sp_id):
+    from sqlalchemy import text
+
+    return db.session.execute(
+        text(
+            "SELECT dest_cep, dest_cep_end, variant_scope, covers_all_variants,"
+            " qty_max, cost FROM supplier_reference_freight_quotes"
+            " WHERE supplier_product_id = :sp"
+        ),
+        {"sp": str(sp_id)},
+    ).all()
+
+
+def test_frete_sem_referencia_e_sem_validade_rejeitado(admin_catalog, db):
+    """ITEM 1.4: sem referência/validade, falha com mensagem clara e nada grava."""
+    _import(admin_catalog)
+    resp = admin_catalog.post(
+        f"{PREFIX}/rascunho/{PRODUCT_ID}/frete",
+        data={"shipping_cost": "20.00", "freight_currency": "BRL"},
+        follow_redirects=True,
+    )
+    page = resp.get_data(as_text=True)
+    assert "Obrigatória" in page or "obrigatória" in page.lower()
+
+    sp = _supplier_product_from_db(db)
+    assert sp.shipping_cost is None
+    assert sp.freight_status != "available"
+    assert _quote_rows(db, sp.id) == []
+
+
+def test_frete_sem_cep_rejeitado(admin_catalog, db):
+    _import(admin_catalog)
+    resp = admin_catalog.post(
+        f"{PREFIX}/rascunho/{PRODUCT_ID}/frete",
+        data={
+            "shipping_cost": "20.00", "freight_currency": "BRL",
+            "freight_ttl_days": "30", "freight_evidence_ref": "COT-X",
+            "freight_variant_scope": "all", "freight_qty_max": "1",
+        },
+        follow_redirects=True,
+    )
+    assert "CEP" in resp.get_data(as_text=True)
+    sp = _supplier_product_from_db(db)
+    assert sp.shipping_cost is None
+    assert _quote_rows(db, sp.id) == []
+
+
+def test_frete_com_evidencia_grava_custo_e_cotacao(admin_catalog, db):
+    """ITEM 5.1: fluxo real via POST grava custo + cotação com escopo."""
+    _import(admin_catalog)
+    resp = _frete(
+        admin_catalog, shipping="20.00", currency="BRL",
+        dest_cep="77000000", ttl_days="30", evidence_ref="COT-REAL-001",
+        variant_scope="all", qty_max="3",
+        extra={"freight_dest_cep_end": "77099999",
+               "freight_min_days": "8", "freight_max_days": "14"},
+    )
+    page = resp.get_data(as_text=True)
+    assert "vigente até" in page
+
+    sp = _supplier_product_from_db(db)
+    assert sp.shipping_cost == Decimal("20.00")
+    assert sp.freight_status == "available"
+    rows = _quote_rows(db, sp.id)
+    assert len(rows) == 1
+    assert rows[0][0] == "77000000"
+    assert rows[0][1] == "77099999"
+    assert rows[0][3] == 1  # covers_all_variants
+    assert rows[0][4] == 3  # qty_max
+    assert Decimal(str(rows[0][5])) == Decimal("20.00")
+
+
+def test_renovacao_publicado_renova_sem_despublicar(admin_catalog, db):
+    """ITEM 2.3/5.2: publicado renova pela rota nova; rascunho segue bloqueado."""
+    _import(admin_catalog)
+    _frete(admin_catalog, shipping="20.00", currency="BRL")
+    _margem(admin_catalog, margin="30")
+    _publicar(admin_catalog)
+
+    product = _draft_from_db()
+    assert product.is_active is True and product.is_draft is False
+    old_price = product.price
+
+    # Fluxo antigo continua bloqueado para o publicado.
+    resp = _frete(admin_catalog, shipping="10", currency="BRL", follow=True)
+    assert "não encontrado" in resp.get_data(as_text=True).lower()
+
+    # Renovação pela rota nova, com regras iguais (custo + evidência).
+    resp = _renovar(
+        admin_catalog, shipping="22.00", currency="BRL",
+        dest_cep="77000000", ttl_days="15", evidence_ref="COT-RENOV-002",
+        variant_scope="all", qty_max="2",
+    )
+    page = resp.get_data(as_text=True)
+    assert "vigente até" in page
+    assert "mesma margem" in page
+
+    db.session.expire_all()
+    product = _draft_from_db()
+    assert product.is_active is True and product.is_draft is False
+    sp = _supplier_product_from_db(db)
+    assert sp.shipping_cost == Decimal("22.00")
+    # CHECK do banco exige publicado+priced: mudança material recalcula com
+    # a MESMA margem (30%) em vez de marcar stale; preço sobe.
+    assert product.pricing_status == "priced"
+    assert product.pricing_error is None
+    assert product.target_margin_percent == Decimal("30.00")
+    assert product.price > old_price
+    rows = _quote_rows(db, sp.id)
+    assert len(rows) == 1
+    assert Decimal(str(rows[0][5])) == Decimal("22.00")
+
+
+def test_renovacao_rascunho_ou_inexistente_bloqueia(admin_catalog, db):
+    _import(admin_catalog)
+    # Ainda rascunho: renovação de publicado não se aplica.
+    resp = _renovar(admin_catalog, follow=True)
+    assert "não encontrado" in resp.get_data(as_text=True).lower()
+    sp = _supplier_product_from_db(db)
+    assert sp.shipping_cost is None
+
+    # ID inexistente.
+    resp = admin_catalog.post(
+        f"{PREFIX}/publicado/nao-existe/frete",
+        data={"shipping_cost": "1.00"},
+        follow_redirects=True,
+    )
+    assert "não encontrado" in resp.get_data(as_text=True).lower()
+
+
+def test_falha_na_cotacao_reverte_custo(admin_catalog, db, monkeypatch):
+    """ITEM 4.3: falha na 2ª gravação reverte a 1ª (transação única)."""
+    import loja.views.aliexpress_admin_routes as routes
+    import loja.services.supplier_freight_quotes as sfq
+
+    _import(admin_catalog)
+    _frete(admin_catalog, shipping="20.00", currency="BRL")
+    sp = _supplier_product_from_db(db)
+    assert sp.shipping_cost == Decimal("20.00")
+
+    real_store = sfq.store_reference_freight_quote
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("falha simulada na persistência")
+
+    monkeypatch.setattr(sfq, "store_reference_freight_quote", _boom)
+    monkeypatch.setattr(routes, "store_reference_freight_quote", _boom,
+                        raising=False)
+
+    resp = _frete(admin_catalog, shipping="99.00", currency="BRL")
+    page = resp.get_data(as_text=True)
+    assert "Nenhuma alteração foi salva" in page
+
+    db.session.expire_all()
+    sp = _supplier_product_from_db(db)
+    # Custo novo revertido: checkout segue com o par antigo consistente.
+    assert sp.shipping_cost == Decimal("20.00")
+    rows = _quote_rows(db, sp.id)
+    assert len(rows) == 1
+    assert Decimal(str(rows[0][5])) == Decimal("20.00")

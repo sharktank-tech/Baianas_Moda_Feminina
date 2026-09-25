@@ -254,16 +254,73 @@ class TableDomesticProvider:
         )
 
 
+_CEP8_RE = re.compile(r"^[0-9]{8}$")
+
+
+def _evidence_scope_covers(fresh, *, dest: str, variant_ids, sp_qty) -> Optional[str]:
+    """Escopo explícito da evidência (ITEM 3, checkout).
+
+    A evidência vale apenas para o que foi declarado — sem inferência:
+      - destino: CEP exato (``dest_cep``) ou faixa explícita
+        (``dest_cep <= destino <= dest_cep_end``); prefixo sozinho NUNCA casa;
+      - variante: ``variant_scope`` igual ao da linha, ou
+        ``covers_all_variants`` explícito; linha sem variante só passa com
+        cobertura multi;
+      - quantidade: soma do vínculo em ``1..qty_max`` (teto declarado).
+    Retorna None quando cobre, senão o código de bloqueio.
+    """
+    dest_cep = fresh.get("dest_cep")
+    if not isinstance(dest_cep, str) or not _CEP8_RE.match(dest_cep):
+        return "unverified_cost"
+    end = fresh.get("dest_cep_end")
+    if end is not None:
+        if not (
+            isinstance(end, str)
+            and _CEP8_RE.match(end)
+            and end >= dest_cep
+        ):
+            return "unverified_cost"
+        if not (dest_cep <= dest <= end):
+            return "unverified_cost"
+    elif dest != dest_cep:
+        return "unverified_cost"
+    if fresh.get("covers_all_variants"):
+        pass
+    else:
+        scope = fresh.get("variant_scope")
+        if not (isinstance(scope, str) and scope):
+            return "unverified_cost"
+        for vid in variant_ids or ():
+            if (vid or "") != scope:
+                return "unverified_cost"
+    qty_max = fresh.get("qty_max")
+    if isinstance(qty_max, bool):
+        return "unverified_cost"
+    try:
+        ceiling = int(qty_max)
+    except (TypeError, ValueError):
+        return "unverified_cost"
+    try:
+        total = int(sp_qty)
+    except (TypeError, ValueError):
+        return "unverified_cost"
+    if ceiling < 1 or total < 1 or total > ceiling:
+        return "unverified_cost"
+    return None
+
+
 class AliExpressSupplierProvider:
     """Cotação AliExpress somente com custo fresco e comprovado.
 
     O ``SupplierProduct.shipping_cost`` persistido é genérico/obsoleto por
     natureza: não comprova destino, opção de envio, quantidade nem momento.
     Por isso a cotação exige um contexto fresco por vínculo
-    (``fresh_quotes[str(supplier_product_id)]`` com custo, prefixo de
-    destino, opção, quantidade, moeda, momento e validade) — em produção,
-    alimentado pela integração de frete do fornecedor; sem ele, bloqueia
-    com ``unverified_cost`` em vez de assumir que o custo anterior vale.
+    (``fresh_quotes[str(supplier_product_id)]`` com custo, escopo explícito
+    — CEP exato ou faixa declarada (nunca prefixo inferido), variante
+    vinculada ou cobertura multi explícita, teto de quantidade —, opção,
+    moeda, momento e validade) — em produção, alimentado pela evidência
+    manual do admin; sem ele, bloqueia com ``unverified_cost`` em vez de
+    assumir que o custo anterior vale.
     Prazo vem do contexto fresco (pode ser None = "prazo do fornecedor").
     Frete sem comprovação nunca cai no simulador doméstico.
     """
@@ -279,7 +336,8 @@ class AliExpressSupplierProvider:
         if dest is None:
             raise QuoteUnavailable("invalid_destination")
         current = now or utcnow()
-        # Agrega quantidade por vínculo (o custo fresco vale para qty exata).
+        # Agrega por vínculo: quantidade total + variantes exigidas (cada
+        # linha precisa de cobertura; o teto vale para a soma do vínculo).
         per_sp: dict = {}
         order: list = []
         for line in group.lines:
@@ -300,16 +358,21 @@ class AliExpressSupplierProvider:
             if sp is None:
                 raise QuoteUnavailable("no_supplier_data")
             key = str(sp.id)
-            if key not in per_sp:
-                per_sp[key] = {"qty": 0}
+            entry = per_sp.get(key)
+            if entry is None:
+                entry = {"qty": 0, "variants": set()}
+                per_sp[key] = entry
                 order.append(key)
-            per_sp[key]["qty"] += int(line.quantity or 1)
+            entry["qty"] += int(line.quantity or 1)
+            entry["variants"].add(
+                "" if line.variant_id is None else str(line.variant_id)
+            )
         total = Decimal("0.00")
         min_days = max_days = None
         for key in order:
             fresh = self.fresh_quotes.get(key)
             problem = self._check_fresh(
-                fresh, dest, group.option, per_sp[key]["qty"], current
+                fresh, dest, group.option, per_sp[key], current
             )
             if problem is not None:
                 raise QuoteUnavailable(problem)
@@ -327,21 +390,13 @@ class AliExpressSupplierProvider:
         )
 
     @staticmethod
-    def _check_fresh(fresh, dest: str, option, qty: int, now) -> Optional[str]:
+    def _check_fresh(fresh, dest: str, option, coverage: dict, now) -> Optional[str]:
         """Prova estrita: retorna None se o custo vale para este cenário,
-        ou o código do bloqueio (destino, opção, quantidade, moeda, valor,
+        ou o código do bloqueio (destino, opção, escopo, moeda, valor,
         validade)."""
         if not isinstance(fresh, dict):
             return "unverified_cost"
-        prefix = str(fresh.get("dest_prefix") or "")
-        if not prefix or not dest.startswith(prefix):
-            return "unverified_cost"
         if (fresh.get("option") or None) != (option or None):
-            return "unverified_cost"
-        try:
-            if int(fresh.get("qty")) != int(qty):
-                return "unverified_cost"
-        except (TypeError, ValueError):
             return "unverified_cost"
         if str(fresh.get("currency") or "BRL").upper() != "BRL":
             return "currency_mismatch"
@@ -360,7 +415,12 @@ class AliExpressSupplierProvider:
                 return "expired"
         except (TypeError, ValueError):
             return "unverified_cost"
-        return None
+        return _evidence_scope_covers(
+            fresh,
+            dest=dest,
+            variant_ids=coverage.get("variants") or set(),
+            sp_qty=coverage.get("qty") or 0,
+        )
 
 
 #: Tolerância de relógio para cotação fresca com quoted_at no futuro.
@@ -608,11 +668,17 @@ def assign_group_origins(groups) -> list:
 def default_providers():
     """Provedores da operação: origem/tabela doméstica via config (sem padrão).
 
-    Com ``SHIPPING_GROUPED_QUOTE_ENABLED=True``, o grupo aliexpress
-    lê cotações válidas de ``supplier_reference_freight_quotes``
-    (via ``find_valid_reference_quotes``) para o cenário de referência.
-    Sem cotação vigente o checkout bloqueia (``QuoteUnavailable``)
-    em vez de presumir valor.
+    O grupo aliexpress lê cotações válidas de
+    ``supplier_reference_freight_quotes`` (via ``load_fresh_quotes_snapshot``)
+    para o cenário de referência, em QUALQUER modo — ITEM 5.5: a evidência
+    autoriza a venda; o modo (``SHIPPING_GROUPED_QUOTE_ENABLED``) define só
+    o valor cobrado (cotação real vs. tarifa flat). Sem cotação vigente o
+    checkout bloqueia (``QuoteUnavailable``) em vez de presumir valor.
+
+    Cenário único de referência ("fotografia única"): grupos de checkout
+    não carregam opção de envio; manter ``SALES_READINESS_SHIPPING_OPTION``
+    ausente até o checkout oferecer escolha, senão o checkout bloqueia
+    (fail-closed).
     """
     from flask import current_app
 
@@ -620,25 +686,17 @@ def default_providers():
     fresh = current_app.config.get("SHIPPING_ALIEXPRESS_FRESH_QUOTES") or {}
     if not isinstance(fresh, dict):
         fresh = {}
-    grouped = bool(current_app.config.get("SHIPPING_GROUPED_QUOTE_ENABLED", False))
-    if grouped:
-        # Cenário único de referência ("fotografia única"): grupos de
-        # checkout não carregam opção de envio, então só cotações com a
-        # mesma opção do cenário validam. Na prática, manter
-        # SALES_READINESS_SHIPPING_OPTION ausente (= opção None) até que
-        # o checkout ofereça escolha de opção; com opção configurada e
-        # sem cotação correspondente, o checkout bloqueia (fail-closed).
-        try:
-            from loja.services.sales_readiness import load_fresh_quotes_snapshot
+    try:
+        from loja.services.sales_readiness import load_fresh_quotes_snapshot
 
-            dest_cep = current_app.config.get("SALES_READINESS_DESTINATION_CEP")
-            option = current_app.config.get("SALES_READINESS_SHIPPING_OPTION")
-            if dest_cep:
-                fresh = load_fresh_quotes_snapshot(
-                    dest_cep=dest_cep, option=option
-                )
-        except Exception:
-            pass
+        dest_cep = current_app.config.get("SALES_READINESS_DESTINATION_CEP")
+        option = current_app.config.get("SALES_READINESS_SHIPPING_OPTION")
+        if dest_cep:
+            fresh = load_fresh_quotes_snapshot(
+                dest_cep=dest_cep, option=option
+            )
+    except Exception:
+        pass
     return {
         "domestic": TableDomesticProvider(rates),
         "aliexpress": AliExpressSupplierProvider(fresh_quotes=fresh),
@@ -660,6 +718,39 @@ def quote_for_items(item_dicts, dest_cep: str, now=None) -> dict:
     ]
     groups = assign_group_origins(group_lines(lines))
     return quote_groups(groups, dest_cep, default_providers(), now)
+
+
+def require_aliexpress_evidence(item_dicts, dest_cep: str, now=None) -> None:
+    """Prova de cobertura vigente para linhas AliExpress (qualquer modo).
+
+    ITEM 5.5: a venda exige evidência válida independente de
+    ``SHIPPING_GROUPED_QUOTE_ENABLED`` — o modo só define o VALOR cobrado
+    (cotação real vs. tarifa flat), nunca se a venda pode ocorrer.
+    Linhas domésticas não têm conceito de evidência de fornecedor e seguem
+    a regra da tarifa vigente. Levanta ``QuoteUnavailable`` sem cobertura.
+    """
+    lines = [
+        ShipmentLine(
+            product_id=item.get("product_id"),
+            variant_id=item.get("variant_id"),
+            quantity=int(item.get("quantity") or 1),
+        )
+        for item in item_dicts
+    ]
+    dest = normalize_cep(dest_cep)
+    if dest is None:
+        raise QuoteUnavailable("invalid_destination")
+    groups = assign_group_origins(group_lines(lines))
+    providers = default_providers()
+    for group in groups:
+        if group.channel == "unknown":
+            raise QuoteUnavailable("unknown_supplier")
+        if group.channel != "aliexpress":
+            continue
+        provider = providers.get("aliexpress")
+        if provider is None:
+            raise QuoteUnavailable("provider_unavailable")
+        validate_quote(provider.quote(group, dest, now), now)
 
 
 def canonical_items(item_dicts) -> list:
@@ -768,6 +859,7 @@ __all__ = [
     "assign_group_origins",
     "default_providers",
     "quote_for_items",
+    "require_aliexpress_evidence",
     "group_lines",
     "quote_groups",
 ]

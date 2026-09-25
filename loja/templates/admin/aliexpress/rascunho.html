@@ -80,24 +80,14 @@
             <p class="text-xs text-gray-500 mb-4">
                 0,00 só é aceito quando o envio é realmente gratuito. A moeda do
                 frete deve ser igual à moeda do fornecedor (sem conversão).
+                Referência da evidência e validade são obrigatórias; a cotação
+                vale só para o CEP/faixa, variante e quantidade declarados.
             </p>
             <form method="POST"
                   action="{{ url_for('aliexpress_admin.rascunho_frete', product_id=product.external_id or '') }}"
                   class="space-y-4">
                 {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-                <label class="block">
-                    <span class="text-sm font-medium text-gray-700">Custo do frete</span>
-                    <input type="number" step="0.01" min="0" name="shipping_cost"
-                           placeholder="Ex: 20,00"
-                           class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
-                </label>
-                <label class="block">
-                    <span class="text-sm font-medium text-gray-700">Moeda do frete</span>
-                    <input type="text" name="freight_currency"
-                           placeholder="Ex: BRL"
-                           value="{{ supplier_product.currency if supplier_product and supplier_product.currency else '' }}"
-                           class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
-                </label>
+                {% include "admin/aliexpress/_freight_evidence_fields.html" %}
                 <button type="submit"
                         class="bg-pink-600 hover:bg-pink-700 text-white font-semibold px-6 py-3 rounded-lg">
                     Salvar frete

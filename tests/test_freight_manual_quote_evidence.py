@@ -45,6 +45,11 @@ def reference_quote_table(db):
                 provider_method VARCHAR(120) NOT NULL,
                 evidence_ref_hash VARCHAR(64),
                 updated_at DATETIME NOT NULL,
+                dest_cep VARCHAR(8),
+                dest_cep_end VARCHAR(8),
+                variant_scope VARCHAR(64),
+                covers_all_variants BOOLEAN NOT NULL DEFAULT 0,
+                qty_max INTEGER,
                 PRIMARY KEY (supplier_product_id, dest_prefix, option_key, quantity),
                 CHECK (length(dest_prefix) = 3),
                 CHECK (quantity > 0),
@@ -104,6 +109,11 @@ def _enable_grouped(client, monkeypatch):
     monkeypatch.setitem(
         client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True
     )
+    _reference_scenario(client, monkeypatch)
+
+
+def _reference_scenario(client, monkeypatch):
+    """Cenário de referência para o snapshot do banco (qualquer modo)."""
     monkeypatch.setitem(
         client.application.config, "SALES_READINESS_DESTINATION_CEP", REF_DEST_CEP
     )
@@ -117,7 +127,9 @@ def _enable_grouped(client, monkeypatch):
 
 
 def _store_manual_quote(sp, *, cost="18.50", dest_cep=REF_DEST_CEP,
-                        option=None, qty=1, ttl_seconds=30 * 86400,
+                        dest_cep_end=None, option=None, qty=1, qty_max=None,
+                        variant_scope=None, covers_all_variants=True,
+                        ttl_seconds=30 * 86400,
                         min_days=8, max_days=14, now=None,
                         provider_method="admin_manual",
                         evidence_ref="COT-TEST-001"):
@@ -139,6 +151,11 @@ def _store_manual_quote(sp, *, cost="18.50", dest_cep=REF_DEST_CEP,
             "max_days": max_days,
             "quoted_at": now,
             "ttl_seconds": ttl_seconds,
+            "dest_cep": dest_cep,
+            "dest_cep_end": dest_cep_end,
+            "variant_scope": variant_scope,
+            "covers_all_variants": covers_all_variants,
+            "qty_max": qty if qty_max is None else qty_max,
         },
         provider_method=provider_method,
         evidence_ref=evidence_ref,
@@ -217,9 +234,96 @@ def test_expired_quote_blocks_until_requoted(db, client, monkeypatch):
         )
 
 
-def test_flat_temporario_preservado_quando_grouped_desligado(
-    db, client, monkeypatch
-):
+# --- POST/renovação/falha parcial: ver test_aliexpress_admin_catalog.py ----
+# (fluxo real via HTTP: evidência incompleta rejeitada, renovação de
+# publicado, rollback em falha de persistência, bloqueio flat sem evidência)
+
+
+# --- ITEM 3.4 / 5.4: matriz de escopo (cada eixo bloqueia sem cobertura) ---
+
+def test_scope_outro_cep_mesmo_prefixo_bloqueia(db, client, monkeypatch):
+    product, variant, sp = _supplier_link(db)
+    _enable_grouped(client, monkeypatch)
+    _store_manual_quote(sp, cost="18.50", dest_cep="77000000")
+
+    with pytest.raises(QuoteUnavailable):
+        quote_for_items(
+            [{"product_id": product.id, "variant_id": variant.id, "quantity": 1}],
+            "77012345",
+        )
+
+
+def test_scope_faixa_explicita_cobre(db, client, monkeypatch):
+    product, variant, sp = _supplier_link(db)
+    _enable_grouped(client, monkeypatch)
+    _store_manual_quote(
+        sp, cost="18.50", dest_cep="77000000", dest_cep_end="77099999"
+    )
+
+    result = quote_for_items(
+        [{"product_id": product.id, "variant_id": variant.id, "quantity": 1}],
+        "77012345",
+    )
+    assert result["total"] == Decimal("18.50")
+
+
+def test_scope_outra_variante_bloqueia(db, client, monkeypatch):
+    from loja.modules.models import ProductVariant
+
+    product, variant, sp = _supplier_link(db)
+    other = ProductVariant(
+        id=uuid.uuid4(), product_id=product.id,
+        supplier_product_id=sp.id, supplier_sku_id="SKU-OTHER",
+        stock=5, is_active=True,
+    )
+    db.session.add(other)
+    db.session.commit()
+    _enable_grouped(client, monkeypatch)
+    _store_manual_quote(
+        sp, cost="18.50", variant_scope=str(variant.id),
+        covers_all_variants=False,
+    )
+
+    with pytest.raises(QuoteUnavailable):
+        quote_for_items(
+            [{"product_id": product.id, "variant_id": other.id, "quantity": 1}],
+            REF_DEST_CEP,
+        )
+    # A variante cotada passa.
+    result = quote_for_items(
+        [{"product_id": product.id, "variant_id": variant.id, "quantity": 1}],
+        REF_DEST_CEP,
+    )
+    assert result["total"] == Decimal("18.50")
+
+
+def test_scope_qtd_acima_do_teto_bloqueia(db, client, monkeypatch):
+    product, variant, sp = _supplier_link(db)
+    _enable_grouped(client, monkeypatch)
+    _store_manual_quote(sp, cost="18.50", qty_max=1)
+
+    with pytest.raises(QuoteUnavailable):
+        quote_for_items(
+            [{"product_id": product.id, "variant_id": variant.id, "quantity": 2}],
+            REF_DEST_CEP,
+        )
+
+
+def test_scope_qtd_dentro_do_teto_cobre(db, client, monkeypatch):
+    product, variant, sp = _supplier_link(db)
+    _enable_grouped(client, monkeypatch)
+    _store_manual_quote(sp, cost="18.50", qty_max=5)
+
+    result = quote_for_items(
+        [{"product_id": product.id, "variant_id": variant.id, "quantity": 3}],
+        REF_DEST_CEP,
+    )
+    assert result["total"] == Decimal("18.50")
+
+
+# --- ITEM 5.5: flat também exige evidência ---------------------------------
+
+def test_flat_sem_evidencia_bloqueia(db, client, monkeypatch):
     from loja.views.payments_routes import quote_checkout_shipping
 
     product, variant, _ = _supplier_link(db)
@@ -229,52 +333,32 @@ def test_flat_temporario_preservado_quando_grouped_desligado(
     monkeypatch.setitem(
         client.application.config, "SHIPPING_TEMPORARY_FLAT_RATE", "10.00"
     )
+    _reference_scenario(client, monkeypatch)
+    with pytest.raises(ValueError, match="Frete indisponível"):
+        quote_checkout_shipping(
+            [{"product_id": product.id, "variant_id": variant.id, "quantity": 1}],
+            REF_DEST_CEP,
+        )
+
+
+def test_flat_com_evidencia_cobra_flat(db, client, monkeypatch):
+    from loja.views.payments_routes import quote_checkout_shipping
+
+    product, variant, sp = _supplier_link(db)
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False
+    )
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_TEMPORARY_FLAT_RATE", "10.00"
+    )
+    _reference_scenario(client, monkeypatch)
+    _store_manual_quote(sp, cost="18.50")
+
     shipping = quote_checkout_shipping(
         [{"product_id": product.id, "variant_id": variant.id, "quantity": 1}],
         REF_DEST_CEP,
     )
     assert shipping == Decimal("10.00")
-
-
-# --- PASSO 2.4: helper admin persiste a evidência com validade -------------
-
-def test_admin_persist_helper_roundtrip(db, client):
-    from flask import current_app
-
-    from loja.services.supplier_freight_quotes import find_valid_reference_quotes
-    from loja.views.aliexpress_admin_routes import _persist_reference_freight_quote
-
-    _, _, sp = _supplier_link(db)
-    form = {
-        "freight_dest_cep": REF_DEST_CEP,
-        "freight_ttl_days": "30",
-        "freight_evidence_ref": "COT-ADMIN-001",
-        "freight_min_days": "8",
-        "freight_max_days": "14",
-    }
-    with current_app.test_request_context("/", method="POST", data=form):
-        note = _persist_reference_freight_quote(sp, Decimal("18.50"), "BRL")
-
-    assert "vigente até" in note
-    snapshot = find_valid_reference_quotes(
-        dest_cep=REF_DEST_CEP, option=None, qty=1
-    )
-    assert str(sp.id) in snapshot
-    assert snapshot[str(sp.id)]["cost"] == Decimal("18.50")
-
-
-def test_admin_persist_helper_sem_cenario_nao_quebra(db, client, monkeypatch):
-    from flask import current_app
-
-    from loja.views.aliexpress_admin_routes import _persist_reference_freight_quote
-
-    _, _, sp = _supplier_link(db)
-    monkeypatch.delitem(
-        current_app.config, "SALES_READINESS_DESTINATION_CEP", raising=False
-    )
-    with current_app.test_request_context("/", method="POST", data={}):
-        note = _persist_reference_freight_quote(sp, Decimal("18.50"), "BRL")
-    assert "não persistida" in note
 
 
 # --- PASSO 3.3: margem real vs. assumida (risco oculto do flat) ------------
