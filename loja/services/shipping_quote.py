@@ -32,7 +32,9 @@ from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
-from loja.utils import utcnow
+# utcnow é importado DENTRO das funções (nunca no topo): o relógio precisa
+# resolver `loja.utils.utcnow` no momento da chamada, senão um freeze de
+# teste vigente no primeiro import congela este módulo para sempre.
 
 from .pricing import to_decimal
 
@@ -175,10 +177,14 @@ class Quote:
     def expires_at(self):
         from datetime import timedelta
 
+        from loja.utils import utcnow
+
         base = self.quoted_at or utcnow()
         return base + timedelta(seconds=self.ttl_seconds)
 
     def is_expired(self, now=None) -> bool:
+        from loja.utils import utcnow
+
         return self.expires_at() <= (now or utcnow())
 
 
@@ -237,6 +243,8 @@ class TableDomesticProvider:
         if entry is None:
             raise QuoteUnavailable("provider_unavailable")
         cost, min_days, max_days = entry
+        from loja.utils import utcnow
+
         return Quote(
             cost=to_decimal(cost),
             min_days=min_days,
@@ -265,6 +273,7 @@ class AliExpressSupplierProvider:
 
     def quote(self, group: ShipmentGroup, dest_cep: str, now=None) -> Quote:
         from loja.modules.models import ProductVariant, SupplierProduct
+        from loja.utils import utcnow
 
         dest = normalize_cep(dest_cep)
         if dest is None:
@@ -375,6 +384,8 @@ def validate_reference_fresh_quote(
     ``invalid_destination``). Puro: sem HTTP, sem provider, sem mutação.
     """
     from datetime import datetime, timedelta, timezone
+
+    from loja.utils import utcnow
 
     effective_now = now or utcnow()
     if getattr(effective_now, "tzinfo", None) is not None:

@@ -22,7 +22,11 @@ from loja.services.shipping_quote import (
     normalize_cep,
     validate_reference_fresh_quote,
 )
-from loja.utils import utcnow
+
+# utcnow é importado DENTRO das funções (nunca no topo): o relógio precisa
+# resolver `loja.utils.utcnow` no momento da chamada, senão um freeze de
+# teste vigente no primeiro import congela este módulo para sempre e as
+# janelas de validade passam a usar o tempo errado.
 
 _TABLE = "supplier_reference_freight_quotes"
 _SCHEMA_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -96,6 +100,8 @@ def find_valid_reference_quotes(*, dest_cep, option=None, qty=1, now=None) -> di
         return {}
     if not _table_exists():
         return {}
+    from loja.utils import utcnow
+
     current = _naive_utc(now or utcnow())
     option_key = str(option or "")
     rows = db.session.execute(
@@ -154,6 +160,8 @@ def store_reference_freight_quote(
     dest, option, qty = _reference_scenario(dest_cep, option, qty)
     if not isinstance(quote, Mapping):
         raise ReferenceQuoteUnavailable("invalid_quote")
+    from loja.utils import utcnow
+
     current = _naive_utc(now or utcnow())
     fresh = dict(quote)
     # O provider deve comprovar o cenário: nunca preencher ou sobrescrever
