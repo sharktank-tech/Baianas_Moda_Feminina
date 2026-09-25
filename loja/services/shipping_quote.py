@@ -597,8 +597,11 @@ def assign_group_origins(groups) -> list:
 def default_providers():
     """Provedores da operação: origem/tabela doméstica via config (sem padrão).
 
-    Sem ``SHIPPING_ORIGIN_CEP`` ou sem tabela, o grupo nacional falha
-    fechado (missing_origin/provider_unavailable) em vez de presumir valor.
+    Com ``SHIPPING_GROUPED_QUOTE_ENABLED=True``, o grupo aliexpress
+    lê cotações válidas de ``supplier_reference_freight_quotes``
+    (via ``find_valid_reference_quotes``) para o cenário de referência.
+    Sem cotação vigente o checkout bloqueia (``QuoteUnavailable``)
+    em vez de presumir valor.
     """
     from flask import current_app
 
@@ -606,6 +609,25 @@ def default_providers():
     fresh = current_app.config.get("SHIPPING_ALIEXPRESS_FRESH_QUOTES") or {}
     if not isinstance(fresh, dict):
         fresh = {}
+    grouped = bool(current_app.config.get("SHIPPING_GROUPED_QUOTE_ENABLED", False))
+    if grouped:
+        # Cenário único de referência ("fotografia única"): grupos de
+        # checkout não carregam opção de envio, então só cotações com a
+        # mesma opção do cenário validam. Na prática, manter
+        # SALES_READINESS_SHIPPING_OPTION ausente (= opção None) até que
+        # o checkout ofereça escolha de opção; com opção configurada e
+        # sem cotação correspondente, o checkout bloqueia (fail-closed).
+        try:
+            from loja.services.sales_readiness import load_fresh_quotes_snapshot
+
+            dest_cep = current_app.config.get("SALES_READINESS_DESTINATION_CEP")
+            option = current_app.config.get("SALES_READINESS_SHIPPING_OPTION")
+            if dest_cep:
+                fresh = load_fresh_quotes_snapshot(
+                    dest_cep=dest_cep, option=option
+                )
+        except Exception:
+            pass
     return {
         "domestic": TableDomesticProvider(rates),
         "aliexpress": AliExpressSupplierProvider(fresh_quotes=fresh),

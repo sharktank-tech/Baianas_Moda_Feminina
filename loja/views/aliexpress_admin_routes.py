@@ -221,6 +221,115 @@ def _sanitized_api_error(exc: Exception) -> str:
     return f"{type(exc).__name__}: {message}"
 
 
+def _parse_optional_int(raw_value, *, minimum=None, maximum=None) -> Optional[int]:
+    """Inteiro opcional do formulário; inválido/fora da faixa vira None."""
+    if raw_value is None:
+        return None
+    text = str(raw_value).strip()
+    if not text:
+        return None
+    try:
+        value = int(text)
+    except (TypeError, ValueError):
+        return None
+    if isinstance(value, bool):
+        return None
+    if minimum is not None and value < minimum:
+        return None
+    if maximum is not None and value > maximum:
+        return None
+    return value
+
+
+def _persist_reference_freight_quote(supplier_product, shipping, currency) -> str:
+    """Persiste a cotação manual vigente por cenário (PASSO 2, rota manual).
+
+    Grava em ``supplier_reference_freight_quotes`` a prova com validade
+    usada pelo checkout agrupado (``SHIPPING_GROUPED_QUOTE_ENABLED=True``):
+    custo, prefixo de destino, opção, quantidade 1, moeda BRL, momento e
+    validade explícita. Nunca quebra o fluxo legado: qualquer problema
+    (cenário ausente, tabela ausente, validação) só gera log + sufixo de
+    aviso, e o ``SupplierProduct.shipping_cost`` já salvo é preservado.
+
+    Retorna o sufixo para o flash de sucesso ("" quando nada foi persistido).
+    """
+    try:
+        from loja.services.shipping_quote import normalize_cep
+        from loja.services.supplier_freight_quotes import (
+            ReferenceQuoteUnavailable,
+            store_reference_freight_quote,
+        )
+        from loja.utils import utcnow
+    except Exception:
+        current_app.logger.warning("frete admin: quote storage indisponível")
+        return " Cotação de referência não persistida (armazenamento indisponível)."
+
+    dest_raw = (request.form.get("freight_dest_cep") or "").strip() or (
+        current_app.config.get("SALES_READINESS_DESTINATION_CEP") or ""
+    ).strip()
+    dest = normalize_cep(dest_raw)
+    if dest is None:
+        current_app.logger.info("frete admin: reference quote sem cenário de destino")
+        return " Cotação de referência não persistida (sem CEP de referência)."
+
+    option_raw = request.form.get("freight_option")
+    option = (option_raw.strip() if option_raw else None) or (
+        current_app.config.get("SALES_READINESS_SHIPPING_OPTION") or None
+    )
+    evidence_ref = (request.form.get("freight_evidence_ref") or "").strip() or None
+    min_days = _parse_optional_int(request.form.get("freight_min_days"), minimum=0)
+    max_days = _parse_optional_int(request.form.get("freight_max_days"), minimum=0)
+    if min_days is not None and max_days is not None and max_days < min_days:
+        max_days = min_days
+    ttl_days = _parse_optional_int(
+        request.form.get("freight_ttl_days"), minimum=1, maximum=365
+    ) or 30
+
+    now = utcnow()
+    if getattr(now, "tzinfo", None) is not None:
+        from datetime import timezone
+
+        now = now.astimezone(timezone.utc).replace(tzinfo=None)
+    quote = {
+        "dest_prefix": dest[:3],
+        "option": option,
+        "qty": 1,
+        "currency": str(currency or "BRL").upper(),
+        "cost": shipping,
+        "min_days": min_days,
+        "max_days": max_days,
+        "quoted_at": now,
+        "ttl_seconds": int(ttl_days) * 86400,
+    }
+    try:
+        stored = store_reference_freight_quote(
+            supplier_product_id=supplier_product.id,
+            dest_cep=dest,
+            option=option,
+            qty=1,
+            quote=quote,
+            provider_method="admin_manual",
+            evidence_ref=evidence_ref,
+            now=now,
+        )
+    except ReferenceQuoteUnavailable as exc:
+        current_app.logger.info("frete admin: reference quote rejeitada=%s", exc.code)
+        return f" Cotação de referência não persistida ({exc.code})."
+    except Exception:
+        current_app.logger.warning("frete admin: reference quote falhou", exc_info=True)
+        return " Cotação de referência não persistida (erro interno)."
+    from datetime import timedelta
+
+    expires_at = stored.get("quoted_at") + timedelta(
+        seconds=int(stored.get("ttl_seconds") or 0)
+    )
+    current_app.logger.info(
+        "frete admin: reference quote persistida dest_prefix=%s qty=1",
+        dest[:3],
+    )
+    return f" Cotação de referência vigente até {expires_at.strftime('%d/%m/%Y')}."
+
+
 # --------------------------------------------------------------------------
 # rotas
 # --------------------------------------------------------------------------
@@ -405,7 +514,10 @@ def rascunho_frete(product_id: str):
 
     db.session.commit()
     current_app.logger.info("frete admin: status=available")
-    flash("Frete salvo e landed cost recalculado.", "success")
+    quote_note = _persist_reference_freight_quote(
+        supplier_product, shipping, currency
+    )
+    flash("Frete salvo e landed cost recalculado." + quote_note, "success")
     return redirect(url_for("aliexpress_admin.rascunho", product_id=product_id))
 
 
