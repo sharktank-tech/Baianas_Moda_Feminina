@@ -398,3 +398,65 @@ def test_margin_real_vs_assumida(db):
     assert price_flat == sale_price_for_margin(Decimal("70.00"), Decimal("30"))
     assert price_real == sale_price_for_margin(Decimal("78.50"), Decimal("30"))
     assert price_real - price_flat >= Decimal("12.14")
+
+
+@pytest.mark.parametrize('destination,end,customer', [
+    ('01310100', None, '01310100'),
+    ('76990000', '77099999', '77001000'),
+])
+def test_checkout_loads_customer_destination_not_reference(db, client, monkeypatch,
+                                                          destination, end, customer):
+    product, variant, sp = _supplier_link(db)
+    _enable_grouped(client, monkeypatch)
+    _store_manual_quote(sp, dest_cep=destination, dest_cep_end=end)
+    result = quote_for_items(
+        [{'product_id': product.id, 'variant_id': variant.id, 'quantity': 1}], customer)
+    assert result['total'] == Decimal('18.50')
+
+
+def test_overlapping_quotes_fail_closed(db, client, monkeypatch):
+    product, variant, sp = _supplier_link(db)
+    _enable_grouped(client, monkeypatch)
+    _store_manual_quote(sp, dest_cep='76990000', dest_cep_end='77099999')
+    _store_manual_quote(sp, dest_cep='77000000', dest_cep_end='77099999', cost='28.50')
+    with pytest.raises(QuoteUnavailable):
+        quote_for_items(
+            [{'product_id': product.id, 'variant_id': variant.id, 'quantity': 1}],
+            '77001000')
+
+
+def test_database_failure_cannot_fall_back_to_config_quote(db, client, monkeypatch):
+    from loja.services import supplier_freight_quotes as sfq
+    from loja.services.shipping_quote import default_providers
+    _enable_grouped(client, monkeypatch)
+    monkeypatch.setitem(client.application.config, 'SHIPPING_ALIEXPRESS_FRESH_QUOTES',
+                        {'stale-config': {'cost': '0'}})
+    def unavailable(**kwargs):
+        raise RuntimeError('database unavailable')
+    monkeypatch.setattr(sfq, 'find_valid_reference_quotes', unavailable)
+    with pytest.raises(QuoteUnavailable, match='provider_unavailable'):
+        default_providers('77000000')
+
+
+@pytest.mark.parametrize('change', [
+    {'currency': None}, {'ttl_seconds': 0}, {'cost': 'Infinity'},
+])
+def test_checkout_freshness_is_strict(db, client, monkeypatch, change):
+    from loja.services.shipping_quote import AliExpressSupplierProvider
+    _, variant, sp = _supplier_link(db)
+    now = utcnow()
+    fresh = _store_manual_quote(sp, now=now)
+    fresh.update(change)
+    assert AliExpressSupplierProvider._check_fresh(
+        fresh, REF_DEST_CEP, None,
+        {'qty': 1, 'variants': {str(variant.id)}}, now) is not None
+
+
+def test_checkout_quote_expires_at_exact_deadline(db, client):
+    from loja.services.shipping_quote import AliExpressSupplierProvider
+    _, variant, sp = _supplier_link(db)
+    now = utcnow()
+    fresh = _store_manual_quote(sp, ttl_seconds=60, now=now)
+    assert AliExpressSupplierProvider._check_fresh(
+        fresh, REF_DEST_CEP, None, {'qty': 1, 'variants': {str(variant.id)}},
+        now + timedelta(seconds=60)) == 'expired'

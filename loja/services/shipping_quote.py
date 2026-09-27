@@ -396,25 +396,16 @@ class AliExpressSupplierProvider:
         validade)."""
         if not isinstance(fresh, dict):
             return "unverified_cost"
-        if (fresh.get("option") or None) != (option or None):
-            return "unverified_cost"
-        if str(fresh.get("currency") or "BRL").upper() != "BRL":
-            return "currency_mismatch"
+        # Valida tempo/moeda/custo pela mesma regra estrita da persistência.
+        # O destino-base valida a origem da evidência; a cobertura abaixo
+        # confere o CEP real, inclusive faixas que atravessam prefixos.
         try:
-            cost = to_decimal(fresh.get("cost"))
-        except Exception:
-            return "unverified_cost"
-        if cost is None or cost < 0:
-            return "unverified_cost"
-        try:
-            quoted_at = fresh.get("quoted_at")
-            ttl = int(fresh.get("ttl_seconds") or QUOTE_TTL_SECONDS)
-            from datetime import timedelta
-
-            if quoted_at is None or now - quoted_at > timedelta(seconds=ttl):
-                return "expired"
-        except (TypeError, ValueError):
-            return "unverified_cost"
+            validate_reference_fresh_quote(
+                fresh, dest_cep=fresh.get("dest_cep"), option=option,
+                qty=fresh.get("qty"), now=now,
+            )
+        except QuoteUnavailable as exc:
+            return exc.code
         return _evidence_scope_covers(
             fresh,
             dest=dest,
@@ -665,20 +656,12 @@ def assign_group_origins(groups) -> list:
     ]
 
 
-def default_providers():
-    """Provedores da operação: origem/tabela doméstica via config (sem padrão).
+def default_providers(dest_cep=None, now=None):
+    """Provedores sem rede; checkout usa o destino real e opção padrão.
 
-    O grupo aliexpress lê cotações válidas de
-    ``supplier_reference_freight_quotes`` (via ``load_fresh_quotes_snapshot``)
-    para o cenário de referência, em QUALQUER modo — ITEM 5.5: a evidência
-    autoriza a venda; o modo (``SHIPPING_GROUPED_QUOTE_ENABLED``) define só
-    o valor cobrado (cotação real vs. tarifa flat). Sem cotação vigente o
-    checkout bloqueia (``QuoteUnavailable``) em vez de presumir valor.
-
-    Cenário único de referência ("fotografia única"): grupos de checkout
-    não carregam opção de envio; manter ``SALES_READINESS_SHIPPING_OPTION``
-    ausente até o checkout oferecer escolha, senão o checkout bloqueia
-    (fail-closed).
+    O cenário do painel não autoriza outros endereços. Cotações do banco
+    devem cobrir explicitamente o CEP/variante/quantidade do carrinho.
+    Falha no armazenamento nunca permite fallback para prova em memória.
     """
     from flask import current_app
 
@@ -687,16 +670,18 @@ def default_providers():
     if not isinstance(fresh, dict):
         fresh = {}
     try:
-        from loja.services.sales_readiness import load_fresh_quotes_snapshot
+        from loja.services.supplier_freight_quotes import find_valid_reference_quotes
 
-        dest_cep = current_app.config.get("SALES_READINESS_DESTINATION_CEP")
-        option = current_app.config.get("SALES_READINESS_SHIPPING_OPTION")
-        if dest_cep:
-            fresh = load_fresh_quotes_snapshot(
-                dest_cep=dest_cep, option=option
-            )
+        destination = dest_cep or current_app.config.get("SALES_READINESS_DESTINATION_CEP")
+        if destination:
+            fresh = dict(fresh)
+            fresh.update(find_valid_reference_quotes(
+                dest_cep=destination, option=None, now=now, for_checkout=True,
+            ))
     except Exception:
-        pass
+        # Não autorizar venda via configuração de compatibilidade quando
+        # a consulta canônica falhar. Não ocultar o erro usando prova antiga.
+        raise QuoteUnavailable("provider_unavailable") from None
     return {
         "domestic": TableDomesticProvider(rates),
         "aliexpress": AliExpressSupplierProvider(fresh_quotes=fresh),
@@ -717,7 +702,7 @@ def quote_for_items(item_dicts, dest_cep: str, now=None) -> dict:
         for item in item_dicts
     ]
     groups = assign_group_origins(group_lines(lines))
-    return quote_groups(groups, dest_cep, default_providers(), now)
+    return quote_groups(groups, dest_cep, default_providers(dest_cep, now), now)
 
 
 def require_aliexpress_evidence(item_dicts, dest_cep: str, now=None) -> None:
@@ -741,7 +726,7 @@ def require_aliexpress_evidence(item_dicts, dest_cep: str, now=None) -> None:
     if dest is None:
         raise QuoteUnavailable("invalid_destination")
     groups = assign_group_origins(group_lines(lines))
-    providers = default_providers()
+    providers = default_providers(dest, now)
     for group in groups:
         if group.channel == "unknown":
             raise QuoteUnavailable("unknown_supplier")

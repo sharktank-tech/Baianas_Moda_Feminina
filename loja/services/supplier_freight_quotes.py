@@ -167,7 +167,8 @@ def _validate_scope(fresh: Mapping) -> dict:
     }
 
 
-def find_valid_reference_quotes(*, dest_cep, option=None, qty=1, now=None) -> dict:
+def find_valid_reference_quotes(*, dest_cep, option=None, qty=1, now=None,
+                                for_checkout=False) -> dict:
     """Carrega uma fotografia válida em uma única consulta, sem provider."""
     try:
         dest, option, qty = _reference_scenario(dest_cep, option, qty)
@@ -179,6 +180,10 @@ def find_valid_reference_quotes(*, dest_cep, option=None, qty=1, now=None) -> di
 
     current = _naive_utc(now or utcnow())
     option_key = str(option or "")
+    destination_filter = (
+        "dest_cep <= :dest AND COALESCE(dest_cep_end, dest_cep) >= :dest"
+        if for_checkout else "dest_prefix = :dest_prefix"
+    )
     rows = db.session.execute(
         text(
             f"""SELECT supplier_product_id, dest_prefix, option_key, quantity,
@@ -187,14 +192,15 @@ def find_valid_reference_quotes(*, dest_cep, option=None, qty=1, now=None) -> di
                        covers_all_variants, qty_max
                 FROM {_qualified_table()}
                 WHERE quantity = :qty
-                  AND dest_prefix = :dest_prefix
+                  AND {destination_filter}
                   AND option_key = :option_key
                   AND expires_at > :now
                 ORDER BY supplier_product_id"""
         ),
-        {"qty": qty, "dest_prefix": dest[:3], "option_key": option_key, "now": current},
+        {"qty": qty, "dest": dest, "dest_prefix": dest[:3], "option_key": option_key, "now": current},
     ).mappings().all()
     snapshot = {}
+    ambiguous = set()
     for row in rows:
         quoted_at = _coerce_row_datetime(row["quoted_at"])
         expires_at = _coerce_row_datetime(row["expires_at"])
@@ -238,12 +244,18 @@ def find_valid_reference_quotes(*, dest_cep, option=None, qty=1, now=None) -> di
         }
         try:
             validated_cost = validate_reference_fresh_quote(
-                fresh, dest_cep=dest, option=option, qty=qty, now=current
+                fresh, dest_cep=(scope["dest_cep"] if for_checkout else dest),
+                option=option, qty=qty, now=current
             )
         except QuoteUnavailable:
             continue
         fresh["cost"] = validated_cost
-        snapshot[str(row["supplier_product_id"])] = fresh
+        key = str(row["supplier_product_id"])
+        if for_checkout and key in snapshot:
+            ambiguous.add(key)
+        snapshot[key] = fresh
+    for key in ambiguous:
+        snapshot.pop(key, None)
     return snapshot
 
 

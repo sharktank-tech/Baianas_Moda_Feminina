@@ -87,8 +87,35 @@
   fornecedor — exige ambiente com credenciais MP/fornecedor e autorização
   humana explícita (`FIRST_REAL_SALE_RUNBOOK.md`). Este relatório cobre até
   o bloqueio/cobrança no checkout; a compra real segue o runbook existente.
-- **Limite conhecido:** cenário único de referência — grupos de checkout não
-  têm opção de envio; manter `SALES_READINESS_SHIPPING_OPTION` ausente até
-  o checkout oferecer escolha, senão o checkout bloqueia (fail-closed).
+- **Seleção no checkout:** usa o CEP informado pelo cliente e somente a opção
+  padrão (`None`), pois ainda não existe escolha de serviço de envio. O CEP e
+  a opção de referência continuam exclusivos do painel. Faixas explicitamente
+  comprovadas podem atravessar prefixos. Evidências sobrepostas para o mesmo
+  vínculo bloqueiam a venda até serem desambiguadas.
   O painel de prontidão usa semântica própria de cenário de referência
   (prefixo); a cobertura que autoriza a venda é só a do checkout.
+
+
+## Complemento da revisão de 2026-09-27
+
+- A leitura para checkout seleciona CEP exato/faixa do cliente, sem depender
+  do CEP de referência de Palmas. Sem cobertura a venda continua bloqueada.
+- Falha ao consultar o banco bloqueia a cotação, sem fallback para a
+  configuração de compatibilidade de testes.
+- Validade, moeda e custo usam a validação canônica estrita: vencimento no
+  instante exato, TTL zero, moeda ausente e valores não finitos são rejeitados.
+- Uma faixa ou cobertura de várias variantes/quantidades deve constar na
+  evidência do fornecedor. O custo registrado é o total por vínculo para
+  toda a cobertura declarada, não uma tarifa unitária multiplicada pelo carrinho.
+- A chave atual conserva apenas uma evidência por vínculo/prefixo/opção/quantidade;
+  cadastrar outro escopo com a mesma chave substitui o anterior. Não prometer
+  múltiplas tarifas simultâneas por variante nessa chave.
+
+## Implantação pendente
+
+A migração 0026 deve ser aplicada e validada no schema correto ANTES do deploy.
+Esta revisão não aplica migração, não faz merge e não cria evidências reais.
+Linhas antigas sem escopo explícito não autorizam checkout. Com a nova regra,
+produtos AliExpress sem evidência deixam de vender também no modo flat.
+Preparar as cotações reais e revisar a cobertura antes de disponibilizar vendas;
+não ativar gates nem presumir que o CI comprovou o frete do fornecedor.
