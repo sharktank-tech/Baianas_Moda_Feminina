@@ -41,6 +41,7 @@ from loja.modules.getway_mercado_pago.payment_service import (
 from loja.services.shipping_quote import (
     QuoteUnavailable,
     quote_for_items,
+    require_aliexpress_evidence,
     temporary_flat_rate,
 )
 from loja.services.reservation_policy import reservation_deadline
@@ -87,13 +88,18 @@ def _is_grouped_quote_enabled() -> bool:
 def quote_checkout_shipping(item_data, dest_cep):
     """Frete total do checkout.
 
-    Com flag desligada (SHIPPING_GROUPED_QUOTE_ENABLED=False), usa a tarifa
+    Com flag desligada (SHIPPING_GROUPED_QUOTE_ENABLED=False), cobra a tarifa
     comercial temporária única (temporary_flat_rate) — regra assumida pela
     loja, não cotação por CEP. Com flag ligada, usa cotação por grupo
     (nunca tarifa presumida). Configuração inválida falha sanitizada.
+
+    ITEM 5.5: em QUALQUER modo, linhas AliExpress exigem evidência de frete
+    vigente com escopo válido (``require_aliexpress_evidence``) — sem ela a
+    venda bloqueia em vez de cobrar o flat. O modo define só o valor.
     """
     if not _is_grouped_quote_enabled():
         try:
+            require_aliexpress_evidence(item_data, dest_cep)
             return temporary_flat_rate()
         except QuoteUnavailable as exc:
             raise ValueError(_unavailable_message(exc.code)) from exc

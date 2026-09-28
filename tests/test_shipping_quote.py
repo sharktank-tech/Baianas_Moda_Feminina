@@ -40,6 +40,45 @@ RATES = {
 ORIGIN = "01310100"
 
 
+@pytest.fixture(autouse=True)
+def reference_quote_table(db):
+    from sqlalchemy import text
+
+    db.session.execute(
+        text(
+            """CREATE TABLE IF NOT EXISTS supplier_reference_freight_quotes (
+                supplier_product_id VARCHAR(36) NOT NULL,
+                dest_prefix VARCHAR(3) NOT NULL,
+                option_key VARCHAR(120) NOT NULL DEFAULT '',
+                quantity INTEGER NOT NULL,
+                currency VARCHAR(3) NOT NULL,
+                cost NUMERIC(12,2) NOT NULL,
+                min_days INTEGER,
+                max_days INTEGER,
+                quoted_at DATETIME NOT NULL,
+                expires_at DATETIME NOT NULL,
+                provider_method VARCHAR(120) NOT NULL,
+                evidence_ref_hash VARCHAR(64),
+                updated_at DATETIME NOT NULL,
+                dest_cep VARCHAR(8),
+                dest_cep_end VARCHAR(8),
+                variant_scope VARCHAR(64),
+                covers_all_variants BOOLEAN NOT NULL DEFAULT 0,
+                qty_max INTEGER,
+                PRIMARY KEY (supplier_product_id, dest_prefix, option_key, quantity),
+                CHECK (length(dest_prefix) = 3),
+                CHECK (quantity > 0),
+                CHECK (currency = 'BRL'),
+                CHECK (cost >= 0),
+                CHECK (expires_at > quoted_at)
+            )"""
+        )
+    )
+    db.session.execute(text("DELETE FROM supplier_reference_freight_quotes"))
+    db.session.commit()
+    yield
+
+
 def _providers(rates=None):
     return {
         "domestic": TableDomesticProvider(rates if rates is not None else RATES),
@@ -241,7 +280,8 @@ def _supplier_link(db, *, freight_status="available", shipping="4.00",
 
 def _fresh(sp_id, *, cost="4.00", dest_prefix="013", option=None, qty=1,
            currency="BRL", quoted_at=None, ttl=QUOTE_TTL_SECONDS,
-           min_days=2, max_days=6):
+           min_days=2, max_days=6, dest_cep="01310100", dest_cep_end=None,
+           variant_scope=None, covers_all_variants=True, qty_max=None):
     from loja.utils import utcnow as _now
 
     return {
@@ -250,6 +290,11 @@ def _fresh(sp_id, *, cost="4.00", dest_prefix="013", option=None, qty=1,
             "dest_prefix": dest_prefix, "option": option, "qty": qty,
             "currency": currency, "quoted_at": quoted_at or _now(),
             "ttl_seconds": ttl,
+            "dest_cep": dest_cep,
+            "dest_cep_end": dest_cep_end,
+            "variant_scope": variant_scope,
+            "covers_all_variants": covers_all_variants,
+            "qty_max": qty if qty_max is None else qty_max,
         }
     }
 
@@ -591,6 +636,9 @@ def test_checkout_fornecedor_cota_dez_reais_cria_pedido(
             "dest_prefix": "013", "option": None, "qty": 1,
             "currency": "BRL", "quoted_at": utcnow(),
             "ttl_seconds": QUOTE_TTL_SECONDS,
+            "dest_cep": "01310100", "dest_cep_end": None,
+            "variant_scope": None, "covers_all_variants": True,
+            "qty_max": 1,
         }},
     )
     preset_shipping_quote(
@@ -1612,7 +1660,9 @@ def test_temporary_flat_rate_invalida_preserva_variante_cupom_e_gateway(
     )
 
     page = response.get_data(as_text=True).lower()
-    assert "frete desatualizado" in page
+    # ITEM 5.5: sem evidência vigente, o bloqueio de evidência vem antes da
+    # validação da tarifa — a venda não ocorre em nenhum dos dois casos.
+    assert "frete indisponível" in page
     assert "invalidoperation" not in page
     assert "traceback" not in page
     assert gateway_calls == []
@@ -1622,3 +1672,244 @@ def test_temporary_flat_rate_invalida_preserva_variante_cupom_e_gateway(
     assert db.session.get(ProductVariant, variant.id).stock == variant_stock_before
     db.session.refresh(coupon)
     assert coupon.times_used == coupon_uses_before
+
+
+@pytest.mark.parametrize(
+    ("raw", "coupon_code"),
+    [("10000.00", "FRETE-LIMITE-ALTO-2"), ("1e999999", "FRETE-LIMITE-EXP-2")],
+)
+def test_temporary_flat_rate_invalida_com_evidencia_mostra_frete_desatualizado(
+    client, db, make_user, make_coupon, monkeypatch, raw, coupon_code
+):
+    """Com evidência vigente, tarifa flat inválida falha como antes."""
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order, OrderItem
+    from loja.modules.models import Product, ProductVariant
+    from loja.services.supplier_freight_quotes import store_reference_freight_quote
+    from loja.utils import utcnow
+
+    user = make_user()
+    product, variant = _supplier_link(db)
+    with db.session.no_autoflush:
+        stored_product = db.session.get(Product, product.id)
+        stored_product.is_draft = False
+        stored_product.pricing_status = "priced"
+        stored_product.is_active = True
+        db.session.commit()
+    sp_id = variant.supplier_product_id
+    now = utcnow()
+    store_reference_freight_quote(
+        supplier_product_id=sp_id, dest_cep="01310100", option=None, qty=1,
+        quote={
+            "dest_prefix": "013", "option": None, "qty": 1,
+            "currency": "BRL", "cost": "10.00",
+            "min_days": 1, "max_days": 3,
+            "quoted_at": now, "ttl_seconds": QUOTE_TTL_SECONDS,
+            "dest_cep": "01310100", "dest_cep_end": None,
+            "variant_scope": None, "covers_all_variants": True,
+            "qty_max": 1,
+        },
+        provider_method="test",
+        evidence_ref="COT-FLAT-INVALIDO",
+        now=now,
+    )
+    monkeypatch.setitem(
+        client.application.config, "SALES_READINESS_DESTINATION_CEP", "01310100"
+    )
+    monkeypatch.delitem(
+        client.application.config, "SALES_READINESS_SHIPPING_OPTION", raising=False
+    )
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_ALIEXPRESS_FRESH_QUOTES", {}
+    )
+
+    coupon = make_coupon(
+        code=coupon_code,
+        discount_type="fixed",
+        discount_value="1.00",
+    )
+    _login(client, user)
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False
+    )
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_TEMPORARY_FLAT_RATE", raw
+    )
+
+    gateway_calls = []
+    monkeypatch.setattr(
+        pr,
+        "create_preference",
+        lambda order: gateway_calls.append(order) or {
+            "preference_id": "must-not-exist",
+            "checkout_url": "https://mp.example/must-not-exist",
+        },
+    )
+
+    orders_before = Order.query.count()
+
+    response = client.post(
+        "/pagamentos/mercado-pago",
+        data={
+            "checkout_type": "product",
+            "product_id": str(product.id),
+            "variant_id": str(variant.id),
+            "quantity": 1,
+            "selected_size": "M",
+            "coupon_code": coupon.code,
+            "nome": "Cliente Teste",
+            "email": user.email,
+            "telefone": "11999999999",
+            "cep": "01310100",
+            "estado": "SP",
+            "endereco": "Rua Teste",
+            "numero": "10",
+            "bairro": "Centro",
+            "cidade": "São Paulo",
+        },
+        follow_redirects=True,
+    )
+
+    page = response.get_data(as_text=True).lower()
+    assert "frete desatualizado" in page
+    assert "invalidoperation" not in page
+    assert "traceback" not in page
+    assert gateway_calls == []
+    assert Order.query.count() == orders_before
+
+
+# ── ITEM 5.5 via HTTP: flat bloqueia sem evidência, vende com evidência ──
+
+def _publish_supplier_product(client, db, product):
+    from loja.modules.models import Product as _Product
+
+    with db.session.no_autoflush:
+        stored = db.session.get(_Product, product.id)
+        stored.is_draft = False
+        stored.pricing_status = "priced"
+        stored.is_active = True
+        db.session.commit()
+
+
+def _product_checkout_form(product, variant, user, cep):
+    return {
+        "checkout_type": "product",
+        "product_id": str(product.id),
+        "variant_id": str(variant.id),
+        "quantity": 1,
+        "selected_size": "M",
+        "nome": "Cliente Teste",
+        "email": user.email,
+        "telefone": "11999999999",
+        "cep": cep,
+        "estado": "SP",
+        "endereco": "Rua Teste",
+        "numero": "10",
+        "bairro": "Centro",
+        "cidade": "São Paulo",
+    }
+
+
+def test_http_flat_sem_evidencia_bloqueia_venda(client, db, make_user, monkeypatch):
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order
+
+    user = make_user()
+    product, variant = _supplier_link(db)
+    _publish_supplier_product(client, db, product)
+    _login(client, user)
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False
+    )
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_TEMPORARY_FLAT_RATE", "10.00"
+    )
+    monkeypatch.setitem(
+        client.application.config, "SALES_READINESS_DESTINATION_CEP", "77000000"
+    )
+    monkeypatch.delitem(
+        client.application.config, "SALES_READINESS_SHIPPING_OPTION", raising=False
+    )
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_ALIEXPRESS_FRESH_QUOTES", {}
+    )
+    gateway_calls = []
+    monkeypatch.setattr(
+        pr, "create_preference",
+        lambda order: gateway_calls.append(order) or {
+            "preference_id": "must-not-exist",
+            "checkout_url": "https://mp.example/must-not-exist",
+        },
+    )
+    orders_before = Order.query.count()
+
+    resp = client.post(
+        "/pagamentos/mercado-pago",
+        data=_product_checkout_form(product, variant, user, "77000000"),
+        follow_redirects=True,
+    )
+    page = resp.get_data(as_text=True).lower()
+    assert "frete indisponível" in page
+    assert gateway_calls == []
+    assert Order.query.count() == orders_before
+
+
+def test_http_flat_com_evidencia_vende(client, db, make_user, monkeypatch):
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import Order
+    from loja.services.supplier_freight_quotes import store_reference_freight_quote
+
+    user = make_user()
+    product, variant = _supplier_link(db)
+    _publish_supplier_product(client, db, product)
+    sp_id = variant.supplier_product_id
+    now = utcnow()
+    store_reference_freight_quote(
+        supplier_product_id=sp_id, dest_cep="77000000", option=None, qty=1,
+        quote={
+            "dest_prefix": "770", "option": None, "qty": 1,
+            "currency": "BRL", "cost": "18.50",
+            "min_days": 8, "max_days": 14,
+            "quoted_at": now, "ttl_seconds": QUOTE_TTL_SECONDS,
+            "dest_cep": "77000000", "dest_cep_end": None,
+            "variant_scope": None, "covers_all_variants": True,
+            "qty_max": 1,
+        },
+        provider_method="test",
+        evidence_ref="COT-HTTP-FLAT",
+        now=now,
+    )
+    _login(client, user)
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", False
+    )
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_TEMPORARY_FLAT_RATE", "10.00"
+    )
+    monkeypatch.setitem(
+        client.application.config, "SALES_READINESS_DESTINATION_CEP", "77000000"
+    )
+    monkeypatch.delitem(
+        client.application.config, "SALES_READINESS_SHIPPING_OPTION", raising=False
+    )
+    monkeypatch.setitem(
+        client.application.config, "SHIPPING_ALIEXPRESS_FRESH_QUOTES", {}
+    )
+    capturados = []
+    monkeypatch.setattr(
+        pr, "create_preference",
+        lambda order: capturados.append(order) or {
+            "preference_id": "pref-flat-ok",
+            "checkout_url": "https://mp.example/flat-ok",
+        },
+    )
+
+    resp = client.post(
+        "/pagamentos/mercado-pago",
+        data=_product_checkout_form(product, variant, user, "77000000"),
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    order = Order.query.filter_by(user_id=user.id).one()
+    assert order.shipping == Decimal("10.00")
+    assert len(capturados) == 1

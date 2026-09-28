@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Renovar frete — {{ product.name }}{% endblock %}
+
+{% block content %}
+
+<div class="max-w-5xl mx-auto px-4 py-8">
+
+    <div class="mb-8">
+        <a href="{{ url_for('aliexpress_admin.index') }}"
+           class="text-sm text-gray-500 hover:text-gray-800 underline">
+            &larr; Voltar ao catálogo
+        </a>
+        <h1 class="text-3xl font-bold text-gray-800 mt-2">
+            Renovar frete — {{ product.name }}
+        </h1>
+        <p class="text-gray-500 mt-2">
+            Produto publicado{% if product.external_id %} &middot; ID: {{ product.external_id }}{% endif %} — a renovação não despublica nem altera preço sozinha.
+        </p>
+
+        <div class="flex flex-wrap gap-2 mt-3">
+            <span class="text-sm font-medium px-3 py-1 rounded-full border
+                         {% if supplier_product and supplier_product.freight_status == 'available' %}text-green-700 bg-green-50 border-green-200{% else %}text-yellow-700 bg-yellow-50 border-yellow-200{% endif %}">
+                Frete: {{ supplier_product.freight_status if supplier_product else '—' }}
+                {% if supplier_product and supplier_product.shipping_cost is not none %}
+                ({{ "%.2f"|format(supplier_product.shipping_cost) }} {{ supplier_product.freight_currency or '' }})
+                {% endif %}
+            </span>
+            <span class="text-sm font-medium px-3 py-1 rounded-full border
+                         {% if live_evidence %}text-green-700 bg-green-50 border-green-200{% else %}text-red-700 bg-red-50 border-red-200{% endif %}">
+                Evidência (cenário de referência): {{ 'vigente' if live_evidence else 'ausente/vencida — vendas bloqueadas' }}
+            </span>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow p-6">
+        <h2 class="text-lg font-semibold text-gray-800 mb-4">Nova cotação com evidência</h2>
+        <p class="text-xs text-gray-500 mb-4">
+            Mesmas regras do rascunho: referência e validade obrigatórias, sem
+            valores presumidos; mudança material de frete marca a precificação
+            como stale (reprecificar em seguida, sem despublicar).
+        </p>
+        <form method="POST"
+              action="{{ url_for('aliexpress_admin.publicado_frete', product_id=product.external_id or '') }}"
+              class="space-y-4">
+            {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+            {% include "admin/aliexpress/_freight_evidence_fields.html" %}
+            <button type="submit"
+                    class="bg-pink-600 hover:bg-pink-700 text-white font-semibold px-6 py-3 rounded-lg">
+                Renovar frete e evidência
+            </button>
+        </form>
+    </div>
+
+</div>
+
+{% endblock %}

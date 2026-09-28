@@ -1,0 +1,83 @@
+{# Campos de evidência de frete (ITEM 1.1). Compartilhado entre o
+   formulário de rascunho e o de renovação de publicado. Referência e
+   validade são OBRIGATÓRIAS (backend rejeita sem elas); sem defaults
+   silenciosos. Requer no contexto: product, supplier_product,
+   form_action. #}
+<label class="block">
+    <span class="text-sm font-medium text-gray-700">Custo do frete</span>
+    <input type="number" step="0.01" min="0" name="shipping_cost"
+           placeholder="Ex: 20,00"
+           class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+</label>
+<label class="block">
+    <span class="text-sm font-medium text-gray-700">Moeda do frete</span>
+    <input type="text" name="freight_currency"
+           placeholder="Ex: BRL"
+           value="{{ supplier_product.currency if supplier_product and supplier_product.currency else '' }}"
+           class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+</label>
+<label class="block">
+    <span class="text-sm font-medium text-gray-700">CEP efetivamente cotado *</span>
+    <input type="text" name="freight_dest_cep" required
+           placeholder="Ex: 77000000 (8 dígitos)"
+           pattern="[0-9]{8}"
+           class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+</label>
+<label class="block">
+    <span class="text-sm font-medium text-gray-700">Fim da faixa de CEP (opcional)</span>
+    <input type="text" name="freight_dest_cep_end"
+           placeholder="Ex: 77099999 — vazio = só o CEP acima"
+           pattern="[0-9]{8}"
+           class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+</label>
+<label class="block">
+    <span class="text-sm font-medium text-gray-700">Escopo da variante *</span>
+    <select name="freight_variant_scope" required
+            class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+        <option value="">— selecione —</option>
+        <option value="all">Todas as variantes (cobertura multi explícita)</option>
+        {% if product and product.variants %}
+        {% for v in product.variants %}
+        <option value="{{ v.id }}">Variante {{ v.sku or v.supplier_sku_id or v.id }}{% if v.size %} · {{ v.size }}{% endif %}{% if v.color %} · {{ v.color }}{% endif %}</option>
+        {% endfor %}
+        {% endif %}
+    </select>
+</label>
+<label class="block">
+    <span class="text-sm font-medium text-gray-700">Opção de envio (opcional)</span>
+    <input type="text" name="freight_option"
+           placeholder="Ex: standard — vazio = padrão"
+           class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+</label>
+<div class="grid grid-cols-2 gap-4">
+    <label class="block">
+        <span class="text-sm font-medium text-gray-700">Prazo mín. (dias)</span>
+        <input type="number" step="1" min="0" name="freight_min_days"
+               placeholder="Opcional"
+               class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+    </label>
+    <label class="block">
+        <span class="text-sm font-medium text-gray-700">Prazo máx. (dias)</span>
+        <input type="number" step="1" min="0" name="freight_max_days"
+               placeholder="Opcional"
+               class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+    </label>
+</div>
+<label class="block">
+    <span class="text-sm font-medium text-gray-700">Teto de quantidade coberta *</span>
+    <input type="number" step="1" min="1" name="freight_qty_max" required
+           placeholder="Ex: 1"
+           class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+</label>
+<label class="block">
+    <span class="text-sm font-medium text-gray-700">Validade da cotação (dias) *</span>
+    <input type="number" step="1" min="1" max="365" name="freight_ttl_days" required
+           placeholder="Ex: 30"
+           class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+</label>
+<label class="block">
+    <span class="text-sm font-medium text-gray-700">Referência da evidência *</span>
+    <input type="text" name="freight_evidence_ref" required maxlength="200"
+           placeholder="Ex: COT-2026-001 / link da cotação"
+           class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+</label>

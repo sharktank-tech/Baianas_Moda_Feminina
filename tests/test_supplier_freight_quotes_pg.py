@@ -43,6 +43,11 @@ def pg_quotes():
         ).read_text()
         migration = migration.replace("pollomodas.", f'"{schema}".')
         conn.exec_driver_sql(migration)
+        scope_migration = Path(
+            "migrations/0026_freight_evidence_scope.sql"
+        ).read_text()
+        scope_migration = scope_migration.replace("pollomodas.", f'"{schema}".')
+        conn.exec_driver_sql(scope_migration)
     yield engine, schema
     with engine.begin() as conn:
         conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
