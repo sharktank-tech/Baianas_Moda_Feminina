@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Redefinir senha — {% if site and site.name %}{{ site.name }}{% else %}Pollo Modas{% endif %}{% endblock %}
+{% block meta_description %}Escolha uma nova senha para a sua conta Pollo Modas.{% endblock %}
+
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles/conta.css') }}">
+{% endblock %}
+
+{% block content %}
+<section class="account-stage">
+  <div class="auth-card">
+
+    <aside class="auth-aside">
+      <a href="{{ url_for('main.home') }}" class="auth-aside-brand">
+        {% if site and site.name %}{{ site.name }}{% else %}Pollo<span>.</span>Modas{% endif %}
+      </a>
+      <div class="auth-aside-copy">
+        <span class="auth-aside-eyebrow">Nova senha</span>
+        <h2 class="auth-aside-title">Escolha uma senha forte.</h2>
+        <p class="auth-aside-text">Após redefinir, você entrará com a nova senha — as sessões antigas serão encerradas.</p>
+      </div>
+    </aside>
+
+    <div class="auth-form-side">
+      <div class="auth-form-head">
+        <h1 class="auth-form-title">Redefinir senha</h1>
+        <p class="auth-form-sub">Informe a nova senha da sua conta.</p>
+      </div>
+
+      {% if error %}
+      <div style="background:#fef2f2;border:1px solid #ef4444;color:#991b1b;padding:12px 14px;border-radius:8px;margin-bottom:1.15rem;font-size:14px;" role="alert">
+        {{ error }}
+        {% if not token %}
+        <p style="margin:10px 0 0;">
+          <a href="{{ url_for('main.esqueci_senha') }}"
+             style="color:#991b1b;font-weight:700;">Solicitar novo link</a>
+        </p>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if token %}
+      <form method="POST" novalidate>
+        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+        <input type="hidden" name="token" value="{{ token }}">
+
+        <div class="field">
+          <label for="password" class="field-label">Nova senha</label>
+          <input type="password" id="password" name="password" class="field-input"
+                 placeholder="Sua nova senha" autocomplete="new-password" required>
+        </div>
+
+        <div class="field">
+          <label for="confirm" class="field-label">Confirmar nova senha</label>
+          <input type="password" id="confirm" name="confirm" class="field-input"
+                 placeholder="Repita a nova senha" autocomplete="new-password" required>
+        </div>
+
+        <button type="submit" class="btn-account">Redefinir senha</button>
+      </form>
+      {% elif not error %}
+      <p class="auth-alt">
+        Link ausente? <a href="{{ url_for('main.esqueci_senha') }}">Solicitar novo link</a>
+      </p>
+      {% endif %}
+
+      {% if error and token %}
+      <p class="auth-alt">
+        <a href="{{ url_for('main.esqueci_senha') }}">Solicitar novo link</a>
+      </p>
+      {% endif %}
+
+      <p class="auth-alt">
+        <a href="{{ url_for('main.login') }}">Voltar ao login</a>
+      </p>
+    </div>
+
+  </div>
+</section>
+{% endblock %}

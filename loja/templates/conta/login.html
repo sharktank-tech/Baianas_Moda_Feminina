@@ -56,6 +56,9 @@
           <label for="password" class="field-label">Senha</label>
           <input type="password" id="password" name="password" class="field-input"
                  placeholder="Sua senha" autocomplete="current-password" required>
+          <p class="auth-forgot">
+            <a href="{{ url_for('main.esqueci_senha') }}">Esqueci minha senha</a>
+          </p>
         </div>
 
         <div class="auth-row">

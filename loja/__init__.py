@@ -13,15 +13,22 @@ import uuid
 # string completa do callback OAuth (code/state) em cada request. Defesas:
 #   1) desliga o access log do Werkzeug ANTES de servir requests; e
 #   2) mesmo que algo ainda emita o access log, sanitiza o self.path no momento
-#      da emissão (somente o caminho do callback OAuth), sem remover a query da
+#      da emissão (somente o caminho do callback OAuth e da redefinição de
+#      senha, cujo token também vive na query), sem remover a query da
 #      request que a aplicação já processou em request.args.
 # Logs próprios da aplicação (OAuth/API, já sanitizados) permanecem.
+_SECRETS_QUERY_PATHS = frozenset({
+    "/integrations/aliexpress/callback",
+    "/redefinir-senha",
+})
+
+
 def _sanitize_oauth_access_path(path: str) -> str:
     if not path:
         return path
 
     base = path.split("?", 1)[0]
-    if base == "/integrations/aliexpress/callback":
+    if base in _SECRETS_QUERY_PATHS:
         return base
 
     return path
@@ -222,11 +229,24 @@ def create_app():
 
     @login_manager.user_loader
     def load_user(user_id):
+        # Payload versionado "uuid.versao" (User.get_id) — sessão e cookie
+        # "manter conectado" carregam a versão vigente na autenticação.
+        # Troca de senha incrementa auth_version e revoga os logins antigos.
+        # Payload legado (sem ponto) equivale à versão 1.
+        raw_id, expected_version = user_id, 1
+        if "." in user_id:
+            raw_id, _, version_text = user_id.rpartition(".")
+            try:
+                expected_version = int(version_text)
+            except ValueError:
+                return None
         try:
-            return db.session.get(User, uuid.UUID(
-                user_id))  # Implementado uso da lib uuid para corresponder ao armazenamento no banco de dados
+            user = db.session.get(User, uuid.UUID(raw_id))
         except ValueError:
-            return None         # corrigido: User
+            return None
+        if user is None or user.auth_version != expected_version:
+            return None
+        return user
 
     from loja import cli
     app.cli.add_command(cli.create_admin)

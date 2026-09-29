@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Esqueci minha senha — {% if site and site.name %}{{ site.name }}{% else %}Pollo Modas{% endif %}{% endblock %}
+{% block meta_description %}Solicite um link para redefinir sua senha Pollo Modas.{% endblock %}
+
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles/conta.css') }}">
+{% endblock %}
+
+{% block content %}
+<section class="account-stage">
+  <div class="auth-card">
+
+    <aside class="auth-aside">
+      <a href="{{ url_for('main.home') }}" class="auth-aside-brand">
+        {% if site and site.name %}{{ site.name }}{% else %}Pollo<span>.</span>Modas{% endif %}
+      </a>
+      <div class="auth-aside-copy">
+        <span class="auth-aside-eyebrow">Recuperação de acesso</span>
+        <h2 class="auth-aside-title">De volta à sua conta.</h2>
+        <p class="auth-aside-text">Informe o e-mail cadastrado e enviamos um link seguro para você escolher uma nova senha.</p>
+      </div>
+    </aside>
+
+    <div class="auth-form-side">
+      <div class="auth-form-head">
+        <h1 class="auth-form-title">Esqueci minha senha</h1>
+        <p class="auth-form-sub">Informe o e-mail da sua conta.</p>
+      </div>
+
+      <form method="POST" novalidate>
+        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+        <div class="field">
+          <label for="email" class="field-label">E-mail</label>
+          <input type="email" id="email" name="email" class="field-input"
+                 placeholder="voce@email.com" autocomplete="email" required>
+        </div>
+
+        <button type="submit" class="btn-account">Enviar link de redefinição</button>
+      </form>
+
+      <p class="auth-alt">
+        Lembrou a senha? <a href="{{ url_for('main.login') }}">Voltar ao login</a>
+      </p>
+    </div>
+
+  </div>
+</section>
+{% endblock %}
