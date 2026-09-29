@@ -15,7 +15,7 @@
             Renovar frete — {{ product.name }}
         </h1>
         <p class="text-gray-500 mt-2">
-            Produto publicado{% if product.external_id %} &middot; ID: {{ product.external_id }}{% endif %} — a renovação não despublica nem altera preço sozinha.
+            Produto publicado{% if product.external_id %} &middot; ID: {{ product.external_id }}{% endif %} — a renovação mantém o produto publicado e recalcula o preço se os custos mudarem, usando a mesma margem-alvo.
         </p>
 
         <div class="flex flex-wrap gap-2 mt-3">
@@ -27,8 +27,8 @@
                 {% endif %}
             </span>
             <span class="text-sm font-medium px-3 py-1 rounded-full border
-                         {% if live_evidence %}text-green-700 bg-green-50 border-green-200{% else %}text-red-700 bg-red-50 border-red-200{% endif %}">
-                Evidência (cenário de referência): {{ 'vigente' if live_evidence else 'ausente/vencida — vendas bloqueadas' }}
+                         {% if live_evidence and live_evidence.import_duty is not none and live_evidence.icms is not none %}text-green-700 bg-green-50 border-green-200{% else %}text-red-700 bg-red-50 border-red-200{% endif %}">
+                Evidência (cenário de referência): {{ 'vigente' if live_evidence and live_evidence.import_duty is not none and live_evidence.icms is not none else 'incompleta/vencida — vendas bloqueadas' }}
             </span>
         </div>
     </div>
@@ -37,8 +37,7 @@
         <h2 class="text-lg font-semibold text-gray-800 mb-4">Nova cotação com evidência</h2>
         <p class="text-xs text-gray-500 mb-4">
             Mesmas regras do rascunho: referência e validade obrigatórias, sem
-            valores presumidos; mudança material de frete marca a precificação
-            como stale (reprecificar em seguida, sem despublicar).
+            valores presumidos; mudanças nos custos recalculam o preço na mesma transação, mantendo sua margem-alvo antes das despesas da venda.
         </p>
         <form method="POST"
               action="{{ url_for('aliexpress_admin.publicado_frete', product_id=product.external_id or '') }}"
@@ -55,3 +54,4 @@
 </div>
 
 {% endblock %}
+

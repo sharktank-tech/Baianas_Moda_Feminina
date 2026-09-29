@@ -242,6 +242,7 @@ def reference_quote_table(db):
                 variant_scope VARCHAR(64),
                 covers_all_variants BOOLEAN NOT NULL DEFAULT 0,
                 qty_max INTEGER,
+                supplier_unit_cost NUMERIC, import_duty NUMERIC, icms NUMERIC,
                 PRIMARY KEY (supplier_product_id, dest_prefix, option_key, quantity),
                 CHECK (length(dest_prefix) = 3),
                 CHECK (quantity > 0),
@@ -269,6 +270,8 @@ def _frete(client, product_id=PRODUCT_ID, shipping="20.00", currency="BRL", foll
            variant_scope="all", qty_max="1", extra=None):
     data = {
         "shipping_cost": shipping, "freight_currency": currency,
+        "supplier_unit_cost": str(Product.query.filter_by(external_id=product_id).first().cost),
+        "import_duty": "0.00", "icms": "0.00",
         "freight_dest_cep": dest_cep, "freight_ttl_days": ttl_days,
         "freight_evidence_ref": evidence_ref,
         "freight_variant_scope": variant_scope, "freight_qty_max": qty_max,
@@ -287,6 +290,8 @@ def _renovar(client, product_id=PRODUCT_ID, shipping="20.00", currency="BRL", fo
              variant_scope="all", qty_max="1", extra=None):
     data = {
         "shipping_cost": shipping, "freight_currency": currency,
+        "supplier_unit_cost": str(Product.query.filter_by(external_id=product_id).first().cost),
+        "import_duty": "0.00", "icms": "0.00",
         "freight_dest_cep": dest_cep, "freight_ttl_days": ttl_days,
         "freight_evidence_ref": evidence_ref,
         "freight_variant_scope": variant_scope, "freight_qty_max": qty_max,
@@ -1215,7 +1220,7 @@ def test_frete_com_evidencia_grava_custo_e_cotacao(admin_catalog, db):
     resp = _frete(
         admin_catalog, shipping="20.00", currency="BRL",
         dest_cep="77000000", ttl_days="30", evidence_ref="COT-REAL-001",
-        variant_scope="all", qty_max="3",
+        variant_scope="all", qty_max="1",
         extra={"freight_dest_cep_end": "77099999",
                "freight_min_days": "8", "freight_max_days": "14"},
     )
@@ -1230,7 +1235,7 @@ def test_frete_com_evidencia_grava_custo_e_cotacao(admin_catalog, db):
     assert rows[0][0] == "77000000"
     assert rows[0][1] == "77099999"
     assert rows[0][3] == 1  # covers_all_variants
-    assert rows[0][4] == 3  # qty_max
+    assert rows[0][4] == 1  # qty_max
     assert Decimal(str(rows[0][5])) == Decimal("20.00")
 
 
@@ -1253,7 +1258,7 @@ def test_renovacao_publicado_renova_sem_despublicar(admin_catalog, db):
     resp = _renovar(
         admin_catalog, shipping="22.00", currency="BRL",
         dest_cep="77000000", ttl_days="15", evidence_ref="COT-RENOV-002",
-        variant_scope="all", qty_max="2",
+        variant_scope="all", qty_max="1",
     )
     page = resp.get_data(as_text=True)
     assert "vigente até" in page
@@ -1322,3 +1327,52 @@ def test_falha_na_cotacao_reverte_custo(admin_catalog, db, monkeypatch):
     rows = _quote_rows(db, sp.id)
     assert len(rows) == 1
     assert Decimal(str(rows[0][5])) == Decimal("20.00")
+
+
+
+@pytest.mark.parametrize('missing', ['supplier_unit_cost', 'import_duty', 'icms'])
+def test_complete_quote_requires_each_explicit_component(admin_catalog, db, missing):
+    _import(admin_catalog)
+    response = _frete(admin_catalog, extra={missing: ''})
+    assert 'Informe custo do produto' in response.get_data(as_text=True)
+    sp = _supplier_product_from_db(db)
+    assert sp.shipping_cost is None
+    assert sp.import_duty is None and sp.icms is None
+    assert _quote_rows(db, sp.id) == []
+
+
+def test_published_tax_change_reprices_same_margin_atomically(admin_catalog, db):
+    _import(admin_catalog)
+    _frete(admin_catalog)
+    _margem(admin_catalog, margin='30')
+    _publicar(admin_catalog)
+    response = _renovar(admin_catalog, shipping='0', extra={
+        'supplier_unit_cost': '337.85', 'import_duty': '35.05', 'icms': '76.42'})
+    assert 'vigente até' in response.get_data(as_text=True)
+    db.session.expire_all()
+    sp = _supplier_product_from_db(db)
+    product = _draft_from_db()
+    assert sp.landed_cost == Decimal('449.32')
+    assert product.price == Decimal('641.89')
+    assert product.target_margin_percent == Decimal('30')
+    assert product.is_active and not product.is_draft
+
+
+def test_purchase_tax_storage_failure_rolls_back_every_amount(admin_catalog, db, monkeypatch):
+    import loja.services.supplier_freight_quotes as quotes
+    _import(admin_catalog)
+    _frete(admin_catalog)
+    _margem(admin_catalog, margin='30')
+    _publicar(admin_catalog)
+    original_price = _draft_from_db().price
+    original_cost = _supplier_product_from_db(db).cost
+    def fail(**kwargs):
+        raise quotes.ReferenceQuoteUnavailable('storage_error')
+    monkeypatch.setattr(quotes, 'store_reference_freight_quote', fail)
+    _renovar(admin_catalog, shipping='0', extra={
+        'supplier_unit_cost': '337.85', 'import_duty': '35.05', 'icms': '76.42'})
+    db.session.expire_all()
+    sp = _supplier_product_from_db(db)
+    assert sp.cost == original_cost
+    assert sp.import_duty == 0 and sp.icms == 0
+    assert _draft_from_db().price == original_price

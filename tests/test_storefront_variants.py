@@ -967,14 +967,29 @@ def test_real_checkout_persists_variant_id_and_uses_product_price(
     db, client, make_user, ae_product, monkeypatch
 ):
     from loja.modules.getway_mercado_pago.payment_models import OrderItem
+    from test_shipping_quote import _fresh
+    from loja.services.supplier_freight_quotes import store_reference_freight_quote
+    from loja.modules.models import SupplierProduct
 
     user = make_user()
     product, rosa_m, _ = ae_product
     # Preço da variante (custo/supplier) diverge do preço de venda do produto;
     # o vendido é sempre Product.price.
     rosa_m.price = Decimal("50.00")
+    link = db.session.get(SupplierProduct, rosa_m.supplier_product_id)
+    link.import_duty = Decimal("0.00")
+    link.icms = Decimal("0.00")
     db.session.commit()
 
+    from sqlalchemy import text
+    # Use the same explicit test schema as the quote service tests.
+    from test_shipping_quote import reference_quote_table
+    table_fixture = reference_quote_table.__wrapped__(db)
+    next(table_fixture)
+    fresh = _fresh(link.id, cost="20.00")[str(link.id)]
+    fresh['supplier_unit_cost'] = '46.60'
+    store_reference_freight_quote(supplier_product_id=link.id, dest_cep='01310100',
+        quote=fresh, provider_method='test', evidence_ref='synthetic-variant-cost')
     client.post("/login", data={"email": user.email, "password": "senha123"})
 
     monkeypatch.setattr(pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("10.00"))
@@ -990,7 +1005,7 @@ def test_real_checkout_persists_variant_id_and_uses_product_price(
 
     preset_shipping_quote(
         client, "01310100",
-        [{"product_id": product.id, "variant_id": rosa_m.id, "quantity": 2}],
+        [{"product_id": product.id, "variant_id": rosa_m.id, "quantity": 1}],
         "10.00",
     )
 
@@ -999,7 +1014,7 @@ def test_real_checkout_persists_variant_id_and_uses_product_price(
         data={
             "checkout_type": "product",
             "product_id": str(product.id),
-            "quantity": "2",
+            "quantity": "1",
             "variant_id": str(rosa_m.id),
             "selected_size": "M",
             "nome": "Cliente Teste",
@@ -1021,7 +1036,7 @@ def test_real_checkout_persists_variant_id_and_uses_product_price(
     assert item.variant_id == rosa_m.id
     assert Decimal(str(item.unit_price)) == Decimal(str(product.price))
     # Estoque debitado na reserva de criação do pedido.
-    assert rosa_m.stock == 2
+    assert rosa_m.stock == 3
 
 
 def test_legacy_product_without_variant_uses_old_flow(db, client, make_user):
@@ -1293,3 +1308,4 @@ def test_sync_payment_retry_after_manual_review_is_idempotent(
     assert retry.status == "manual_review"
     db.session.refresh(product)
     assert product.stock == 9
+

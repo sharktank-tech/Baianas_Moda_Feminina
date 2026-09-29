@@ -50,6 +50,7 @@ def reference_quote_table(db):
                 variant_scope VARCHAR(64),
                 covers_all_variants BOOLEAN NOT NULL DEFAULT 0,
                 qty_max INTEGER,
+                supplier_unit_cost NUMERIC, import_duty NUMERIC, icms NUMERIC,
                 PRIMARY KEY (supplier_product_id, dest_prefix, option_key, quantity),
                 CHECK (length(dest_prefix) = 3),
                 CHECK (quantity > 0),
@@ -86,6 +87,7 @@ def _supplier_link(db, *, cost="60.00"):
     db.session.add(product)
     db.session.flush()
     sp = SupplierProduct(
+        import_duty=Decimal("0.00"), icms=Decimal("0.00"),
         id=uuid.uuid4(), supplier_id=supplier.id, product_id=product.id,
         supplier_product_id="SP_MANUAL",
         cost=Decimal(cost), currency="BRL",
@@ -142,6 +144,7 @@ def _store_manual_quote(sp, *, cost="18.50", dest_cep=REF_DEST_CEP,
         option=option,
         qty=qty,
         quote={
+            "supplier_unit_cost": sp.cost, "import_duty": "0.00", "icms": "0.00",
             "dest_prefix": dest_cep[:3],
             "option": option,
             "qty": qty,
@@ -309,16 +312,15 @@ def test_scope_qtd_acima_do_teto_bloqueia(db, client, monkeypatch):
         )
 
 
-def test_scope_qtd_dentro_do_teto_cobre(db, client, monkeypatch):
+def test_scope_qtd_maior_exige_cotacao_propria(db, client, monkeypatch):
     product, variant, sp = _supplier_link(db)
     _enable_grouped(client, monkeypatch)
-    _store_manual_quote(sp, cost="18.50", qty_max=5)
-
-    result = quote_for_items(
-        [{"product_id": product.id, "variant_id": variant.id, "quantity": 3}],
-        REF_DEST_CEP,
-    )
-    assert result["total"] == Decimal("18.50")
+    _store_manual_quote(sp, cost="18.50")
+    with pytest.raises(QuoteUnavailable):
+        quote_for_items(
+            [{"product_id": product.id, "variant_id": variant.id, "quantity": 3}],
+            REF_DEST_CEP,
+        )
 
 
 # --- ITEM 5.5: flat também exige evidência ---------------------------------
@@ -460,3 +462,39 @@ def test_checkout_quote_expires_at_exact_deadline(db, client):
     assert AliExpressSupplierProvider._check_fresh(
         fresh, REF_DEST_CEP, None, {'qty': 1, 'variants': {str(variant.id)}},
         now + timedelta(seconds=60)) == 'expired'
+
+
+
+def test_checkout_freezes_cost_evidence_and_catalog_changes_do_not_rewrite_it(db, client):
+    from types import SimpleNamespace
+    from loja.services.acquisition_costs import freeze_checkout_acquisition
+    from loja.services.order_unit_economics import resolve_order_landed_cost_snapshot
+    from loja.services.pricing import price_dropshipping_product
+    product, variant, sp = _supplier_link(db)
+    price_dropshipping_product(product=product, target_margin_percent='30')
+    db.session.commit()
+    _store_manual_quote(sp, variant_scope=str(variant.id), covers_all_variants=False)
+    items = [{'product_id': product.id, 'variant_id': variant.id, 'quantity': 1, 'unit_price': product.price}]
+    freeze_checkout_acquisition(items, REF_DEST_CEP)
+    frozen = SimpleNamespace(**items[0])
+    total = resolve_order_landed_cost_snapshot(SimpleNamespace(items=[frozen]))
+    assert total == Decimal('78.50')
+    assert frozen.supplier_import_duty_snapshot == 0
+    assert frozen.supplier_icms_snapshot == 0
+    assert frozen.supplier_cost_evidence_snapshot['variant_scope'] == str(variant.id)
+    assert frozen.supplier_cost_evidence_snapshot['evidence_ref_hash']
+    sp.icms = Decimal('99.00')
+    assert resolve_order_landed_cost_snapshot(SimpleNamespace(items=[frozen])) == total
+    db.session.rollback()
+
+
+def test_legacy_quote_missing_taxes_blocks_flat_checkout(db, client, monkeypatch):
+    from sqlalchemy import text
+    from loja.views.payments_routes import quote_checkout_shipping
+    product, variant, sp = _supplier_link(db)
+    _store_manual_quote(sp)
+    db.session.execute(text('UPDATE supplier_reference_freight_quotes SET supplier_unit_cost=NULL, import_duty=NULL, icms=NULL'))
+    db.session.commit()
+    monkeypatch.setitem(client.application.config, 'SHIPPING_GROUPED_QUOTE_ENABLED', False)
+    with pytest.raises(ValueError):
+        quote_checkout_shipping([{'product_id': product.id, 'variant_id': variant.id, 'quantity': 1}], REF_DEST_CEP)

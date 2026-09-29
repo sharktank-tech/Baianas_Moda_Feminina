@@ -343,6 +343,9 @@ class OrderItem(db.Model):
     supplier_shipping_cost_snapshot = db.Column(db.Numeric(10, 2), nullable=True)
     supplier_landed_cost_snapshot = db.Column(db.Numeric(10, 2), nullable=True)
     supplier_cost_currency_snapshot = db.Column(db.String(3), nullable=True)
+    supplier_import_duty_snapshot = db.Column(db.Numeric(10, 2), nullable=True)
+    supplier_icms_snapshot = db.Column(db.Numeric(10, 2), nullable=True)
+    supplier_cost_evidence_snapshot = db.Column(db.JSON, nullable=True)
 
     created_at = db.Column(
         db.DateTime,
@@ -382,6 +385,17 @@ class OrderItem(db.Model):
             "supplier_landed_cost_snapshot IS NULL OR "
             "supplier_landed_cost_snapshot > 0",
             name="ck_order_items_supplier_landed_cost_positive",
+        ),
+        db.CheckConstraint(
+            "(supplier_import_duty_snapshot IS NULL AND supplier_icms_snapshot IS NULL) OR "
+            "(supplier_import_duty_snapshot IS NOT NULL AND supplier_icms_snapshot IS NOT NULL AND "
+            "supplier_import_duty_snapshot BETWEEN 0 AND 99999999.99 AND "
+            "supplier_icms_snapshot BETWEEN 0 AND 99999999.99 AND "
+            "supplier_unit_cost_snapshot IS NOT NULL AND supplier_shipping_cost_snapshot IS NOT NULL AND "
+            "supplier_landed_cost_snapshot IS NOT NULL AND "
+            "supplier_landed_cost_snapshot = supplier_unit_cost_snapshot + supplier_shipping_cost_snapshot + "
+            "supplier_import_duty_snapshot + supplier_icms_snapshot)",
+            name="ck_order_items_purchase_taxes",
         ),
     )
 

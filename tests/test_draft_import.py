@@ -1012,6 +1012,8 @@ def _priced_draft(db, external_id, sku_price="10.00", currency="USD"):
     sp.freight_status = "available"
     sp.shipping_cost = Decimal("2.00")
     sp.freight_currency = currency
+    sp.import_duty = Decimal("0.00")
+    sp.icms = Decimal("0.00")
     db.session.flush()
     price_dropshipping_product(product=product, target_margin_percent="20")
     db.session.commit()
@@ -1131,6 +1133,8 @@ def _priced_draft_with(
     sp.freight_status = "available"
     sp.shipping_cost = Decimal(str(shipping))
     sp.freight_currency = currency
+    sp.import_duty = Decimal("0.00")
+    sp.icms = Decimal("0.00")
     db.session.flush()
     price_dropshipping_product(product=product, target_margin_percent=margin)
     db.session.commit()

@@ -224,7 +224,14 @@ def resolve_order_landed_cost_snapshot(order) -> Optional[Decimal]:
         landed = _money(raw_landed, "order_item_supplier_landed_cost_snapshot")
         if unit <= 0 or landed <= 0:
             raise OrderUnitEconomicsError("order_item_landed_cost_invalid")
-        if landed != (unit + shipping).quantize(Decimal("0.01")):
+        duty_raw = getattr(item, "supplier_import_duty_snapshot", None)
+        icms_raw = getattr(item, "supplier_icms_snapshot", None)
+        # Historical snapshots omitted supplier taxes; never relabel them as zero.
+        if duty_raw is None or icms_raw is None:
+            return None
+        duty = _money(duty_raw, "order_item_supplier_import_duty_snapshot")
+        icms = _money(icms_raw, "order_item_supplier_icms_snapshot")
+        if landed != (unit + shipping + duty + icms).quantize(Decimal("0.01")):
             raise OrderUnitEconomicsError("order_item_landed_cost_mismatch")
 
         item_currency = str(raw_currency).strip().upper()
@@ -395,3 +402,4 @@ __all__ = [
     "evaluate_order_unit_economics_with_payment",
     "resolve_order_landed_cost_snapshot",
 ]
+

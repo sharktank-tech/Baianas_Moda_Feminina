@@ -115,6 +115,7 @@ jobs:
           tests/test_stock_reservation_cleanup_pg.py
           tests/test_checkout_recovery_skip_pg.py
           tests/test_supplier_freight_quotes_pg.py
+          tests/test_acquisition_costs_pg.py
 
       - name: Prova observável do bloqueio (2o INSERT aguardando unicidade)
         run: >
@@ -179,3 +180,4 @@ jobs:
           tests/test_pricing_publication_pg.py
           tests/test_verify_future_canary_readonly_pg.py
           tests/test_verify_payment_evidence_readonly_pg.py
+

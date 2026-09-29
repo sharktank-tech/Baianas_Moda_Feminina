@@ -52,15 +52,21 @@
                         {% if supplier_product and supplier_product.freight_currency %}{{ supplier_product.freight_currency }}{% endif %}
                     </dd>
                 </div>
+                {% for field, label in [('import_duty', 'Imposto de importação'), ('icms', 'ICMS da compra')] %}
                 <div class="flex justify-between">
-                    <dt class="text-gray-500">Landed cost</dt>
+                    <dt class="text-gray-500">{{ label }}</dt>
+                    <dd class="font-medium text-gray-800">{{ "%.2f"|format(supplier_product|attr(field)) if supplier_product and supplier_product|attr(field) is not none else 'Não confirmado' }}</dd>
+                </div>
+                {% endfor %}
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Custo completo da aquisição</dt>
                     <dd class="font-medium text-gray-800">
                         {{ "%.2f"|format(supplier_product.landed_cost) if supplier_product and supplier_product.landed_cost is not none else '—' }}
                         {% if supplier_product %}{{ supplier_product.freight_currency or supplier_product.currency }}{% endif %}
                     </dd>
                 </div>
                 <div class="flex justify-between">
-                    <dt class="text-gray-500">Margem alvo</dt>
+                    <dt class="text-gray-500">Margem alvo antes das despesas da venda</dt>
                     <dd class="font-medium text-gray-800">
                         {{ "%.2f"|format(product.target_margin_percent) if product.target_margin_percent is not none else '—' }}%
                     </dd>

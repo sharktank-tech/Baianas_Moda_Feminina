@@ -360,7 +360,7 @@ class AliExpressSupplierProvider:
             key = str(sp.id)
             entry = per_sp.get(key)
             if entry is None:
-                entry = {"qty": 0, "variants": set()}
+                entry = {"qty": 0, "variants": set(), "link": sp}
                 per_sp[key] = entry
                 order.append(key)
             entry["qty"] += int(line.quantity or 1)
@@ -376,6 +376,13 @@ class AliExpressSupplierProvider:
             )
             if problem is not None:
                 raise QuoteUnavailable(problem)
+            sp = per_sp[key]["link"]
+            if (not sp.is_active or sp.currency != "BRL" or sp.freight_currency != "BRL"
+                    or sp.freight_status != "available"):
+                raise QuoteUnavailable("supplier_cost_changed")
+            if any(to_decimal(fresh[k]) != to_decimal(getattr(sp, attr, None))
+                   for k, attr in (("supplier_unit_cost", "cost"), ("import_duty", "import_duty"), ("icms", "icms"), ("cost", "shipping_cost"))):
+                raise QuoteUnavailable("supplier_cost_changed")
             total += to_decimal(fresh["cost"])
             if fresh.get("min_days") is not None:
                 min_days = fresh["min_days"] if min_days is None else min(min_days, fresh["min_days"])
@@ -396,6 +403,15 @@ class AliExpressSupplierProvider:
         validade)."""
         if not isinstance(fresh, dict):
             return "unverified_cost"
+        from .acquisition_costs import acquisition_components, AcquisitionCostUnavailable
+        try:
+            acquisition_components(fresh)
+        except AcquisitionCostUnavailable as exc:
+            return str(exc)
+        if coverage.get("qty") != 1 or fresh.get("qty_max") != 1:
+            return "acquisition_quantity_unverified"
+        if not fresh.get("evidence_ref_hash"):
+            return "supplier_taxes_unverified"
         # Valida tempo/moeda/custo pela mesma regra estrita da persistência.
         # O destino-base valida a origem da evidência; a cobertura abaixo
         # confere o CEP real, inclusive faixas que atravessam prefixos.
@@ -848,3 +864,4 @@ __all__ = [
     "group_lines",
     "quote_groups",
 ]
+

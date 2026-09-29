@@ -1,3 +1,10 @@
+<p class="text-sm text-gray-600">Cotação completa para uma unidade: registre os valores do checkout do fornecedor para o destino e a variante abaixo. Tributos da venda da loja são calculados separadamente.</p>
+{% for field, label in [('supplier_unit_cost', 'Custo do produto no fornecedor'), ('import_duty', 'Imposto de importação'), ('icms', 'ICMS da compra')] %}
+<label class="block">
+    <span class="text-sm font-medium text-gray-700">{{ label }} (BRL) *</span>
+    <input type="number" name="{{ field }}" required min="{{ '0.01' if field == 'supplier_unit_cost' else '0' }}" step="0.01" placeholder="Valor comprovado; zero somente se confirmado" class="mt-1 w-full border rounded-lg px-4 py-3">
+</label>
+{% endfor %}
 {# Campos de evidência de frete (ITEM 1.1). Compartilhado entre o
    formulário de rascunho e o de renovação de publicado. Referência e
    validade são OBRIGATÓRIAS (backend rejeita sem elas); sem defaults
@@ -65,7 +72,7 @@
 </div>
 <label class="block">
     <span class="text-sm font-medium text-gray-700">Teto de quantidade coberta *</span>
-    <input type="number" step="1" min="1" name="freight_qty_max" required
+    <input type="number" step="1" min="1" max="1" name="freight_qty_max" required value="1"
            placeholder="Ex: 1"
            class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
 </label>
@@ -81,3 +88,4 @@
            placeholder="Ex: COT-2026-001 / link da cotação"
            class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
 </label>
+

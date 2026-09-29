@@ -362,6 +362,7 @@ def test_pricing_and_publish_roundtrip_in_disposable_schema(env, monkeypatch):
         db.session.add(product)
         db.session.flush()
         supplier_product = SupplierProduct(
+        import_duty=Decimal("0.00"), icms=Decimal("0.00"),
             id=uuid.uuid4(), supplier_id=supplier.id,
             product_id=product.id, supplier_product_id="SP_PG_F6",
             cost=Decimal("100.00"), currency="BRL",

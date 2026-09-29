@@ -3,10 +3,10 @@
 Semântica financeira canônica (NÃO misturar):
     supplier cost = SupplierProduct.cost            (fonte canônica)
     shipping cost = SupplierProduct.shipping_cost
-    landed cost   = supplier cost + shipping cost  (calculado por aqui)
+    landed cost   = supplier cost + shipping cost + import duty + ICMS  (calculado por aqui)
     selling price = Product.price
 
-Nesta fase ficam FORA do landed cost: impostos, FX, gateway fee, parcelamento,
+Ficam FORA do landed cost: tributos da venda, FX, gateway fee, parcelamento,
 desconto e comissão. Nunca adicionamos valor presumido para nenhum deles.
 
 Definições explícitas:
@@ -181,7 +181,13 @@ def calculate_landed_cost(supplier_product: SupplierProduct) -> Decimal:
         supplier_product.landed_cost = None
         raise PricingBlocked("currency_mismatch")
 
-    landed = cost + shipping
+    from .acquisition_costs import AcquisitionCostUnavailable, supplier_tax_total
+    try:
+        taxes = supplier_tax_total(supplier_product)
+    except AcquisitionCostUnavailable as exc:
+        supplier_product.landed_cost = None
+        raise PricingBlocked(str(exc)) from None
+    landed = cost + shipping + taxes
     return landed.quantize(Decimal("0.01"))
 
 

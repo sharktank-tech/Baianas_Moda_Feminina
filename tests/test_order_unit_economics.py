@@ -146,6 +146,8 @@ def _snapshot_item(quantity="1", **overrides):
         "quantity": quantity,
         "supplier_unit_cost_snapshot": Decimal("30.00"),
         "supplier_shipping_cost_snapshot": Decimal("5.00"),
+        "supplier_import_duty_snapshot": Decimal("0.00"),
+        "supplier_icms_snapshot": Decimal("0.00"),
         "supplier_landed_cost_snapshot": Decimal("35.00"),
         "supplier_cost_currency_snapshot": "BRL",
     }
@@ -631,3 +633,4 @@ def test_with_payment_does_not_mutate_order_or_payment():
     assert vars(payment) == before_payment
     assert payment.raw_payload == before_payload
     assert vars(item) == dict(vars(item))
+

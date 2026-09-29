@@ -51,6 +51,7 @@ def _prepared(
     db.session.add(product)
     db.session.flush()
     supplier_product = SupplierProduct(
+        import_duty=Decimal("0.00"), icms=Decimal("0.00"),
         id=uuid.uuid4(),
         supplier_id=uuid.uuid4(),
         product_id=product.id,
@@ -174,6 +175,7 @@ def test_negative_shipping_blocks_publication(db):
         pricing_status=pricing.PRICED, target_margin_percent=Decimal("20"),
     )
     supplier_product = SupplierProduct(
+        import_duty=Decimal("0.00"), icms=Decimal("0.00"),
         id=uuid.uuid4(), supplier_id=uuid.uuid4(),
         product_id=product.id, supplier_product_id="SP_NEGPUB",
         cost=Decimal("100.00"), currency="BRL",
@@ -194,6 +196,7 @@ def test_variant_only_from_inactive_supplier_gives_no_sellable(db):
     product, sp = _prepared(db, variant_stock=0)
     product.variants[0].is_active = False
     inactive_supplier = SupplierProduct(
+        import_duty=Decimal("0.00"), icms=Decimal("0.00"),
         id=uuid.uuid4(), supplier_id=sp.supplier_id, product_id=product.id,
         supplier_product_id="SP_INACTIVE", cost=Decimal("100.00"),
         currency="BRL", freight_status="available",
@@ -419,3 +422,4 @@ def test_non_literal_gate_values_remain_off(db, monkeypatch):
             value,
         )
         assert evaluate_publication(product).allowed is True
+
