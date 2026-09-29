@@ -52,16 +52,21 @@ Loja de roupas com estilização moderna e limpa com todas as funcionalidades de
     ```sh
     DATABASE_URL=postgresql://usuario:senha@localhost:5432/pollomodas
     SECRET_KEY=uma-chave-secreta-forte
-    EMAIL_SERVER=smtp.seuprovedor.com
+    EMAIL_SERVER=smtp.resend.com
     EMAIL_PORT=587
-    EMAIL_SENDER=contato@pollomodas.com.br
-    EMAIL_PASSWORD=sua-senha
+    EMAIL_USERNAME=resend
+    EMAIL_SENDER=atendimento@pollomodas.com.br
+    EMAIL_SENDER_NAME=PolloModas
+    EMAIL_PASSWORD=<API_KEY_RESEND>
     EMAIL_DESTINE=contato@pollomodas.com.br
     MERCADO_PAGO_ACCESS_TOKEN=APP_USR-xxxxxxxx
     MERCADO_PAGO_WEBHOOK_SECRET=xxxxxxxx
     APP_PUBLIC_URL=http://127.0.0.1:5001
     MERCADO_PAGO_USE_SANDBOX=true
     ```
+
+   Consulte [a configuração de e-mail Resend](docs/RESEND_EMAIL.md) para
+   produção, prioridade de credenciais e validação de entrega.
 
 5. Crie as tabelas do banco (necessário uma única vez):
 

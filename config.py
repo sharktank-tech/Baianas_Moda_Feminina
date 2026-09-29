@@ -50,10 +50,17 @@ class Config:
 
     # ============= Email ==================
     EMAIL_DESTINE = os.getenv("EMAIL_DESTINE")
-    EMAIL_SERVER = os.getenv("EMAIL_SERVER")
-    EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+    EMAIL_SERVER = os.getenv("EMAIL_SERVER", "smtp.resend.com")
+    # SMTP login is distinct from the visible sender. None preserves legacy
+    # SMTP providers; Resend uses the fixed username "resend" in the transport.
+    EMAIL_USERNAME = os.getenv("EMAIL_USERNAME")
+    EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD") or (
+        os.getenv("RESEND_API_KEY")
+        if EMAIL_SERVER.strip().lower() == "smtp.resend.com" else None
+    )
     EMAIL_PORT = int(os.getenv("EMAIL_PORT", 587))
-    EMAIL_SENDER = os.getenv("EMAIL_SENDER")
+    EMAIL_SENDER = os.getenv("EMAIL_SENDER", "atendimento@pollomodas.com.br")
+    EMAIL_SENDER_NAME = os.getenv("EMAIL_SENDER_NAME", "PolloModas")
 
     # ===== Mercado Pago ====================
     MERCADO_PAGO_ACCESS_TOKEN = os.environ.get(

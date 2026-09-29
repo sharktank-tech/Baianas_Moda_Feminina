@@ -173,7 +173,9 @@ def _dispatch_email(destinatario: str, link: str, *, sender=None) -> None:
                 "password_reset email_failed=1 err=%s", type(exc).__name__
             )
 
-    if current_app.config.get("PASSWORD_RESET_SEND_ASYNC", True):
+    # Serverless runtimes can freeze daemon threads after the response.
+    # Wait for SMTP by default; background dispatch needs a durable worker.
+    if current_app.config.get("PASSWORD_RESET_SEND_ASYNC", False):
         threading.Thread(target=_run, daemon=True).start()
     else:
         _run()
