@@ -116,7 +116,10 @@ def test_reset_request_reaches_resend_transport(client, make_user, app, smtp, mo
     monkeypatch.setitem(app.config, 'APP_PUBLIC_URL', 'https://www.pollomodas.com.br')
     monkeypatch.delitem(app.config, 'PASSWORD_RESET_SEND_ASYNC', raising=False)
     user = make_user()
-    response = client.post('/esqueci-senha', data={'email': user.email})
+    # The suite shares committed rate-limit rows. Give this transport test
+    # its own documentation-only IP instead of inheriting localhost's quota.
+    response = client.post('/esqueci-senha', data={'email': user.email},
+                           headers={'X-Forwarded-For': '192.0.2.79'})
     assert response.status_code == 302
     assert smtp[-1][0] == 'send'
     message = smtp[-1][1]
