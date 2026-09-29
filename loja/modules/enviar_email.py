@@ -24,7 +24,14 @@ def email_delivery_ready():
     )
 
 
-def enviar_email(destinatario, assunto, corpo):
+def enviar_email(destinatario, assunto, corpo, corpo_html=None):
+    """Envia e-mail transacional.
+
+    corpo_html (opcional): quando informado, envia multipart/alternative com
+    texto puro (corpo) + HTML próprio. Sem corpo_html, mantém o formato
+    histórico: apenas o HTML gerado do texto escapado (comportamento
+    inalterado para os chamadores existentes, ex.: checkout_recovery).
+    """
     if not email_delivery_ready():
         raise RuntimeError("email_delivery_unavailable")
 
@@ -38,14 +45,20 @@ def enviar_email(destinatario, assunto, corpo):
     msg["To"] = destinatario
     msg["Subject"] = assunto
 
-    # O corpo chega como texto simples; o conteúdo é escapado antes de virar
-    # HTML para impedir injeção de marcação vinda de campos de usuário.
-    corpo_html = (
-        html.escape(corpo)
-        .replace("\\r\\n", "\\n")
-        .replace("\\n", "<br>\\n")
-    )
-    msg.attach(MIMEText(corpo_html, "html", "utf-8"))
+    if corpo_html is not None:
+        # Texto puro + HTML: o cliente escolhe a melhor representação.
+        msg.attach(MIMEText(corpo, "plain", "utf-8"))
+        msg.attach(MIMEText(corpo_html, "html", "utf-8"))
+    else:
+        # O corpo chega como texto simples; o conteúdo é escapado antes de
+        # virar HTML para impedir injeção de marcação vinda de campos de
+        # usuário.
+        corpo_html_gerado = (
+            html.escape(corpo)
+            .replace("\\r\\n", "\\n")
+            .replace("\\n", "<br>\n")
+        )
+        msg.attach(MIMEText(corpo_html_gerado, "html", "utf-8"))
 
     try:
         with smtplib.SMTP(servidor_smtp, porta_smtp) as server:

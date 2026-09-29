@@ -203,6 +203,9 @@
 .auth-check input { accent-color: var(--accent); width: 15px; height: 15px; }
 .auth-link { color: var(--accent); text-decoration: none; font-weight: 600; }
 .auth-link:hover { text-decoration: underline; }
+.auth-forgot { margin: 0.45rem 0 0; font-size: 0.8rem; text-align: right; }
+.auth-forgot a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.auth-forgot a:hover { text-decoration: underline; }
 
 .btn-account {
   width: 100%;

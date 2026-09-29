@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from flask import (
     Blueprint, render_template, request, redirect, url_for,
-    flash, jsonify, Response, session, current_app, abort
+    flash, jsonify, Response, session, current_app, abort, make_response
 )
 from flask_login import login_user, login_required, current_user, logout_user
 from sqlalchemy import asc, desc
@@ -2352,6 +2352,106 @@ def logout():
     logout_user()
     flash("Você saiu da sua conta.", "info")
     return redirect(url_for('main.home'))
+
+
+# ── Esqueci minha senha ───────────────────────────────────────────────────────
+def _headers_pagina_redefinicao(resp):
+    """2.9: página de redefinição não vaza referência nem é cacheada."""
+    resp = make_response(resp)
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+def _mensagem_erro_redefinicao(code: str) -> str:
+    return {
+        "invalid": (
+            "Link inválido. Solicite um novo link de redefinição."
+        ),
+        "expired": (
+            "Este link expirou. Solicite um novo link de redefinição."
+        ),
+        "used": (
+            "Este link já foi utilizado. Solicite um novo link de "
+            "redefinição."
+        ),
+        "empty": "Todos os campos são obrigatórios.",
+        "same_password": "A nova senha não pode ser igual à senha atual.",
+    }.get(code, "Link inválido. Solicite um novo link de redefinição.")
+
+
+@main_blueprint.route("/esqueci-senha", methods=["GET", "POST"])
+def esqueci_senha():
+    from loja.services.password_reset import PUBLIC_MESSAGE, request_password_reset
+
+    if request.method == "POST":
+        # Mesma resposta pública em TODOS os casos (conta existente,
+        # inexistente, sem senha local ou no limite): flash idêntico + PRG.
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        ip = forwarded.split(",")[0].strip() or (request.remote_addr or "")
+        request_password_reset(
+            request.form.get("email", ""),
+            ip=ip or None,
+        )
+        flash(PUBLIC_MESSAGE, "info")
+        return redirect(url_for("main.esqueci_senha"))
+
+    return render_template("conta/esqueci_senha.html")
+
+
+@main_blueprint.route("/redefinir-senha", methods=["GET", "POST"])
+def redefinir_senha():
+    from loja.services.password_reset import (
+        reset_password_with_token,
+        validate_reset_token,
+    )
+
+    if request.method == "GET":
+        token = request.args.get("token", "")
+        status = validate_reset_token(token)
+        if status == "ok":
+            return _headers_pagina_redefinicao(
+                render_template("conta/redefinir_senha.html",
+                                token=token, error=None)
+            )
+        return _headers_pagina_redefinicao(
+            render_template(
+                "conta/redefinir_senha.html",
+                token=None,
+                error=_mensagem_erro_redefinicao(status),
+            )
+        )
+
+    token = request.form.get("token", "")
+    password = request.form.get("password", "")
+    confirm = request.form.get("confirm", "")
+
+    if not password:
+        error = _mensagem_erro_redefinicao("empty")
+    elif password != confirm:
+        error = "As senhas não coincidem."
+    else:
+        ok, code = reset_password_with_token(token, password)
+        if ok:
+            # Sucesso: SEM autenticar — usuário entra na tela de login.
+            flash(
+                "Senha redefinida com sucesso! Faça login com a nova senha.",
+                "success",
+            )
+            return _headers_pagina_redefinicao(
+                redirect(url_for("main.login"))
+            )
+        error = _mensagem_erro_redefinicao(code)
+        # Falha não consome o token: o form volta com ele para nova tentativa.
+        token = token if code in ("empty", "same_password") else None
+
+    return _headers_pagina_redefinicao(
+        render_template(
+            "conta/redefinir_senha.html",
+            token=token,
+            error=error,
+        )
+    )
 
 
 # ── Editar conta e endereço ──────────────────────────────────────────────────

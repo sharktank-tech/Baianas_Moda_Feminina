@@ -1017,6 +1017,16 @@ class User(UserMixin, db.Model):
         default=False
     )
 
+    # Versão de autenticação (reset de senha, 0027). Embutida no payload de
+    # sessão/lembrar-me via get_id(); trocar a senha incrementa o valor e
+    # invalida todos os logins antigos, inclusive "manter conectado".
+    auth_version = db.Column(
+        db.Integer,
+        nullable=False,
+        default=1,
+        server_default="1"
+    )
+
     def set_password(self, password):
         # CORRIGIDO: a coluna se chama `password`, não `password_hash`.
         # Como estava, set_password() criava um atributo novo em memória
@@ -1028,10 +1038,106 @@ class User(UserMixin, db.Model):
         return check_password_hash(self.password, password)
 
     def get_id(self):
-        return str(self.id)
+        # Payload versionado: "uuid.versao". O user_loader valida a versão —
+        # sem ponto (payload legado) equivale à versão 1.
+        return f"{self.id}.{self.auth_version}"
 
     def __repr__(self):
         return f"<User {self.email}>"
+
+
+# ==========================================================
+# Recuperação de senha (esqueci minha senha — 0027)
+# ==========================================================
+class PasswordResetToken(db.Model):
+    """Token de redefinição de senha — guarda somente o hash sha256."""
+
+    __tablename__ = "password_reset_tokens"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+
+    user_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    token_hash = db.Column(
+        db.String(64),
+        nullable=False,
+        unique=True
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=utcnow
+    )
+
+    expires_at = db.Column(
+        db.DateTime,
+        nullable=False
+    )
+
+    used_at = db.Column(
+        db.DateTime,
+        nullable=True
+    )
+
+    user = db.relationship("User")
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "expires_at > created_at",
+            name="ck_password_reset_tokens_window"
+        ),
+        # No máximo 1 token não consumido por usuário.
+        db.Index(
+            "uq_password_reset_active_user",
+            "user_id",
+            unique=True,
+            sqlite_where=db.text("used_at IS NULL"),
+            postgresql_where=db.text("used_at IS NULL"),
+        ),
+    )
+
+
+class AuthRateLimit(db.Model):
+    """Janela fixa de tentativas por escopo (ex.: por IP ou por e-mail)."""
+
+    __tablename__ = "auth_rate_limits"
+
+    scope = db.Column(
+        db.String(32),
+        primary_key=True
+    )
+
+    key_hash = db.Column(
+        db.String(64),
+        primary_key=True
+    )
+
+    window_started_at = db.Column(
+        db.DateTime,
+        nullable=False
+    )
+
+    attempts = db.Column(
+        db.Integer,
+        nullable=False
+    )
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "attempts >= 0",
+            name="ck_auth_rate_limits_attempts"
+        ),
+    )
 
 
 # ==========================================================
