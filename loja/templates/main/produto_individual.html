@@ -690,7 +690,7 @@ body.product-lightbox-open {
 
 </div>
 
-{% if product.source == "aliexpress" %}
+{% if product.source == "aliexpress" and not product.description %}
 {% set desc_without_images = sanitize_product_description_without_images(product.description) %}
 {% if product_description_excerpt(desc_without_images) %}
 <section class="details-section">
