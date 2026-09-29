@@ -1,13 +1,24 @@
 import html
 import logging
+import ssl
 
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr
 import smtplib
 from config import Config
 
 
 logger = logging.getLogger(__name__)
+
+
+def _smtp_username():
+    configured = getattr(Config, "EMAIL_USERNAME", None)
+    if configured is not None:
+        return str(configured).strip()
+    if str(Config.EMAIL_SERVER or "").strip().lower() == "smtp.resend.com":
+        return "resend"
+    return str(Config.EMAIL_SENDER or "").strip()
 
 
 def email_delivery_ready():
@@ -20,6 +31,7 @@ def email_delivery_ready():
         str(Config.EMAIL_SERVER or "").strip()
         and str(Config.EMAIL_SENDER or "").strip()
         and str(Config.EMAIL_PASSWORD or "").strip()
+        and _smtp_username()
         and 1 <= port <= 65535
     )
 
@@ -40,8 +52,11 @@ def enviar_email(destinatario, assunto, corpo, corpo_html=None):
     remetente = str(Config.EMAIL_SENDER).strip()
     senha = str(Config.EMAIL_PASSWORD)
 
-    msg = MIMEMultipart()
-    msg["From"] = remetente
+    msg = MIMEMultipart("alternative")
+    msg["From"] = formataddr((
+        str(getattr(Config, "EMAIL_SENDER_NAME", "") or "").strip(),
+        remetente,
+    ))
     msg["To"] = destinatario
     msg["Subject"] = assunto
 
@@ -61,10 +76,18 @@ def enviar_email(destinatario, assunto, corpo, corpo_html=None):
         msg.attach(MIMEText(corpo_html_gerado, "html", "utf-8"))
 
     try:
-        with smtplib.SMTP(servidor_smtp, porta_smtp) as server:
-            server.starttls()
-            server.login(remetente, senha)
-            server.send_message(msg)
+        context = ssl.create_default_context()
+        if porta_smtp in (465, 2465):
+            connection = smtplib.SMTP_SSL(
+                servidor_smtp, porta_smtp, timeout=10, context=context
+            )
+        else:
+            connection = smtplib.SMTP(servidor_smtp, porta_smtp, timeout=10)
+        with connection as server:
+            if porta_smtp not in (465, 2465):
+                server.starttls(context=context)
+            server.login(_smtp_username(), senha)
+            server.send_message(msg, from_addr=remetente, to_addrs=[destinatario])
         logger.info("email_delivery sent=1")
     except Exception:
         logger.warning("email_delivery failed=1")
