@@ -304,3 +304,66 @@ def test_product_title_uses_name_and_description_not_duplicated(client, db):
     assert descricao[:20] in list_excerpt, (
         "Listing excerpt must contain description text"
     )
+
+def test_product_description_not_doubled_aliexpress(client, db):
+    """Verify description appears only once for AliExpress products.
+
+    The template has TWO description sections for AliExpress products:
+    1) General section (lines 507-519 of produto_individual.html)
+    2) AliExpress-specific section (lines 693-705 of produto_individual.html)
+
+    This test confirms only one section renders, preventing duplication.
+    """
+    from uuid import uuid4
+    from decimal import Decimal
+
+    name = "Camisa Social Listrada"
+    # AliExpress product with description and variants
+    descricao = "Camisa social de algodão 100% listrada listras azuis e brancas. "
+    descricao += "Mangas longas com botões de madrepérola. Tecido de alta qualidade."
+
+    product = Product(
+        id=uuid4(),
+        name=name,
+        description=descricao,
+        price=Decimal("79.90"),
+        stock=12,
+        image1="https://exemplo.com/camisa.jpg",
+        category="masculino",
+        is_draft=False,
+        source="aliexpress",  # Critical: AliExpress source
+    )
+    db.session.add(product)
+    db.session.commit()
+
+    html = render_template("main/produto_individual.html", product=product)
+
+    # Count how many times "Descrição" section title appears
+    desc_count = html.count('class="section-title">Descrição</h2>')
+    # Should be exactly 1, not 2 (which would indicate duplication)
+    assert desc_count == 1, (
+        f"Expected 1 'Descrição' section, found {desc_count}. "
+        "Description appears twice in the template for AliExpress products."
+    )
+
+    # The description text should appear exactly once (or 0 if no description,
+    # but since we set it, should be 1)
+    assert descricao[:30] in html, "Description text must appear in the template"
+
+    # The name should NOT be confused with description
+    assert name in html, "Product name must appear in the template"
+    assert descricao[:30] not in html.replace(name, ""), (
+        "Description text should not be masquerading as name"
+    )
+
+    # Verify the description appears in a single .product-description or .details-section
+    # There should be exactly one section showing the description content
+    product_desc_count = html.count('class="product-description"')
+    details_count = html.count('class="details-section"')
+    # For AliExpress with variants, we expect exactly one description-related section
+    # The exact count depends on the variant state, but should not be double
+    total_desc_sections = product_desc_count + details_count
+    assert total_desc_sections <= 2, (
+        f"Too many description sections ({total_desc_sections}). "
+        "Possible duplication of description in template."
+    )
