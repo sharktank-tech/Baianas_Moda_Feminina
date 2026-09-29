@@ -93,6 +93,8 @@ def _order_with_cost_snapshot(user_id, product, *, total="59.90", unit="40.00",
             supplier_shipping_cost_snapshot=Decimal(shipping),
             supplier_landed_cost_snapshot=Decimal(unit) + Decimal(shipping),
             supplier_cost_currency_snapshot="BRL",
+            supplier_import_duty_snapshot=Decimal("0.00"),
+            supplier_icms_snapshot=Decimal("0.00"),
         )
     )
     if installments is not None:

@@ -95,6 +95,7 @@ def _link(db, product, supplier, **overrides):
         "currency": "BRL",
         "freight_status": "available",
         "shipping_cost": Decimal("5.00"),
+        "import_duty": Decimal("0.00"), "icms": Decimal("0.00"),
         "landed_cost": Decimal("25.00"),
         "freight_currency": "BRL",
         "is_active": True,
@@ -141,6 +142,7 @@ def _fresh(
 ):
     entry = {
         "cost": cost,
+        "supplier_unit_cost": "20.00", "import_duty": "0.00", "icms": "0.00",
         "dest_prefix": dest_prefix,
         "option": option,
         "qty": qty,
@@ -715,6 +717,7 @@ def _stale_product(db, *, cost, shipping, landed, fresh_shipping):
     )
     fresh = _fresh(link.id)
     fresh[str(link.id)]["cost"] = fresh_shipping
+    fresh[str(link.id)]["supplier_unit_cost"] = cost
     return product, fresh
 
 

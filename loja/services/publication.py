@@ -13,7 +13,7 @@ Códigos estáveis de bloqueio (NUNCA usar mensagens livres como lógica):
     shipping_cost_missing   -> shipping_cost NULL
     shipping_cost_invalid   -> shipping_cost < 0
     landed_cost_missing     -> landed_cost NULL ou <= 0
-    landed_cost_stale       -> landed_cost != (cost + shipping) quantizado
+    landed_cost_stale       -> landed_cost != (cost + shipping + supplier_taxes) quantizado
     currency_mismatch       -> moeda de venda/fornecedor/frete divergente
     margin_missing          -> target_margin_percent NULL ou inválida
     pricing_not_ready       -> pricing_status != 'priced'
@@ -113,6 +113,12 @@ def evaluate_publication(product: Product) -> PublicationDecision:
             elif shipping < 0:
                 reasons.append("shipping_cost_invalid")
 
+        from .acquisition_costs import supplier_tax_total, AcquisitionCostUnavailable
+        try:
+            supplier_taxes = supplier_tax_total(supplier_product)
+        except AcquisitionCostUnavailable:
+            supplier_taxes = None
+            reasons.append("supplier_taxes_unverified")
         landed = to_decimal(supplier_product.landed_cost)
         if landed is None or landed <= 0:
             reasons.append("landed_cost_missing")
@@ -129,7 +135,7 @@ def evaluate_publication(product: Product) -> PublicationDecision:
             reasons.append("currency_mismatch")
 
         # Defesa contra landed guardado/inconsistente: qualquer divergência de
-        # banco/edição manual entre landed_cost e (cost + shipping) bloqueia.
+        # banco/edição manual entre landed_cost e (cost + shipping + supplier_taxes) bloqueia.
         # Só avalia quando o estado do fornecedor está íntegro (cost > 0,
         # shipping >= 0, frete disponível e moedas coerentes).
         if (
@@ -137,8 +143,9 @@ def evaluate_publication(product: Product) -> PublicationDecision:
             and shipping is not None and shipping >= 0
             and supplier_product.freight_status == FREIGHT_AVAILABLE
             and currencies_ok
+            and supplier_taxes is not None
         ):
-            expected_landed = (cost + shipping).quantize(Decimal("0.01"))
+            expected_landed = (cost + shipping + supplier_taxes).quantize(Decimal("0.01"))
             if landed != expected_landed:
                 reasons.append("landed_cost_stale")
 

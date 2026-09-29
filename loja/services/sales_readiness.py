@@ -74,6 +74,7 @@ REASON_SEVERITY = {
     "missing_cost": BLOCKING,
     "currency_mismatch": BLOCKING,
     "landed_cost_stale": BLOCKING,
+    "supplier_taxes_unverified": BLOCKING,
     "shipping_cost_unproven": REVIEW_ONLY,
     "shipping_destination_unproven": REVIEW_ONLY,
     "shipping_quote_expired": BLOCKING,
@@ -96,7 +97,8 @@ REASON_LABELS = {
     "missing_origin": "Origem de envio não comprovada",
     "missing_cost": "Custo do item não comprovado",
     "currency_mismatch": "Moeda diferente de BRL",
-    "landed_cost_stale": "Custo total inconsistente (custo + frete)",
+    "landed_cost_stale": "Custo total inconsistente (produto, frete e tributos)",
+    "supplier_taxes_unverified": "Tributos da compra no fornecedor não confirmados",
     "shipping_cost_unproven": "Custo logístico sem prova fresca",
     "shipping_destination_unproven": "Destino de referência não configurado",
     "shipping_quote_expired": "Cotação de frete vencida",
@@ -431,6 +433,12 @@ def evaluate_product_readiness(
         ):
             _add("currency_mismatch")
         else:
+            from .acquisition_costs import supplier_tax_total, AcquisitionCostUnavailable
+            try:
+                supplier_taxes = supplier_tax_total(link) if source == "aliexpress" else Decimal("0.00")
+            except AcquisitionCostUnavailable:
+                supplier_taxes = None
+                _add("supplier_taxes_unverified")
             shipping = to_decimal(getattr(link, "shipping_cost", None))
             landed = to_decimal(getattr(link, "landed_cost", None))
             persisted_ok = (
@@ -441,7 +449,8 @@ def evaluate_product_readiness(
                 and shipping.is_finite()
                 and shipping >= 0
                 and getattr(link, "freight_status", None) == "available"
-                and landed == (cost + shipping).quantize(Decimal("0.01"))
+                and supplier_taxes is not None
+                and landed == (cost + shipping + supplier_taxes).quantize(Decimal("0.01"))
             )
             if not ref_dest_valid:
                 # Sem cenário de referência: teto REVISÃO para dependentes
@@ -462,9 +471,19 @@ def evaluate_product_readiness(
                     option=ref_option,
                     now=effective_now,
                 )
-                if fresh_cost is not None:
+                if fresh_cost is not None and source == "aliexpress":
+                    from .acquisition_costs import acquisition_components
+                    try:
+                        components = acquisition_components((fresh_quotes or {}).get(str(link.id)) or {})
+                        if (components["supplier_unit_cost"] != cost or
+                            components["import_duty"] + components["icms"] != supplier_taxes):
+                            raise AcquisitionCostUnavailable("supplier_taxes_unverified")
+                    except AcquisitionCostUnavailable:
+                        _add("supplier_taxes_unverified")
+                        supplier_taxes = None
+                if fresh_cost is not None and supplier_taxes is not None:
                     proven_logistic = fresh_cost
-                    current_landed = (cost + fresh_cost).quantize(Decimal("0.01"))
+                    current_landed = (cost + fresh_cost + supplier_taxes).quantize(Decimal("0.01"))
                     if persisted_ok and (
                         abs(landed - current_landed) > Decimal("0.01")
                     ):

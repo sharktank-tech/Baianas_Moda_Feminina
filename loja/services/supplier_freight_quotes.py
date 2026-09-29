@@ -189,7 +189,7 @@ def find_valid_reference_quotes(*, dest_cep, option=None, qty=1, now=None,
             f"""SELECT supplier_product_id, dest_prefix, option_key, quantity,
                        currency, cost, min_days, max_days, quoted_at, expires_at,
                        dest_cep, dest_cep_end, variant_scope,
-                       covers_all_variants, qty_max
+                       covers_all_variants, qty_max, supplier_unit_cost, import_duty, icms, evidence_ref_hash
                 FROM {_qualified_table()}
                 WHERE quantity = :qty
                   AND {destination_filter}
@@ -232,6 +232,10 @@ def find_valid_reference_quotes(*, dest_cep, option=None, qty=1, now=None,
             "qty": int(row["quantity"]),
             "currency": row["currency"],
             "cost": row["cost"],
+            "supplier_unit_cost": row["supplier_unit_cost"],
+            "import_duty": row["import_duty"],
+            "icms": row["icms"],
+            "evidence_ref_hash": row["evidence_ref_hash"],
             "min_days": row["min_days"],
             "max_days": row["max_days"],
             "quoted_at": quoted_at,
@@ -294,6 +298,15 @@ def store_reference_freight_quote(
     if not {"dest_prefix", "option", "qty"}.issubset(fresh):
         raise ReferenceQuoteUnavailable("invalid_quote")
     scope = _validate_scope(fresh)
+    from .acquisition_costs import acquisition_components, AcquisitionCostUnavailable
+    components = {k: None for k in ("supplier_unit_cost", "import_duty", "icms")}
+    if any(fresh.get(k) is not None for k in components):
+        try:
+            components = acquisition_components(fresh)
+        except AcquisitionCostUnavailable as exc:
+            raise ReferenceQuoteUnavailable(str(exc)) from None
+        if int(qty) != 1 or scope["qty_max"] != 1 or not evidence_ref:
+            raise ReferenceQuoteUnavailable("acquisition_quantity_unverified")
     if (
         scope["qty_max"] is not None
         and scope["qty_max"] < int(qty)
@@ -326,13 +339,13 @@ def store_reference_freight_quote(
                  currency, cost, min_days, max_days, quoted_at, expires_at,
                  provider_method, evidence_ref_hash, updated_at,
                  dest_cep, dest_cep_end, variant_scope,
-                 covers_all_variants, qty_max)
+                 covers_all_variants, qty_max, supplier_unit_cost, import_duty, icms)
                 VALUES
                 (:supplier_product_id, :dest_prefix, :option_key, :quantity,
                  :currency, :cost, :min_days, :max_days, :quoted_at, :expires_at,
                  :provider_method, :evidence_ref_hash, :updated_at,
                  :dest_cep, :dest_cep_end, :variant_scope,
-                 :covers_all_variants, :qty_max)
+                 :covers_all_variants, :qty_max, :supplier_unit_cost, :import_duty, :icms)
                 ON CONFLICT
                 (supplier_product_id, dest_prefix, option_key, quantity)
                 DO UPDATE SET
@@ -346,7 +359,10 @@ def store_reference_freight_quote(
                     dest_cep_end = excluded.dest_cep_end,
                     variant_scope = excluded.variant_scope,
                     covers_all_variants = excluded.covers_all_variants,
-                    qty_max = excluded.qty_max
+                    qty_max = excluded.qty_max,
+                    supplier_unit_cost = excluded.supplier_unit_cost,
+                    import_duty = excluded.import_duty,
+                    icms = excluded.icms
                 WHERE excluded.quoted_at >= {table}.quoted_at"""
             ),
             {
@@ -356,6 +372,7 @@ def store_reference_freight_quote(
                 "quantity": int(qty),
                 "currency": "BRL",
                 "cost": format(Decimal(cost), "f"),
+                **{k: format(v, "f") if v is not None else None for k, v in components.items()},
                 "min_days": fresh.get("min_days"),
                 "max_days": fresh.get("max_days"),
                 "quoted_at": quoted_at,
@@ -375,6 +392,7 @@ def store_reference_freight_quote(
     except SQLAlchemyError:
         db.session.rollback()
         raise ReferenceQuoteUnavailable("storage_error") from None
+    fresh["evidence_ref_hash"] = ref_hash
     fresh.update(
         {
             "dest_cep": scope["dest_cep"],
@@ -423,3 +441,4 @@ __all__ = [
     "store_reference_freight_quote",
     "request_reference_freight_quote",
 ]
+

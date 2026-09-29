@@ -39,6 +39,7 @@ def _sp(
     freight_currency="BRL",
 ):
     return SupplierProduct(
+        import_duty=Decimal("0.00"), icms=Decimal("0.00"),
         id=uuid.uuid4(),
         supplier_id=uuid.uuid4(),
         product_id=product.id,
@@ -245,6 +246,7 @@ def test_negative_shipping_blocks_at_service_level(db):
     # depender apenas do CHECK de banco. Vínculo em memória: o CHECK nem roda.
     product = _product(db)
     supplier_product = SupplierProduct(
+        import_duty=Decimal("0.00"), icms=Decimal("0.00"),
         id=uuid.uuid4(),
         supplier_id=uuid.uuid4(),
         product_id=product.id,

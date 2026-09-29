@@ -1558,6 +1558,9 @@ class SupplierProduct(db.Model):
     )
     shipping_cost = db.Column(db.Numeric(10, 2))
     landed_cost = db.Column(db.Numeric(10, 2))
+    # NULL means unverified; zero must be explicitly evidenced.
+    import_duty = db.Column(db.Numeric(10, 2), nullable=True)
+    icms = db.Column(db.Numeric(10, 2), nullable=True)
     freight_currency = db.Column(db.String(3))
     sync_status = db.Column(db.String(20))
     last_sync_at = db.Column(db.DateTime)
@@ -1579,6 +1582,12 @@ class SupplierProduct(db.Model):
             name="uq_supplier_product_external",
         ),
         db.CheckConstraint("cost >= 0", name="ck_supplier_product_cost_nonneg"),
+        db.CheckConstraint(
+            "(import_duty IS NULL AND icms IS NULL) OR "
+            "(import_duty IS NOT NULL AND icms IS NOT NULL AND "
+            "import_duty BETWEEN 0 AND 99999999.99 AND icms BETWEEN 0 AND 99999999.99)",
+            name="ck_supplier_product_purchase_taxes",
+        ),
         db.CheckConstraint(
             "wholesale_price >= 0",
             name="ck_supplier_product_wholesale_nonneg",

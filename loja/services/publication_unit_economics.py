@@ -109,6 +109,15 @@ def evaluate_product_net_margin(
     landed_cost = _positive_money(
         getattr(active_links[0], "landed_cost", None)
     )
+    if str(getattr(product, "source", "") or "").lower() == "aliexpress":
+        from .acquisition_costs import supplier_tax_total, observed_amount, AcquisitionCostUnavailable
+        try:
+            link = active_links[0]
+            expected = observed_amount(getattr(link, "cost", None), positive=True) + observed_amount(getattr(link, "shipping_cost", None)) + supplier_tax_total(link)
+            if landed_cost != expected:
+                landed_cost = None
+        except AcquisitionCostUnavailable:
+            landed_cost = None
     if landed_cost is None:
         return NetMarginPublicationDecision(
             allowed=False,
@@ -181,3 +190,4 @@ __all__ = [
     "NetMarginPublicationDecision",
     "evaluate_product_net_margin",
 ]
+

@@ -65,6 +65,7 @@ def reference_quote_table(db):
                 variant_scope VARCHAR(64),
                 covers_all_variants BOOLEAN NOT NULL DEFAULT 0,
                 qty_max INTEGER,
+                supplier_unit_cost NUMERIC, import_duty NUMERIC, icms NUMERIC,
                 PRIMARY KEY (supplier_product_id, dest_prefix, option_key, quantity),
                 CHECK (length(dest_prefix) = 3),
                 CHECK (quantity > 0),
@@ -254,15 +255,18 @@ def _supplier_link(db, *, freight_status="available", shipping="4.00",
     product = Product(
         id=uuid.uuid4(), name="Prod AE", price=Decimal("29.90"),
         source="aliexpress", external_id="EXT_Q", is_draft=True,
+        target_margin_percent=Decimal("30"),
         is_active=False,
     )
     db.session.add(product)
     db.session.flush()
     sp = SupplierProduct(
+        import_duty=Decimal("0.00"), icms=Decimal("0.00"),
         id=uuid.uuid4(), supplier_id=supplier.id, product_id=product.id,
         supplier_product_id="SP_Q",
         cost=Decimal(cost) if cost is not None else None,
         currency=currency, freight_status=freight_status,
+        landed_cost=(Decimal(cost) + Decimal(shipping)) if cost is not None and shipping is not None else None,
         shipping_cost=Decimal(shipping) if shipping is not None else None,
         freight_currency=freight_currency, is_active=True,
     )
@@ -286,6 +290,8 @@ def _fresh(sp_id, *, cost="4.00", dest_prefix="013", option=None, qty=1,
 
     return {
         str(sp_id): {
+            "supplier_unit_cost": "10.00", "import_duty": "0.00", "icms": "0.00",
+            "evidence_ref_hash": "synthetic-test-reference",
             "cost": Decimal(cost), "min_days": min_days, "max_days": max_days,
             "dest_prefix": dest_prefix, "option": option, "qty": qty,
             "currency": currency, "quoted_at": quoted_at or _now(),
@@ -337,7 +343,7 @@ def test_aliexpress_outro_cep_ou_quantidade_bloqueia(db):
     # Mesma cotação, outra quantidade: também bloqueia.
     with pytest.raises(QuoteUnavailable) as exc:
         provider.quote(_ae_group(product, variant, qty=2), "01310100")
-    assert exc.value.code == "unverified_cost"
+    assert exc.value.code == "acquisition_quantity_unverified"
 
 
 def test_aliexpress_cotacao_vencida_bloqueia(db):
@@ -617,7 +623,7 @@ def test_checkout_fornecedor_cota_dez_reais_cria_pedido(
     from loja.modules.models import Product as _Product
 
     user = make_user()
-    product, variant = _supplier_link(db)
+    product, variant = _supplier_link(db, shipping="10.00")
     sp_id = str(variant.supplier_product_id)
     # Checkout exige produto público; guarda exige priced+!draft p/ ativar.
     with db.session.no_autoflush:
@@ -628,18 +634,11 @@ def test_checkout_fornecedor_cota_dez_reais_cria_pedido(
         db.session.commit()
     _login(client, user)
     monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True)
-    monkeypatch.setitem(
-        client.application.config,
-        "SHIPPING_ALIEXPRESS_FRESH_QUOTES",
-        {sp_id: {
-            "cost": Decimal("10.00"), "min_days": 5, "max_days": 12,
-            "dest_prefix": "013", "option": None, "qty": 1,
-            "currency": "BRL", "quoted_at": utcnow(),
-            "ttl_seconds": QUOTE_TTL_SECONDS,
-            "dest_cep": "01310100", "dest_cep_end": None,
-            "variant_scope": None, "covers_all_variants": True,
-            "qty_max": 1,
-        }},
+    from loja.services.supplier_freight_quotes import store_reference_freight_quote
+    store_reference_freight_quote(
+        supplier_product_id=variant.supplier_product_id, dest_cep="01310100",
+        quote=_fresh(sp_id, cost="10.00")[sp_id],
+        provider_method="test", evidence_ref="synthetic-complete-cost",
     )
     preset_shipping_quote(
         client, "01310100",
@@ -699,6 +698,7 @@ def _manual_supplier_cart(db, user, suffixes=("A", "B")):
         db.session.add(product)
         db.session.flush()
         db.session.add(SupplierProduct(
+        import_duty=Decimal("0.00"), icms=Decimal("0.00"),
             id=uuid.uuid4(), supplier_id=supplier.id, product_id=product.id,
             supplier_product_id=f"SP_{suffix}", cost=Decimal("8.00"),
             currency="BRL", is_active=True,
@@ -1689,7 +1689,7 @@ def test_temporary_flat_rate_invalida_com_evidencia_mostra_frete_desatualizado(
     from loja.utils import utcnow
 
     user = make_user()
-    product, variant = _supplier_link(db)
+    product, variant = _supplier_link(db, shipping="10.00")
     with db.session.no_autoflush:
         stored_product = db.session.get(Product, product.id)
         stored_product.is_draft = False
@@ -1708,6 +1708,7 @@ def test_temporary_flat_rate_invalida_com_evidencia_mostra_frete_desatualizado(
             "dest_cep": "01310100", "dest_cep_end": None,
             "variant_scope": None, "covers_all_variants": True,
             "qty_max": 1,
+            "supplier_unit_cost": "10.00", "import_duty": "0.00", "icms": "0.00",
         },
         provider_method="test",
         evidence_ref="COT-FLAT-INVALIDO",
@@ -1854,13 +1855,19 @@ def test_http_flat_sem_evidencia_bloqueia_venda(client, db, make_user, monkeypat
     assert Order.query.count() == orders_before
 
 
-def test_http_flat_com_evidencia_vende(client, db, make_user, monkeypatch):
+@pytest.mark.parametrize("duty,icms", [("0.00", "0.00"), ("3.50", "7.67")])
+def test_http_flat_com_evidencia_vende(client, db, make_user, monkeypatch, duty, icms):
     import loja.views.payments_routes as pr
     from loja.modules.getway_mercado_pago.payment_models import Order
     from loja.services.supplier_freight_quotes import store_reference_freight_quote
 
     user = make_user()
-    product, variant = _supplier_link(db)
+    product, variant = _supplier_link(db, shipping="18.50")
+    from loja.services.pricing import price_dropshipping_product
+    from loja.modules.models import SupplierProduct
+    link = db.session.get(SupplierProduct, variant.supplier_product_id)
+    link.import_duty, link.icms = Decimal(duty), Decimal(icms)
+    price_dropshipping_product(product=product, target_margin_percent="30")
     _publish_supplier_product(client, db, product)
     sp_id = variant.supplier_product_id
     now = utcnow()
@@ -1874,6 +1881,7 @@ def test_http_flat_com_evidencia_vende(client, db, make_user, monkeypatch):
             "dest_cep": "77000000", "dest_cep_end": None,
             "variant_scope": None, "covers_all_variants": True,
             "qty_max": 1,
+            "supplier_unit_cost": "10.00", "import_duty": duty, "icms": icms,
         },
         provider_method="test",
         evidence_ref="COT-HTTP-FLAT",
@@ -1899,7 +1907,7 @@ def test_http_flat_com_evidencia_vende(client, db, make_user, monkeypatch):
     monkeypatch.setattr(
         pr, "create_preference",
         lambda order: capturados.append(order) or {
-            "preference_id": "pref-flat-ok",
+            "preference_id": f"pref-flat-ok-{duty}-{icms}",
             "checkout_url": "https://mp.example/flat-ok",
         },
     )
@@ -1913,3 +1921,9 @@ def test_http_flat_com_evidencia_vende(client, db, make_user, monkeypatch):
     order = Order.query.filter_by(user_id=user.id).one()
     assert order.shipping == Decimal("10.00")
     assert len(capturados) == 1
+
+
+    assert order.items[0].supplier_import_duty_snapshot == Decimal(duty)
+    assert order.items[0].supplier_icms_snapshot == Decimal(icms)
+    assert order.items[0].supplier_landed_cost_snapshot == Decimal('28.50') + Decimal(duty) + Decimal(icms)
+    assert order.items[0].supplier_cost_evidence_snapshot['version'] == 2

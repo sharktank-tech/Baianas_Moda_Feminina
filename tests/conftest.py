@@ -204,3 +204,50 @@ def login(client):
         )
 
     return _login
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _deny_external_network_in_tests():
+    """Unit/integration tests may use local PG, never live providers.
+
+    Block before DNS and at socket connect (including numeric addresses).
+    Provider tests must inject a fake transport. No credentials leave tests.
+    """
+    import ipaddress
+    import socket
+
+    patcher = pytest.MonkeyPatch()
+    original_resolve = socket.getaddrinfo
+    original_connect = socket.socket.connect
+    original_connect_ex = socket.socket.connect_ex
+
+    def local(host):
+        if isinstance(host, bytes):
+            host = host.decode('ascii')
+        if host in ('localhost', None):
+            return True
+        try:
+            return ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            return False
+
+    def resolve(host, *args, **kwargs):
+        if not local(host):
+            raise OSError('External network disabled in tests; inject a fake transport')
+        return original_resolve(host, *args, **kwargs)
+
+    def checked_connect(sock, address):
+        if sock.family in (socket.AF_INET, socket.AF_INET6) and not local(address[0]):
+            raise OSError('External network disabled in tests')
+        return original_connect(sock, address)
+
+    def checked_connect_ex(sock, address):
+        if sock.family in (socket.AF_INET, socket.AF_INET6) and not local(address[0]):
+            raise OSError('External network disabled in tests')
+        return original_connect_ex(sock, address)
+
+    patcher.setattr(socket, 'getaddrinfo', resolve)
+    patcher.setattr(socket.socket, 'connect', checked_connect)
+    patcher.setattr(socket.socket, 'connect_ex', checked_connect_ex)
+    yield
+    patcher.undo()

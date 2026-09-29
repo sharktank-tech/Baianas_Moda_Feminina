@@ -33,6 +33,7 @@ def reference_quote_table(db):
                 variant_scope VARCHAR(64),
                 covers_all_variants BOOLEAN NOT NULL DEFAULT 0,
                 qty_max INTEGER,
+                supplier_unit_cost NUMERIC, import_duty NUMERIC, icms NUMERIC,
                 PRIMARY KEY (supplier_product_id, dest_prefix, option_key, quantity),
                 CHECK (length(dest_prefix) = 3),
                 CHECK (quantity > 0),
@@ -478,3 +479,4 @@ def test_admin_quote_post_without_csrf_is_rejected(
         assert response.status_code == 400
     finally:
         app.config["WTF_CSRF_ENABLED"] = False
+

@@ -58,7 +58,7 @@ from loja.integrations.aliexpress.importer import (
     DraftImportError,
     import_product_draft,
 )
-from loja.modules.models import Product
+from loja.modules.models import Product, SupplierProduct
 from loja.modules.services import get_layout_data
 from loja.services.pricing import (
     PRICED,
@@ -365,6 +365,9 @@ def _apply_freight_update(product, supplier_product, *, back_endpoint,
     def _back():
         return redirect(url_for(back_endpoint, product_id=product_id))
 
+    # Same lock order as checkout: product then supplier link.
+    product = Product.query.filter_by(id=product.id).with_for_update(of=Product).populate_existing().one()
+    supplier_product = SupplierProduct.query.filter_by(id=supplier_product.id).with_for_update(of=SupplierProduct).populate_existing().one()
     shipping = _parse_amount("shipping_cost")
     currency = _norm_currency(request.form.get("freight_currency"))
 
@@ -390,6 +393,24 @@ def _apply_freight_update(product, supplier_product, *, back_endpoint,
         current_app.logger.info("frete admin: evidencia rejeitada")
         flash(evidence_error, "warning")
         return _back()
+
+    from loja.services.acquisition_costs import acquisition_components, AcquisitionCostUnavailable
+    try:
+        components = acquisition_components({
+            key: (request.form.get(key) or "").strip().replace(",", ".") or None
+            for key in ("supplier_unit_cost", "import_duty", "icms")
+        })
+    except AcquisitionCostUnavailable:
+        flash("Informe custo do produto, imposto de importação e ICMS da cotação. Use zero somente quando comprovado.", "warning")
+        return _back()
+    if evidence["qty_max"] != 1:
+        flash("A cotação completa cobre uma unidade. Informe quantidade máxima 1.", "warning")
+        return _back()
+    previous_components = (supplier_product.cost, supplier_product.import_duty, supplier_product.icms)
+    supplier_product.cost = components["supplier_unit_cost"]
+    supplier_product.import_duty = components["import_duty"]
+    supplier_product.icms = components["icms"]
+    product.cost = components["supplier_unit_cost"]
 
     # Valores ANTERIORES capturados antes de qualquer mutação: usados para
     # detectar mudança material (nunca reprecificar automaticamente).
@@ -417,7 +438,8 @@ def _apply_freight_update(product, supplier_product, *, back_endpoint,
     # Publicado não pode ficar STALE (CHECK do banco exige priced): recalcula
     # com a MESMA margem-alvo dentro da transação; falha reverte tudo.
     material_change = (
-        _equals_decimal(prev_shipping, shipping) is False
+        previous_components != (supplier_product.cost, supplier_product.import_duty, supplier_product.icms)
+        or _equals_decimal(prev_shipping, shipping) is False
         or (prev_currency or None) != currency
         or (prev_status or None) != FREIGHT_AVAILABLE
     )
@@ -459,6 +481,7 @@ def _apply_freight_update(product, supplier_product, *, back_endpoint,
     if getattr(now, "tzinfo", None) is not None:
         now = now.astimezone(timezone.utc).replace(tzinfo=None)
     quote = {
+        **components,
         "dest_prefix": evidence["dest_cep"][:3],
         "option": evidence["option"],
         "qty": 1,

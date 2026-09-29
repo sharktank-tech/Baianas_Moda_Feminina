@@ -65,6 +65,9 @@ def _unavailable_message(code: str) -> str:
             "Frete indisponível para este destino no momento. "
             "Confira o CEP e tente novamente."
         ),
+        "supplier_taxes_unverified": "Frete indisponível: falta confirmar o custo completo para este produto e destino.",
+        "supplier_cost_changed": "Os custos ou o preço foram atualizados. Atualize o carrinho e calcule o frete novamente.",
+        "acquisition_quantity_unverified": "A cotação disponível cobre uma unidade deste produto. Ajuste a quantidade ou entre em contato.",
         "invalid_destination": "Informe um CEP válido com 8 números.",
         "expired": (
             "Cotação de frete vencida. Calcule novamente e tente outra vez."
@@ -768,6 +771,11 @@ def create_mercado_pago_payment():
         )
 
         customer_data = _get_customer_data()
+        from loja.services.acquisition_costs import freeze_checkout_acquisition
+        try:
+            freeze_checkout_acquisition(item_data, customer_data["zip_code"])
+        except QuoteUnavailable as exc:
+            raise ValueError(_unavailable_message(exc.code)) from exc
         shipping = quote_checkout_shipping(item_data, customer_data["zip_code"])
         # Flag ligada exige confirmação agrupada por sessão; desligada usa
         # regra temporária flat aprovada, sem confirmação de remessas.
