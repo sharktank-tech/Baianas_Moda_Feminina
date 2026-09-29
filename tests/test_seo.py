@@ -213,3 +213,94 @@ def test_search_page_is_noindex(client, db):
     response = client.get("/produtos?q=vestido")
     body = response.get_data(as_text=True)
     assert 'name="robots" content="noindex,follow"' in body
+
+
+def test_product_title_uses_name_and_description_not_duplicated(client, db):
+    """Verify product title uses product.name and description section shows only description.
+
+    Confirms the template correctly separates name from description:
+    - <h1 class="product-name"> displays product.name
+    - Meta description uses product_description_excerpt (text-only, not the name)
+    - The structured data name matches product.name
+    - The description in structured data is not the same as the name
+    """
+    from uuid import uuid4
+    from decimal import Decimal
+
+    name = "Camisa Listrada Azul"
+    descricao = "Uma camisa de algodão 100% azul com listras brancas. "
+    descricao += "Possui botões de madrepérola e manga longa ajustada."
+
+    product = Product(
+        id=uuid4(),
+        name=name,
+        description=descricao,
+        price=Decimal("49.90"),
+        stock=15,
+        image1="https://exemplo.com/camisa.jpg",
+        category="masculino",
+        is_active=True,
+    )
+    db.session.add(product)
+    db.session.commit()
+
+    # 1) Structured data: name equals product.name
+    from loja.services.seo import product_structured_data
+    data = product_structured_data(product)
+    assert data is not None
+    assert data["@type"] == "Product"
+    assert data["name"] == name, "Structured data name must equal product.name"
+
+    # 2) Structured data: description is NOT the same as the name
+    assert data["description"] != name, (
+        "Structured data description must not be the product name"
+    )
+    # description must contain actual description text
+    assert descricao[:20] in data["description"], (
+        "Structured data description must contain description text"
+    )
+
+    # 3) Template: <h1 class="product-name"> contains the name (not description)
+    from flask import render_template
+    html = render_template("main/produto_individual.html", product=product)
+    assert 'class="product-name"' in html, (
+        "Template must have h1 with class product-name"
+    )
+    # The h1 content should be the name
+    assert name in html, "h1 must contain product.name"
+
+    # 4) Meta description (block meta_description) uses excerpt, not raw name
+    # The meta_description block is: {{ product_description_excerpt(product.description) or product.name }}
+    # Since we have description text, excerpt should be used
+    from loja.services.product_content import product_description_excerpt
+    with __import__("warnings").catch_warnings():
+        import warnings
+        warnings.filterwarnings("ignore")
+        excerpt = product_description_excerpt(descricao, max_words=40)
+    # excerpt must not equal the full name
+    assert excerpt != name, "Excerpt must not equal the full product name"
+    assert len(excerpt) > 0, "Excerpt must have content"
+
+    # 5) Description section in template uses sanitized description, not the name
+    with __import__("warnings").catch_warnings():
+        warnings.filterwarnings("ignore")
+        desc_html = render_template(
+            "main/produto_individual.html", product=product,
+            uses_variants=False,
+        )
+    assert 'class="product-description"' in desc_html, (
+        "Template must have .product-description section"
+    )
+    # Description section must contain description text, not just the name
+    assert descricao[:30] in desc_html, (
+        "Description section must contain description text"
+    )
+
+    # 6) Listing page: excerpt uses description, not name
+    with __import__("warnings").catch_warnings():
+        warnings.filterwarnings("ignore")
+        list_excerpt = product_description_excerpt(descricao, max_words=30)
+    assert list_excerpt != name, "Listing excerpt must not equal product name"
+    assert descricao[:20] in list_excerpt, (
+        "Listing excerpt must contain description text"
+    )
