@@ -58,11 +58,24 @@ def _attrs(cor, tamanho):
 
 def make_cargo(db, *, name=NOME_MANUAL, active_colors=CORES_ATIVAS):
     """Replica o caso real: size=NULL, tamanhos só em attributes."""
+    from loja.modules.models import Supplier, SupplierProduct
+
+    supplier = Supplier(
+        id=uuid.uuid4(),
+        name="Fornecedor Cargo",
+        channel_type="aliexpress",
+        seller_id="test-seller-cargo",
+        default_currency="BRL",
+        is_sync_enabled=False,
+    )
+    db.session.add(supplier)
+    db.session.flush()
     product = Product(
         id=uuid.uuid4(),
         name=name,
         description="<p>Calça cargo feminina com bolsos laterais.</p>",
         price=Decimal("119.90"),
+        cost=Decimal("46.60"),
         stock=0,
         image1="https://exemplo.com/cargo.jpg",
         category="feminino",
@@ -72,8 +85,26 @@ def make_cargo(db, *, name=NOME_MANUAL, active_colors=CORES_ATIVAS):
         external_id="1005012000378696",
         currency="BRL",
         pricing_status="priced",
+        target_margin_percent=Decimal("30.00"),
     )
     db.session.add(product)
+    db.session.flush()
+    link = SupplierProduct(
+        id=uuid.uuid4(),
+        supplier_id=supplier.id,
+        product_id=product.id,
+        supplier_product_id="1005012000378696",
+        cost=Decimal("46.60"),
+        currency="BRL",
+        freight_status="available",
+        shipping_cost=Decimal("20.00"),
+        landed_cost=Decimal("66.60"),
+        freight_currency="BRL",
+        import_duty=Decimal("0.00"),
+        icms=Decimal("0.00"),
+        is_active=True,
+    )
+    db.session.add(link)
     db.session.flush()
     variantes = {}
     for cor in ["Black", "Grey", "Purple"]:
@@ -82,6 +113,7 @@ def make_cargo(db, *, name=NOME_MANUAL, active_colors=CORES_ATIVAS):
             v = ProductVariant(
                 id=uuid.uuid4(),
                 product_id=product.id,
+                supplier_product_id=link.id,
                 external_sku_id=f"cargo-{cor}-{tamanho}",
                 supplier_sku_id=f"cargo-{cor}-{tamanho}",
                 color=cor,
@@ -439,3 +471,215 @@ def test_nome_manual_preservado_nos_fluxos(db, client, make_user, cargo):
     item = list(cart.items)[0]
     assert item.product.name == NOME_MANUAL
     assert "1005012000378696" not in pagina  # sem vazamento de SKU externo
+
+
+def test_normalizacao_lista_e_dict_mesmo_resultado(db):
+    from loja.services.variant_attributes import (
+        variant_attribute_value as mesmo,
+    )
+
+    lista = [
+        {"name": "cor", "value": "Grey", "sku_property_id": "14"},
+        {
+            "name": "Tamanho infantil dos EUA",
+            "value": "5T(Size 120)",
+            "sku_property_id": "200000463",
+        },
+    ]
+    dicio = {"cor": "Grey", "Tamanho infantil dos EUA": "5T(Size 120)"}
+    assert mesmo(lista, "color") == mesmo(dicio, "color") == "Grey"
+    assert mesmo(lista, "size") == mesmo(dicio, "size") == "5T(Size 120)"
+    assert mesmo(lista, "peso") is None
+    assert mesmo(dicio, "peso") is None
+
+    # Paridade no seletor com attributes em forma de dict no banco.
+    product = Product(
+        id=uuid.uuid4(),
+        name="Dict Attrs",
+        description="x",
+        price=Decimal("10.00"),
+        stock=2,
+        is_active=True,
+        is_draft=False,
+        source="aliexpress",
+        pricing_status="priced",
+    )
+    db.session.add(product)
+    db.session.flush()
+    db.session.add(
+        ProductVariant(
+            id=uuid.uuid4(),
+            product_id=product.id,
+            external_sku_id="dict-1",
+            supplier_sku_id="dict-1",
+            color=None,
+            size=None,
+            attributes=dicio,
+            stock=2,
+            price=Decimal("10.00"),
+            is_active=True,
+        )
+    )
+    db.session.commit()
+    selector = _build_variant_selector(product)
+    assert [(d["key"], d["options"]) for d in selector["dimensions"]] == [
+        ("color", ["Grey"]),
+        ("size", ["5T(Size 120)"]),
+    ]
+
+
+def test_mesmo_rotulo_em_todos_os_fluxos(db, client, make_user, cargo):
+    """O rótulo resolvido é idêntico no seletor, carrinho, checkout e pedido."""
+    product, variantes = cargo
+    alvo = variantes[("Grey", "5T(Size 120)")]
+    esperado = "5T(Size 120)"
+
+    selector = _build_variant_selector(product)
+    size_idx = next(
+        i for i, d in enumerate(selector["dimensions"]) if d["key"] == "size"
+    )
+    meta = next(v for v in selector["variants"] if v["id"] == str(alvo.id))
+    rotulo_seletor = meta["dims"][size_idx]
+
+    user = _login(client, make_user)
+    client.post(
+        f"/produtos/{product.id}/processar",
+        data={
+            "action": "add_to_cart",
+            "variant_id": str(alvo.id),
+            "quantity": "1",
+        },
+        follow_redirects=True,
+    )
+    cart = Cart.query.filter_by(user_id=user.id).first()
+    item = next(i for i in cart.items if i.variant_id == alvo.id)
+    rotulo_carrinho = item.selected_size
+
+    corpo_checkout = client.post(
+        f"/produtos/{product.id}/processar",
+        data={
+            "action": "buy_now",
+            "variant_id": str(alvo.id),
+            "quantity": "1",
+        },
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert esperado in corpo_checkout
+
+    assert rotulo_seletor == rotulo_carrinho == esperado
+
+
+def test_snapshot_pedido_pela_rota_real_pagamento(
+    db, client, make_user, monkeypatch, cargo
+):
+    import loja.views.payments_routes as pr
+    from loja.modules.getway_mercado_pago.payment_models import (
+        Order,
+        OrderItem,
+    )
+    from test_shipping_quote import preset_shipping_quote
+
+    product, variantes = cargo
+    alvo = variantes[("Purple", "11-12T(Size 160)")]
+    user = make_user()
+    # Evidência de frete vigente (registros relacionados válidos), mesmo
+    # padrão do checkout real com variante.
+    from loja.modules.models import SupplierProduct
+    from test_shipping_quote import _fresh, reference_quote_table
+    from loja.services.supplier_freight_quotes import (
+        store_reference_freight_quote,
+    )
+
+    link = SupplierProduct.query.filter_by(product_id=product.id).first()
+    table_fixture = reference_quote_table.__wrapped__(db)
+    next(table_fixture)
+    fresh = _fresh(link.id, cost="20.00")[str(link.id)]
+    fresh["supplier_unit_cost"] = "46.60"
+    store_reference_freight_quote(
+        supplier_product_id=link.id,
+        dest_cep="01310100",
+        quote=fresh,
+        provider_method="test",
+        evidence_ref="synthetic-cargo-cost",
+    )
+    client.post("/login", data={"email": user.email, "password": "senha123"})
+    monkeypatch.setattr(
+        pr, "quote_checkout_shipping", lambda item_data, cep: Decimal("10.00")
+    )
+    monkeypatch.setattr(
+        pr,
+        "create_preference",
+        lambda order: {
+            "preference_id": "pref-cargo-snap",
+            "checkout_url": "https://mp.example/x",
+        },
+    )
+    preset_shipping_quote(
+        client,
+        "01310100",
+        [{"product_id": product.id, "variant_id": alvo.id, "quantity": 1}],
+        "10.00",
+    )
+    resp = client.post(
+        "/pagamentos/mercado-pago",
+        data={
+            "checkout_type": "product",
+            "product_id": str(product.id),
+            "quantity": "1",
+            "variant_id": str(alvo.id),
+            "selected_size": "11-12T(Size 160)",
+            "nome": "Cliente Teste",
+            "email": user.email,
+            "telefone": "+55 (63) 99876-5432",
+            "cep": "01310100",
+            "estado": "SP",
+            "endereco": "Rua Teste",
+            "numero": "10",
+            "bairro": "Centro",
+            "cidade": "São Paulo",
+        },
+    )
+    assert resp.status_code == 302
+
+    order = Order.query.filter_by(user_id=user.id).first()
+    assert order is not None
+    item = OrderItem.query.filter_by(order_id=order.id).first()
+    assert item.variant_id == alvo.id
+    assert item.selected_size == "11-12T(Size 160)"
+    assert item.product_name == NOME_MANUAL
+
+
+def test_importador_rejeita_rotulo_acima_do_teto(db):
+    from loja.integrations.aliexpress.importer import (
+        DraftImportError,
+        import_product_draft,
+    )
+    from loja.integrations.aliexpress.models import (
+        AliExpressProductDetail,
+        AliExpressProductSku,
+    )
+
+    detail = AliExpressProductDetail(
+        product_id="1005999999999999",
+        title="Produto Teto",
+        description="x",
+        category_id="200003959",
+        images=[],
+        skus=[
+            AliExpressProductSku(
+                sku_id="teto-1",
+                attributes=[{"name": "size", "value": "Y" * 41}],
+                available_stock=3,
+                sale_price=Decimal("10.00"),
+                original_price=None,
+                currency="BRL",
+            )
+        ],
+        currency="BRL",
+    )
+    with pytest.raises(DraftImportError, match="variant_label_too_long"):
+        import_product_draft(detail=detail, seller_id="SELLER_TETO")
+    assert (
+        Product.query.filter_by(external_id="1005999999999999").first()
+        is None
+    )

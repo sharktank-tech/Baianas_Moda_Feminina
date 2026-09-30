@@ -8,3 +8,6 @@ ALTER TABLE pollomodas.cart_items
 
 ALTER TABLE pollomodas.order_items
     ALTER COLUMN selected_size TYPE varchar(20);
+
+ALTER TABLE pollomodas.product_variants
+    ALTER COLUMN size TYPE varchar(20);

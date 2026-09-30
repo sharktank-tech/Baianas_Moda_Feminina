@@ -64,17 +64,31 @@ def classify_variant_attribute(attr) -> Optional[str]:
     return None
 
 
+def _iter_attributes(attributes):
+    """Normaliza listas e dicionários para o mesmo formato de dicts.
+
+    Aceita a lista bruta do importer ([{"name","value","sku_property_id"}])
+    e dict nome->valor legado: ambos produzem o MESMO resultado nas funções
+    de classificação/extração (seletor, carrinho, checkout e pedido).
+    """
+    if isinstance(attributes, dict):
+        for name, value in attributes.items():
+            yield {"name": name, "value": value}
+        return
+    for attr in attributes or []:
+        if isinstance(attr, dict):
+            yield attr
+
+
 def variant_attribute_value(attributes, dim: str) -> Optional[str]:
     """Primeiro valor não vazio do atributo da dimensão ("color"/"size").
 
-    Recebe a lista bruta de atributos (dicts com name/value/sku_property_id).
+    Recebe lista bruta ou dict (normalizados por `_iter_attributes`).
     Dimensão desconhecida ou ausência de valor retorna None.
     """
     if dim not in ("color", "size"):
         return None
-    for attr in attributes or []:
-        if not isinstance(attr, dict):
-            continue
+    for attr in _iter_attributes(attributes):
         if classify_variant_attribute(attr) != dim:
             continue
         value = str(attr.get("value") or "").strip()

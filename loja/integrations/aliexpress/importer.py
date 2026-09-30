@@ -67,6 +67,7 @@ from loja.services.pricing import (
 from loja.services.variant_attributes import (
     COLOR_NAMES,
     SIZE_NAMES,
+    VARIANT_LABEL_MAX_LEN,
     extract_variant_color_size,
 )
 from loja.utils import utcnow
@@ -574,6 +575,12 @@ def _apply_variants_and_images(
         seen.add(sku_id)
         attributes = list(sku.attributes or [])
         color, size = _extract_variant_meta(attributes)
+        # Rótulos acima do teto (VARIANT_LABEL_MAX_LEN) abortam a importação
+        # com código estável e rollback total: nunca truncar nem persistir
+        # parcial (valores existentes preservados por não haver escrita).
+        for rotulo in (color, size):
+            if rotulo is not None and len(rotulo) > VARIANT_LABEL_MAX_LEN:
+                raise DraftImportError("variant_label_too_long")
         stock = max(int(sku.available_stock) if sku.available_stock is not None else 0, 0)
         price = _effective_supplier_price(sku)
         variant = by_supplier_sku.get(sku_id)

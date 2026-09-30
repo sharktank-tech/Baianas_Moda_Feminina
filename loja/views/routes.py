@@ -341,14 +341,8 @@ def _active_variants_for_product(product):
 def _variant_attr_value(attributes, wanted_key):
     """Busca o valor de um atributo AliExpress (Cor/Tamanho) em `attributes`.
 
-    Delega ao helper compartilhado (nomes + sku_property_id). Aceita também
-    dict nome->valor por compatibilidade legada.
+    Delegação pura ao helper compartilhado (listas e dicts normalizados lá).
     """
-    if isinstance(attributes, dict):
-        attributes = [
-            {"name": name, "value": value}
-            for name, value in attributes.items()
-        ]
     return variant_attribute_value(attributes, wanted_key)
 
 
