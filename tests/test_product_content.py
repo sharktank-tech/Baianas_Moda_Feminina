@@ -213,9 +213,11 @@ def test_aliexpress_image_heavy_description_not_rendered_twice(client, db):
     assert 'data-gallery-src="https://ae01.alicdn.com/kf/1.jpg"' in body
     assert 'data-gallery-src="https://ae-pic-a1.aliexpress-media.com/2.png"' in body
     # A descrição completa sanitizada aparece UMA única vez (na .details-text),
-    # agora SEM imagens — apenas o texto estrutural permanece.
+    # agora SEM imagens — apenas o texto estrutural permanece. Nenhum bloco
+    # de resumo/excerpt proximo ao titulo.
     assert body.count("details-text") == 1
-    assert "product-description-excerpt" in body
+    assert "product-description-excerpt" not in body
+    assert 'class="product-description"' not in body
     # Conteúdo da região de descrição completa (fora do restante do layout).
     section_marker = '<div class="details-text">'
     start = body.index(section_marker) + len(section_marker)

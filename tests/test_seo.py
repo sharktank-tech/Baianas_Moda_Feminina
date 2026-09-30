@@ -215,282 +215,154 @@ def test_search_page_is_noindex(client, db):
     assert 'name="robots" content="noindex,follow"' in body
 
 
-def test_product_title_uses_name_and_description_not_duplicated(client, db):
-    """Verify product title uses product.name and description section shows only description.
+def test_descricao_completa_unica_com_variantes_reais(client, db):
+    """Descricao completa em local unico, inclusive com variantes reais.
 
-    Confirms the template correctly separates name from description:
-    - <h1 class="product-name"> displays product.name
-    - Meta description uses product_description_excerpt (text-only, not the name)
-    - The structured data name matches product.name
-    - The description in structured data is not the same as the name
+    Cobre:
+    - AliExpress COM variantes reais (2 ProductVariant ativas): a frase
+      exclusiva no final de uma descricao > 40 palavras aparece visivel
+      EXATAMENTE UMA VEZ no corpo da pagina (metadados desconsiderados).
+    - AliExpress SEM variantes: idem.
+    - Produto local: idem, com sanitizacao preservada.
+    - Descricao vazia: nenhuma secao de descricao renderizada.
+    - Titulo principal usa product.name; nenhum bloco de resumo proximo
+      ao titulo (sem .product-description / product-description-excerpt).
     """
+    import re
     from uuid import uuid4
     from decimal import Decimal
 
-    name = "Camisa Listrada Azul"
-    descricao = "Uma camisa de algodão 100% azul com listras brancas. "
-    descricao += "Possui botões de madrepérola e manga longa ajustada."
+    from loja.modules.models import Product, ProductVariant
 
-    product = Product(
-        id=uuid4(),
-        name=name,
-        description=descricao,
-        price=Decimal("49.90"),
-        stock=15,
-        image1="https://exemplo.com/camisa.jpg",
-        category="masculino",
-        is_active=True,
-    )
-    db.session.add(product)
-    db.session.commit()
+    FRASE_EXCLUSIVA = "FraseExclusivaFinalXtz789"
 
-    # 1) Structured data: name equals product.name
-    from loja.services.seo import product_structured_data
-    data = product_structured_data(product)
-    assert data is not None
-    assert data["@type"] == "Product"
-    assert data["name"] == name, "Structured data name must equal product.name"
-
-    # 2) Structured data: description is NOT the same as the name
-    assert data["description"] != name, (
-        "Structured data description must not be the product name"
-    )
-    # description must contain actual description text
-    assert descricao[:20] in data["description"], (
-        "Structured data description must contain description text"
-    )
-
-    # 3) Template: <h1 class="product-name"> contains the name (not description)
-    from flask import render_template
-    html = render_template("main/produto_individual.html", product=product)
-    assert 'class="product-name"' in html, (
-        "Template must have h1 with class product-name"
-    )
-    # The h1 content should be the name
-    assert name in html, "h1 must contain product.name"
-
-    # 4) Meta description (block meta_description) uses excerpt, not raw name
-    # The meta_description block is: {{ product_description_excerpt(product.description) or product.name }}
-    # Since we have description text, excerpt should be used
-    from loja.services.product_content import product_description_excerpt
-    with __import__("warnings").catch_warnings():
-        import warnings
-        warnings.filterwarnings("ignore")
-        excerpt = product_description_excerpt(descricao, max_words=40)
-    # excerpt must not equal the full name
-    assert excerpt != name, "Excerpt must not equal the full product name"
-    assert len(excerpt) > 0, "Excerpt must have content"
-
-    # 5) Description section in template uses sanitized description, not the name
-    with __import__("warnings").catch_warnings():
-        warnings.filterwarnings("ignore")
-        desc_html = render_template(
-            "main/produto_individual.html", product=product,
-            uses_variants=False,
+    def _descricao_longa():
+        # > 40 palavras, com <img> do CDN AliExpress e <script> malicioso
+        # para validar remocao de imagens + sanitizacao.
+        palavras = " ".join(f"palavra{i}" for i in range(1, 46))
+        return (
+            "<p>" + palavras + " "
+            '<img src="https://ae01.alicdn.com/kf/Steste.jpg"> '
+            "</p><script>alert('xss')</script>"
+            f"<p>{FRASE_EXCLUSIVA}</p>"
         )
-    assert 'class="product-description"' in desc_html, (
-        "Template must have .product-description section"
+
+    def _corpo_sem_metadados(html):
+        # Remove <head>...</head> (title/meta/og) e JSON-LD para contar
+        # apenas o corpo visivel da pagina.
+        sem_head = re.sub(r"<head.*?</head>", "", html, flags=re.S)
+        sem_ld = re.sub(
+            r'<script type="application/ld[+]json">.*?</script>',
+            "",
+            sem_head,
+            flags=re.S,
+        )
+        return sem_ld
+
+    def _cria_produto(name, description, source="aliexpress", com_variantes=False):
+        product = Product(
+            id=uuid4(),
+            name=name,
+            description=description,
+            price=Decimal("89.90"),
+            stock=10,
+            image1="https://exemplo.com/prod.jpg",
+            category="feminino",
+            is_active=True,
+            is_draft=False,
+            source=source,
+            pricing_status="priced",
+        )
+        db.session.add(product)
+        db.session.flush()
+        if com_variantes:
+            for cor, tam in (("Rosa", "M"), ("Azul", "M")):
+                db.session.add(
+                    ProductVariant(
+                        id=uuid4(),
+                        product_id=product.id,
+                        external_sku_id=f"ext-{cor}-{tam}",
+                        supplier_sku_id=f"sup-{cor}-{tam}",
+                        color=cor,
+                        size=tam,
+                        stock=4,
+                        price=Decimal("89.90"),
+                        sale_price=None,
+                        is_active=True,
+                    )
+                )
+        db.session.commit()
+        db.session.refresh(product)
+        return product
+
+    # Caso A: AliExpress COM variantes reais (fluxo real da rota).
+    prod_a = _cria_produto(
+        "Vestido Longo de Festa",
+        _descricao_longa(),
+        source="aliexpress",
+        com_variantes=True,
     )
-    # Description section must contain description text, not just the name
-    assert descricao[:30] in desc_html, (
-        "Description section must contain description text"
+    resp = client.get(f"/produtos/{prod_a.id}")
+    assert resp.status_code == 200
+    corpo = _corpo_sem_metadados(resp.get_data(as_text=True))
+
+    # Titulo principal usa o nome.
+    assert '<h1 class="product-name">' in corpo
+    assert "Vestido Longo de Festa" in corpo
+    # Nenhum bloco de resumo proximo ao titulo.
+    assert "product-description-excerpt" not in corpo
+    assert 'class="product-description"' not in corpo
+    # Frase exclusiva do FINAL da descricao (> 40 palavras) visivel 1x.
+    assert FRASE_EXCLUSIVA in corpo
+    assert corpo.count(FRASE_EXCLUSIVA) == 1, (
+        "frase exclusiva deve aparecer exatamente uma vez no corpo"
     )
+    # Secao unica de descricao completa.
+    assert corpo.count('class="details-section"') == 1
+    # Imagem da descricao removida da secao (ja esta na galeria); XSS removido.
+    detalhes = corpo.split('class="details-text"')[1].split("</section>")[0]
+    assert "ae01.alicdn.com" not in detalhes
+    assert "<script" not in detalhes
 
-    # 6) Listing page: excerpt uses description, not name
-    with __import__("warnings").catch_warnings():
-        warnings.filterwarnings("ignore")
-        list_excerpt = product_description_excerpt(descricao, max_words=30)
-    assert list_excerpt != name, "Listing excerpt must not equal product name"
-    assert descricao[:20] in list_excerpt, (
-        "Listing excerpt must contain description text"
+    # Caso B: AliExpress SEM variantes.
+    prod_b = _cria_produto(
+        "Camisa Social Listrada",
+        _descricao_longa(),
+        source="aliexpress",
+        com_variantes=False,
     )
-
-def test_product_description_not_doubled_aliexpress(client, db):
-    """Verify description appears only once for AliExpress products.
-
-    The template has TWO description sections for AliExpress products:
-    1) General section (lines 507-519 of produto_individual.html)
-    2) AliExpress-specific section (lines 693-705 of produto_individual.html)
-
-    This test confirms only one section renders, preventing duplication.
-    """
-    from uuid import uuid4
-    from decimal import Decimal
-
-    name = "Camisa Social Listrada"
-    # AliExpress product with description and variants
-    descricao = "Camisa social de algodão 100% listrada listras azuis e brancas. "
-    descricao += "Mangas longas com botões de madrepérola. Tecido de alta qualidade."
-
-    product = Product(
-        id=uuid4(),
-        name=name,
-        description=descricao,
-        price=Decimal("79.90"),
-        stock=12,
-        image1="https://exemplo.com/camisa.jpg",
-        category="masculino",
-        is_draft=False,
-        source="aliexpress",  # Critical: AliExpress source
+    corpo_b = _corpo_sem_metadados(
+        client.get(f"/produtos/{prod_b.id}").get_data(as_text=True)
     )
-    db.session.add(product)
-    db.session.commit()
+    assert FRASE_EXCLUSIVA in corpo_b
+    assert corpo_b.count(FRASE_EXCLUSIVA) == 1
+    assert corpo_b.count('class="details-section"') == 1
 
-    html = render_template("main/produto_individual.html", product=product)
-
-    # Count how many times "Descrição" section title appears
-    desc_count = html.count('class="section-title">Descrição</h2>')
-    # Should be exactly 1, not 2 (which would indicate duplication)
-    assert desc_count == 1, (
-        f"Expected 1 'Descrição' section, found {desc_count}. "
-        "Description appears twice in the template for AliExpress products."
+    # Caso C: produto local (sanitizacao preservada).
+    prod_c = _cria_produto(
+        "Produto Nacional",
+        _descricao_longa(),
+        source="internal",
+        com_variantes=False,
     )
-
-    # The description text should appear exactly once (or 0 if no description,
-    # but since we set it, should be 1)
-    assert descricao[:30] in html, "Description text must appear in the template"
-
-    # The name should NOT be confused with description
-    assert name in html, "Product name must appear in the template"
-    assert descricao[:30] not in html.replace(name, ""), (
-        "Description text should not be masquerading as name"
+    corpo_c = _corpo_sem_metadados(
+        client.get(f"/produtos/{prod_c.id}").get_data(as_text=True)
     )
+    assert FRASE_EXCLUSIVA in corpo_c
+    assert corpo_c.count(FRASE_EXCLUSIVA) == 1
+    assert corpo_c.count('class="details-section"') == 1
+    detalhes_c = corpo_c.split('class="details-text"')[1].split("</section>")[0]
+    assert "<script" not in detalhes_c
 
-    # Verify the description appears in a single .product-description or .details-section
-    # There should be exactly one section showing the description content
-    product_desc_count = html.count('class="product-description"')
-    details_count = html.count('class="details-section"')
-    # For AliExpress with variants, we expect exactly one description-related section
-    # The exact count depends on the variant state, but should not be double
-    total_desc_sections = product_desc_count + details_count
-    assert total_desc_sections <= 2, (
-        f"Too many description sections ({total_desc_sections}). "
-        "Possible duplication of description in template."
+    # Caso D: descricao vazia -> nenhuma secao de descricao.
+    prod_d = _cria_produto(
+        "Produto Sem Descricao",
+        "",
+        source="aliexpress",
+        com_variantes=False,
     )
-
-def test_ali_description_no_duplication(client, db):
-    """Verify description appears only once for AliExpress products.
-
-    The template now has ONE description section only (the upper section).
-    The lower AliExpress-specific section was removed to prevent duplication.
-
-    Cases covered:
-    - AliExpress with variants: excerpt shown (max 40 words)
-    - AliExpress without variants: full description shown
-    - AliExpress with empty description: no description section
-    - Local products: description section as normal
-    """
-    from uuid import uuid4
-    from decimal import Decimal
-
-    # Case 1: AliExpress with description and without variants
-    # (full description shown, since not uses_variants)
-    name1 = 'Camisa Social Listrada'
-    desc1 = 'Uma camisa de algod\u00e3o 100% listrada com cores vivas. '
-    desc1 += 'Mangas compridas e bot\u00f5es de madreperola. Confort\u00e1vel para uso diario. '
-    desc1 += 'Frase\u00adunica1'  # Unique sentence at end (>40 words total)
-
-    product1 = Product(
-        id=uuid4(),
-        name=name1,
-        description=desc1,
-        price=Decimal('49.90'),
-        stock=15,
-        image1='https://exemplo.com/camisa.jpg',
-        category='masculino',
-        is_active=True,
-        source='aliexpress',
+    corpo_d = _corpo_sem_metadados(
+        client.get(f"/produtos/{prod_d.id}").get_data(as_text=True)
     )
-    db.session.add(product1)
-    db.session.commit()
-
-    html = render_template('main/produto_individual.html', product=product1)
-
-    # Should have exactly one .product-description section
-    pdc = html.count('class="product-description"')
-    assert pdc == 1, f'AliEX w/o variants: expected 1 product-description, got {pdc}'
-
-    # Unique sentence should appear in the page content
-    assert 'Frase\u00adunica1' in html, 'Unique sentence must be visible'
-    assert html.count('Frase\u00adunica1') == 1, 'Unique sentence must appear exactly once'
-
-    # Case 2: AliExpress with variants (excerpt shown, max 40 words)
-    name2 = 'Vestido Floral'
-    desc2 = 'Vestido floral de algod\u00e3o para dias quentes. Confort\u00e1vel e leirinho. '
-    desc2 += 'Almofadado. Features exclusivas.'  # This may or may not exceed 40 words
-
-    product2 = Product(
-        id=uuid4(),
-        name=name2,
-        description=desc2,
-        price=Decimal('69.90'),
-        stock=10,
-        image1='https://exemplo.com/vestido.jpg',
-        category='feminino',
-        is_active=True,
-        source='aliexpress',
-    )
-    db.session.add(product2)
-    db.session.commit()
-
-    html2 = render_template('main/produto_individual.html', product=product2)
-    pdc2 = html2.count('class="product-description"')
-    # With variants, excerpt is shown (max 40 words), so still 1 section
-    assert pdc2 == 1, f'AliEX w/ variants: expected 1 product-description, got {pdc2}'
-
-    # Case 3: Local product (no source=aliexpress) with description
-    name3 = 'Produto Local'
-    desc3 = 'Produto nacional de excelente qualidade. '
-    desc3 += 'Feito com materiais sustent\u00e1veis. Frase\u00adlocal1'
-
-    product3 = Product(
-        id=uuid4(),
-        name=name3,
-        description=desc3,
-        price=Decimal('39.90'),
-        stock=5,
-        image1='https://exemplo.com/local.jpg',
-        category='interno',
-        is_active=True,  # source not set to aliexpress
-    )
-    db.session.add(product3)
-    db.session.commit()
-
-    html3 = render_template('main/produto_individual.html', product=product3)
-    pdc3 = html3.count('class="product-description"')
-    assert pdc3 == 1, f'Local product: expected 1 product-description, got {pdc3}'
-    assert 'Frase\u00adlocal1' in html3, 'Local product description must be visible'
-
-    # Case 4: AliExpress with empty description
-    name4 = 'Produto Sem Desc'
-    product4 = Product(
-        id=uuid4(),
-        name=name4,
-        description='',
-        price=Decimal('29.90'),
-        stock=0,
-        image1='https://exemplo.com/semdesc.jpg',
-        category='interno',
-        is_active=True,
-        source='aliexpress',
-    )
-    db.session.add(product4)
-    db.session.commit()
-
-    html4 = render_template('main/produto_individual.html', product=product4)
-    pdc4 = html4.count('class="product-description"')
-    # With empty description, no description section should render
-    # (the upper {% if product.description %} block won't execute)
-    # The lower section was removed, so 0 is acceptable
-    # Actually, let's just check it doesn't crash and has reasonable count
-    print(f'Empty desc product: product-description count = {pdc4}')
-
-    # Case 5: Verify no duplication by checking total description-related sections
-    total_desc = pdc + pdc2 + pdc3 + pdc4
-    # Each should have at most 1, so total should be <= 4 (but ideally each is 1 or 0)
-    # The key point: no section should appear more than once for the same product
-    assert pdc <= 1, f'AliEX w/o vars: too many sections {pdc}'
-    assert pdc2 <= 1, f'AliEX w/ variants: too many sections {pdc2}'
-    assert pdc3 <= 1, f'Local: too many sections {pdc3}'
-
-    print('=== ALL ALIEX DESCRIPTION TESTS PASSED ===')
+    assert "Produto Sem Descricao" in corpo_d
+    assert 'class="details-section"' not in corpo_d
