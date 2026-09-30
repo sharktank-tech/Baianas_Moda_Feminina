@@ -64,6 +64,11 @@ from loja.services.pricing import (
     calculate_landed_cost,
     to_decimal,
 )
+from loja.services.variant_attributes import (
+    COLOR_NAMES,
+    SIZE_NAMES,
+    extract_variant_color_size,
+)
 from loja.utils import utcnow
 
 from .models import AliExpressProductDetail, AliExpressProductSku
@@ -74,9 +79,6 @@ SOURCE_ALIEXPRESS = "aliexpress"
 DRAFT_STATE = "draft"
 FREIGHT_PROVIDER_UNAVAILABLE = "provider_unavailable"
 FREIGHT_AVAILABLE = "available"
-
-COLOR_NAMES = {"color", "colour", "cor"}
-SIZE_NAMES = {"size", "tamanho"}
 
 
 class DraftImportError(Exception):
@@ -543,20 +545,9 @@ def _apply_product(
 def _extract_variant_meta(
     attributes: Optional[List[dict]],
 ) -> Tuple[Optional[str], Optional[str]]:
-    color = None
-    size = None
-    for attr in attributes or []:
-        if not isinstance(attr, dict):
-            continue
-        name = str(attr.get("name") or "").strip().lower()
-        value = str(attr.get("value") or "").strip()
-        if not value:
-            continue
-        if name in COLOR_NAMES and color is None:
-            color = value
-        elif name in SIZE_NAMES and size is None:
-            size = value
-    return color, size
+    # Delegação ao helper compartilhado (nomes + sku_property_id); mantém
+    # primeira ocorrência por dimensão e nunca presume dimensão desconhecida.
+    return extract_variant_color_size(attributes)
 
 
 def _apply_variants_and_images(

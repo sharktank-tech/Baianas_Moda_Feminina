@@ -1228,8 +1228,10 @@ class CartItem(db.Model):
 
     # Tamanho escolhido na página do produto. O nome selected_size foi mantido
     # explícito para não confundir com dimensões físicas ou estoque do produto.
+    # VARCHAR(40) pela migração 0028: rótulos completos de variante (ex.:
+    # "11-12T(Size 160)"); nunca truncar em Python — falhar explícito acima.
     selected_size = db.Column(
-        db.String(10),
+        db.String(40),
         nullable=False
     )
 

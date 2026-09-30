@@ -596,7 +596,7 @@
                         {% if item.variant %}
                         <span class="cart-meta-item">
                             Variação:
-                            <strong>{{ item.variant.color or item.variant.size or 'Único' }}{% if item.variant.color and item.variant.size %} · {{ item.variant.size }}{% endif %}</strong>
+                            <strong>{{ variant_dim_value(item.variant, 'color') or variant_dim_value(item.variant, 'size') or 'Único' }}{% if variant_dim_value(item.variant, 'color') and variant_dim_value(item.variant, 'size') %} · {{ variant_dim_value(item.variant, 'size') }}{% endif %}</strong>
                         </span>
                         {% else %}
                         <span class="cart-meta-item">

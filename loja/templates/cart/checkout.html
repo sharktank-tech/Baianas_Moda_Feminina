@@ -924,7 +924,7 @@
 
                         <div class="summary-price">
                             {% if item.variant %}
-                                Variação: {{ item.variant.color or item.variant.size or 'Único' }}{% if item.variant.color and item.variant.size %} · {{ item.variant.size }}{% endif %}
+                                Variação: {{ variant_dim_value(item.variant, 'color') or variant_dim_value(item.variant, 'size') or 'Único' }}{% if variant_dim_value(item.variant, 'color') and variant_dim_value(item.variant, 'size') %} · {{ variant_dim_value(item.variant, 'size') }}{% endif %}
                             {% else %}
                                 Tamanho: {{ item.selected_size or item.size or 'Único' }}
                             {% endif %}
