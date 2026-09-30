@@ -14,6 +14,7 @@ from loja.modules.newsletter import subscribe_newsletter
 from loja.services.product_content import (
     build_product_gallery,
     product_description_excerpt,
+    product_description_image_urls,
     sanitize_product_description_html,
     sanitize_product_description_without_images,
 )
@@ -171,6 +172,7 @@ def inject_product_content_helpers():
         "sanitize_product_description_html": sanitize_product_description_html,
         "sanitize_product_description_without_images": sanitize_product_description_without_images,
         "product_description_excerpt": product_description_excerpt,
+        "product_description_image_urls": product_description_image_urls,
         "product_canonical_url": product_canonical_url,
         # Prazos de promoção sempre em America/Sao_Paulo (banco guarda UTC naive).
         "format_deadline_sp": format_deadline_sp,

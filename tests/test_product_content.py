@@ -213,9 +213,11 @@ def test_aliexpress_image_heavy_description_not_rendered_twice(client, db):
     assert 'data-gallery-src="https://ae01.alicdn.com/kf/1.jpg"' in body
     assert 'data-gallery-src="https://ae-pic-a1.aliexpress-media.com/2.png"' in body
     # A descrição completa sanitizada aparece UMA única vez (na .details-text),
-    # agora SEM imagens — apenas o texto estrutural permanece.
+    # agora SEM imagens — apenas o texto estrutural permanece. Nenhum bloco
+    # de resumo/excerpt proximo ao titulo.
     assert body.count("details-text") == 1
-    assert "product-description-excerpt" in body
+    assert "product-description-excerpt" not in body
+    assert 'class="product-description"' not in body
     # Conteúdo da região de descrição completa (fora do restante do layout).
     section_marker = '<div class="details-text">'
     start = body.index(section_marker) + len(section_marker)
@@ -229,6 +231,47 @@ def test_aliexpress_image_heavy_description_not_rendered_twice(client, db):
     # style/onerror/peso do fornecedor removidos da descrição.
     assert "style=" not in details_block
     assert "onerror" not in details_block
+
+
+def test_local_image_only_description_renders_section(client, db):
+    # Descricao composta APENAS por imagens permitidas (sem texto), com o
+    # src em posicoes diferentes (antes/depois de alt, depois de width):
+    # para produtos nao AliExpress a imagem sanitizada e conteudo valido,
+    # logo a secao existe (sem exibir secao vazia em nenhum outro caso).
+    # Dominios permitidos inalterados (CDNs oficiais do AliExpress).
+    # A deteccao usa product_description_image_urls (independente da ordem
+    # dos atributos), nunca busca literal de string no HTML.
+    product = _make_public(
+        db,
+        name="Só Foto Válida",
+        description=(
+            '<p><img src="https://ae01.alicdn.com/kf/a.jpg" alt="a"></p>'
+            '<p><img alt="b" src="https://ae01.alicdn.com/kf/b.jpg"></p>'
+            '<p><img width="120" alt="c" '
+            'src="https://ae-pic-a1.aliexpress-media.com/c.png"></p>'
+        ),
+    )
+    body = client.get(f"/produtos/{product.id}").get_data(as_text=True)
+    assert body.count('class="details-section"') == 1
+    section = body.split('<div class="details-text">')[1].split("</section>")[0]
+    assert 'src="https://ae01.alicdn.com/kf/a.jpg"' in section
+    assert 'src="https://ae01.alicdn.com/kf/b.jpg"' in section
+    assert 'src="https://ae-pic-a1.aliexpress-media.com/c.png"' in section
+
+
+def test_rejected_image_only_description_renders_no_section(client, db):
+    # Imagem rejeitada pela sanitizacao (host externo, fora dos dominios
+    # permitidos): sem texto e sem imagem valida nao ha conteudo — nenhuma
+    # secao vazia e nenhuma ampliacao dos dominios permitidos.
+    product = _make_public(
+        db,
+        name="Foto Rejeitada",
+        description='<p><img src="https://example.com/x.jpg" alt="foto"></p>',
+    )
+    body = client.get(f"/produtos/{product.id}").get_data(as_text=True)
+    assert "Foto Rejeitada" in body  # titulo h1 intacto
+    assert 'class="details-section"' not in body
+    assert "example.com/x.jpg" not in body
 
 
 def test_sanitized_description_keeps_valid_images_removes_style_and_onerror():

@@ -213,3 +213,156 @@ def test_search_page_is_noindex(client, db):
     response = client.get("/produtos?q=vestido")
     body = response.get_data(as_text=True)
     assert 'name="robots" content="noindex,follow"' in body
+
+
+def test_descricao_completa_unica_com_variantes_reais(client, db):
+    """Descricao completa em local unico, inclusive com variantes reais.
+
+    Cobre:
+    - AliExpress COM variantes reais (2 ProductVariant ativas): a frase
+      exclusiva no final de uma descricao > 40 palavras aparece visivel
+      EXATAMENTE UMA VEZ no corpo da pagina (metadados desconsiderados).
+    - AliExpress SEM variantes: idem.
+    - Produto local: idem, com sanitizacao preservada.
+    - Descricao vazia: nenhuma secao de descricao renderizada.
+    - Titulo principal usa product.name; nenhum bloco de resumo proximo
+      ao titulo (sem .product-description / product-description-excerpt).
+    """
+    import re
+    from uuid import uuid4
+    from decimal import Decimal
+
+    from loja.modules.models import Product, ProductVariant
+
+    FRASE_EXCLUSIVA = "FraseExclusivaFinalXtz789"
+
+    def _descricao_longa():
+        # > 40 palavras, com <img> do CDN AliExpress e <script> malicioso
+        # para validar remocao de imagens + sanitizacao.
+        palavras = " ".join(f"palavra{i}" for i in range(1, 46))
+        return (
+            "<p>" + palavras + " "
+            '<img src="https://ae01.alicdn.com/kf/Steste.jpg"> '
+            "</p><script>alert('xss')</script>"
+            f"<p>{FRASE_EXCLUSIVA}</p>"
+        )
+
+    def _corpo_sem_metadados(html):
+        # Remove <head>...</head> (title/meta/og) e JSON-LD para contar
+        # apenas o corpo visivel da pagina.
+        sem_head = re.sub(r"<head.*?</head>", "", html, flags=re.S)
+        sem_ld = re.sub(
+            r'<script type="application/ld[+]json">.*?</script>',
+            "",
+            sem_head,
+            flags=re.S,
+        )
+        return sem_ld
+
+    def _cria_produto(name, description, source="aliexpress", com_variantes=False):
+        product = Product(
+            id=uuid4(),
+            name=name,
+            description=description,
+            price=Decimal("89.90"),
+            stock=10,
+            image1="https://exemplo.com/prod.jpg",
+            category="feminino",
+            is_active=True,
+            is_draft=False,
+            source=source,
+            pricing_status="priced",
+        )
+        db.session.add(product)
+        db.session.flush()
+        if com_variantes:
+            for cor, tam in (("Rosa", "M"), ("Azul", "M")):
+                db.session.add(
+                    ProductVariant(
+                        id=uuid4(),
+                        product_id=product.id,
+                        external_sku_id=f"ext-{cor}-{tam}",
+                        supplier_sku_id=f"sup-{cor}-{tam}",
+                        color=cor,
+                        size=tam,
+                        stock=4,
+                        price=Decimal("89.90"),
+                        sale_price=None,
+                        is_active=True,
+                    )
+                )
+        db.session.commit()
+        db.session.refresh(product)
+        return product
+
+    # Caso A: AliExpress COM variantes reais (fluxo real da rota).
+    prod_a = _cria_produto(
+        "Vestido Longo de Festa",
+        _descricao_longa(),
+        source="aliexpress",
+        com_variantes=True,
+    )
+    resp = client.get(f"/produtos/{prod_a.id}")
+    assert resp.status_code == 200
+    corpo = _corpo_sem_metadados(resp.get_data(as_text=True))
+
+    # Titulo principal usa o nome.
+    assert '<h1 class="product-name">' in corpo
+    assert "Vestido Longo de Festa" in corpo
+    # Nenhum bloco de resumo proximo ao titulo.
+    assert "product-description-excerpt" not in corpo
+    assert 'class="product-description"' not in corpo
+    # Frase exclusiva do FINAL da descricao (> 40 palavras) visivel 1x.
+    assert FRASE_EXCLUSIVA in corpo
+    assert corpo.count(FRASE_EXCLUSIVA) == 1, (
+        "frase exclusiva deve aparecer exatamente uma vez no corpo"
+    )
+    # Secao unica de descricao completa.
+    assert corpo.count('class="details-section"') == 1
+    # Imagem da descricao removida da secao (ja esta na galeria); XSS removido.
+    detalhes = corpo.split('class="details-text"')[1].split("</section>")[0]
+    assert "ae01.alicdn.com" not in detalhes
+    assert "<script" not in detalhes
+
+    # Caso B: AliExpress SEM variantes.
+    prod_b = _cria_produto(
+        "Camisa Social Listrada",
+        _descricao_longa(),
+        source="aliexpress",
+        com_variantes=False,
+    )
+    corpo_b = _corpo_sem_metadados(
+        client.get(f"/produtos/{prod_b.id}").get_data(as_text=True)
+    )
+    assert FRASE_EXCLUSIVA in corpo_b
+    assert corpo_b.count(FRASE_EXCLUSIVA) == 1
+    assert corpo_b.count('class="details-section"') == 1
+
+    # Caso C: produto local (sanitizacao preservada).
+    prod_c = _cria_produto(
+        "Produto Nacional",
+        _descricao_longa(),
+        source="internal",
+        com_variantes=False,
+    )
+    corpo_c = _corpo_sem_metadados(
+        client.get(f"/produtos/{prod_c.id}").get_data(as_text=True)
+    )
+    assert FRASE_EXCLUSIVA in corpo_c
+    assert corpo_c.count(FRASE_EXCLUSIVA) == 1
+    assert corpo_c.count('class="details-section"') == 1
+    detalhes_c = corpo_c.split('class="details-text"')[1].split("</section>")[0]
+    assert "<script" not in detalhes_c
+
+    # Caso D: descricao vazia -> nenhuma secao de descricao.
+    prod_d = _cria_produto(
+        "Produto Sem Descricao",
+        "",
+        source="aliexpress",
+        com_variantes=False,
+    )
+    corpo_d = _corpo_sem_metadados(
+        client.get(f"/produtos/{prod_d.id}").get_data(as_text=True)
+    )
+    assert "Produto Sem Descricao" in corpo_d
+    assert 'class="details-section"' not in corpo_d

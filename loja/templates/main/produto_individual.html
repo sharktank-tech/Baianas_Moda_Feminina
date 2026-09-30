@@ -504,21 +504,6 @@ body.product-lightbox-open {
                 R$ {{ '%.2f'|format(product.price)|replace('.', ',') }}
             </div>
 
-            {% if product.description %}
-            {% if uses_variants %}
-                {% set excerpt = product_description_excerpt(product.description, max_words=40) %}
-                {% if excerpt %}
-                <div class="product-description product-description-excerpt">
-                    {{ excerpt }}
-                </div>
-                {% endif %}
-            {% else %}
-                <div class="product-description">
-                    {{ sanitize_product_description_html(product.description) }}
-                </div>
-            {% endif %}
-            {% endif %}
-
             <form
                 class="product-purchase-form"
                 action="{{ url_for('main.processar_produto', product_id=product.id) }}"
@@ -690,26 +675,14 @@ body.product-lightbox-open {
 
 </div>
 
-{% if product.source == "aliexpress" %}
-{% set desc_without_images = sanitize_product_description_without_images(product.description) %}
-{% if product_description_excerpt(desc_without_images) %}
+{% set full_description = sanitize_product_description_without_images(product.description) if product.source == "aliexpress" else sanitize_product_description_html(product.description) %}
+{% if product_description_excerpt(full_description) or product_description_image_urls(full_description) %}
 <section class="details-section">
 
     <h2 class="section-title">Descrição</h2>
 
     <div class="details-text">
-        {{ desc_without_images }}
-    </div>
-
-</section>
-{% endif %}
-{% else %}
-<section class="details-section">
-
-    <h2 class="section-title">Descrição</h2>
-
-    <div class="details-text">
-        {{ sanitize_product_description_html(product.description) }}
+        {{ full_description }}
     </div>
 
 </section>
