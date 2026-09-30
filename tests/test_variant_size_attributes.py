@@ -683,3 +683,52 @@ def test_importador_rejeita_rotulo_acima_do_teto(db):
         Product.query.filter_by(external_id="1005999999999999").first()
         is None
     )
+
+
+def test_importador_aceita_cor_41_60_e_rejeita_acima(db):
+    # Cor preserva o limite próprio de 60 (sem o teto de 40 do tamanho).
+    from loja.integrations.aliexpress.importer import (
+        DraftImportError,
+        import_product_draft,
+    )
+    from loja.integrations.aliexpress.models import (
+        AliExpressProductDetail,
+        AliExpressProductSku,
+    )
+    from loja.modules.models import ProductVariant
+
+    def _detail_cor(cor, pid):
+        return AliExpressProductDetail(
+            product_id=pid,
+            title="Produto Cor",
+            description="x",
+            category_id="200003959",
+            images=[],
+            skus=[
+                AliExpressProductSku(
+                    sku_id="cor-1",
+                    attributes=[{"name": "color", "value": cor}],
+                    available_stock=2,
+                    sale_price=Decimal("10.00"),
+                    original_price=None,
+                    currency="BRL",
+                )
+            ],
+            currency="BRL",
+        )
+
+    cor50 = "C" * 50
+    result = import_product_draft(
+        detail=_detail_cor(cor50, "1005999999999998"), seller_id="SELLER_COR50"
+    )
+    assert result.created is True
+    variante = ProductVariant.query.filter_by(
+        supplier_product_id=result.supplier_product_id
+    ).first()
+    assert variante.color == cor50  # exato, sem corte
+
+    with pytest.raises(DraftImportError, match="variant_label_too_long"):
+        import_product_draft(
+            detail=_detail_cor("C" * 61, "1005999999999997"),
+            seller_id="SELLER_COR61",
+        )

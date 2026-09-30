@@ -36,6 +36,9 @@ SIZE_PROPERTY_IDS = frozenset({"200000463"})
 # OrderItem.selected_size após a migração 0028). Rótulos acima disso falham
 # de forma explícita — nunca há truncamento silencioso.
 VARIANT_LABEL_MAX_LEN = 40
+# Teto próprio da cor (ProductVariant.color VARCHAR(60, inalterado): cores
+# de 41–60 caracteres são aceitas; acima disso, rejeição explícita.
+VARIANT_COLOR_MAX_LEN = 60
 
 
 def _norm_name(value) -> str:
@@ -137,6 +140,7 @@ __all__ = [
     "COLOR_PROPERTY_IDS",
     "SIZE_PROPERTY_IDS",
     "VARIANT_LABEL_MAX_LEN",
+    "VARIANT_COLOR_MAX_LEN",
     "classify_variant_attribute",
     "variant_attribute_value",
     "extract_variant_color_size",
