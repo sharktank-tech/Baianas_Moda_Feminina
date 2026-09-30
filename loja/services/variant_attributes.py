@@ -10,6 +10,8 @@ tamanho (retornam None): nenhuma dimensão é presumida.
 Casos reconhecidos além dos aliases originais:
   * "Tamanho infantil dos EUA" (tamanhos infantis US, ex.: "5T(Size 120)"),
     também via sku_property_id "200000463" (estável entre traduções).
+  * "Tamanho do sapato" (numeração BR de calçados, ex.: "46"), também via
+    sku_property_id "200000124".
   * Propriedade canônica de cor do AliExpress (sku_property_id "14").
 
 Valores originais são preservados integralmente: sem conversão
@@ -25,12 +27,19 @@ from typing import Dict, List, Optional, Tuple
 # size/tamanho) e na apresentação (cor/color, tamanho/size/talla), mais o
 # atributo do caso real "Tamanho infantil dos EUA".
 COLOR_NAMES = frozenset({"color", "colour", "cor"})
-SIZE_NAMES = frozenset({"size", "tamanho", "talla", "tamanho infantil dos eua"})
+SIZE_NAMES = frozenset({
+    "size",
+    "tamanho",
+    "talla",
+    "tamanho infantil dos eua",
+    "tamanho do sapato",
+})
 
 # sku_property_id conhecidos do AliExpress (estáveis entre traduções):
-# "14" = cor; "200000463" = "Tamanho infantil dos EUA".
+# "14" = cor; "200000463" = "Tamanho infantil dos EUA";
+# "200000124" = "Tamanho do sapato".
 COLOR_PROPERTY_IDS = frozenset({"14"})
-SIZE_PROPERTY_IDS = frozenset({"200000463"})
+SIZE_PROPERTY_IDS = frozenset({"200000463", "200000124"})
 
 # Teto dos snapshots de rótulo (CartItem.selected_size e
 # OrderItem.selected_size após a migração 0028). Rótulos acima disso falham
