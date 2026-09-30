@@ -732,3 +732,83 @@ def test_importador_aceita_cor_41_60_e_rejeita_acima(db):
             detail=_detail_cor("C" * 61, "1005999999999997"),
             seller_id="SELLER_COR61",
         )
+
+
+def test_tamanho_do_sapato_reconhecido_por_nome_e_property_id(db):
+    from loja.services.variant_attributes import (
+        classify_variant_attribute as cls,
+        extract_variant_color_size as ext,
+    )
+
+    # Nome exato do atributo de calçados.
+    assert cls({"name": "Tamanho do sapato", "value": "46"}) == "size"
+    # Property id vale mesmo com nome não catalogado.
+    assert (
+        cls(
+            {
+                "name": "Numero",
+                "value": "46",
+                "sku_property_id": "200000124",
+            }
+        )
+        == "size"
+    )
+    cor, tamanho = ext(
+        [
+            {"name": "cor", "value": "Azul", "sku_property_id": "14"},
+            {
+                "name": "Tamanho do sapato",
+                "value": "46",
+                "sku_property_id": "200000124",
+            },
+        ]
+    )
+    assert (cor, tamanho) == ("Azul", "46")
+
+
+def test_seletor_exibe_46_sem_opcao(client, db):
+    # Variante com size NULL e tamanho só em attributes ("Tamanho do
+    # sapato"/200000124): o seletor mostra "46", sem fallback "Opção N".
+    product = Product(
+        id=uuid.uuid4(),
+        name="Tênis Corrida",
+        description="Tênis de corrida.",
+        price=Decimal("199.90"),
+        stock=2,
+        is_active=True,
+        is_draft=False,
+        source="aliexpress",
+        pricing_status="priced",
+    )
+    db.session.add(product)
+    db.session.flush()
+    db.session.add(
+        ProductVariant(
+            id=uuid.uuid4(),
+            product_id=product.id,
+            external_sku_id="tenis-46",
+            supplier_sku_id="tenis-46",
+            color="Azul",
+            size=None,
+            attributes=[
+                {"name": "cor", "value": "Azul", "sku_property_id": "14"},
+                {
+                    "name": "Tamanho do sapato",
+                    "value": "46",
+                    "sku_property_id": "200000124",
+                },
+            ],
+            stock=2,
+            price=Decimal("199.90"),
+            is_active=True,
+        )
+    )
+    db.session.commit()
+
+    selector = _build_variant_selector(product)
+    _assert_selector_invariant(selector)
+    assert selector["dimensions"][1] == {"key": "size", "title": "Tamanho",
+                                         "options": ["46"]}
+    pagina = client.get(f"/produtos/{product.id}").get_data(as_text=True)
+    assert "46" in pagina
+    assert "Opção" not in pagina
