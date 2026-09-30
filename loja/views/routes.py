@@ -444,6 +444,9 @@ def _build_variant_selector(product):
     # Passo 2: garante unicidade das tuplas. Se duas variantes geraram o mesmo
     # dims (ex.: A=Rosa/M e B=Rosa/M), adiciono uma dimensão "Opção" segura
     # (valores únicos por variante, ligados aos UUIDs internos) para desempatar.
+    # Os rótulos carregam o estoque ("Opção 2 (11987 un.)") para o cliente
+    # distinguir SKUs idênticos na aparência; a identidade continua sendo o
+    # variant_id — nunca há auto-seleção.
     seen_tuples = {}
     duplicated = False
     for variant in variants:
@@ -454,7 +457,10 @@ def _build_variant_selector(product):
         seen_tuples[key] = variant
 
     if duplicated:
-        option_labels = ["Opção %d" % (i + 1) for i in range(len(variants))]
+        option_labels = [
+            "Opção %d (%d un.)" % (i + 1, max(int(v.get("stock") or 0), 0))
+            for i, v in enumerate(variants)
+        ]
         dimensions.append({"key": "option", "title": "Opção", "options": option_labels})
         for i, variant in enumerate(variants):
             variant["dims"].append(option_labels[i])
