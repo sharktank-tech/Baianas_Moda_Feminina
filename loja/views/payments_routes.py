@@ -45,6 +45,10 @@ from loja.services.shipping_quote import (
     temporary_flat_rate,
 )
 from loja.services.reservation_policy import reservation_deadline
+from loja.services.variant_attributes import (
+    VARIANT_LABEL_MAX_LEN,
+    variant_dim_value,
+)
 
 
 def _unavailable_message(code: str) -> str:
@@ -364,7 +368,12 @@ def _resolve_payment_variant(product, raw_variant_id, fallback_size):
     if int(variant.stock or 0) <= 0:
         raise ValueError("Esta variação está temporariamente indisponível.")
 
-    label = (variant.size or "UNICO")[:20]
+    # Snapshot do tamanho COMPLETO resolvido (coluna ou attributes). Acima do
+    # teto da coluna (migração 0028), falha explícita: nunca truncamento
+    # silencioso. A identidade continua sendo o variant_id.
+    label = variant_dim_value(variant, "size") or "UNICO"
+    if len(label) > VARIANT_LABEL_MAX_LEN:
+        raise ValueError("O tamanho desta variação excede o limite suportado.")
 
     return variant, label
 

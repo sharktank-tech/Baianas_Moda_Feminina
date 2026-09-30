@@ -18,6 +18,11 @@ from loja.services.product_content import (
     sanitize_product_description_html,
     sanitize_product_description_without_images,
 )
+from loja.services.variant_attributes import (
+    VARIANT_LABEL_MAX_LEN,
+    variant_attribute_value,
+    variant_dim_value,
+)
 from loja.services.seo import (
     listing_meta,
     product_canonical_url,
@@ -173,6 +178,7 @@ def inject_product_content_helpers():
         "sanitize_product_description_without_images": sanitize_product_description_without_images,
         "product_description_excerpt": product_description_excerpt,
         "product_description_image_urls": product_description_image_urls,
+        "variant_dim_value": variant_dim_value,
         "product_canonical_url": product_canonical_url,
         # Prazos de promoção sempre em America/Sao_Paulo (banco guarda UTC naive).
         "format_deadline_sp": format_deadline_sp,
@@ -309,54 +315,35 @@ def _active_variants_for_product(product):
     def _sort_key(v):
         return (v.color or "", v.size or "")
 
-    return [
-        {
-            "id": str(v.id),
-            "color": v.color or "",
-            "size": v.size or "",
-            "stock": int(v.stock or 0),
-            "attributes": getattr(v, "attributes", None),
-            "label": " ".join(
-                part for part in (v.color or "", v.size or "") if part
-            ).strip()
-            or "Único",
-        }
-        for v in sorted(variants, key=_sort_key)
-    ]
-
-
-_VARIANT_COLOR_ATTR_NAMES = {"cor", "color"}
-_VARIANT_SIZE_ATTR_NAMES = {"tamanho", "size", "talla"}
+    # Rótulos resolvidos com fallback para attributes: corrige a exibição de
+    # produtos existentes sem reimportação e sem UPDATE em massa (as colunas
+    # color/size continuam NULL no banco; só a apresentação resolve).
+    resolved = []
+    for v in sorted(variants, key=_sort_key):
+        color = variant_dim_value(v, "color") or ""
+        size = variant_dim_value(v, "size") or ""
+        resolved.append(
+            {
+                "id": str(v.id),
+                "color": color,
+                "size": size,
+                "stock": int(v.stock or 0),
+                "attributes": getattr(v, "attributes", None),
+                "label": " ".join(
+                    part for part in (color, size) if part
+                ).strip()
+                or "Único",
+            }
+        )
+    return resolved
 
 
 def _variant_attr_value(attributes, wanted_key):
     """Busca o valor de um atributo AliExpress (Cor/Tamanho) em `attributes`.
 
-    `attributes` pode ser uma lista de {"name","value"} (formato do importer)
-    ou um dict nome->valor.
+    Delegação pura ao helper compartilhado (listas e dicts normalizados lá).
     """
-    if not attributes:
-        return None
-    if isinstance(attributes, dict):
-        items = list(attributes.items())
-    else:
-        items = []
-        for attr in attributes:
-            if isinstance(attr, dict):
-                items.append((attr.get("name"), attr.get("value")))
-
-    wanted = wanted_key.lower()
-    for name, value in items:
-        name_norm = str(name or "").strip().lower()
-        if wanted == "color" and name_norm in _VARIANT_COLOR_ATTR_NAMES:
-            val = str(value or "").strip()
-            if val:
-                return val
-        if wanted == "size" and name_norm in _VARIANT_SIZE_ATTR_NAMES:
-            val = str(value or "").strip()
-            if val:
-                return val
-    return None
+    return variant_attribute_value(attributes, wanted_key)
 
 
 def _variant_dim_label(meta, key):
@@ -651,10 +638,18 @@ def _add_product_to_cart(product, size=None, quantity=1, variant=None):
 
     selected_size = size
     if selected_variant is not None:
-        # Para variante, `selected_size` guarda SOMENTE o tamanho (abaixo do
-        # limite VARCHAR). Cor e demais dados da opção vêm do relacionamento
-        # variant — nunca gravamos color+tamanho aqui (evita overflow).
-        selected_size = (selected_variant.size or "UNICO")[:10]
+        # Para variante, `selected_size` guarda o tamanho COMPLETO resolvido
+        # (coluna ou attributes). Cor e demais dados vêm do relacionamento
+        # variant_id — a identidade nunca é o texto. Acima do teto da coluna
+        # (migração 0028), falha explícita: nunca truncamento silencioso.
+        resolved_size = (
+            variant_dim_value(selected_variant, "size") or "UNICO"
+        )
+        if len(resolved_size) > VARIANT_LABEL_MAX_LEN:
+            raise ValueError(
+                "O tamanho desta variação excede o limite suportado."
+            )
+        selected_size = resolved_size
 
     values = _uuid_primary_key_values(item_model)
     values.update({
@@ -1521,10 +1516,15 @@ def checkout(product_id):
     selected_variant_label = None
     selected_variant_id = None
     if variant is not None:
+        # Rótulo completo (coluna ou attributes): identidade continua sendo o
+        # variant_id; o texto aqui é só apresentação, sem truncamento.
         selected_variant_label = (
             " ".join(
                 part
-                for part in (variant.color or "", variant.size or "")
+                for part in (
+                    variant_dim_value(variant, "color") or "",
+                    variant_dim_value(variant, "size") or "",
+                )
                 if part
             ).strip()
             or "Único"

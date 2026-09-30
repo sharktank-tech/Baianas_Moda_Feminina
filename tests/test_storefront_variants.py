@@ -604,7 +604,7 @@ def test_cart_selected_size_uses_size_only_when_size_absent(
     assert item.variant_id == no_size.id
 
 
-def test_long_size_truncated_to_varchar10(db, client, make_user):
+def test_long_size_stored_complete_no_truncation(db, client, make_user):
     long_size = _sku("x-3", "Preto", "EXTRA-GRANDE-GG", 4)
     product = _sized_product(db, [long_size])
     user = make_user()
@@ -618,8 +618,10 @@ def test_long_size_truncated_to_varchar10(db, client, make_user):
 
     cart = Cart.query.filter_by(user_id=user.id).first()
     item = list(cart.items)[0]
-    # Aberração defensiva: mesmo com tamanho longo, não estoura VARCHAR(10).
-    assert len(item.selected_size) <= 10
+    # Contrato novo (migração 0028): rótulo completo, sem truncamento
+    # silencioso; identidade continua sendo o variant_id.
+    assert item.selected_size == "EXTRA-GRANDE-GG"
+    assert item.variant_id == long_size.id
 
 
 # D: seletores reais Cor/Tamanho + fallback de atributos + "Opção N".

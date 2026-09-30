@@ -64,6 +64,13 @@ from loja.services.pricing import (
     calculate_landed_cost,
     to_decimal,
 )
+from loja.services.variant_attributes import (
+    COLOR_NAMES,
+    SIZE_NAMES,
+    VARIANT_COLOR_MAX_LEN,
+    VARIANT_LABEL_MAX_LEN,
+    extract_variant_color_size,
+)
 from loja.utils import utcnow
 
 from .models import AliExpressProductDetail, AliExpressProductSku
@@ -74,9 +81,6 @@ SOURCE_ALIEXPRESS = "aliexpress"
 DRAFT_STATE = "draft"
 FREIGHT_PROVIDER_UNAVAILABLE = "provider_unavailable"
 FREIGHT_AVAILABLE = "available"
-
-COLOR_NAMES = {"color", "colour", "cor"}
-SIZE_NAMES = {"size", "tamanho"}
 
 
 class DraftImportError(Exception):
@@ -543,20 +547,9 @@ def _apply_product(
 def _extract_variant_meta(
     attributes: Optional[List[dict]],
 ) -> Tuple[Optional[str], Optional[str]]:
-    color = None
-    size = None
-    for attr in attributes or []:
-        if not isinstance(attr, dict):
-            continue
-        name = str(attr.get("name") or "").strip().lower()
-        value = str(attr.get("value") or "").strip()
-        if not value:
-            continue
-        if name in COLOR_NAMES and color is None:
-            color = value
-        elif name in SIZE_NAMES and size is None:
-            size = value
-    return color, size
+    # Delegação ao helper compartilhado (nomes + sku_property_id); mantém
+    # primeira ocorrência por dimensão e nunca presume dimensão desconhecida.
+    return extract_variant_color_size(attributes)
 
 
 def _apply_variants_and_images(
@@ -583,6 +576,16 @@ def _apply_variants_and_images(
         seen.add(sku_id)
         attributes = list(sku.attributes or [])
         color, size = _extract_variant_meta(attributes)
+        # Rótulos acima do teto de cada coluna (size: 40, cor: 60) abortam a
+        # importação com código estável e rollback total: nunca truncar nem
+        # persistir parcial (valores existentes preservados por não haver
+        # escrita).
+        for rotulo, teto in (
+            (size, VARIANT_LABEL_MAX_LEN),
+            (color, VARIANT_COLOR_MAX_LEN),
+        ):
+            if rotulo is not None and len(rotulo) > teto:
+                raise DraftImportError("variant_label_too_long")
         stock = max(int(sku.available_stock) if sku.available_stock is not None else 0, 0)
         price = _effective_supplier_price(sku)
         variant = by_supplier_sku.get(sku_id)

@@ -326,7 +326,9 @@ class OrderItem(db.Model):
     )
 
     product_name = db.Column(db.String(255), nullable=False)
-    selected_size = db.Column(db.String(20))
+    # Snapshot do rótulo completo (migração 0028 ampliou para VARCHAR(40);
+    # nunca truncar em Python — falhar explícito acima do teto).
+    selected_size = db.Column(db.String(40))
     variant_id = db.Column(
         UUID(as_uuid=True),
         db.ForeignKey("product_variants.id", ondelete="SET NULL"),

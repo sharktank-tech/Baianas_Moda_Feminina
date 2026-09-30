@@ -1228,8 +1228,10 @@ class CartItem(db.Model):
 
     # Tamanho escolhido na página do produto. O nome selected_size foi mantido
     # explícito para não confundir com dimensões físicas ou estoque do produto.
+    # VARCHAR(40) pela migração 0028: rótulos completos de variante (ex.:
+    # "11-12T(Size 160)"); nunca truncar em Python — falhar explícito acima.
     selected_size = db.Column(
-        db.String(10),
+        db.String(40),
         nullable=False
     )
 
@@ -1592,7 +1594,9 @@ class ProductVariant(db.Model):
     )
     supplier_sku_id = db.Column(db.String(64))
     color = db.Column(db.String(60))
-    size = db.Column(db.String(20))
+    # VARCHAR(40) pela migração 0028 (alinhado à política VARIANT_LABEL_MAX_LEN;
+    # nunca truncar em Python — excessos rejeitados explicitamente na importação).
+    size = db.Column(db.String(40))
     attributes = db.Column(JSONB)
     stock = db.Column(db.Integer, nullable=False, default=0)
     price = db.Column(db.Numeric(10, 2))
