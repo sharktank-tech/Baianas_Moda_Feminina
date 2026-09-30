@@ -427,7 +427,7 @@ def test_atributos_ausentes_mantem_opcao_e_sem_autoselecao(client, db):
         _resolve_selected_variant(product, None)
 
 
-def test_colisao_continua_desambiguada(db, cargo):
+def test_colisao_continua_desambiguada(db, client, cargo):
     from loja.views.routes import _build_variant_selector as build
 
     product, variantes = cargo
@@ -436,6 +436,7 @@ def test_colisao_continua_desambiguada(db, cargo):
     gemea.attributes = list(variantes[("Purple", "5T(Size 120)")].attributes)
     gemea.color = "Purple"
     gemea.size = None
+    gemea.stock = 4  # estoque distinto para diferenciar no rótulo
     db.session.commit()
 
     selector = build(product)
@@ -443,11 +444,19 @@ def test_colisao_continua_desambiguada(db, cargo):
     # Desempate explícito via dimensão extra; combinações continuam únicas.
     tuplas = [tuple(v["dims"]) for v in selector["variants"]]
     assert len(tuplas) == len(set(tuplas))
-    assert any(d["key"] == "option" for d in selector["dimensions"])
+    dim_opcao = next(d for d in selector["dimensions"] if d["key"] == "option")
+    # Rótulos carregam o estoque ("Opção N (X un.)"), únicos por variante.
+    assert len(dim_opcao["options"]) == len(set(dim_opcao["options"]))
+    assert any("(4 un.)" in opt for opt in dim_opcao["options"])
+    assert any("(5 un.)" in opt for opt in dim_opcao["options"])
+    assert all(opt.startswith("Opção ") for opt in dim_opcao["options"])
     # Cada combinação resolve exatamente para o seu variant_id.
     for variante in selector["variants"]:
         resolvida = _resolve_selected_variant(product, variante["id"])
         assert str(resolvida.id) == variante["id"]
+    # Página exibe o desempate com estoque, sem auto-seleção.
+    pagina = client.get(f"/produtos/{product.id}").get_data(as_text=True)
+    assert "(4 un.)" in pagina
 
 
 def test_nome_manual_preservado_nos_fluxos(db, client, make_user, cargo):
