@@ -2,6 +2,16 @@
 
 {% block title %}Detalhes do produto AliExpress{% endblock %}
 
+{% block extra_head %}
+<style>
+/* Descrição do fornecedor (HTML externo sanitizado): nunca estourar o
+   card — larguras fixas do AliExpress contidas, imagens responsivas. */
+.ae-descricao { overflow-x: auto; max-width: 100%; }
+.ae-descricao img { max-width: 100% !important; height: auto !important; }
+.ae-descricao table { max-width: 100%; }
+</style>
+{% endblock %}
+
 {% block content %}
 
 <div class="max-w-5xl mx-auto px-4 py-8">
@@ -86,7 +96,10 @@
     {% if detail.description %}
         <div class="bg-white rounded-2xl shadow p-6 mb-8">
             <h2 class="text-xl font-semibold text-gray-800 mb-3">Descrição</h2>
-            <div class="text-gray-600">{{ detail.description }}</div>
+            {# HTML externo NUNCA renderizado bruto: sanitizado pela allowlist
+               de product_content (sem |safe no HTML original); o Markup já
+               limpo passa pelo autoescape padrão do Jinja. #}
+            <div class="text-gray-600 ae-descricao">{{ sanitize_product_description_html(detail.description) }}</div>
         </div>
     {% endif %}
 
