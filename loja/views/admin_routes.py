@@ -18,7 +18,7 @@ from sqlalchemy.orm import selectinload
 from loja.utils.decorators import admin_required
 from loja.utils import as_sao_paulo
 from loja.modules.footer_links import is_safe_footer_url
-from loja.modules.services import get_layout_data
+from loja.modules.services import get_layout_data, invalidate_footer_cache
 
 _FOOTER_URL_ERROR = (
     "URL inválida para link do rodapé. "
@@ -1483,6 +1483,7 @@ def add_social_link():
             )
             db.session.add(social)
             db.session.commit()
+            invalidate_footer_cache()
             flash("Rede social adicionada com sucesso!", "success")
             return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
@@ -1516,6 +1517,7 @@ def edit_social_link(id):
 
         try:
             db.session.commit()
+            invalidate_footer_cache()
             flash("Rede social atualizada com sucesso!", "success")
             return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
@@ -1537,6 +1539,7 @@ def delete_social_link(id):
     social = SocialLink.query.get_or_404(id)
     db.session.delete(social)
     db.session.commit()
+    invalidate_footer_cache()
     flash("Rede social excluída com sucesso!", "success")
     return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
@@ -1562,6 +1565,7 @@ def add_footer_config():
             )
             db.session.add(footer)
             db.session.commit()
+            invalidate_footer_cache()
             flash("Configuração do rodapé salva com sucesso!", "success")
             return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
@@ -1588,6 +1592,7 @@ def edit_footer_config():
 
         try:
             db.session.commit()
+            invalidate_footer_cache()
             flash("Rodapé atualizado com sucesso!", "success")
             return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
@@ -1621,6 +1626,7 @@ def add_contact_info():
             )
             db.session.add(contact)
             db.session.commit()
+            invalidate_footer_cache()
             flash("Informações de contato salvas com sucesso!", "success")
             return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
@@ -1649,6 +1655,7 @@ def edit_contact_info():
 
         try:
             db.session.commit()
+            invalidate_footer_cache()
             flash("Contato atualizado com sucesso!", "success")
             return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
@@ -1680,6 +1687,7 @@ def add_nav_link():
             nav = NavLink(label=label, url=url)
             db.session.add(nav)
             db.session.commit()
+            invalidate_footer_cache()
             flash("Link de navegação adicionado com sucesso!", "success")
             return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
@@ -1712,6 +1720,7 @@ def edit_nav_link(id):
 
         try:
             db.session.commit()
+            invalidate_footer_cache()
             flash("Link atualizado com sucesso!", "success")
             return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
@@ -1733,6 +1742,7 @@ def delete_nav_link(id):
     nav = NavLink.query.get_or_404(id)
     db.session.delete(nav)
     db.session.commit()
+    invalidate_footer_cache()
     flash("Link excluído com sucesso!", "success")
     return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
@@ -1760,6 +1770,7 @@ def add_category_link():
             cat = CategoryLink(label=label, url=url, slug=slug, image=image)
             db.session.add(cat)
             db.session.commit()
+            invalidate_footer_cache()
             flash("Link de categoria adicionado com sucesso!", "success")
             return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
@@ -1795,6 +1806,7 @@ def edit_category_link(id):
 
         try:
             db.session.commit()
+            invalidate_footer_cache()
             flash("Link de categoria atualizado com sucesso!", "success")
             return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
@@ -1816,6 +1828,7 @@ def delete_category_link(id):
     cat = CategoryLink.query.get_or_404(id)
     db.session.delete(cat)
     db.session.commit()
+    invalidate_footer_cache()
     flash("Link de categoria excluído com sucesso!", "success")
     return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
@@ -1841,6 +1854,7 @@ def add_legal_link():
             legal = LegalLink(label=label, url=url)
             db.session.add(legal)
             db.session.commit()
+            invalidate_footer_cache()
             flash("Link legal adicionado com sucesso!", "success")
             return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
@@ -1873,6 +1887,7 @@ def edit_legal_link(id):
 
         try:
             db.session.commit()
+            invalidate_footer_cache()
             flash("Link legal atualizado com sucesso!", "success")
             return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 
@@ -1894,6 +1909,7 @@ def delete_legal_link(id):
     legal = LegalLink.query.get_or_404(id)
     db.session.delete(legal)
     db.session.commit()
+    invalidate_footer_cache()
     flash("Link legal excluído com sucesso!", "success")
     return redirect(url_for("admin.admin_dashboard", _anchor="footer"))
 

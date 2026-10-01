@@ -22,3 +22,9 @@ def set_cached(key, value, ttl=_DEFAULT_TTL):
     """Armazena um valor no cache por `ttl` segundos (idempotente)."""
     with _lock:
         _cache[key] = (value, time.monotonic() + ttl)
+
+
+def invalidate_cached(key):
+    """Remove a chave do cache (usar após escrita no banco)."""
+    with _lock:
+        _cache.pop(key, None)

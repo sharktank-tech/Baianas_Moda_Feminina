@@ -193,6 +193,89 @@ def test_rodape_omite_sociais_invalidas_mostra_validas(
     assert 'href="#"' not in html
 
 
+def test_rodape_social_conhecida_usa_png_local_e_nao_sprite(
+    client, db, _footer_fresco, _links_proprios
+):
+    """Instagram/Facebook/Twitter renderizam o PNG versionado no repositório.
+
+    Regressão: o rodapé usava <use href="#icon-..."> apontando para um sprite
+    inexistente, então o link existia no HTML mas o glifo não aparecia.
+    """
+    from loja.modules.models import SocialLink
+
+    _criar(
+        SocialLink, db, _links_proprios,
+        label="Instagram", url="https://www.instagram.com/pollo.modaspmw",
+        icon="fab fa-instagram",
+    )
+    html = _get(client, "/")
+
+    # O link continua alcançável e com nome acessível.
+    assert 'href="https://www.instagram.com/pollo.modaspmw"' in html
+    assert 'aria-label="Instagram"' in html
+
+    # Ícone é o PNG local, não o <use> de sprite inexistente.
+    assert "img/rodape/instagram.png" in html
+    assert 'class="footer-social-icon"' in html
+    assert "#icon-instagram" not in html
+    assert "<use href=" not in html
+
+
+def test_rodape_social_desconhecida_cai_para_rotulo_visivel(
+    client, db, _footer_fresco, _links_proprios
+):
+    """Rede sem PNG local não pode sumir: mostra o rótulo dentro do círculo."""
+    from loja.modules.models import SocialLink
+
+    _criar(
+        SocialLink, db, _links_proprios,
+        label="TikTok", url="https://www.tiktok.com/pollomodas",
+    )
+    html = _get(client, "/")
+
+    assert 'href="https://www.tiktok.com/pollomodas"' in html
+    # Rótulo presente no link do rodapé (fallback textual).
+    assert 'aria-label="TikTok"' in html
+    assert "footer-social-label" in html
+    # Não há tentativa de carregar um PNG inexistente.
+    assert "img/rodape/tiktok.png" not in html
+
+
+def test_admin_salvar_social_invalida_cache_do_rodape(
+    client, db, admin_user, _footer_fresco, _links_proprios
+):
+    """Salvar no admin aparece na hora, sem esperar o TTL de 600s.
+
+    O rodapé e a lista do próprio dashboard leem o mesmo cache: sem
+    invalidação, o link recém-criado ficava invisível nos dois lugares.
+    """
+    # Esquece o rodapé em cache ANTES do POST (simula página já visitada).
+    from loja.modules.models import SocialLink
+
+    _get(client, "/")
+    assert "footer_data" in _cache_mod._cache
+
+    resp = _post_admin(
+        client, admin_user, "/admin/add_social_link",
+        {
+            "label": "Instagram",
+            "url": "https://www.instagram.com/pollo.modaspmw",
+            "icon": "fab fa-instagram",
+        },
+    )
+    assert resp.status_code in (302, 303), resp.status_code
+
+    criado = SocialLink.query.filter_by(label="Instagram").first()
+    assert criado is not None
+    _links_proprios.append((criado.id, SocialLink))
+
+    # Imediatamente após o POST: cache descartado e já renderizando.
+    assert "footer_data" not in _cache_mod._cache
+    html = _get(client, "/")
+    assert 'href="https://www.instagram.com/pollo.modaspmw"' in html
+    assert "img/rodape/instagram.png" in html
+
+
 def test_rodape_omite_nav_javascript_mostra_interno(
     client, db, _footer_fresco, _links_proprios
 ):

@@ -417,8 +417,26 @@
       stroke: var(--gray-700);
       transition: stroke 0.2s;
     }
+    /* PNG local do rodapé: cabe no círculo de 36px sem estourar. */
+    .footer-social a .footer-social-icon {
+      width: 18px;
+      height: 18px;
+      object-fit: contain;
+      display: block;
+    }
+    /* Rede sem PNG local: rótulo curto no lugar do ícone. */
+    .footer-social a .footer-social-label {
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 1.1;
+      text-align: center;
+      color: var(--gray-700);
+      padding: 0 2px;
+      word-break: break-word;
+    }
     .footer-social a:hover { border-color: var(--brand-pink); background: var(--brand-pink-light); }
     .footer-social a:hover svg { stroke: var(--brand-pink); }
+    .footer-social a:hover .footer-social-label { color: var(--brand-pink); }
 
     /* cols */
     .footer-col-title {
@@ -799,9 +817,21 @@
           </p>
           <div class="footer-social">
             {% if footer and footer.social_links %}
+              {# Ícones locais versionados em static/img/rodape/. Redes fora do
+                 mapa caem no rótulo textual: o link nunca fica invisível. #}
+              {% set _rodape_icones = {
+                'instagram': 'img/rodape/instagram.png',
+                'facebook':  'img/rodape/facebook.png',
+                'twitter':   'img/rodape/twitter.png',
+              } %}
               {% for social in footer.social_links %}
+              {% set _chave = social.label | trim | lower %}
               <a href="{{ social.url }}" target="_blank" rel="noopener" aria-label="{{ social.label }}">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><use href="#icon-{{ social.label | lower }}"/></svg>
+                {% if _chave in _rodape_icones %}
+                <img src="{{ url_for('static', filename=_rodape_icones[_chave]) }}" alt="" aria-hidden="true" class="footer-social-icon"/>
+                {% else %}
+                <span class="footer-social-label">{{ social.label }}</span>
+                {% endif %}
               </a>
               {% endfor %}
             {% else %}

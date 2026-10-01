@@ -13,7 +13,7 @@ from flask import has_request_context, url_for
 from flask_login import current_user
 
 from loja import db
-from loja.cache import get_cached, set_cached
+from loja.cache import get_cached, invalidate_cached, set_cached
 from loja.modules.models import (
     Product,
     HeroSlide,
@@ -295,6 +295,15 @@ def _build_banner(site: "SiteConfig | None") -> dict:
         "quote":    site.banner_quote    if site else "",
         "cta_text": site.banner_cta_text if site else "",
     }
+
+
+def invalidate_footer_cache() -> None:
+    """Descarta o cache do rodapé após qualquer escrita dos seus links.
+
+    Sem isso, um link salvo no admin só apareceria no rodapé (e na lista do
+    próprio dashboard, que lê o mesmo cache) depois do TTL de 600s.
+    """
+    invalidate_cached("footer_data")
 
 
 def get_footer_data() -> dict:
