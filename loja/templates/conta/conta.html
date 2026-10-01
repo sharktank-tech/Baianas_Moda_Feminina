@@ -362,6 +362,54 @@ Minha conta — {% if site and site.name %}{{ site.name }}{% else %}Pollo Modas{
 
           </a>
 
+
+          <!-- =================================================== -->
+          <!-- PEDIDO EXPIRADO -->
+          <!-- =================================================== -->
+
+          <a
+            href="{{ url_for('main.encomendas_status', status='expirados') }}"
+            class="order-status-card"
+          >
+
+            <div class="order-status-icon">
+
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M15 9l-6 6"/>
+                <path d="M9 9l6 6"/>
+              </svg>
+
+            </div>
+
+
+            <div class="order-status-content">
+
+              <span class="order-status-title">
+                Pedido expirado
+              </span>
+
+              <span class="order-status-description">
+                O prazo de pagamento acabou e o estoque foi liberado.
+                Faça um novo pedido se ainda quiser o produto.
+              </span>
+
+            </div>
+
+
+            <span class="order-status-count">
+              {{ compras_status.expirado|default(0) }}
+            </span>
+
+          </a>
+
         </div>
 
 

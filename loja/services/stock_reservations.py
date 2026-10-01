@@ -209,7 +209,12 @@ def find_expired_stock_reservations(*, hours=None, limit=None, now=None):
 
 
 def _release_stock_locked(order):
-    """Restitui integralmente uma reserva; requer o Order já travado."""
+    """Restitui a reserva vencida e transiciona o pedido para "expired".
+
+    Requer o Order já travado. Só é chamado pelos caminhos de liberação por
+    expiração, que garantem pending_payment; o pagamento aprovado tardio
+    é reconstruído em _sync_payment (re-debita o estoque e vira "paid").
+    """
     if not order.stock_reserved or order.status != "pending_payment":
         return False
 
@@ -253,6 +258,7 @@ def _release_stock_locked(order):
                 product.stock += item.quantity
 
     order.stock_reserved = False
+    order.status = "expired"
     return True
 
 

@@ -1154,6 +1154,9 @@ def _sync_payment(payment_id):
             # Mantém mesmas AliExpressOrder/idempotency_key/items.
             ensure_aliexpress_fulfillment(order)
         elif order.status not in {"manual_review"}:
+            # Inclui "expired": approved tardio reconstrói o pedido —
+            # re-debita o estoque liberado (if not stock_reserved abaixo)
+            # e promove para "paid".
             locked_products = {}
             locked_variants = {}
             review_reasons = []
@@ -1300,10 +1303,17 @@ def _sync_payment(payment_id):
         "manual_review",
         "refunded",
         "charged_back",
+        "expired",
     }:
         _release_stock(order)
         order.status = mapped_status
-    elif order.status not in {"paid", "manual_review", "refunded", "charged_back"}:
+    elif order.status not in {
+        "paid",
+        "manual_review",
+        "refunded",
+        "charged_back",
+        "expired",
+    }:
         order.status = mapped_status
 
     db.session.commit()

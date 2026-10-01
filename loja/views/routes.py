@@ -2034,6 +2034,10 @@ PURCHASE_FILTERS = {
         "bucket": "aguardando_avaliacao",
         "titulo": "Aguardando avaliação",
     },
+    "expirados": {
+        "bucket": "expirado",
+        "titulo": "Pedidos expirados",
+    },
 }
 
 
@@ -2042,6 +2046,7 @@ PURCHASE_STATUS_LABELS = {
     "aguardando_envio": "Aguardando envio",
     "enviado": "Enviado",
     "aguardando_avaliacao": "Aguardando avaliação",
+    "expirado": "Expirado",
 }
 
 
@@ -2082,6 +2087,9 @@ def _shipment_is_delivered(status):
 def _order_purchase_bucket(order):
     """Converte Order + Shipment para um dos quatro cards da área do cliente."""
     order_status = _normalize_status(getattr(order, "status", None))
+
+    if order_status == "expired":
+        return "expirado"
 
     if order_status == "pending_payment":
         return "aguardando_pagamento"
@@ -2146,6 +2154,7 @@ def _purchase_status_counts(orders):
         "aguardando_envio": 0,
         "enviado": 0,
         "aguardando_avaliacao": 0,
+        "expirado": 0,
     }
 
     for order in orders:
@@ -2201,6 +2210,114 @@ def detalhes_encomenda(order_id):
         "conta/detalhes_encomenda.html",
         pedido=pedido,
     )
+
+
+# ── Refazer pedido expirado ──────────────────────────────────────────────────
+@main_blueprint.route(
+    "/encomendas/pedido/<uuid:order_id>/refazer",
+    methods=["POST"],
+)
+@login_required
+def refazer_pedido(order_id):
+    """Reabre o checkout com os itens de um pedido com estado "expired".
+
+    Só o dono do pedido e apenas quando o estado é "expired". Itens sem
+    produto público/variante ativa/estoque são pulados com aviso; o preço
+    é sempre o do catálogo atual (mesma regra do carrinho normal).
+    """
+    pedido = (
+        Order.query
+        .filter(
+            Order.id == order_id,
+            Order.user_id == current_user.id,
+        )
+        .first_or_404()
+    )
+
+    if _normalize_status(pedido.status) != "expired":
+        flash("Este pedido não pode ser refeito.", "warning")
+        return redirect(
+            url_for("main.detalhes_encomenda", order_id=pedido.id)
+        )
+
+    adicionados = 0
+    indisponiveis = 0
+
+    for item in pedido.items:
+        product = None
+        if item.product_id is not None:
+            product = (
+                public_product_query()
+                .filter(Product.id == item.product_id)
+                .first()
+            )
+
+        if product is None:
+            indisponiveis += 1
+            continue
+
+        variant = None
+        if item.variant_id is not None:
+            variant = ProductVariant.query.filter_by(
+                id=item.variant_id,
+                product_id=product.id,
+            ).first()
+            if (
+                variant is None
+                or not variant.is_active
+                or (variant.stock is not None and variant.stock <= 0)
+            ):
+                indisponiveis += 1
+                continue
+            estoque = variant.stock
+        else:
+            estoque = product.stock
+            if estoque is not None and estoque <= 0:
+                indisponiveis += 1
+                continue
+
+        quantidade = int(item.quantity)
+        if estoque is not None:
+            quantidade = min(quantidade, int(estoque))
+
+        try:
+            _add_product_to_cart(
+                product,
+                size=item.selected_size,
+                quantity=quantidade,
+                variant=variant,
+            )
+        except (ValueError, RuntimeError):
+            indisponiveis += 1
+            continue
+
+        adicionados += 1
+
+    if not adicionados:
+        db.session.rollback()
+        flash(
+            "Nenhum item deste pedido está disponível para uma nova compra.",
+            "warning",
+        )
+        return redirect(
+            url_for("main.detalhes_encomenda", order_id=pedido.id)
+        )
+
+    db.session.commit()
+
+    session.pop("checkout_cart", None)
+    session.pop("checkout_coupon", None)
+    session.modified = True
+
+    if indisponiveis:
+        flash(
+            "Alguns itens não estão mais disponíveis e ficaram de fora.",
+            "warning",
+        )
+    else:
+        flash("Itens do pedido adicionados ao carrinho.", "success")
+
+    return redirect(url_for("main.checkout_carrinho"))
 
 
 # ── Encomendas dinâmicas ─────────────────────────────────────────────────────
