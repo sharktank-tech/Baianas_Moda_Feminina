@@ -1356,6 +1356,24 @@ def processar_carrinho():
     )
 
 
+def _issue_checkout_idempotency_key():
+    """Emite a chave de idempotência do checkout e a registra NA SESSÃO.
+
+    O hidden field do form pode ser omitido/forjado no POST; a lista de
+    chaves emitidas na sessão é a fonte de verdade do servidor para
+    reconhecer o reenvio nesse caso (janela de 8 renderizações recentes).
+    """
+    key = uuid.uuid4().hex
+    prior = session.get("checkout_idempotency_keys")
+    issued = (
+        [k for k in prior if isinstance(k, str)]
+        if isinstance(prior, list)
+        else []
+    )
+    session["checkout_idempotency_keys"] = ([key] + issued)[:8]
+    return key
+
+
 @main_blueprint.route(
     "/checkout/carrinho",
     methods=["GET"],
@@ -1402,6 +1420,7 @@ def checkout_carrinho():
     return render_template(
         "cart/checkout.html",
         checkout_mode="cart",
+        checkout_idempotency_key=_issue_checkout_idempotency_key(),
         cart=cart,
         cart_items=cart_items,
         subtotal=subtotal,
@@ -1551,6 +1570,7 @@ def checkout(product_id):
     return render_template(
         "cart/checkout.html",
         checkout_mode="buy_now",
+        checkout_idempotency_key=_issue_checkout_idempotency_key(),
         product=product,
         selected_size=selected_size,
         selected_variant=selected_variant_label,

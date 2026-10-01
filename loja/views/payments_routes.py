@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 from datetime import timedelta
 from decimal import Decimal
@@ -14,6 +15,7 @@ from flask import (
     url_for,
 )
 from flask_login import current_user, login_required
+from sqlalchemy.exc import IntegrityError
 
 from loja import db, csrf
 from loja.utils import utcnow
@@ -213,6 +215,107 @@ def _safe_referrer(value):
         and value.startswith("/")
         and not value.startswith("//")
     )
+
+
+IDEMPOTENCY_KEY_MAX_LEN = 64
+IDEMPOTENCY_WINDOW_SECS = 30
+
+
+def _normalize_idempotency_key(raw):
+    """Chave de idempotência enviada pelo form de checkout (opcional).
+
+    Aceita 8–64 caracteres [A-Za-z0-9_-]. Qualquer outro valor é descartado
+    (None): entrada inválida não pode travar o checkout. A proteção real é a
+    constraint UNIQUE (user_id, idempotency_key) no banco.
+    """
+    key = str(raw or "").strip()
+
+    if not 8 <= len(key) <= IDEMPOTENCY_KEY_MAX_LEN:
+        return None
+
+    if any(not (ch.isalnum() or ch in "-_") for ch in key):
+        return None
+
+    return key
+
+
+def _window_fallback_key():
+    """Chave derivada no servidor para POST sem campo E sem renderização.
+
+    Script que nunca abriu a página de checkout não tem chave emitida; a
+    chave passa a ser determinística por (usuário, formulário, janela de
+    30s). Dois POSTs imediatos do mesmo formulário geram a MESMA chave e a
+    constraint UNIQUE reduz o resultado a 1 pedido.
+    """
+    bucket = int(utcnow().timestamp()) // IDEMPOTENCY_WINDOW_SECS
+    canonical = "&".join(
+        "%s=%s" % (name, value)
+        for name, value in sorted(request.form.items())
+        if name not in ("csrf_token", "idempotency_key")
+    )
+    digest = hashlib.sha256(
+        ("%s|%s|%s" % (current_user.id, bucket, canonical)).encode("utf-8")
+    ).hexdigest()
+    # "w" + dígitos + hex: nunca colide com as chaves uuid emitidas no GET.
+    return "w%s%s" % (bucket, digest[:40])
+
+
+def _resolve_idempotency_key():
+    """Chave efetiva do POST, em ordem de precedência:
+
+    1. campo enviado pelo form (uma chave por renderização/aba);
+    2. chave emitida pelo servidor no GET e guardada na sessão — cobre o
+       caso do campo omitido/forjado: a proteção NÃO depende do cliente;
+    3. chave de janela determinística — cobre script que nunca abriu o GET.
+    """
+    posted = _normalize_idempotency_key(
+        request.form.get("idempotency_key")
+    )
+    if posted:
+        return posted
+
+    issued = session.get("checkout_idempotency_keys")
+    if (
+        isinstance(issued, list)
+        and issued
+        and isinstance(issued[0], str)
+        and issued[0]
+    ):
+        return issued[0]
+
+    return _window_fallback_key()
+
+
+def _find_duplicate_checkout(idempotency_key):
+    """Pedido já criado com esta chave pelo mesmo usuário, se houver."""
+    if not idempotency_key:
+        return None
+
+    return (
+        Order.query
+        .filter(
+            Order.user_id == current_user.id,
+            Order.idempotency_key == idempotency_key,
+        )
+        .first()
+    )
+
+
+def _redirect_to_existing_order(order):
+    """Reaproveita o pedido do reenvio: leva o cliente ao pagamento dele.
+
+    Sem mensagem nova ao cliente: o destino é a mesma página do Mercado Pago
+    que o fluxo normal mostraria.
+    """
+    target = order.mp_checkout_url
+
+    if not target:
+        target = url_for(
+            "main.detalhes_encomenda",
+            order_id=order.id,
+        )
+
+    return redirect(target)
 
 
 def _parse_quantity(value):
@@ -748,21 +851,37 @@ def create_mercado_pago_payment():
     e redireciona o cliente para o Checkout Pro.
     """
 
+    idempotency_key = None
+
     try:
         checkout_type = str(
             request.form.get("checkout_type") or ""
         ).strip().lower()
 
-        if checkout_type == "product":
-            item_data, cart = _get_direct_product_items(), None
-
-        elif checkout_type == "cart":
-            item_data, cart = _get_cart_items()
-
-        else:
+        if checkout_type not in ("product", "cart"):
             raise ValueError(
                 "Tipo de checkout inválido."
             )
+
+        # Reenvio do mesmo form (duplo clique, F5, voltar do Mercado Pago):
+        # reaproveita o pedido já criado antes de qualquer efeito colateral.
+        # Campo omitido/forjado não desliga a proteção: a chave vem da
+        # sessão emitida no GET ou da janela determinística.
+        idempotency_key = _resolve_idempotency_key()
+        duplicate = _find_duplicate_checkout(idempotency_key)
+        if duplicate is not None:
+            current_app.logger.info(
+                "Checkout idempotente: reenvio detectado no pre-check; "
+                "reaproveitando pedido %s.",
+                duplicate.id,
+            )
+            return _redirect_to_existing_order(duplicate)
+
+        if checkout_type == "product":
+            item_data, cart = _get_direct_product_items(), None
+
+        else:
+            item_data, cart = _get_cart_items()
 
         subtotal = money(
             sum(
@@ -809,6 +928,7 @@ def create_mercado_pago_payment():
             coupon_id=coupon.id if coupon else None,
             coupon_code=coupon.code if coupon else None,
             checkout_type=checkout_type,
+            idempotency_key=idempotency_key,
             status="pending_payment",
             subtotal=subtotal,
             shipping=shipping,
@@ -864,8 +984,44 @@ def create_mercado_pago_payment():
             preference["checkout_url"]
         )
 
+    except IntegrityError:
+        # Reenvio concorrente do mesmo form: a constraint UNIQUE
+        # (user_id, idempotency_key) venceu. O rollback desfaz a reserva
+        # de estoque deste request; o pedido do vencedor já está gravado.
+        db.session.rollback()
+
+        duplicate = _find_duplicate_checkout(idempotency_key)
+        if duplicate is not None:
+            current_app.logger.info(
+                "Checkout idempotente: constraint UNIQUE recusou o 2o "
+                "INSERT; reaproveitando pedido %s.",
+                duplicate.id,
+            )
+            return _redirect_to_existing_order(duplicate)
+
+        current_app.logger.exception(
+            "Erro de integridade ao criar pedido."
+        )
+
+        flash(
+            "Ocorreu um erro ao processar seu pedido.",
+            "danger",
+        )
+
     except ValueError as error:
         db.session.rollback()
+
+        # Um reenvio pode bater em "carrinho vazio"/"estoque insuficiente"
+        # depois que o primeiro request concluiu; nesse caso reaproveita
+        # o pedido em vez de mostrar erro.
+        duplicate = _find_duplicate_checkout(idempotency_key)
+        if duplicate is not None:
+            current_app.logger.info(
+                "Checkout idempotente: reenvio com erro de validacao; "
+                "reaproveitando pedido %s.",
+                duplicate.id,
+            )
+            return _redirect_to_existing_order(duplicate)
 
         flash(
             str(error),
