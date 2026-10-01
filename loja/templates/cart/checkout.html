@@ -654,6 +654,19 @@
                 {% endif %}
 
                 {#
+                    Chave de idempotência: gerada uma vez por renderização da
+                    página. Duplo clique, F5 e "voltar do Mercado Pago"
+                    reenviam a mesma chave; o backend reaproveita o pedido.
+                #}
+                {% if checkout_idempotency_key %}
+                <input
+                    type="hidden"
+                    name="idempotency_key"
+                    value="{{ checkout_idempotency_key }}"
+                >
+                {% endif %}
+
+                {#
                     Informa ao backend se o pagamento corresponde ao carrinho
                     completo ou a uma compra direta de produto.
                 #}

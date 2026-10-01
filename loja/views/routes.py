@@ -1402,6 +1402,7 @@ def checkout_carrinho():
     return render_template(
         "cart/checkout.html",
         checkout_mode="cart",
+        checkout_idempotency_key=uuid.uuid4().hex,
         cart=cart,
         cart_items=cart_items,
         subtotal=subtotal,
@@ -1551,6 +1552,7 @@ def checkout(product_id):
     return render_template(
         "cart/checkout.html",
         checkout_mode="buy_now",
+        checkout_idempotency_key=uuid.uuid4().hex,
         product=product,
         selected_size=selected_size,
         selected_variant=selected_variant_label,

@@ -90,6 +90,9 @@ REQUIRED_COLUMNS = {
     ("orders", "stock_reserved"): {
         "type": "boolean", "nullable": False, "default": "FALSE",
     },
+    ("orders", "idempotency_key"): {
+        "type": "string", "length": 64, "nullable": True,
+    },
     # suppliers (dropshipping)
     ("suppliers", "channel_type"): {
         "type": "string", "length": 20, "nullable": False, "default": "'manual'",

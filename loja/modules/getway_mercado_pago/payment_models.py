@@ -87,6 +87,14 @@ class Order(db.Model):
         nullable=False,
     )
 
+    # Chave de idempotência do checkout: gerada no cliente quando a página
+    # de checkout é renderizada. Reenvios do mesmo form (duplo clique, F5)
+    # carregam a mesma chave; a constraint UNIQUE impede o segundo INSERT.
+    idempotency_key = db.Column(
+        db.String(64),
+        nullable=True,
+    )
+
     status = db.Column(
         db.String(30),
         nullable=False,
@@ -278,6 +286,11 @@ class Order(db.Model):
             "ix_orders_user_created",
             "user_id",
             "created_at",
+        ),
+        db.UniqueConstraint(
+            "user_id",
+            "idempotency_key",
+            name="uq_orders_user_idempotency_key",
         ),
     )
 
