@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 from datetime import timedelta
 from decimal import Decimal
@@ -217,6 +218,7 @@ def _safe_referrer(value):
 
 
 IDEMPOTENCY_KEY_MAX_LEN = 64
+IDEMPOTENCY_WINDOW_SECS = 30
 
 
 def _normalize_idempotency_key(raw):
@@ -235,6 +237,53 @@ def _normalize_idempotency_key(raw):
         return None
 
     return key
+
+
+def _window_fallback_key():
+    """Chave derivada no servidor para POST sem campo E sem renderização.
+
+    Script que nunca abriu a página de checkout não tem chave emitida; a
+    chave passa a ser determinística por (usuário, formulário, janela de
+    30s). Dois POSTs imediatos do mesmo formulário geram a MESMA chave e a
+    constraint UNIQUE reduz o resultado a 1 pedido.
+    """
+    bucket = int(utcnow().timestamp()) // IDEMPOTENCY_WINDOW_SECS
+    canonical = "&".join(
+        "%s=%s" % (name, value)
+        for name, value in sorted(request.form.items())
+        if name not in ("csrf_token", "idempotency_key")
+    )
+    digest = hashlib.sha256(
+        ("%s|%s|%s" % (current_user.id, bucket, canonical)).encode("utf-8")
+    ).hexdigest()
+    # "w" + dígitos + hex: nunca colide com as chaves uuid emitidas no GET.
+    return "w%s%s" % (bucket, digest[:40])
+
+
+def _resolve_idempotency_key():
+    """Chave efetiva do POST, em ordem de precedência:
+
+    1. campo enviado pelo form (uma chave por renderização/aba);
+    2. chave emitida pelo servidor no GET e guardada na sessão — cobre o
+       caso do campo omitido/forjado: a proteção NÃO depende do cliente;
+    3. chave de janela determinística — cobre script que nunca abriu o GET.
+    """
+    posted = _normalize_idempotency_key(
+        request.form.get("idempotency_key")
+    )
+    if posted:
+        return posted
+
+    issued = session.get("checkout_idempotency_keys")
+    if (
+        isinstance(issued, list)
+        and issued
+        and isinstance(issued[0], str)
+        and issued[0]
+    ):
+        return issued[0]
+
+    return _window_fallback_key()
 
 
 def _find_duplicate_checkout(idempotency_key):
@@ -816,9 +865,9 @@ def create_mercado_pago_payment():
 
         # Reenvio do mesmo form (duplo clique, F5, voltar do Mercado Pago):
         # reaproveita o pedido já criado antes de qualquer efeito colateral.
-        idempotency_key = _normalize_idempotency_key(
-            request.form.get("idempotency_key")
-        )
+        # Campo omitido/forjado não desliga a proteção: a chave vem da
+        # sessão emitida no GET ou da janela determinística.
+        idempotency_key = _resolve_idempotency_key()
         duplicate = _find_duplicate_checkout(idempotency_key)
         if duplicate is not None:
             current_app.logger.info(

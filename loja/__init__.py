@@ -175,6 +175,14 @@ def _setup_database(app):
         if _should_bootstrap_database_on_startup():
             _bootstrap_database(app)
 
+        # Salvaguarda da ordem de deploy (PONTO 3): a migration 0029 precisa
+        # estar aplicada ANTES do release. Sem o índice único, a proteção de
+        # idempotência do checkout (item 1.7) ficaria só no pre-check em
+        # memória. Falha visível no boot — nunca silenciosa.
+        from loja.schema import assert_checkout_idempotency_index
+
+        assert_checkout_idempotency_index(app)
+
 
 def create_app():
     # Antes de começar a servir requests: em Vercel, desliga o access log do

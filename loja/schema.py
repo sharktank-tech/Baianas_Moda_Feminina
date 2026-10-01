@@ -180,6 +180,10 @@ REQUIRED_INDEXES = [
     ("shipments", "external_shipment_id"),
 ]
 
+# Índice único de idempotência do checkout (item 1.7). Nome compartilhado
+# com o UniqueConstraint do model e com migrations/0029_*.sql.
+CHECKOUT_IDEMPOTENCY_INDEX = "uq_orders_user_idempotency_key"
+
 
 def _sql_type(dialect, generic):
     if generic == "uuid":
@@ -354,3 +358,50 @@ def ensure_schema(app):
             "Nao foi possivel garantir o schema do banco "
             "(colunas/FKs/indices ausentes)."
         )
+
+
+def assert_checkout_idempotency_index(app):
+    """Falha o boot (visível, não silencioso) sem o índice único da 0029.
+
+    Ordem de deploy obrigatória: aplicar
+    migrations/0029_order_checkout_idempotency.sql (psql -f) ANTES de
+    publicar o release. Sem o índice, dois POSTs concorrentes do mesmo form
+    só seriam impedidos pelo pre-check em memória — a corrida real do item
+    1.7 reabriria. Cenário clássico de ordem invertida: um boot com
+    bootstrap/ensure_schema cria a coluna (aditivo) mas NÃO o índice único.
+
+    Só roda em PostgreSQL (produção); SQLite usa create_all com a constraint
+    e não tem pg_indexes. Tabela inexistente (banco novo/testes) não bloqueia.
+    """
+    from loja import db
+
+    with app.app_context():
+        dialect = db.engine.dialect.name
+        if dialect != "postgresql":
+            return
+
+        inspector = inspect(db.engine)
+        schema_arg, _qualify = _schema_context(dialect)
+        if "orders" not in inspector.get_table_names(schema=schema_arg):
+            return
+
+        with db.engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT indexdef FROM pg_indexes "
+                    "WHERE schemaname = :schema "
+                    "AND tablename = 'orders' "
+                    "AND indexname = :index"
+                ),
+                {"schema": schema_arg, "index": CHECKOUT_IDEMPOTENCY_INDEX},
+            ).fetchone()
+
+        if row is None or "UNIQUE" not in row[0].upper():
+            raise RuntimeError(
+                "Migration 0029 nao aplicada: indice unico %r ausente em "
+                "%s.orders. Aplique migrations/0029_order_checkout_idempotency"
+                ".sql (psql -f) ANTES de publicar o release — sem o indice, a "
+                "protecao contra duplo submit do checkout fica sem a garantia "
+                "de banco (item 1.7 CRITICO reaberto)."
+                % (CHECKOUT_IDEMPOTENCY_INDEX, schema_arg)
+            )

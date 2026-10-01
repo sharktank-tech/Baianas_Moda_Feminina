@@ -8,6 +8,9 @@ Cobre em PostgreSQL (o dialeto real de produção):
 - migration 0029 aplicada 2x (idempotente) e DOWN reversível: a coluna
   idempotency_key e o índice único (user_id, idempotency_key) existem e o
   2o INSERT com a mesma chave é recusado pelo banco;
+- guard de boot (assert_checkout_idempotency_index): a aplicação RECUSA
+  subir (RuntimeError visível, não silencioso) se a migration 0029 não
+  estiver aplicada — ordem de deploy migration → release;
 - duas requisições CONCORRENTES reais no endpoint POST
   /pagamentos/mercado-pago: o perdedor é observado BLOQUEADO em
   pg_stat_activity (wait_event_type=Lock) enquanto o vencedor ainda não
@@ -262,6 +265,61 @@ def test_migration_0029_idempotent_and_enforces_unique(pg_env):
         assert (
             db.session.query(Order).filter_by(user_id=user.id).count() == 3
         )
+
+
+# ── Guard de boot: ordem de deploy (migration antes do release) ──────────────
+
+def test_boot_guard_requires_unique_index_before_checkout(pg_env):
+    """Item 1.7/3.3: o boot recusa subir sem o índice único da migration 0029.
+
+    * create_all (constraint de tabela) → boot liberado;
+    * DROP CONSTRAINT (forma legada removida) → RuntimeError visível com a
+      instrução da migration 0029 (nunca falha silencioso);
+    * CREATE UNIQUE INDEX (forma da migration, como em produção) → liberado;
+    * DROP INDEX → RuntimeError de novo;
+    * aplicar 0029 (idempotente) → liberado.
+    """
+    from loja.schema import (
+        CHECKOUT_IDEMPOTENCY_INDEX,
+        assert_checkout_idempotency_index,
+    )
+
+    app, engine, schema = pg_env
+
+    # create_all criou a constraint → boot liberado.
+    assert_checkout_idempotency_index(app)
+
+    # Forma constraint de tabela: removida → boot recusado.
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            f'ALTER TABLE "{schema}".orders '
+            f"DROP CONSTRAINT {CHECKOUT_IDEMPOTENCY_INDEX}"
+        )
+    with pytest.raises(RuntimeError, match="0029"):
+        assert_checkout_idempotency_index(app)
+
+    # Forma índice (migration 0029, como em produção) → boot liberado.
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            f"CREATE UNIQUE INDEX {CHECKOUT_IDEMPOTENCY_INDEX} "
+            f'ON "{schema}".orders (user_id, idempotency_key)'
+        )
+    assert_checkout_idempotency_index(app)
+
+    # Removido → boot recusado de novo.
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            f'DROP INDEX "{schema}".{CHECKOUT_IDEMPOTENCY_INDEX}'
+        )
+    with pytest.raises(RuntimeError, match="0029"):
+        assert_checkout_idempotency_index(app)
+
+    # A migration 0029 up (idempotente) repara → boot liberado.
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            _migration_sql("0029_order_checkout_idempotency.sql", schema)
+        )
+    assert_checkout_idempotency_index(app)
 
 
 # ── Corrida real no endpoint ─────────────────────────────────────────────────

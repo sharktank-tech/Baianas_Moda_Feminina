@@ -3,7 +3,8 @@
 Cobre POST /pagamentos/mercado-pago com checkout_type=product e =cart:
 
 - a página de checkout renderiza o hidden field ``idempotency_key`` (uma
-  chave por renderização);
+  chave por renderização) E guarda a mesma chave na sessão do servidor
+  (fonte de verdade que não depende do cliente);
 - reenvio sequencial (F5 / voltar do Mercado Pago) reaproveita o pedido já
   criado em vez de criar outro ou mostrar erro;
 - duas requisições CONCORRENTES reais (threads, sobreposição determinística)
@@ -12,7 +13,12 @@ Cobre POST /pagamentos/mercado-pago com checkout_type=product e =cart:
   (user_id, idempotency_key) no banco, não o pre-check em memória;
 - o fluxo cart continua funcionando (primeiro POST cria e esvazia o
   carrinho; o reenvio reaproveita o pedido);
-- formulário legado sem chave continua aceitando pedido (degradação graciosa);
+- POST SEM o campo idempotency_key (omissão deliberada/devtools/script) segue
+  protegido: a chave emitida no GET e guardada na sessão é usada no lugar do
+  campo; sem renderização nenhuma, cai na chave de janela determinística
+  (usuário + formulário + 30s) — nos dois casos 2 POSTs concorrentes = 1 pedido;
+- chave malformada é tratada como ausente (fail-open no formato) e NÃO deixa
+  o pedido sem proteção;
 - checkout de convidado não existe: anônimo é redirecionado ao login.
 
 A corrida real em PostgreSQL (bloqueio observado em pg_stat_activity) fica em
@@ -33,6 +39,33 @@ from sqlalchemy.exc import IntegrityError
 from loja.modules.getway_mercado_pago.payment_models import Order
 
 MP_URL_PREFIX = "https://mp.example/checkout"
+WINDOW_KEY_RE = re.compile(r"^w\d{8,10}[0-9a-f]{40}$")
+
+
+def _enable_wal(db_path):
+    raw = sqlite3.connect(db_path)
+    try:
+        raw.execute("PRAGMA journal_mode=WAL")
+    finally:
+        raw.close()
+
+
+def _restore_delete_journal(db, db_path):
+    db.session.rollback()
+    db.engine.dispose()
+    raw = sqlite3.connect(db_path, timeout=10)
+    try:
+        raw.execute("PRAGMA journal_mode=DELETE")
+    finally:
+        raw.close()
+
+
+def _freeze_endpoint_time(monkeypatch, pr):
+    """Congela o relógio do endpoint para a chave de janela ser idêntica nas
+    duas requisições mesmo se a virada da janela de 30s cair no meio."""
+    moment = pr.utcnow()
+    monkeypatch.setattr(pr, "utcnow", lambda: moment)
+    return moment
 
 
 def _product_form(user, product, key=None, quantity=1):
@@ -204,6 +237,13 @@ def test_checkout_page_renders_idempotency_key(
     # Cada renderização gera chave nova: compra legítima posterior não é
     # bloqueada pelo pedido anterior.
     assert key_product != key_cart
+
+    # A chave emitida fica registrada NA SESSÃO do servidor: é a fonte de
+    # verdade usada quando o POST omite o campo hidden.
+    with client.session_transaction() as sess:
+        issued = sess.get("checkout_idempotency_keys") or []
+    assert key_cart in issued
+    assert key_product in issued
 
 
 # ── Reenvio sequencial (F5 / voltar do Mercado Pago) ─────────────────────────
@@ -428,6 +468,327 @@ def test_concurrent_double_submit_creates_single_order(
             raw.close()
 
 
+# ── POST sem o campo idempotency_key (omissão deliberada) ────────────────────
+
+def test_post_omitting_field_concurrent_creates_single_order(
+    app, db, make_user, make_product, monkeypatch,
+):
+    """Item 1.7/1.2: POST SEM o campo idempotency_key x2 CONCORRENTES -> 1 pedido.
+
+    O campo hidden foi removido do form (devtools/script), mas o GET de
+    checkout emitiu a chave e a guardou NA SESSÃO do servidor. Os dois
+    clientes carregam a mesma sessão, então ambos resolvem para a chave
+    emitida pelo servidor — a proteção não depende da cooperação do cliente.
+    """
+    pr = _patch_shipping(monkeypatch)
+    user = make_user()
+    product = make_product(stock=5)
+    _make_cart(db, user, product)
+
+    calls = []
+    gating_errors = []
+    winner_in_txn = threading.Event()
+    loser_missed_precheck = threading.Event()
+
+    original_find = pr._find_duplicate_checkout
+
+    def tracked_find(candidate):
+        result = original_find(candidate)
+        if (
+            threading.current_thread().name == "loser"
+            and result is None
+        ):
+            loser_missed_precheck.set()
+        return result
+
+    monkeypatch.setattr(pr, "_find_duplicate_checkout", tracked_find)
+
+    def gated_preference(order):
+        calls.append(order.id)
+        if threading.current_thread().name != "winner":
+            gating_errors.append(
+                "create_preference chamado por thread errada"
+            )
+        winner_in_txn.set()
+        if not loser_missed_precheck.wait(timeout=10):
+            gating_errors.append(
+                "perdedor não passou pelo pre-check com o vencedor "
+                "sem commitar"
+            )
+        time.sleep(0.2)
+        return {
+            "preference_id": "pref-omit",
+            "checkout_url": f"{MP_URL_PREFIX}/omit",
+        }
+
+    monkeypatch.setattr(pr, "create_preference", gated_preference)
+
+    db_path = db.engine.url.database
+    _enable_wal(db_path)
+
+    # O GET emite a chave no form E na sessão do servidor.
+    winner_client = app.test_client()
+    _login(winner_client, user)
+    page = winner_client.get("/checkout/carrinho")
+    assert page.status_code == 200
+    rendered_key = _extract_key(page.get_data(as_text=True))
+    assert rendered_key and len(rendered_key) == 32
+    with winner_client.session_transaction() as sess:
+        issued = sess.get("checkout_idempotency_keys") or []
+    assert issued and issued[0] == rendered_key
+
+    # O segundo cliente carrega a MESMA sessão (mesmo cookie de navegador).
+    cookie = winner_client.get_cookie("session")
+    assert cookie is not None
+    loser_client = app.test_client()
+    _login(loser_client, user)
+    loser_client.set_cookie("session", cookie.value, domain="localhost")
+
+    # Form FORJADO: campo idempotency_key omitido.
+    form = _product_form(user, product)
+    assert "idempotency_key" not in form
+
+    results = {}
+    errors = []
+
+    def run_winner():
+        try:
+            resp = winner_client.post(
+                "/pagamentos/mercado-pago", data=form,
+            )
+            results["winner"] = (
+                resp.status_code,
+                resp.headers.get("Location"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(("winner", repr(exc)))
+
+    def run_loser():
+        try:
+            if not winner_in_txn.wait(timeout=10):
+                raise AssertionError(
+                    "vencedor não entrou na transação"
+                )
+            resp = loser_client.post(
+                "/pagamentos/mercado-pago", data=form,
+            )
+            results["loser"] = (
+                resp.status_code,
+                resp.headers.get("Location"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(("loser", repr(exc)))
+
+    winner_thread = threading.Thread(
+        target=run_winner, name="winner",
+    )
+    loser_thread = threading.Thread(
+        target=run_loser, name="loser",
+    )
+    captured, stop_capture = _capture_app_logs(app.logger)
+    try:
+        loser_thread.start()
+        winner_thread.start()
+        winner_thread.join(timeout=30)
+        loser_thread.join(timeout=30)
+
+        # Reenvio sequencial ainda sem o campo: pre-check reaproveita.
+        third = winner_client.post(
+            "/pagamentos/mercado-pago", data=form,
+        )
+    finally:
+        stop_capture()
+
+    try:
+        assert not winner_thread.is_alive()
+        assert not loser_thread.is_alive()
+        assert errors == [], errors
+        assert gating_errors == [], gating_errors
+
+        # Mecanismo: perdedor provou o pre-check miss e foi recusado pela
+        # constraint UNIQUE com a chave vinda DA SESSÃO (não do form).
+        assert any(
+            "constraint UNIQUE recusou o 2o INSERT" in message
+            for message in captured
+        ), captured
+
+        assert results["winner"] == (
+            302, f"{MP_URL_PREFIX}/omit",
+        )
+        assert results["loser"] == (
+            302, f"{MP_URL_PREFIX}/omit",
+        )
+
+        assert len(calls) == 1
+        orders = (
+            db.session.query(Order)
+            .filter_by(user_id=user.id)
+            .all()
+        )
+        assert len(orders) == 1
+        assert orders[0].idempotency_key == rendered_key
+        db.session.refresh(product)
+        assert product.stock == 4
+
+        # 3a tentativa (sequencial, campo ainda omitido): pre-check.
+        assert third.status_code == 302
+        assert third.headers["Location"] == f"{MP_URL_PREFIX}/omit"
+        assert any("pre-check" in message for message in captured)
+        assert (
+            db.session.query(Order).filter_by(user_id=user.id).count()
+            == 1
+        )
+    finally:
+        _restore_delete_journal(db, db_path)
+
+
+def test_forged_post_without_get_or_field_concurrent_single_order(
+    app, db, make_user, make_product, monkeypatch,
+):
+    """Item 1.7/1.2: script sem GET e sem campo x2 CONCORRENTES -> 1 pedido.
+
+    Cenário mais agressivo: nenhuma página de checkout foi aberta (não há
+    chave emitida) e o form não traz o campo. O servidor deriva a chave de
+    janela determinística (usuário + formulário + janela de 30s): os dois
+    POSTs idênticos geram a MESMA chave e a constraint UNIQUE decide.
+    """
+    pr = _patch_shipping(monkeypatch)
+    _freeze_endpoint_time(monkeypatch, pr)
+    user = make_user()
+    product = make_product(stock=5)
+
+    calls = []
+    gating_errors = []
+    winner_in_txn = threading.Event()
+    loser_missed_precheck = threading.Event()
+
+    original_find = pr._find_duplicate_checkout
+
+    def tracked_find(candidate):
+        result = original_find(candidate)
+        if (
+            threading.current_thread().name == "loser"
+            and result is None
+        ):
+            loser_missed_precheck.set()
+        return result
+
+    monkeypatch.setattr(pr, "_find_duplicate_checkout", tracked_find)
+
+    def gated_preference(order):
+        calls.append(order.id)
+        if threading.current_thread().name != "winner":
+            gating_errors.append(
+                "create_preference chamado por thread errada"
+            )
+        winner_in_txn.set()
+        if not loser_missed_precheck.wait(timeout=10):
+            gating_errors.append(
+                "perdedor não passou pelo pre-check com o vencedor "
+                "sem commitar"
+            )
+        time.sleep(0.2)
+        return {
+            "preference_id": "pref-forged",
+            "checkout_url": f"{MP_URL_PREFIX}/forged",
+        }
+
+    monkeypatch.setattr(pr, "create_preference", gated_preference)
+
+    db_path = db.engine.url.database
+    _enable_wal(db_path)
+
+    # Nunca abriu /checkout: a sessão não tem chave emitida.
+    winner_client = app.test_client()
+    loser_client = app.test_client()
+    _login(winner_client, user)
+    _login(loser_client, user)
+    for client in (winner_client, loser_client):
+        with client.session_transaction() as sess:
+            assert not sess.get("checkout_idempotency_keys")
+
+    form = _product_form(user, product)
+    assert "idempotency_key" not in form
+
+    results = {}
+    errors = []
+
+    def run_winner():
+        try:
+            resp = winner_client.post(
+                "/pagamentos/mercado-pago", data=form,
+            )
+            results["winner"] = (
+                resp.status_code,
+                resp.headers.get("Location"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(("winner", repr(exc)))
+
+    def run_loser():
+        try:
+            if not winner_in_txn.wait(timeout=10):
+                raise AssertionError(
+                    "vencedor não entrou na transação"
+                )
+            resp = loser_client.post(
+                "/pagamentos/mercado-pago", data=form,
+            )
+            results["loser"] = (
+                resp.status_code,
+                resp.headers.get("Location"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(("loser", repr(exc)))
+
+    winner_thread = threading.Thread(
+        target=run_winner, name="winner",
+    )
+    loser_thread = threading.Thread(
+        target=run_loser, name="loser",
+    )
+    captured, stop_capture = _capture_app_logs(app.logger)
+    try:
+        loser_thread.start()
+        winner_thread.start()
+        winner_thread.join(timeout=30)
+        loser_thread.join(timeout=30)
+    finally:
+        stop_capture()
+
+    try:
+        assert not winner_thread.is_alive()
+        assert not loser_thread.is_alive()
+        assert errors == [], errors
+        assert gating_errors == [], gating_errors
+
+        assert any(
+            "constraint UNIQUE recusou o 2o INSERT" in message
+            for message in captured
+        ), captured
+
+        assert results["winner"] == (
+            302, f"{MP_URL_PREFIX}/forged",
+        )
+        assert results["loser"] == (
+            302, f"{MP_URL_PREFIX}/forged",
+        )
+
+        assert len(calls) == 1
+        orders = (
+            db.session.query(Order)
+            .filter_by(user_id=user.id)
+            .all()
+        )
+        assert len(orders) == 1
+        # Chave de janela derivada no servidor (sem form, sem renderização).
+        assert WINDOW_KEY_RE.match(orders[0].idempotency_key)
+        db.session.refresh(product)
+        assert product.stock == 4
+    finally:
+        _restore_delete_journal(db, db_path)
+
+
 # ── Carrinho ─────────────────────────────────────────────────────────────────
 
 def test_cart_resubmit_redirects_to_existing_order(
@@ -543,11 +904,17 @@ def test_distinct_idempotency_keys_create_separate_orders(
     assert product.stock == 3
 
 
-def test_form_without_idempotency_key_keeps_legacy_behavior(
+def test_post_without_key_and_without_get_is_protected_by_window_key(
     client, db, make_user, make_product, monkeypatch,
 ):
-    """Item 1.7: página legada sem hidden field não quebra o checkout."""
+    """Item 1.7/1.2: nem campo nem renderização -> 1 pedido, chave de janela.
+
+    Antes desta correção este cenário criava 2 pedidos com
+    idempotency_key=NULL (bypass). Agora o servidor deriva a chave de
+    janela determinística e o 2º POST reaproveita o pedido via pre-check.
+    """
     pr = _patch_shipping(monkeypatch)
+    _freeze_endpoint_time(monkeypatch, pr)
     calls = []
     monkeypatch.setattr(pr, "create_preference", _recording_preference(calls))
 
@@ -555,33 +922,49 @@ def test_form_without_idempotency_key_keeps_legacy_behavior(
     product = make_product(stock=5)
     _login(client, user)
 
-    first = client.post(
-        "/pagamentos/mercado-pago",
-        data=_product_form(user, product),
-    )
-    second = client.post(
-        "/pagamentos/mercado-pago",
-        data=_product_form(user, product),
-    )
+    captured, stop_capture = _capture_app_logs(client.application.logger)
+    try:
+        first = client.post(
+            "/pagamentos/mercado-pago",
+            data=_product_form(user, product),
+        )
+        second = client.post(
+            "/pagamentos/mercado-pago",
+            data=_product_form(user, product),
+        )
+    finally:
+        stop_capture()
+
     assert first.status_code == 302
     assert second.status_code == 302
     assert first.headers["Location"].startswith(MP_URL_PREFIX)
-    assert second.headers["Location"].startswith(MP_URL_PREFIX)
-    assert len(calls) == 2
+    assert second.headers["Location"] == first.headers["Location"]
+    assert any("pre-check" in message for message in captured)
+
+    assert len(calls) == 1
     orders = (
         db.session.query(Order)
         .filter_by(user_id=user.id)
         .all()
     )
-    assert len(orders) == 2
-    assert [o.idempotency_key for o in orders] == [None, None]
+    assert len(orders) == 1
+    # Chave de janela derivada no servidor — nunca NULL (sem bypass).
+    assert WINDOW_KEY_RE.match(orders[0].idempotency_key)
+    db.session.refresh(product)
+    assert product.stock == 4
 
 
-def test_invalid_idempotency_key_is_ignored(
+def test_malformed_key_falls_back_to_window_key(
     client, db, make_user, make_product, monkeypatch,
 ):
-    """Item 1.7: chave malformada não trava o checkout (fail-open no formato)."""
+    """Item 1.7: chave malformada não trava E não deixa o pedido sem proteção.
+
+    Fail-open no formato: a chave inválida é tratada como ausente e o
+    servidor usa a chave de janela — o pedido é gravado com uma chave
+    válida, não com NULL.
+    """
     pr = _patch_shipping(monkeypatch)
+    _freeze_endpoint_time(monkeypatch, pr)
     calls = []
     monkeypatch.setattr(pr, "create_preference", _recording_preference(calls))
 
@@ -601,7 +984,9 @@ def test_invalid_idempotency_key_is_ignored(
         .all()
     )
     assert len(orders) == 1
-    assert orders[0].idempotency_key is None
+    assert orders[0].idempotency_key != "x" * 65
+    assert WINDOW_KEY_RE.match(orders[0].idempotency_key)
+    assert len(calls) == 1
 
 
 # ── Convidado e constraint do banco ──────────────────────────────────────────
