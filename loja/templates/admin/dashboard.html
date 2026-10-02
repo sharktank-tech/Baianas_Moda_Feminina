@@ -194,6 +194,14 @@
 
         <a
           class="adm-nav-link"
+          href="{{ url_for('admin.manual_review_list') }}"
+        >
+          <span class="adm-icon">⚑</span>
+          Revisão manual
+        </a>
+
+        <a
+          class="adm-nav-link"
           href="{{ url_for('admin.sales_readiness') }}"
         >
           <span class="adm-icon">✓</span>
@@ -326,6 +334,13 @@
         href="{{ url_for('admin.checkout_recovery') }}"
       >
         Recuperação
+      </a>
+
+      <a
+        class="adm-nav-link"
+        href="{{ url_for('admin.manual_review_list') }}"
+      >
+        Revisão manual
       </a>
 
       <a
