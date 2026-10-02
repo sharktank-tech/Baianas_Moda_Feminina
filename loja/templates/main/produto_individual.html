@@ -768,6 +768,8 @@ body.product-lightbox-open {
             id="productLightboxImage"
             src="{{ primary_image }}"
             alt="{{ product.name }} — imagem ampliada"
+            loading="lazy"
+            decoding="async"
         >
 
         {% if image_count > 1 %}

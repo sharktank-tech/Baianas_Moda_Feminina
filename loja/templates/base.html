@@ -11,8 +11,9 @@
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1185235685562020"
      crossorigin="anonymous"></script>
 
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.tailwindcss.com" defer></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/animation.css') }}">
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
@@ -828,7 +829,7 @@
               {% set _chave = social.label | trim | lower %}
               <a href="{{ social.url }}" target="_blank" rel="noopener" aria-label="{{ social.label }}">
                 {% if _chave in _rodape_icones %}
-                <img src="{{ url_for('static', filename=_rodape_icones[_chave]) }}" alt="" aria-hidden="true" class="footer-social-icon"/>
+                <img src="{{ url_for('static', filename=_rodape_icones[_chave]) }}" alt="" aria-hidden="true" class="footer-social-icon" loading="lazy" decoding="async"/>
                 {% else %}
                 <span class="footer-social-label">{{ social.label }}</span>
                 {% endif %}
@@ -897,9 +898,9 @@
 
           <p class="footer-col-title" style="margin-top:1.75rem;">Pagamento</p>
           <div class="footer-payments">
-            <img src="{{ url_for('static', filename='img/rodape/logotipo-visa.png') }}" alt="Visa">
-            <img src="{{ url_for('static', filename='img/rodape/cartao.png') }}" alt="Mastercard">
-            <img src="{{ url_for('static', filename='img/rodape/amex.png') }}" alt="Amex">
+            <img src="{{ url_for('static', filename='img/rodape/logotipo-visa.png') }}" alt="Visa" loading="lazy" decoding="async">
+            <img src="{{ url_for('static', filename='img/rodape/cartao.png') }}" alt="Mastercard" loading="lazy" decoding="async">
+            <img src="{{ url_for('static', filename='img/rodape/amex.png') }}" alt="Amex" loading="lazy" decoding="async">
           </div>
         </div>
 
