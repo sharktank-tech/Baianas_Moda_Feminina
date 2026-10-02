@@ -17,6 +17,7 @@ from typing import Iterable, Optional
 
 from loja.modules.enviar_email import email_delivery_ready, enviar_email
 from loja.modules.getway_mercado_pago.payment_models import Order
+from loja.services.reservation_policy import load_reservation_hours
 from loja.utils import utcnow
 
 
@@ -26,7 +27,6 @@ ENABLED_ENV = "CHECKOUT_RECOVERY_ENABLED"
 BATCH_ENABLED_ENV = "CHECKOUT_RECOVERY_BATCH_ENABLED"
 AFTER_HOURS_ENV = "CHECKOUT_RECOVERY_AFTER_HOURS"
 DEFAULT_AFTER_HOURS = 2
-DEFAULT_RESERVATION_HOURS = 24
 DEFAULT_BATCH_LIMIT = 50
 _MAX_AFTER_HOURS = 24 * 30
 _MAX_BATCH_LIMIT = 200
@@ -71,9 +71,12 @@ def find_recoverable_orders(
     lock: bool = False,
     order_id=None,
 ) -> list[Order]:
-    """Seleciona apenas pedidos cuja reserva de 24h ainda não expirou.
+    """Seleciona apenas pedidos cuja reserva ainda não expirou.
 
-    lock=True usa FOR UPDATE SKIP LOCKED. A listagem administrativa usa
+    A janela de elegibilidade usa a política canônica de reserva
+    (``STOCK_RESERVATION_HOURS`` via ``load_reservation_hours``), a mesma
+    que define o prazo persistido do pedido. lock=True usa
+    FOR UPDATE SKIP LOCKED. A listagem administrativa usa
     leitura normal; a execução usa lock até o commit posterior ao envio.
     """
     hours = after_hours if after_hours is not None else load_after_hours()
@@ -88,7 +91,9 @@ def find_recoverable_orders(
 
     now = now or utcnow()
     minimum_age = now - timedelta(hours=hours)
-    reservation_started_after = now - timedelta(hours=DEFAULT_RESERVATION_HOURS)
+    reservation_started_after = now - timedelta(
+        hours=load_reservation_hours()
+    )
 
     query = (
         Order.query
@@ -316,7 +321,6 @@ __all__ = [
     "CheckoutRecoveryResult",
     "DEFAULT_AFTER_HOURS",
     "DEFAULT_BATCH_LIMIT",
-    "DEFAULT_RESERVATION_HOURS",
     "find_recoverable_orders",
     "is_batch_recovery_enabled",
     "is_recovery_enabled",
