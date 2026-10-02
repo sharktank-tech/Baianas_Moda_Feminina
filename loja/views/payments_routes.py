@@ -228,6 +228,14 @@ def _safe_referrer(value):
 IDEMPOTENCY_KEY_MAX_LEN = 64
 IDEMPOTENCY_WINDOW_SECS = 30
 
+# Issue #89: o fallback de janela deduplica somente enquanto o pedido
+# anterior ainda está em andamento. Pedido já concluído (pago, expirado,
+# cancelado, estornado, falho) na MESMA janela com o MESMO formulário é
+# segunda compra idêntica legítima → chave nova e pedido novo.
+# "manual_review" entra na trava: a reserva de estoque continua ativa e uma
+# segunda ordem duplicaria a reserva enquanto o admin decide.
+_FALLBACK_DEDUP_STATUSES = {"pending_payment", "manual_review"}
+
 
 def _normalize_idempotency_key(raw):
     """Chave de idempotência enviada pelo form de checkout (opcional).
@@ -268,19 +276,32 @@ def _window_fallback_key():
     return "w%s%s" % (bucket, digest[:40])
 
 
-def _resolve_idempotency_key():
-    """Chave efetiva do POST, em ordem de precedência:
+def _fresh_window_key(base_key):
+    """Chave nova e única derivada da chave de janela (issue #89).
 
-    1. campo enviado pelo form (uma chave por renderização/aba);
+    Usada quando o fallback encontra um pedido já concluído: a segunda
+    compra idêntica precisa de chave própria para passar pela constraint
+    UNIQUE (user_id, idempotency_key). O nonce garante unicidade.
+    """
+    return "%s-%s" % (base_key, uuid.uuid4().hex[:12])
+
+
+def _resolve_idempotency_key():
+    """Chave efetiva do POST e a origem dela, em ordem de precedência:
+
+    1. campo enviado pelo form (uma chave por renderização/aba) — "field";
     2. chave emitida pelo servidor no GET e guardada na sessão — cobre o
-       caso do campo omitido/forjado: a proteção NÃO depende do cliente;
-    3. chave de janela determinística — cobre script que nunca abriu o GET.
+       caso do campo omitido/forjado: a proteção NÃO depende do cliente
+       — "session";
+    3. chave de janela determinística — cobre script que nunca abriu o GET
+       — "window" (o único caminho com a regra de dedup condicional da
+       issue #89).
     """
     posted = _normalize_idempotency_key(
         request.form.get("idempotency_key")
     )
     if posted:
-        return posted
+        return posted, "field"
 
     issued = session.get("checkout_idempotency_keys")
     if (
@@ -289,9 +310,9 @@ def _resolve_idempotency_key():
         and isinstance(issued[0], str)
         and issued[0]
     ):
-        return issued[0]
+        return issued[0], "session"
 
-    return _window_fallback_key()
+    return _window_fallback_key(), "window"
 
 
 def _find_duplicate_checkout(idempotency_key):
@@ -794,8 +815,26 @@ def create_mercado_pago_payment():
         # reaproveita o pedido já criado antes de qualquer efeito colateral.
         # Campo omitido/forjado não desliga a proteção: a chave vem da
         # sessão emitida no GET ou da janela determinística.
-        idempotency_key = _resolve_idempotency_key()
+        idempotency_key, key_source = _resolve_idempotency_key()
         duplicate = _find_duplicate_checkout(idempotency_key)
+        if (
+            duplicate is not None
+            and key_source == "window"
+            and duplicate.status not in _FALLBACK_DEDUP_STATUSES
+        ):
+            # Issue #89: o fallback bateu em pedido JÁ CONCLUÍDO na mesma
+            # janela. Reapresentá-lo seria o falso positivo da issue; a
+            # segunda compra idêntica legítima ganha chave nova e segue
+            # como pedido novo (a constraint UNIQUE fica como barreira).
+            current_app.logger.info(
+                "Checkout idempotente: fallback sobre pedido concluido %s "
+                "(%s); gerando chave nova para nova compra.",
+                duplicate.id,
+                duplicate.status,
+            )
+            idempotency_key = _fresh_window_key(idempotency_key)
+            duplicate = None
+
         if duplicate is not None:
             current_app.logger.info(
                 "Checkout idempotente: reenvio detectado no pre-check; "
