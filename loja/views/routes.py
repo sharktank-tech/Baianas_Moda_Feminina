@@ -2718,22 +2718,52 @@ def edit_account():
                 flash('O estado deve ser informado com uma sigla de duas letras.', 'danger')
                 return render_edit_form(400)
 
+            # zip_code é String(10) no banco; CEP mais longo estouraria
+            # DataError no commit (caía no handler genérico).
+            if len(zip_code) > 10:
+                flash('CEP muito longo.', 'danger')
+                return render_edit_form(400)
+
         try:
             current_user.name = new_username
             current_user.email = new_email
             current_user.phone = new_phone or None
 
             if should_save_address:
+                # A relação precisa ser lida ANTES de qualquer Address pendente:
+                # cada acesso lazy à relação dispara autoflush e um INSERT com
+                # as colunas NOT NULL ainda nulas estouraria IntegrityError
+                # (bug do primeiro endereço, que o except genérico reportava
+                # como "e-mail já cadastrado").
+                current_addresses = list(current_user.addresses)
+
                 if address is None:
+                    if not current_addresses:
+                        # O primeiro endereço cadastrado sempre vira o principal.
+                        make_default = True
+
                     address = Address(
                         id=uuid.uuid4(),
                         user_id=current_user.id,
                     )
                     db.session.add(address)
 
-                    # O primeiro endereço cadastrado sempre vira o principal.
-                    if not current_user.addresses:
-                        make_default = True
+                # Preenche todas as colunas NOT NULL antes de qualquer query:
+                # o autoflush do bloco abaixo só pode ver um Address completo.
+                address.recipient_name = recipient_name
+                address.phone = address_phone or None
+                address.zip_code = zip_code
+                address.street = street
+                address.number = number
+                address.complement = complement or None
+                address.neighborhood = neighborhood
+                address.city = city
+                address.state = state
+                address.is_default = (
+                    make_default
+                    or address.is_default
+                    or len(current_addresses) <= 1
+                )
 
                 if make_default:
                     (
@@ -2748,21 +2778,6 @@ def edit_account():
                         )
                     )
 
-                address.recipient_name = recipient_name
-                address.phone = address_phone or None
-                address.zip_code = zip_code
-                address.street = street
-                address.number = number
-                address.complement = complement or None
-                address.neighborhood = neighborhood
-                address.city = city
-                address.state = state
-                address.is_default = (
-                    make_default
-                    or address.is_default
-                    or len(current_user.addresses) <= 1
-                )
-
             db.session.commit()
 
             flash('Conta e endereço atualizados com sucesso!', 'success')
@@ -2770,10 +2785,28 @@ def edit_account():
 
         except IntegrityError:
             db.session.rollback()
-            flash(
-                'Não foi possível salvar. Verifique se o e-mail já está cadastrado.',
-                'danger',
+            # Nem toda violação de constraint é e-mail duplicado (era o que o
+            # flash antigo afirmava). Após o rollback, refaz o pre-check: a
+            # única forma de users.email violar a unicidade é existir outra
+            # conta com o mesmo e-mail (corrida contra o check acima).
+            email_conflict = (
+                User.query
+                .filter(
+                    User.email == new_email,
+                    User.id != current_user.id,
+                )
+                .first()
             )
+            if email_conflict:
+                flash(
+                    'Não foi possível salvar. Verifique se o e-mail já está cadastrado.',
+                    'danger',
+                )
+            else:
+                flash(
+                    'Não foi possível salvar os dados. Verifique os campos e tente novamente.',
+                    'danger',
+                )
             return render_edit_form(409)
 
         except Exception as error:
