@@ -75,7 +75,7 @@ def test_release_expired_pending_is_idempotent(db, make_user, make_product):
     db.session.refresh(order)
     db.session.refresh(product)
     assert first is True
-    assert order.status == "pending_payment"
+    assert order.status == "expired"
     assert order.stock_reserved is False
     assert product.stock == 5
 
@@ -216,7 +216,7 @@ def test_admin_action_releases_without_provider_call(
     assert response.status_code == 302
     db.session.refresh(order)
     db.session.refresh(product)
-    assert order.status == "pending_payment"
+    assert order.status == "expired"
     assert order.stock_reserved is False
     assert product.stock == 5
     assert provider_calls == []

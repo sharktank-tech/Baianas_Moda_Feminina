@@ -465,6 +465,17 @@
 }
 
 
+/* Expirado */
+
+.order-badge--expired {
+    border-color: #efcccc;
+
+    background: #fdecec;
+
+    color: #8c2f2f;
+}
+
+
 /* ==========================================================
    PRODUTOS
    ========================================================== */
@@ -860,7 +871,15 @@
 
     gap: 0.6rem;
 
+
     padding: 1rem 1.25rem 1.25rem;
+}
+
+
+/* Formulário "Refazer pedido": participa direto do flex do rodapé */
+
+.order-refazer-form {
+    display: contents;
 }
 
 

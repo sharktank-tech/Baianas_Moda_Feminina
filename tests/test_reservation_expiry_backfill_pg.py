@@ -386,9 +386,10 @@ def test_backfill_unblocks_expiry_and_release(pg_env):
 
         db.session.expire_all()
         released_order = db.session.get(Order, ids["legacy_pending"])
-        # Estoque devolvido; status NÃO muda (design: não cancela pedidos).
+        # Estoque devolvido e estado transiciona para "expired"
+        # (estado próprio de expiração de reserva; não é cancelamento).
         assert released_order.stock_reserved is False
-        assert released_order.status == "pending_payment"
+        assert released_order.status == "expired"
         product_a = db.session.get(Product, ids["product_a"])
         assert product_a.stock == 5
 

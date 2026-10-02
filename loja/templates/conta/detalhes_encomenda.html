@@ -88,7 +88,11 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
             >
                 <span class="order-status-dot"></span>
 
-                {{ pedido_status|replace('_', ' ')|title }}
+                {% if pedido_status == 'expired' %}
+                    Expirado
+                {% else %}
+                    {{ pedido_status|replace('_', ' ')|title }}
+                {% endif %}
             </span>
 
         </header>
@@ -257,6 +261,35 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
                         Caso tenha alguma dúvida, entre em contato
                         com nosso atendimento.
                     </p>
+
+
+                {% elif pedido_status == 'expired' %}
+
+                    <span>Expirado</span>
+
+                    <h2>Pedido expirado</h2>
+
+                    <p>
+                        O prazo de pagamento acabou e o estoque foi liberado.
+                        Faça um novo pedido se ainda quiser o produto.
+                    </p>
+
+                    <form
+                        method="post"
+                        action="{{ url_for(
+                            'main.refazer_pedido',
+                            order_id=pedido.id
+                        ) }}"
+                        class="order-refazer-form"
+                    >
+                        {% if csrf_token %}
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        {% endif %}
+
+                        <button type="submit" class="order-refazer-btn">
+                            Refazer pedido
+                        </button>
+                    </form>
 
 
                 {% else %}
