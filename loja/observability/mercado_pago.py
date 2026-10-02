@@ -25,12 +25,14 @@ _SENSITIVE_KEYS = {
 _CORRELATION_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 
 # Eventos de webhook (issue #50): nomes fixos e sanitizados para poder
-# distinguir moderno válido, moderno rejeitado, IPN legado ignorado e payload
-# malformado/desconhecido ignorado — sem vazar identificadores em texto puro.
+# distinguir moderno válido, moderno rejeitado, IPN legado ignorado, payload
+# malformado/desconhecido ignorado e pagamento órfão (item 1.6) — sem vazar
+# identificadores em texto puro.
 WH_MODERN_VALIDATED = "modern_webhook_validated"
 WH_MODERN_REJECTED = "modern_webhook_rejected"
 WH_LEGACY_IPN_IGNORED = "legacy_ipn_ignored"
 WH_MALFORMED_IGNORED = "webhook_malformed_ignored"
+WH_ORPHAN_PAYMENT_IGNORED = "orphan_payment_ignored"
 
 
 def stable_hash(value):
