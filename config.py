@@ -137,3 +137,13 @@ class Config:
         "STOCK_RESERVATION_RELEASE_LIMIT",
         "100",
     )
+    # Item 1.8: limite de tentativas de checkout por usuário.
+    # CHECKOUT_RATE_LIMIT=0 desliga o gate (escape operacional).
+    CHECKOUT_RATE_LIMIT = os.environ.get(
+        "CHECKOUT_RATE_LIMIT",
+        "10",
+    )
+    CHECKOUT_RATE_WINDOW_SECONDS = os.environ.get(
+        "CHECKOUT_RATE_WINDOW_SECONDS",
+        "300",
+    )
