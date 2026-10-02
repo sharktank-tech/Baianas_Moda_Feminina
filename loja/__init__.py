@@ -232,6 +232,10 @@ def create_app():
     from loja.checkout_cpf_ui import install_checkout_cpf_ui
     install_checkout_cpf_ui(app)
 
+    # Prioridade 1 (plano Weblyzer): headers globais de segurança.
+    from loja.security_headers import install_security_headers
+    install_security_headers(app)
+
     from loja.modules.models import User             # corrigido: User
     from loja.modules import canary_evidence_models  # registra tabelas no bootstrap
 
