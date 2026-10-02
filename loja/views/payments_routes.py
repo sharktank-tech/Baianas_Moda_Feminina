@@ -203,6 +203,7 @@ from loja.observability.mercado_pago import (
     WH_MALFORMED_IGNORED,
     WH_MODERN_REJECTED,
     WH_MODERN_VALIDATED,
+    WH_ORPHAN_PAYMENT_IGNORED,
     log_event,
 )
 
@@ -998,9 +999,14 @@ def _sync_payment(payment_id):
     try:
         order_id = uuid.UUID(external_reference)
     except (ValueError, TypeError):
-        current_app.logger.warning(
-            "Pagamento %s sem external_reference válido.",
-            payment_id,
+        # Item 1.6: pagamento órfão sem referência utilizável vira evento
+        # sanitizado (issue #50) em vez de warning com identificador cru.
+        log_event(
+            WH_ORPHAN_PAYMENT_IGNORED,
+            level="warning",
+            reason="invalid_external_reference",
+            external_reference=external_reference,
+            payment_id=payment_id,
         )
         return None
 
@@ -1011,10 +1017,14 @@ def _sync_payment(payment_id):
         .first()
     )
     if not order:
-        current_app.logger.warning(
-            "Pedido %s do pagamento %s não encontrado.",
-            external_reference,
-            payment_id,
+        # Item 1.6: pagamento sem pedido correspondente — o provedor sabe
+        # do pagamento, nós não temos a linha do pedido.
+        log_event(
+            WH_ORPHAN_PAYMENT_IGNORED,
+            level="warning",
+            reason="order_not_found",
+            external_reference=external_reference,
+            payment_id=payment_id,
         )
         return None
 
