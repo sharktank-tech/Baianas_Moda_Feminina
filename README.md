@@ -107,8 +107,10 @@ Loja de roupas com estilização moderna e limpa com todas as funcionalidades de
 - Todos os formulários são protegidos contra CSRF (Flask-WTF); o webhook do
   Mercado Pago é a única rota isenta.
 - O estoque é **reservado** na criação do pedido e devolvido quando o pagamento
-  é recusado, cancelado, reembolsado ou permanece pendente por mais de 24h
-  (liberação automática no webhook/retorno).
+  é recusado, cancelado ou reembolsado (webhook/retorno), ou quando a reserva
+  expira sem pagamento aprovado — prazo canônico `STOCK_RESERVATION_HOURS`
+  (default 24h; produção opera com override de 4h), expirado pelo cron diário
+  ou pelo painel admin, caso em que o pedido transiciona para `expired`.
 
 ## Mudanças de schema (PostgreSQL)
 
