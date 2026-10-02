@@ -23,6 +23,7 @@ from datetime import timedelta
 from urllib.parse import quote, urlsplit
 
 from loja.modules.enviar_email import enviar_email
+from loja.services.rate_limits import rate_allow
 
 logger = logging.getLogger(__name__)
 
@@ -44,45 +45,6 @@ _SUBJECT = "Redefina sua senha — Pollo Modas"
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def _key_hash(value: str) -> str:
-    return _hash_token(value.strip().lower())
-
-
-def _rate_allow(scope: str, key: str, limit: int, window_seconds: int) -> bool:
-    """Janela fixa por (escopo, chave). Persiste a contagem mesmo ao bloquear."""
-    from loja import db
-    from loja.modules.models import AuthRateLimit, utcnow
-
-    if limit <= 0:
-        return False
-
-    now = utcnow()
-    key_hash = _key_hash(key)
-    row = db.session.get(AuthRateLimit, {"scope": scope, "key_hash": key_hash})
-    if row is None:
-        row = AuthRateLimit(
-            scope=scope,
-            key_hash=key_hash,
-            window_started_at=now,
-            attempts=0,
-        )
-        db.session.add(row)
-
-    elapsed = (now - row.window_started_at).total_seconds()
-    if elapsed >= window_seconds:
-        row.window_started_at = now
-        row.attempts = 1
-        allowed = True
-    elif row.attempts >= limit:
-        allowed = False
-    else:
-        row.attempts += 1
-        allowed = True
-
-    db.session.commit()
-    return allowed
 
 
 def _config_int(name: str, default: int) -> int:
@@ -201,8 +163,8 @@ def request_password_reset(email, *, ip=None, email_sender=None) -> str:
         "PASSWORD_RESET_WINDOW_SECONDS", WINDOW_SECONDS_DEFAULT
     )
 
-    ip_blocked = bool(ip) and not _rate_allow("pwreset_ip", ip, ip_limit, window)
-    email_blocked = bool(normalized) and not _rate_allow(
+    ip_blocked = bool(ip) and not rate_allow("pwreset_ip", ip, ip_limit, window)
+    email_blocked = bool(normalized) and not rate_allow(
         "pwreset_email", normalized, email_limit, window
     )
 

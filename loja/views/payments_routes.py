@@ -191,6 +191,10 @@ from loja.services.order_promotion import (
     product_uses_variants as _product_uses_variants,
     revalidate_and_promote_paid,
 )
+from loja.services.checkout_rate_limit import (
+    CHECKOUT_BLOCK_MESSAGE,
+    checkout_attempt_allowed,
+)
 from loja.services.stock_reservations import (
     release_reserved_stock as _release_stock,
 )
@@ -842,6 +846,22 @@ def create_mercado_pago_payment():
                 duplicate.id,
             )
             return _redirect_to_existing_order(duplicate)
+
+        # Item 1.8: limite de tentativas por usuário. Roda depois do
+        # pre-check idempotente (reenvio já resolvido acima, sem efeito
+        # colateral) e ANTES de qualquer efeito colateral — sem pedido,
+        # sem reserva de estoque, sem chamada ao provedor.
+        # CHECKOUT_RATE_LIMIT=0 desliga o gate.
+        if not checkout_attempt_allowed(current_user.id):
+            current_app.logger.warning(
+                "Checkout rate limit: tentativa bloqueada user=%s.",
+                current_user.id,
+            )
+            flash(CHECKOUT_BLOCK_MESSAGE, "warning")
+            referrer = request.referrer or ""
+            if _safe_referrer(referrer):
+                return redirect(referrer)
+            return redirect(url_for("main.home"))
 
         if checkout_type == "product":
             item_data, cart = _get_direct_product_items(), None
