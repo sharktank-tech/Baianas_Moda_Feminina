@@ -161,6 +161,24 @@ class Order(db.Model):
     mp_status_detail = db.Column(db.String(120))
 
     manual_review_reason = db.Column(db.Text)
+
+    # Item 1.3: auditoria da rota de saída de manual_review (aprovar/rejeitar).
+    # NULL = nunca decido; 'approved'/'rejected' = decisão admin persistida
+    # (constraint ck_orders_manual_review_decision). Rejeição grava status
+    # 'cancelled'; aprovação segue o mesmo caminho de pagamento do webhook.
+    manual_review_decision = db.Column(db.String(16))
+    manual_review_decided_at = db.Column(db.DateTime)
+    manual_review_decided_by_user_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey(
+            "users.id",
+            name="orders_manual_review_decided_by_user_id_fkey",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+    manual_review_decided_reason = db.Column(db.Text)
     paid_at = db.Column(db.DateTime)
 
     # FASE 9.0.0: origem de tráfego sanitizada e opcional; nunca expõe
@@ -281,6 +299,11 @@ class Order(db.Model):
             "recovery_email_skip_reason IS NULL OR "
             "recovery_email_skip_reason = 'admin_decision'",
             name="ck_orders_recovery_email_skip_reason",
+        ),
+        db.CheckConstraint(
+            "manual_review_decision IS NULL OR "
+            "manual_review_decision IN ('approved', 'rejected')",
+            name="ck_orders_manual_review_decision",
         ),
         db.Index(
             "ix_orders_user_created",

@@ -75,6 +75,9 @@
         {% elif order and order.status in ["refunded", "charged_back"] %}
             <h1>Pagamento estornado</h1>
             <p>Consulte a loja para obter os detalhes do estorno.</p>
+        {% elif order and order.status == "cancelled" %}
+            <h1>Pedido recusado</h1>
+            <p>Este pedido foi recusado pela loja após conferência manual. Fale com o suporte para detalhes.</p>
         {% else %}
             <h1>Status do pagamento</h1>
             <p>

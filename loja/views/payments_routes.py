@@ -187,6 +187,13 @@ from loja.services.acquisition_source import (
     acquisition_to_order_kwargs,
     order_acquisition,
 )
+from loja.services.order_promotion import (
+    product_uses_variants as _product_uses_variants,
+    revalidate_and_promote_paid,
+)
+from loja.services.stock_reservations import (
+    release_reserved_stock as _release_stock,
+)
 from loja.modules.getway_mercado_pago.webhook_classification import (
     WebhookKind,
     classify_webhook,
@@ -420,21 +427,6 @@ def _get_customer_data():
         ),
         "state": state,
     }
-
-
-def _product_uses_variants(product):
-    """Um produto usa variantes quando vem do AliExpress ou possui variantes
-    ativas com estoque. Mesma semântica do storefront (routes.py)."""
-    variants = getattr(product, "variants", None) or []
-
-    return (
-        getattr(product, "source", None) == "aliexpress"
-        or any(
-            getattr(v, "is_active", False)
-            and int(getattr(v, "stock", 0) or 0) > 0
-            for v in variants
-        )
-    )
 
 
 def _resolve_payment_variant(product, raw_variant_id, fallback_size):
@@ -773,72 +765,6 @@ def _reserve_stock(item_data):
                 product.stock -= item["quantity"]
 
 
-def _release_stock(order):
-    """Devolve ao estoque o que foi reservado em um pedido não pago.
-
-    Para itens com variante, resolve sempre Product primeiro e ProductVariant
-    depois (ordem de lock consistente com _reserve_stock). Se a variante não
-    resolver (id inexistente ou pertencente a outro produto), ABORTA com erro
-    para que a transação faça rollback — jamais restaura apenas o agregado
-    (Product.stock) e deixa a soma das variantes divergente.
-    """
-    if not order.stock_reserved:
-        return
-
-    for item in order.items:
-        if item.variant_id is not None:
-            # Guard: sem product_id não há como validar a integridade da
-            # variante — aborta em vez de restaurar cegamente.
-            if item.product_id is None:
-                raise ValueError(
-                    f"Item inválido em {item.product_name}: "
-                    "variant_id sem product_id não pode ser restituído."
-                )
-
-            product = (
-                Product.query
-                .filter_by(id=item.product_id)
-                .with_for_update()
-                .first()
-            )
-            if product is None:
-                raise ValueError(
-                    f"Produto não encontrado para restituir: {item.product_name}."
-                )
-
-            variant = (
-                ProductVariant.query
-                .filter_by(id=item.variant_id, product_id=item.product_id)
-                .with_for_update()
-                .first()
-            )
-            if variant is None:
-                # Erro de integridade: não restaurar Product.stock isoladamente.
-                raise ValueError(
-                    f"Variação inválida ao restituir: {item.product_name}."
-                )
-
-            if variant.stock is not None:
-                variant.stock += item.quantity
-            if product.stock is not None:
-                product.stock += item.quantity
-        else:
-            if item.product_id is None:
-                continue
-
-            product = (
-                Product.query
-                .filter_by(id=item.product_id)
-                .with_for_update()
-                .first()
-            )
-            if product is not None and product.stock is not None:
-                product.stock += item.quantity
-
-    # Só após TODOS os itens restaurados com sucesso a reserva é encerrada.
-    order.stock_reserved = False
-
-
 # ── Criar pagamento no Mercado Pago ─────────────────────────────────────────
 @payments_blueprint.route(
     "/pagamentos/mercado-pago",
@@ -1127,13 +1053,16 @@ def _sync_payment(payment_id):
     order.mp_status_detail = status_detail
 
     if currency != "BRL" or amount != money(order.total):
-        order.status = "manual_review"
-        order.manual_review_reason = (
-            f"Valor/moeda divergente: recebido {currency} {amount}; "
-            f"esperado BRL {money(order.total)}."
-        )
-        if mp_status == "approved" and order.paid_at is None:
-            order.paid_at = utcnow()
+        # Item 1.3: pedido recusado na saída manual (cancelled) não volta a
+        # manual_review por webhook divergente — payload fica no Payment acima.
+        if order.status != "cancelled":
+            order.status = "manual_review"
+            order.manual_review_reason = (
+                f"Valor/moeda divergente: recebido {currency} {amount}; "
+                f"esperado BRL {money(order.total)}."
+            )
+            if mp_status == "approved" and order.paid_at is None:
+                order.paid_at = utcnow()
         db.session.commit()
         return order
 
@@ -1153,137 +1082,18 @@ def _sync_payment(payment_id):
             # Webhook approved repetido: re-ensure idempotente (Fase 8.0.1).
             # Mantém mesmas AliExpressOrder/idempotency_key/items.
             ensure_aliexpress_fulfillment(order)
-        elif order.status not in {"manual_review"}:
+        elif order.status not in {"manual_review", "cancelled"}:
             # Inclui "expired": approved tardio reconstrói o pedido —
-            # re-debita o estoque liberado (if not stock_reserved abaixo)
-            # e promove para "paid".
-            locked_products = {}
-            locked_variants = {}
-            review_reasons = []
-
-            for item in order.items:
-                if item.product_id is None:
-                    review_reasons.append(
-                        f"Produto removido: {item.product_name}."
-                    )
-                    continue
-
-                product = (
-                    Product.query
-                    .filter_by(id=item.product_id)
-                    .with_for_update()
-                    .first()
-                )
-                locked_products[item.id] = product
-
-                if product is None:
-                    review_reasons.append(
-                        f"Produto não encontrado: {item.product_name}."
-                    )
-                elif (
-                    not order.stock_reserved
-                    and product.stock is not None
-                    and product.stock < item.quantity
-                ):
-                    review_reasons.append(
-                        f"Estoque insuficiente: {item.product_name}."
-                    )
-
-                if (
-                    product is not None
-                    and _product_uses_variants(product)
-                    and item.variant_id is None
-                ):
-                    # Integridade: produto que usa variantes (ex.: AliExpress)
-                    # com OrderItem sem variant_id. NUNCA debitamos Product.stock
-                    # isoladamente aqui — o pagamento vai para revisão manual com
-                    # mensagem sanitizada (sem supplier_sku_id/external_sku_id).
-                    review_reasons.append(
-                        f"Variação não informada: {item.product_name}."
-                    )
-
-                if item.variant_id is not None:
-                    variant = (
-                        ProductVariant.query
-                        .filter_by(id=item.variant_id, product_id=item.product_id)
-                        .with_for_update()
-                        .first()
-                    )
-                    locked_variants[item.id] = variant
-
-                    # Integridade Product<->Variant: a variante deve existir E
-                    # pertencer ao produto do item — validada SEMPRE,
-                    # independentemente de stock_reserved. Uma variante
-                    # inexistente ou de outro produto é erro de integridade e
-                    # nunca deve virar "paid" silenciosamente.
-                    if variant is None:
-                        review_reasons.append(
-                            f"Variação inválida: {item.product_name}."
-                        )
-                    elif not order.stock_reserved and (
-                        not variant.is_active
-                        or int(variant.stock or 0) < item.quantity
-                    ):
-                        # Estoque/disponibilidade só importam quando um novo
-                        # débito será necessário (reserva já abatida dispensa).
-                        review_reasons.append(
-                            f"Estoque insuficiente: {item.product_name}."
-                        )
-
-            locked_coupon = None
-            if order.coupon_id and order.coupon_counted_at is None:
-                locked_coupon = (
-                    Coupon.query
-                    .filter_by(id=order.coupon_id)
-                    .with_for_update()
-                    .first()
-                )
-                if (
-                    locked_coupon is not None
-                    and locked_coupon.usage_limit is not None
-                    and locked_coupon.times_used >= locked_coupon.usage_limit
-                ):
-                    review_reasons.append(
-                        f"Limite do cupom {order.coupon_code} atingido."
-                    )
-
+            # re-debita o estoque liberado e promove para "paid".
+            # "cancelled" é a saída administrativa (item 1.3): approved
+            # tardio NÃO reanima pedido recusado pelo admin.
+            # A revalidação de estoque/variante/cupom sob lock e a promoção
+            # são o caminho compartilhado com a aprovação manual (item 1.3).
             order.paid_at = order.paid_at or utcnow()
-
+            review_reasons = revalidate_and_promote_paid(order)
             if review_reasons:
                 order.status = "manual_review"
                 order.manual_review_reason = " ".join(review_reasons)
-            else:
-                # Pedidos com reserva já tiveram o estoque abatido na criação.
-                if not order.stock_reserved:
-                    for item in order.items:
-                        product = locked_products.get(item.id)
-                        if product is not None and product.stock is not None:
-                            product.stock -= item.quantity
-
-                        if item.variant_id is not None:
-                            variant = locked_variants.get(item.id)
-                            if (
-                                variant is not None
-                                and variant.stock is not None
-                            ):
-                                variant.stock -= item.quantity
-
-                    # Pagamento aprovado tardio: o estoque foi debitado agora e
-                    # precisa poder ser restituído em um eventual refund.
-                    order.stock_reserved = True
-
-                if locked_coupon is not None:
-                    locked_coupon.times_used += 1
-                    order.coupon_counted_at = utcnow()
-
-                order.status = "paid"
-                order.manual_review_reason = None
-
-                # Fulfillment AliExpress (Fase 8.0) — idempotente, mesma transação.
-                # Só roda para pedidos com status "paid" (não manual_review).
-                # Não enfileira quando Order.status em: manual_review, payment_failed, refunded, charged_back
-                if order.status == "paid":
-                    ensure_aliexpress_fulfillment(order)
 
     elif mapped_status in {"refunded", "charged_back"}:
         _release_stock(order)
@@ -1304,6 +1114,7 @@ def _sync_payment(payment_id):
         "refunded",
         "charged_back",
         "expired",
+        "cancelled",
     }:
         _release_stock(order)
         order.status = mapped_status
@@ -1313,6 +1124,7 @@ def _sync_payment(payment_id):
         "refunded",
         "charged_back",
         "expired",
+        "cancelled",
     }:
         order.status = mapped_status
 

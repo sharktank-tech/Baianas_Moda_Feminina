@@ -701,6 +701,106 @@ def release_expired_reservations():
 
 
 # -------------------------------------------------------------------
+# Item 1.3: rota de saída de manual_review (aprovar / rejeitar)
+# -------------------------------------------------------------------
+
+def _flash_manual_review_result(result):
+    """Converte ManualReviewResult em flash legível (motivos sanitizados)."""
+    if result.outcome == "changed":
+        if result.action == "approve":
+            flash(
+                "Pedido aprovado: estoque revalidado e pedido marcado como pago.",
+                "success",
+            )
+        else:
+            flash(
+                "Pedido recusado (cancelled); a reserva, se existia, foi "
+                "devolvida ao estoque.",
+                "success",
+            )
+    elif result.outcome == "noop":
+        flash("Pedido não está em revisão manual; nada foi alterado.", "warning")
+    elif result.reasons == ("reason_required",):
+        flash("Informe o motivo da rejeição.", "warning")
+    else:
+        flash(
+            "Bloqueado sem alterações: " + " ".join(result.reasons),
+            "warning",
+        )
+
+
+@admin_blueprint.route("/admin/pedidos/revisao")
+@admin_required
+def manual_review_list():
+    """Fila dos pedidos travados em manual_review (item 1.3)."""
+    from loja.modules.getway_mercado_pago.payment_models import Order
+
+    orders = (
+        Order.query
+        .filter_by(status="manual_review")
+        .order_by(Order.created_at.asc(), Order.id.asc())
+        .all()
+    )
+    return render_template("admin/manual_review.html", orders=orders)
+
+
+@admin_blueprint.route(
+    "/admin/pedidos/revisao/<uuid:order_id>/aprovar",
+    methods=["POST"],
+)
+@admin_required
+def manual_review_approve(order_id):
+    """Aprovação: revalidação de estoque sob lock + promoção a paid."""
+    if request.form.get("confirm_approve") != "1":
+        flash("Confirme a aprovação do pedido antes de continuar.", "warning")
+        return redirect(url_for("admin.manual_review_list"))
+
+    from loja.services.order_promotion import approve_manual_review
+
+    result = approve_manual_review(
+        order_id,
+        admin_user_id=current_user.id,
+        note=request.form.get("note"),
+    )
+    _flash_manual_review_result(result)
+    return redirect(url_for("admin.manual_review_list"))
+
+
+@admin_blueprint.route(
+    "/admin/pedidos/revisao/<uuid:order_id>/rejeitar",
+    methods=["POST"],
+)
+@admin_required
+def manual_review_reject(order_id):
+    """Rejeição: devolve a reserva e marca cancelled, com motivo auditável."""
+    reason = str(request.form.get("reason") or "").strip()
+    if not reason:
+        flash("Informe o motivo da rejeição.", "warning")
+        return redirect(url_for("admin.manual_review_list"))
+    if request.form.get("confirm_reject") != "1":
+        flash("Confirme a rejeição do pedido antes de continuar.", "warning")
+        return redirect(url_for("admin.manual_review_list"))
+
+    from loja.services.order_promotion import reject_manual_review
+
+    try:
+        result = reject_manual_review(
+            order_id,
+            admin_user_id=current_user.id,
+            reason=reason,
+        )
+    except ValueError:
+        flash(
+            "Falha de integridade ao devolver o estoque; nada foi alterado.",
+            "danger",
+        )
+        return redirect(url_for("admin.manual_review_list"))
+
+    _flash_manual_review_result(result)
+    return redirect(url_for("admin.manual_review_list"))
+
+
+# -------------------------------------------------------------------
 # Adicionar produto
 # -------------------------------------------------------------------
 

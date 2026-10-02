@@ -208,6 +208,76 @@ def find_expired_stock_reservations(*, hours=None, limit=None, now=None):
     return eligible
 
 
+def release_reserved_stock(order):
+    """Devolve ao estoque o que foi reservado em um pedido não pago.
+
+    Caminho compartilhado de restituição (webhook refunded/payment_failed e
+    rejeição administrativa de manual_review — item 1.3). Não altera status:
+    quem chama decide o desfecho do pedido.
+
+    Para itens com variante, resolve sempre Product primeiro e ProductVariant
+    depois (ordem de lock consistente com o abatimento na criação). Se a
+    variante não resolver (id inexistente ou pertencente a outro produto),
+    ABORTA com erro para que a transação faça rollback — jamais restaura
+    apenas o agregado (Product.stock) e deixa a soma das variantes divergente.
+    """
+    if not order.stock_reserved:
+        return
+
+    for item in order.items:
+        if item.variant_id is not None:
+            # Guard: sem product_id não há como validar a integridade da
+            # variante — aborta em vez de restaurar cegamente.
+            if item.product_id is None:
+                raise ValueError(
+                    f"Item inválido em {item.product_name}: "
+                    "variant_id sem product_id não pode ser restituído."
+                )
+
+            product = (
+                Product.query
+                .filter_by(id=item.product_id)
+                .with_for_update()
+                .first()
+            )
+            if product is None:
+                raise ValueError(
+                    f"Produto não encontrado para restituir: {item.product_name}."
+                )
+
+            variant = (
+                ProductVariant.query
+                .filter_by(id=item.variant_id, product_id=item.product_id)
+                .with_for_update()
+                .first()
+            )
+            if variant is None:
+                # Erro de integridade: não restaurar Product.stock isoladamente.
+                raise ValueError(
+                    f"Variação inválida ao restituir: {item.product_name}."
+                )
+
+            if variant.stock is not None:
+                variant.stock += item.quantity
+            if product.stock is not None:
+                product.stock += item.quantity
+        else:
+            if item.product_id is None:
+                continue
+
+            product = (
+                Product.query
+                .filter_by(id=item.product_id)
+                .with_for_update()
+                .first()
+            )
+            if product is not None and product.stock is not None:
+                product.stock += item.quantity
+
+    # Só após TODOS os itens restaurados com sucesso a reserva é encerrada.
+    order.stock_reserved = False
+
+
 def _release_stock_locked(order):
     """Restitui a reserva vencida e transiciona o pedido para "expired".
 
