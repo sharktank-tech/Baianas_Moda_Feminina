@@ -145,6 +145,41 @@ def test_find_recoverable_orders_limit(db):
     assert len(rows) == 2
 
 
+def test_find_recoverable_reservation_window_follows_config(db, app, monkeypatch):
+    """A janela usa STOCK_RESERVATION_HOURS (produção opera com 4)."""
+    monkeypatch.setitem(app.config, "STOCK_RESERVATION_HOURS", "4")
+
+    in_window = _order(
+        status="pending_payment",
+        created_at=NOW - timedelta(hours=3),
+    )
+    outside_window = _order(
+        status="pending_payment",
+        created_at=NOW - timedelta(hours=5),
+    )
+    db.session.add_all([in_window, outside_window])
+    db.session.commit()
+
+    rows = find_recoverable_orders(after_hours=2, now=NOW)
+    ids = {row.id for row in rows}
+    assert in_window.id in ids
+    assert outside_window.id not in ids
+
+
+def test_find_recoverable_reservation_window_defaults_to_24h(db, app, monkeypatch):
+    monkeypatch.setitem(app.config, "STOCK_RESERVATION_HOURS", "24")
+
+    older = _order(
+        status="pending_payment",
+        created_at=NOW - timedelta(hours=5),
+    )
+    db.session.add(older)
+    db.session.commit()
+
+    rows = find_recoverable_orders(after_hours=2, now=NOW)
+    assert older.id in {row.id for row in rows}
+
+
 def test_find_recoverable_orders_invalid_after_hours():
     with pytest.raises(ValueError, match="checkout_recovery_after_hours_invalid"):
         find_recoverable_orders(after_hours=0)
