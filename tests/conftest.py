@@ -104,6 +104,19 @@ def db(app):
         yield db
 
 
+@pytest.fixture(autouse=True)
+def _clear_home_data_cache():
+    """Cache de dados da home (PR #103) é estado global do processo.
+
+    Limpa antes e depois de cada teste para nenhum teste ver página servida
+    de dado gravado por outro (o app é session-scoped).
+    """
+    import loja.cache as _cache_mod
+    _cache_mod._cache.pop("home_data", None)
+    yield
+    _cache_mod._cache.pop("home_data", None)
+
+
 # ── Dados de apoio ────────────────────────────────────────────────────────────
 
 @pytest.fixture()
