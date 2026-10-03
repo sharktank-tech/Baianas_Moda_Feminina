@@ -23,7 +23,7 @@ grava o prazo) fica em tests/test_reservation_expiry_backfill.py.
 
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -101,7 +101,13 @@ def _run_migration(engine, schema, filename):
         connection.exec_driver_sql(_migration_sql(filename, schema))
 
 
-LEGACY_AGO = timedelta(days=12)
+# Linhas legadas pré-0024 com data FIXA (2026-09-19, antes do corte da 0024
+# em 2026-09-21) e não "hoje - N dias": o DOWN da 0030 filtra
+# created_at < DATE '2026-09-21' e um offset relativo cruza o corte com o
+# tempo (quebrou em 2026-10-03, quando agora - 12d chegou a 2026-09-21).
+LEGACY_AGO = datetime.now(timezone.utc) - datetime(
+    2026, 9, 19, 12, 0, tzinfo=timezone.utc
+)
 
 
 def _make_order(user, product, *, status="pending_payment", reserved=True,

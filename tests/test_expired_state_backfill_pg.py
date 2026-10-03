@@ -20,7 +20,7 @@ transição, webhook tardio) fica em tests/test_order_expired_state.py.
 
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -173,7 +173,14 @@ def _seed(app):
             is_active=False,
         )
 
-        past = utcnow() - timedelta(days=2)
+        # `past` com data FIXA (naive, no formato das colunas): o DOWN da
+        # 0031 filtra expires < DATE '2026-10-03' (dia da aplicação) e um
+        # offset relativo a "hoje" cruzaria o corte (quebraria em
+        # 2026-10-05, quando agora - 2d chegasse a 2026-10-03).
+        # `future` permanece relativo de propósito: o UP usa
+        # `expires < now()` e uma data fixa faria o controle "fresh" virar
+        # expired com o passar dos dias.
+        past = datetime(2026, 10, 1, 12, 0)
         future = utcnow() + timedelta(days=2)
 
         # O defeito: reserva devolvida antes do estado existir.
