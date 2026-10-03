@@ -11,6 +11,7 @@ import json
 
 from flask import has_request_context, url_for
 from flask_login import current_user
+from sqlalchemy import func
 
 from loja import db
 from loja.cache import get_cached, invalidate_cached, set_cached
@@ -85,17 +86,30 @@ def get_home_data() -> dict:
     """
     Dados usados pela home (main/index.html).
 
-    Estrutura retornada:
-        hero_slides   – list[HeroSlide] (ativas, ordenadas)
+    Estrutura retornada (snapshot puro: dicts/Decimal/datetime, NUNCA ORM
+    vivo entre requests):
+        hero_slides   – list[dict] (ativas, ordenadas; image/alt/eyebrow/title/link)
         categories    – cards de categoria
         banner        – dict  { quote, cta_text, cta_link }
-        promotions    – list[Promotion] (ativas, não expiradas; cada card mostra
+        promotions    – list[dict] (ativas, não expiradas; cada card mostra
                         o próprio ends_at em America/Sao_Paulo quando houver)
         deals_do_dia  – bool (True só se todas as ofertas terminam hoje)
-        products      – list[Product] (até 8, ativos, favoritados)
-        testimonials  – list[Testimonial] (visíveis, até 6)
+        products      – list[dict] (até 8, ativos, favoritados)
+        testimonials  – list[dict] (visíveis, até 6)
         store_policy  – dict  { exchange_days }
+
+    Cache (PR #103/TTFB): visitante ANÔNIMO usa cache em processo de 60s
+    (mesmo mecanismo/TTL do site_config e do rodapé; limitação documentada:
+    é por instância no Vercel). Usuário logado NUNCA usa o cache (favoritos
+    são por usuário). Só o dicionário de dados é cacheado — nunca HTML,
+    que conteria o token CSRF da sessão.
     """
+    cacheavel = not current_user.is_authenticated
+    if cacheavel:
+        cached = get_cached("home_data")
+        if cached is not None:
+            return cached
+
     favoritos = get_favorited_ids()
 
     hero_slides = (
@@ -130,8 +144,6 @@ def get_home_data() -> dict:
         .limit(8)
         .all()
     )
-    for promo in promotions:
-        promo.is_favorited = bool(promo.product_id) and promo.product_id in favoritos
 
     products = (
         public_product_query()
@@ -139,7 +151,6 @@ def get_home_data() -> dict:
         .limit(8)
         .all()
     )
-    products = [_serialize_product(p, favoritos) for p in products]
 
     testimonials = (
         Testimonial.query
@@ -175,23 +186,40 @@ def get_home_data() -> dict:
         }
         structured_data = json.dumps(item_list, ensure_ascii=False)
 
-    return {
+    data = {
         "structured_data": structured_data,
-        "hero_slides": hero_slides,
+        "hero_slides": [
+            {
+                "image": slide.image,
+                "alt": slide.alt,
+                "eyebrow": slide.eyebrow,
+                "title": slide.title,
+                "link": slide.link,
+            }
+            for slide in hero_slides
+        ],
         "categories": _get_home_categories(),
         "banner": {
             "quote": "A moda é a armadura para enfrentar a vida cotidiana.",
             "cta_text": "Ver a coleção completa",
             "cta_link": url_for("main.produtos"),
         },
-        "promotions": promotions,
+        "promotions": [
+            _snapshot_promotion(promo, favoritos) for promo in promotions
+        ],
         "deals_do_dia": deals_do_dia,
-        "products": products,
-        "testimonials": testimonials,
+        "products": [_snapshot_product(p, favoritos) for p in products],
+        "testimonials": [
+            {"author": t.author, "text": t.text, "rating": t.rating}
+            for t in testimonials
+        ],
         "store_policy": {
             "exchange_days": 7,
         },
     }
+    if cacheavel:
+        set_cached("home_data", data, ttl=60)
+    return data
 
 
 def public_product_query():
@@ -219,9 +247,42 @@ def get_favorited_ids() -> set:
     return {r[0] for r in rows}
 
 
-def _serialize_product(p, favoritos):
-    p.is_favorited = p.id in favoritos
-    return p
+def _snapshot_product(p, favoritos):
+    """Snapshot puro do produto para a home (dict de escalares, nunca ORM).
+
+    Mantém somente os campos que o template usa. Decimal/str/bool preservam
+    o tipo original: um JSON puro (str de preço) quebraria o format de preço
+    e o cálculo de desconto no template.
+    """
+    return {
+        "id": str(p.id),
+        "name": p.name,
+        "price": p.price,
+        "image1": p.image1,
+        "is_favorited": p.id in favoritos,
+    }
+
+
+def _snapshot_promotion(promo, favoritos):
+    """Snapshot puro da promoção com o produto aninhado (nunca ORM vivo)."""
+    product = promo.product
+    return {
+        "id": str(promo.id),
+        "product_id": str(promo.product_id),
+        "sale_price": promo.sale_price,
+        "ends_at": promo.ends_at,
+        "is_favorited": bool(promo.product_id) and promo.product_id in favoritos,
+        "product": (
+            None
+            if product is None
+            else {
+                "id": str(product.id),
+                "name": product.name,
+                "price": product.price,
+                "image1": product.image1,
+            }
+        ),
+    }
 
 
 # ── Categorias ────────────────────────────────────────────────────────────────
@@ -234,32 +295,45 @@ def _get_home_categories(limit=10):
     """
     Monta os cards de categoria da home (cat-strip / categories-grid).
     Usa uma imagem representativa (o produto mais recente daquela categoria).
+
+    PR #103: o recorte acontece NO SQL — row_number() por category (ordenado
+    por created_at desc) + filtro rn=1 + ORDER BY category + LIMIT — em vez
+    de baixar todos os produtos ativos e filtrar no Python.
     """
-    rows = (
-        db.session
-        .query(Product.category, Product.image1)
+    ranked = (
+        db.session.query(
+            Product.category.label("category"),
+            Product.image1.label("image1"),
+            func.row_number()
+            .over(
+                partition_by=Product.category,
+                order_by=Product.created_at.desc(),
+            )
+            .label("rn"),
+        )
         .filter(
             Product.is_active == True,  # noqa: E712
             Product.is_draft.is_(False),
             Product.category.isnot(None),
-            Product.category != ''
+            Product.category != "",
         )
-        .order_by(Product.category.asc(), Product.created_at.desc())
+        .subquery()
+    )
+    rows = (
+        db.session.query(ranked.c.category, ranked.c.image1)
+        .filter(ranked.c.rn == 1)
+        .order_by(ranked.c.category.asc())
+        .limit(limit)
         .all()
     )
-    vistas, categorias = set(), []
-    for categoria, imagem in rows:
-        if categoria in vistas:
-            continue
-        vistas.add(categoria)
-        categorias.append({
+    return [
+        {
             "slug": categoria,
             "label": categoria.replace("-", " ").title(),
             "image": imagem,
-        })
-        if len(categorias) >= limit:
-            break
-    return categorias
+        }
+        for categoria, imagem in rows
+    ]
 
 
 # ── Helpers privados ──────────────────────────────────────────────────────────

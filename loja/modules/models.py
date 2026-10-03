@@ -263,6 +263,16 @@ class Product(db.Model):
             "('unpriced', 'blocked', 'ready', 'priced', 'stale')",
             name="ck_product_pricing_status",
         ),
+        # List público da home + recorte de categorias (PR #103/TTFB):
+        # filtro is_active/is_draft + ordenação por created_at (a janela por
+        # category ordena o mesmo par). Instalações existentes aplicam via
+        # migration 0033 (create_all não altera tabelas já existentes).
+        db.Index(
+            "ix_products_public_recent",
+            "is_active",
+            "is_draft",
+            "created_at",
+        ),
     )
 
     suppliers = db.relationship(
