@@ -1421,7 +1421,7 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
 </section>
 
 
-<script>
+<script nonce="{{ csp_nonce }}">
 document.addEventListener("DOMContentLoaded", function () {
 
     const buttons = document.querySelectorAll(".order-copy-code");

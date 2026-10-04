@@ -50,7 +50,7 @@
 
   <form method="POST"
         action="{{ url_for('aliexpress_single_live_canary_admin.submit', order_id=ali_order.id) }}"
-        onsubmit="return confirm('CONFIRMA UMA ÚNICA TENTATIVA REAL DE COMPRA NO ALIEXPRESS? Não existe retry automático.');">
+        data-confirm="CONFIRMA UMA ÚNICA TENTATIVA REAL DE COMPRA NO ALIEXPRESS? Não existe retry automático.">
     {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
     <button type="submit"
             class="px-5 py-3 rounded-lg font-semibold text-white {% if canary_preflight.eligible %}bg-red-600 hover:bg-red-700{% else %}bg-gray-400 cursor-not-allowed{% endif %}"

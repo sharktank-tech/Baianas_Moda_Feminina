@@ -41,7 +41,7 @@
                 class="w-full border rounded-lg px-4 py-3 bg-white
                        focus:ring-2 focus:ring-pink-500
                        focus:border-pink-500"
-                onchange="updateProductPreview()"
+                data-change-fn="updateProductPreview"
             >
                 <option value="">
                     Selecione um produto
@@ -267,7 +267,7 @@
 </div>
 
 
-<script>
+<script nonce="{{ csp_nonce }}">
     function updateProductPreview() {
         const select = document.getElementById("product_id");
         const selectedOption = select.options[select.selectedIndex];

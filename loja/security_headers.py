@@ -6,15 +6,27 @@ com ``setdefault`` para não sobrescrever headers específicos de rota (ex.:
 
 Fora do escopo proposital:
 - HSTS: a Vercel já envia ``max-age=63072000`` na borda.
-- COEP: ``require-corp`` bloquearia AdSense/fontes/imagens externas sem CORP.
+- COEP: ``require-corp`` bloquearia AdSense/imagens externas sem CORP.
 
-CSP (adicionada no PR #100) é uma allowlist mínima auditada contra os
-templates reais: Tailwind CDN (``<script>`` do Play CDN), AdSense
-(script + iframes de anúncio + beacons), Google Fonts (CSS + arquivos),
-ViaCEP (busca de CEP no front) e a origem da própria API.
-``script-src-attr 'none'`` do plano foi omitido: o app usa 25 handlers
-``on*`` inline.
+Histórico da CSP (auditoria ao vivo contra os templates reais):
+- PR #100: allowlist estática (Tailwind CDN, AdSense, Google Fonts, ViaCEP);
+  ``script-src-attr 'none'`` ficou de fora por 25 handlers ``on*`` inline.
+- #104 removeu o Google Fonts, #110 removeu o Tailwind Play CDN e #111
+  tirou o ``<script>`` eager do AdSense — as allowlists mortas saem aqui.
+- PR P4 (este): ``script-src`` sem ``'unsafe-inline'``/``'unsafe-eval'``;
+  cada ``<script>`` inline recebe ``nonce`` por requisição
+  (``g.csp_nonce`` = ``secrets.token_hex(32)``, sorteado em ``before_request``
+  e reconciliado de forma preguiçosa para requests que encurtam o
+  ``preprocess_request``); os 25 ``on*`` viraram data-attributes +
+  delegação (``base.html``), habilitando ``script-src-attr 'none'``.
+- ``style-src`` mantém ``'unsafe-inline'`` de propósito: os 12 blocos
+  ``<style>`` e os atributos ``style=""`` não usam nonce — refatorar isso
+  é escopo separado e fica registrado no PENDENCIAS.
 """
+
+import secrets
+
+from flask import g
 
 DEFAULT_REFERRER_POLICY = "strict-origin-when-cross-origin"
 
@@ -23,34 +35,45 @@ PERMISSIONS_POLICY = (
     "magnetometer=(), microphone=(), payment=(), usb=()"
 )
 
-CSP_DIRECTIVES = [
-    "default-src 'self'",
-    (
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
-        "https://cdn.tailwindcss.com https://*.googlesyndication.com "
-        "https://*.googleadservices.com https://*.doubleclick.net"
-    ),
-    (
-        "style-src 'self' 'unsafe-inline' "
-        "https://cdn.tailwindcss.com https://fonts.googleapis.com"
-    ),
-    "img-src 'self' data: blob: https:",
-    "font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com",
-    (
-        "connect-src 'self' https://viacep.com.br "
-        "https://api.pollomodas.com.br https://www.google.com "
-        "https://*.googlesyndication.com https://*.googleadservices.com "
-        "https://*.doubleclick.net"
-    ),
-    "frame-ancestors 'self'",
-    "frame-src https://*.googlesyndication.com https://*.doubleclick.net",
-    "object-src 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-    "upgrade-insecure-requests",
-]
+# Origens de anúncio: o loader do #111 cria o <script> dinamicamente e o
+# loader leva nonce; os destinos seguem na allowlist (sem 'strict-dynamic').
+AD_SCRIPT_ORIGINS = (
+    "https://*.googlesyndication.com "
+    "https://*.googleadservices.com "
+    "https://*.doubleclick.net"
+)
 
-CONTENT_SECURITY_POLICY = "; ".join(CSP_DIRECTIVES)
+
+def csp_nonce():
+    """Nonce atual da requisição (sorteia sob demanda)."""
+    nonce = getattr(g, "csp_nonce", None)
+    if not nonce:
+        nonce = secrets.token_hex(32)
+        g.csp_nonce = nonce
+    return nonce
+
+
+def csp_directives(nonce: str) -> list[str]:
+    return [
+        "default-src 'self'",
+        f"script-src 'self' 'nonce-{nonce}' {AD_SCRIPT_ORIGINS}",
+        "script-src-attr 'none'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob: https:",
+        "font-src 'self'",
+        (
+            "connect-src 'self' https://viacep.com.br "
+            "https://api.pollomodas.com.br https://www.google.com "
+            f"{AD_SCRIPT_ORIGINS}"
+        ),
+        "frame-ancestors 'self'",
+        f"frame-src {AD_SCRIPT_ORIGINS}",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "upgrade-insecure-requests",
+    ]
+
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -58,16 +81,32 @@ SECURITY_HEADERS = {
     "Referrer-Policy": DEFAULT_REFERRER_POLICY,
     "Permissions-Policy": PERMISSIONS_POLICY,
     "Cross-Origin-Opener-Policy": "same-origin",
-    "Content-Security-Policy": CONTENT_SECURITY_POLICY,
 }
 
 
 def install_security_headers(app) -> None:
+    @app.before_request
+    def _issue_csp_nonce():
+        csp_nonce()
+
+    @app.context_processor
+    def _expose_csp_nonce():
+        return {"csp_nonce": csp_nonce()}
+
     @app.after_request
     def _set_security_headers(response):
         for header, value in SECURITY_HEADERS.items():
             response.headers.setdefault(header, value)
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "; ".join(csp_directives(csp_nonce())),
+        )
         return response
 
 
-__all__ = ["SECURITY_HEADERS", "install_security_headers"]
+__all__ = [
+    "SECURITY_HEADERS",
+    "csp_directives",
+    "csp_nonce",
+    "install_security_headers",
+]

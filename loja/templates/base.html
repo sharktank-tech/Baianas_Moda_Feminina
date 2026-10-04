@@ -10,7 +10,7 @@
   <!-- Google AdSense: auto ads carregado somente após o window load
        (fase do plano: PageLoad ≤3.5s / requests ≤25 — o request do
        adsbygoogle.js deixa de disputar o critical path). -->
-  <script>
+  <script nonce="{{ csp_nonce }}">
     window.addEventListener('load', function () {
       var adsbygoogle = document.createElement('script');
       adsbygoogle.async = true;
@@ -706,7 +706,7 @@
           } %}
           <div class="flash-message {{ styles.get(category, 'bg-zinc-800 border-zinc-900') }} text-white border-l-4 shadow-2xl rounded-lg p-4 flex items-start justify-between">
             <span class="text-sm leading-snug">{{ message }}</span>
-            <button onclick="closeFlash(this)" class="ml-4 text-white/70 hover:text-white text-xl leading-none flex-shrink-0">&times;</button>
+            <button data-dismiss-flash class="ml-4 text-white/70 hover:text-white text-xl leading-none flex-shrink-0">&times;</button>
           </div>
         {% endfor %}
       {% endif %}
@@ -937,7 +937,7 @@
     </div>
   </footer>
 
-  <script>
+  <script nonce="{{ csp_nonce }}">
     function closeFlash(button) {
       const flash = button.parentElement;
       flash.style.opacity = '0';
@@ -979,6 +979,25 @@
       if (closeBtn) closeBtn.addEventListener('click', closeDrawer);
       if (overlay)  overlay.addEventListener('click', closeDrawer);
       document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+    });
+
+    // Delegação global (PR P4): CSP com script-src-attr 'none' proíbe
+    // on* inline — os 25 handlers viraram data-attributes resolvidos aqui.
+    document.addEventListener('submit', e => {
+      const msg = e.target.getAttribute('data-confirm');
+      if (msg && !window.confirm(msg)) e.preventDefault();
+    });
+    document.addEventListener('click', e => {
+      const dismiss = e.target.closest('[data-dismiss-flash]');
+      if (dismiss) closeFlash(dismiss);
+    });
+    document.addEventListener('change', e => {
+      if (e.target.hasAttribute('data-nav-select')) {
+        location = e.target.value;
+        return;
+      }
+      const fn = e.target.getAttribute('data-change-fn');
+      if (fn && typeof window[fn] === 'function') window[fn]();
     });
   </script>
 

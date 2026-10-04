@@ -967,7 +967,7 @@
                       <form
                         method="POST"
                         action="{{ url_for('admin.delete_product', id=p.id) }}"
-                        onsubmit="return confirm('Excluir {{ p.name }}?')"
+                        data-confirm="Excluir {{ p.name }}?"
                       >
 
                         {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
@@ -1198,7 +1198,7 @@
                       <form
                         method="POST"
                         action="{{ url_for('admin.delete_promotion', id=promo.id) }}"
-                        onsubmit="return confirm('Excluir esta promoção?')"
+                        data-confirm="Excluir esta promoção?"
                       >
 
                         {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
@@ -1537,7 +1537,7 @@
                       <form
                         method="POST"
                         action="{{ url_for('admin.delete_coupon', id=coupon.id) }}"
-                        onsubmit="return confirm('Excluir o cupom {{ coupon.code }}?')"
+                        data-confirm="Excluir o cupom {{ coupon.code }}?"
                       >
 
                         {% if csrf_token %}
@@ -1711,7 +1711,7 @@
                       <form
                         method="POST"
                         action="{{ url_for('admin.delete_supplier', id=s.id) }}"
-                        onsubmit="return confirm('Excluir {{ s.name }}?')"
+                        data-confirm="Excluir {{ s.name }}?"
                       >
 
                         {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
@@ -1873,7 +1873,7 @@
                       <form
                         method="POST"
                         action="{{ url_for('admin.delete_user', id=u.id) }}"
-                        onsubmit="return confirm('Excluir {{ u.name }}?')"
+                        data-confirm="Excluir {{ u.name }}?"
                       >
 
                         {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
@@ -2046,7 +2046,7 @@
                       <form
                         method="POST"
                         action="{{ url_for('admin.delete_testimonial', id=t.id) }}"
-                        onsubmit="return confirm('Excluir este depoimento?')"
+                        data-confirm="Excluir este depoimento?"
                       >
 
                         {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
@@ -2190,7 +2190,7 @@
                       <form
                         method="POST"
                         action="{{ url_for('admin.delete_hero_slide', id=slide.id) }}"
-                        onsubmit="return confirm('Excluir este slide?')"
+                        data-confirm="Excluir este slide?"
                       >
 
                         {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
@@ -2468,7 +2468,7 @@
                       <form
                         method="POST"
                         action="{{ url_for('admin.delete_social_link', id=sl.id) }}"
-                        onsubmit="return confirm('Excluir?')"
+                        data-confirm="Excluir?"
                       >
 
                         {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
@@ -2777,7 +2777,7 @@
                       <form
                         method="POST"
                         action="{{ url_for('admin.delete_nav_link', id=nl.id) }}"
-                        onsubmit="return confirm('Excluir?')"
+                        data-confirm="Excluir?"
                       >
 
                         {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
@@ -2886,7 +2886,7 @@
                       <form
                         method="POST"
                         action="{{ url_for('admin.delete_category_link', id=cl.id) }}"
-                        onsubmit="return confirm('Excluir?')"
+                        data-confirm="Excluir?"
                       >
 
                         {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
@@ -2995,7 +2995,7 @@
                       <form
                         method="POST"
                         action="{{ url_for('admin.delete_legal_link', id=ll.id) }}"
-                        onsubmit="return confirm('Excluir?')"
+                        data-confirm="Excluir?"
                       >
 
                         {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}

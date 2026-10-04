@@ -145,7 +145,7 @@
     <form method="POST"
           action="{{ url_for('admin.release_expired_reservations') }}"
           class="mt-4"
-          onsubmit="return confirm('Liberar todas as reservas comprovadamente vencidas e sem pagamento aprovado?');">
+          data-confirm="Liberar todas as reservas comprovadamente vencidas e sem pagamento aprovado?">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit"
               class="px-4 py-2 rounded-lg bg-red-700 text-white hover:bg-red-800 text-sm">
@@ -176,7 +176,7 @@
             <td class="px-3 py-2 text-sm">
               <form method="POST"
                     action="{{ url_for('admin.release_single_expired_reservation', order_id=order.id) }}"
-                    onsubmit="return confirm('Liberar somente esta reserva? A operação será recusada se houver pagamento aprovado.');">
+                    data-confirm="Liberar somente esta reserva? A operação será recusada se houver pagamento aprovado.">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="confirm_release" value="1">
                 <button type="submit"
@@ -260,7 +260,7 @@
                 {% endif %}
                 <form method="POST"
                       action="{{ url_for('admin.skip_checkout_recovery', order_id=order.id) }}"
-                      onsubmit="return confirm('Ignorar este lembrete? O pedido, o pagamento e a reserva não serão alterados.');">
+                      data-confirm="Ignorar este lembrete? O pedido, o pagamento e a reserva não serão alterados.">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="confirm_skip" value="1">
                   <button type="submit"

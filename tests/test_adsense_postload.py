@@ -51,8 +51,11 @@ def test_adsense_single_template_reference():
     assert offenders == [], offenders
 
 
-def test_loader_stays_inline_pending_nonce_pr():
-    """Hoje CSP tem 'unsafe-inline' — o loader e inline. Quando o PR do nonce
-    adicionar o nonce neste <script>, este teste deve ser atualizado junto."""
-    html = Path("loja/templates/base.html").read_text(encoding="utf-8")
-    assert "window.addEventListener('load'" in html
+def test_adsense_loader_is_nonced(client):
+    """PR P4: o loader inline carrega o nonce da CSP (script-src sem
+    'unsafe-inline'). O script dinâmico criado por ele é coberto pela
+    allowlist de origens (não recebe nonce)."""
+    html = client.get("/").get_data(as_text=True)
+    m = re.search(r"<script([^>]*)>\s*window\.addEventListener\('load'", html)
+    assert m, "loader do AdSense nao encontrado"
+    assert 'nonce="' in m.group(1), m.group(1)

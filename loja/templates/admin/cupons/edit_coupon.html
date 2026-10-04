@@ -461,7 +461,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 (function () {
   const form = document.getElementById('couponForm');
   const typeInput = document.getElementById('discount_type');
