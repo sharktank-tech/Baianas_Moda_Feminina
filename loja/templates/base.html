@@ -7,9 +7,18 @@
   <meta name="keywords" content="{% block meta_keywords %}roupas, moda, promoções, loja online, Pollo Modas{% endblock %}">
   <title>{% block title %}Pollo Modas{% endblock %}</title>
 
-  <!-- Google AdSense -->
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1185235685562020"
-     crossorigin="anonymous"></script>
+  <!-- Google AdSense: auto ads carregado somente após o window load
+       (fase do plano: PageLoad ≤3.5s / requests ≤25 — o request do
+       adsbygoogle.js deixa de disputar o critical path). -->
+  <script>
+    window.addEventListener('load', function () {
+      var adsbygoogle = document.createElement('script');
+      adsbygoogle.async = true;
+      adsbygoogle.crossOrigin = 'anonymous';
+      adsbygoogle.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1185235685562020';
+      document.head.appendChild(adsbygoogle);
+    });
+  </script>
 
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/tailwind.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/fonts.css') }}">
