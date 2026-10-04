@@ -10,6 +10,8 @@ Mudanças aprovadas do PR de Core Web Vitals:
 PR #104 (fontes auto-hospedadas) substituiu o ``preconnect``/``<link>`` de
 fonts.googleapis.com por ``static/styles/fonts.css`` local — as invariantes
 de fonte agora apontam para o CSS local (ver ``test_font_self_hosted.py``).
+PR P3b (Tailwind pré-compilado) substituiu o Play CDN por
+``static/styles/tailwind.css`` local (ver ``test_tailwind_precompiled.py``).
 
 Invariantes checados no HTML renderizado (home e detalhe do produto).
 """
@@ -30,12 +32,13 @@ def _missing_lazy(html):
     ]
 
 
-def test_home_has_local_fonts_and_deferred_tailwind(client):
+def test_home_has_local_fonts_and_local_tailwind(client):
     html = client.get("/").get_data(as_text=True)
     assert "styles/fonts.css" in html
     assert "fonts.googleapis.com" not in html
     assert "fonts.gstatic.com" not in html
-    assert '<script src="https://cdn.tailwindcss.com" defer></script>' in html
+    assert "styles/tailwind.css" in html
+    assert "cdn.tailwindcss.com" not in html
 
 
 def test_font_weights_preserved_as_decided():
