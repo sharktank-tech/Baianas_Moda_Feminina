@@ -725,7 +725,7 @@ Minha conta — {% if site and site.name %}{{ site.name }}{% else %}Pollo Modas{
             action="{{ url_for('main.delete_account') }}"
             method="POST"
             class="account-action-form"
-            onsubmit="return confirm('Tem certeza que deseja excluir sua conta? Esta ação não pode ser desfeita.');"
+            data-confirm="Tem certeza que deseja excluir sua conta? Esta ação não pode ser desfeita."
           >
 
             {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}

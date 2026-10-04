@@ -15,7 +15,7 @@
 {% endif %}
 
 {% if structured_data %}
-<script type="application/ld+json">
+<script type="application/ld+json" nonce="{{ csp_nonce }}">
 {{ structured_data | tojson }}
 </script>
 {% endif %}
@@ -798,7 +798,7 @@ body.product-lightbox-open {
 {% endblock %}
 
 {% block extra_scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 (function () {
     /* =====================================================
        Galeria de imagens

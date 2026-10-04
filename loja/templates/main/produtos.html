@@ -141,7 +141,7 @@
 
         <!-- Sort (desktop: select) -->
         <div class="sort-wrap">
-          <select onchange="location=this.value" class="sort-select" aria-label="Ordenar">
+          <select data-nav-select class="sort-select" aria-label="Ordenar">
             {% for label, value in [
               ('Mais recentes',  '?ordenar=recentes'),
               ('Menor preço',    '?ordenar=menor-preco'),
@@ -211,7 +211,7 @@
             </div>
 
             <!-- Favorito -->
-            <button class="favorite-btn" data-id="{{ product.id }}" aria-label="Favoritar" onclick="event.preventDefault()">
+            <button type="button" class="favorite-btn" data-id="{{ product.id }}" aria-label="Favoritar">
               <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
               </svg>

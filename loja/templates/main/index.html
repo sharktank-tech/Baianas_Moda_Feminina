@@ -233,7 +233,7 @@
 
   <!-- Dados estruturados: ajuda o Google a exibir preço/estoque nos resultados -->
   {% if structured_data %}
-  <script type="application/ld+json">
+  <script type="application/ld+json" nonce="{{ csp_nonce }}">
   {{ structured_data | safe }}
   </script>
   {% endif %}
@@ -720,7 +720,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
-  <script>
+  <script nonce="{{ csp_nonce }}">
 
     // Hero carousel — autoplay, navegação, teclado, swipe e acessibilidade
     (function () {
