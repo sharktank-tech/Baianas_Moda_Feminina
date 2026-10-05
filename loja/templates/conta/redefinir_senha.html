@@ -29,12 +29,12 @@
       </div>
 
       {% if error %}
-      <div style="background:#fef2f2;border:1px solid #ef4444;color:#991b1b;padding:12px 14px;border-radius:8px;margin-bottom:1.15rem;font-size:14px;" role="alert">
+      <div class="bg-[#fef2f2] border border-[#ef4444] text-[#991b1b] py-3 px-3.5 rounded-lg mb-[1.15rem] text-sm" role="alert">
         {{ error }}
         {% if not token %}
-        <p style="margin:10px 0 0;">
+        <p class="mt-2.5">
           <a href="{{ url_for('main.esqueci_senha') }}"
-             style="color:#991b1b;font-weight:700;">Solicitar novo link</a>
+             class="text-[#991b1b] font-bold">Solicitar novo link</a>
         </p>
         {% endif %}
       </div>

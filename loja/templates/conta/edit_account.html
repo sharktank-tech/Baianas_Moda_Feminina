@@ -5,7 +5,7 @@
 {% block extra_head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='styles/conta.css') }}">
 
-<style>
+<style nonce="{{ csp_nonce }}">
   .auth-card--account-edit {
     width: min(920px, 100%);
   }

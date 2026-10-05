@@ -3,7 +3,7 @@
 {% block title %}Checkout — {{ site.name }}{% endblock %}
 
 {% block extra_head %}
-<style>
+<style nonce="{{ csp_nonce }}">
 .checkout-container {
     max-width: 1280px;
     margin: 4rem auto;

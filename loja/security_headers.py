@@ -19,9 +19,11 @@ Histórico da CSP (auditoria ao vivo contra os templates reais):
   e reconciliado de forma preguiçosa para requests que encurtam o
   ``preprocess_request``); os 25 ``on*`` viraram data-attributes +
   delegação (``base.html``), habilitando ``script-src-attr 'none'``.
-- ``style-src`` mantém ``'unsafe-inline'`` de propósito: os 12 blocos
-  ``<style>`` e os atributos ``style=""`` não usam nonce — refatorar isso
-  é escopo separado e fica registrado no PENDENCIAS.
+- PR P4b: ``style-src`` também perde ``'unsafe-inline'`` (último ``!!`` do
+  Weblyzer) — os 12 blocos ``<style>`` ganham o mesmo nonce e os 9
+  atributos ``style=""`` viraram classes utilitárias do Tailwind;
+  ``style-src-attr 'none'`` fecha atributos de estilo. CSSOM
+  (``el.style.x = ...`` nos scripts) não é afetado pela CSP.
 """
 
 import secrets
@@ -58,7 +60,8 @@ def csp_directives(nonce: str) -> list[str]:
         "default-src 'self'",
         f"script-src 'self' 'nonce-{nonce}' {AD_SCRIPT_ORIGINS}",
         "script-src-attr 'none'",
-        "style-src 'self' 'unsafe-inline'",
+        f"style-src 'self' 'nonce-{nonce}'",
+        "style-src-attr 'none'",
         "img-src 'self' data: blob: https:",
         "font-src 'self'",
         (

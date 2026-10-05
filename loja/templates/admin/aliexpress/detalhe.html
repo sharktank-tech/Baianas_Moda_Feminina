@@ -3,7 +3,7 @@
 {% block title %}Detalhes do produto AliExpress{% endblock %}
 
 {% block extra_head %}
-<style>
+<style nonce="{{ csp_nonce }}">
 /* Descrição do fornecedor (HTML externo sanitizado): nunca estourar o
    card — larguras fixas do AliExpress contidas, imagens responsivas. */
 .ae-descricao { overflow-x: auto; max-width: 100%; }

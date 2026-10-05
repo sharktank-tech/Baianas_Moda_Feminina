@@ -12,7 +12,7 @@
   {% endif %}
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/produtos.css') }}">
 
-  <style>
+  <style nonce="{{ csp_nonce }}">
     /*
      * Suaviza a transição do mini-slider. O intervalo entre as trocas é
      * controlado em produtos.js para manter cada foto visível por mais tempo.

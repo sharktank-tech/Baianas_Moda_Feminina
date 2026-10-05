@@ -109,9 +109,12 @@ def test_csp_drops_unsafe_inline_and_eval(client):
     assert "'unsafe-inline'" not in directives["script-src"]
     assert "'unsafe-eval'" not in directives["script-src"]
     assert directives["script-src-attr"] == ["'none'"]
-    # style-src mantém unsafe-inline de propósito: blocos <style> e
-    # atributos style="" não usam nonce (escopo separado, ver módulo).
-    assert "'unsafe-inline'" in directives["style-src"]
+    # P4b: style-src tambem perdeu unsafe-inline — blocos <style> usam
+    # nonce e atributos style="" foram convertidos em classes.
+    assert "'unsafe-inline'" not in directives["style-src"]
+    assert directives["style-src-attr"] == ["'none'"]
+    # o nonce de style-src e o mesmo do header (e dos blocos renderizados)
+    assert any(t.startswith("'nonce-") for t in directives["style-src"])
 
 
 def test_csp_default_src_is_self_without_scheme_wildcard(client):
@@ -219,3 +222,35 @@ def test_templates_have_no_javascript_urls():
         if "javascript:" in p.read_text(encoding="utf-8", errors="replace")
     ]
     assert offenders == [], offenders
+
+
+def test_templates_style_blocks_all_nonced():
+    """P4b: todo <style> carrega o nonce (style-src sem unsafe-inline)."""
+    offenders = []
+    for path in TEMPLATES.rglob("*.html"):
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), 1
+        ):
+            for m in re.finditer(r"<style[^>]*>", line):
+                if 'nonce="{{ csp_nonce }}"' not in m.group(0):
+                    offenders.append(f"{path}:{lineno}:{m.group(0)}")
+    assert offenders == [], offenders
+
+
+def test_templates_have_no_style_attributes():
+    """P4b: os 9 atributos style="" viraram classes utilitárias."""
+    offenders = []
+    for path in TEMPLATES.rglob("*.html"):
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), 1
+        ):
+            if 'style="' in line or "style='" in line:
+                offenders.append(f"{path}:{lineno}")
+    assert offenders == [], offenders
+
+
+def test_converted_utilities_are_in_built_css():
+    """O tailwind.css versionado foi regerado com as classes das conversões."""
+    css = Path("loja/static/styles/tailwind.css").read_text(encoding="utf-8")
+    for probe in ("mt-7", "mt-2\\.5", "fef2f2", "ef4444", "991b1b", "1.15rem"):
+        assert probe in css, probe
