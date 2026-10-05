@@ -58,6 +58,28 @@
     {% set nacional_endpoint = 'aliexpress_admin.publicado_nacional' %}
     {% include "admin/aliexpress/_origin_fields.html" %}
 
+    {# Etapa 3: sincronização técnica — só estoque/dados técnicos. #}
+    <div class="bg-white rounded-2xl shadow p-6">
+        <h2 class="text-lg font-semibold text-gray-800 mb-1">
+            Sincronização técnica
+        </h2>
+        <p class="text-xs text-gray-500 mb-4">
+            Atualiza apenas o estoque e os dados técnicos a partir do catálogo
+            do fornecedor. Nome, descrição, imagens, categoria, preço, margem,
+            custo, moeda e a publicação ficam exatamente como estão; uma
+            divergência de custo/moeda é sinalizada aqui e nunca aplicada
+            automaticamente. Novos tamanhos/cores entram inativos.
+        </p>
+        <form method="POST"
+              action="{{ url_for('aliexpress_admin.publicado_sincronizar', product_id=product.external_id or '') }}">
+            {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+            <button type="submit"
+                    class="bg-gray-800 hover:bg-gray-900 text-white font-semibold px-6 py-3 rounded-lg">
+                Sincronizar estoque agora
+            </button>
+        </form>
+    </div>
+
 </div>
 
 {% endblock %}

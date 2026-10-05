@@ -14,6 +14,7 @@
   POST /admin/integrations/aliexpress/publicado/<product_id>/origem -> idem (publicado)
   POST /admin/integrations/aliexpress/rascunho/<product_id>/nacional-> seleção de variantes
   POST /admin/integrations/aliexpress/publicado/<product_id>/nacional -> idem (publicado)
+  POST /admin/integrations/aliexpress/publicado/<product_id>/sincronizar -> estoque/técnico
   POST /admin/integrations/aliexpress/encerrar                    -> limpa cookie admin
 
 Origem de envio (Etapa 2):
@@ -24,6 +25,13 @@ Origem de envio (Etapa 2):
     obrigatório, escopo XOR (uma variante ou todas) e transação única.
   * POST .../nacional define quem participa da operação nacional; a
     publicação continua exigindo origem Brasil comprovada por variante.
+
+Sincronização técnica (Etapa 3):
+  * POST .../publicado/<id>/sincronizar atualiza SÓ estoque/técnico a partir
+    do detalhe já obtido; nunca altera preço, margem, custo, moeda, imagens,
+    categoria, publicação, origem de envio ou seleção nacional.
+  * Divergência de custo/moeda do fornecedor é sinalizada (sync_error) e
+    NUNCA aplicada; nenhum produto é despublicado por esta rota.
 
 
 Segurança:
@@ -72,6 +80,11 @@ from loja.integrations.aliexpress.importer import (
     FREIGHT_AVAILABLE,
     DraftImportError,
     import_product_draft,
+)
+from loja.integrations.aliexpress.published_sync import (
+    PublishedSyncConflict,
+    PublishedSyncError,
+    sync_published_product,
 )
 from loja.modules.models import Product, SupplierProduct
 from loja.modules.services import get_layout_data
@@ -624,6 +637,44 @@ ORIGIN_ERROR_MESSAGES = {
     ),
 }
 
+#: Rejeições estáveis da sincronização técnica de produto publicado (Etapa 3).
+PUBLISHED_SYNC_MESSAGES = {
+    "not_found": "Rascunho/supplier não encontrado.",
+    "not_published": (
+        "Este produto não está publicado: a sincronização técnica vale para "
+        "produto já à venda."
+    ),
+    "link_mismatch": "Vínculo produto/fornecedor inconsistente: nada foi alterado.",
+    "external_id_mismatch": (
+        "Os dados recebidos são de outro produto: sincronização cancelada, "
+        "nada foi alterado."
+    ),
+    "missing_product_id": "O fornecedor não devolveu o identificador do produto.",
+    "missing_supplier_price": (
+        "Nenhum SKU com preço no fornecedor: nada foi alterado."
+    ),
+    "missing_currency": "Moeda do fornecedor ausente: nada foi alterado.",
+    "currency_mismatch": (
+        "Mais de uma moeda entre os SKUs: nada foi alterado (sem conversão)."
+    ),
+    "variant_label_too_long": (
+        "Rótulo de variante acima do limite: nada foi alterado."
+    ),
+}
+
+#: Divergência sinalizada (nunca aplicada) durante a sincronização técnica.
+PUBLISHED_SYNC_DIVERGENCE_MESSAGES = {
+    "supplier_cost_changed": (
+        "Custo do fornecedor divergente do custo gravado: divergência "
+        "sinalizada SEM aplicar — preço, margem, precificação e publicação "
+        "preservados."
+    ),
+    "currency_changed": (
+        "Moeda do fornecedor divergente da moeda gravada: divergência "
+        "sinalizada SEM aplicar — sem FX e sem reprecificação automática."
+    ),
+}
+
 
 def _origin_error_message(code: str) -> str:
     return ORIGIN_ERROR_MESSAGES.get(code, "Dados de origem inválidos.")
@@ -1139,6 +1190,83 @@ def publicado_nacional(product_id: str):
         back_endpoint="aliexpress_admin.publicado_frete_form",
         product_id=product_id,
     )
+
+
+@aliexpress_admin_blueprint.route(
+    "/publicado/<product_id>/sincronizar", methods=["POST"]
+)
+@admin_required
+@ali_session_required
+def publicado_sincronizar(product_id: str):
+    """Sincronização TÉCNICA de produto já publicado (Etapa 3).
+
+    Atualiza somente estoque/dados técnicos a partir do detalhe do catálogo.
+    Nunca altera decisões comerciais (preço, margem, custo, moeda, imagens,
+    categoria, publicação) e nunca despublica; divergência de custo/moeda é
+    sinalizada em `sync_error` sem ser aplicada. Nenhuma chamada de frete,
+    compra ou pedido.
+    """
+    back_endpoint = "aliexpress_admin.publicado_frete_form"
+    product = _load_published(product_id)
+    supplier_product = _active_supplier_product(product)
+    if product is None or supplier_product is None:
+        flash("Produto publicado não encontrado.", "warning")
+        return redirect(url_for("aliexpress_admin.index"))
+
+    try:
+        client = _aliexpress_client()
+        detail = client.get_product(product_id=product_id)
+    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+        flash(_sanitized_api_error(exc), "danger")
+        return _back_to(back_endpoint, product_id)
+
+    if detail is None:
+        flash("Produto não encontrado no catálogo do fornecedor.", "warning")
+        return _back_to(back_endpoint, product_id)
+
+    try:
+        result = sync_published_product(
+            detail=detail, product=product, supplier_product=supplier_product
+        )
+        db.session.commit()
+    except PublishedSyncError as exc:
+        db.session.rollback()
+        code = exc.args[0] if exc.args else "unknown"
+        current_app.logger.info("sincronização publicado: rejected reason=%s", code)
+        flash(
+            PUBLISHED_SYNC_MESSAGES.get(str(code), "Sincronização recusada."),
+            "warning",
+        )
+        return _back_to(back_endpoint, product_id)
+    except Exception:
+        db.session.rollback()
+        current_app.logger.warning(
+            "sincronização publicado: falha", exc_info=True
+        )
+        flash("Falha na sincronização. Nenhuma alteração foi aplicada.", "danger")
+        return _back_to(back_endpoint, product_id)
+
+    flash(
+        "Sincronização técnica concluída: %d variante(s) atualizada(s), "
+        "%d desativada(s) por estoque, %d nova(s) opção(ões) inativa(s). "
+        "Estoque: %d → %d."
+        % (
+            result.variants_updated,
+            result.variants_deactivated,
+            result.variants_created,
+            result.stock_before,
+            result.stock_after,
+        ),
+        "success",
+    )
+    if result.divergence:
+        flash(
+            PUBLISHED_SYNC_DIVERGENCE_MESSAGES.get(
+                result.divergence, "Divergência sinalizada sem aplicar."
+            ),
+            "warning",
+        )
+    return _back_to(back_endpoint, product_id)
 
 
 @aliexpress_admin_blueprint.route("/rascunho/<product_id>/margem", methods=["POST"])
