@@ -3,7 +3,7 @@
 {% block title %}Status do pagamento — {{ site.name }}{% endblock %}
 
 {% block extra_head %}
-<style>
+<style nonce="{{ csp_nonce }}">
 .payment-result {
     max-width: 720px;
     margin: 4rem auto;

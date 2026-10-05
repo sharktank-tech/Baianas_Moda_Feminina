@@ -22,7 +22,7 @@ Produção em `4bde1ec`: suíte `2052 passed, 90 skipped`; CI master 3/3.
 | # | Item | Por quê | Próximo passo | Revisão |
 |---|---|---|---|---|
 | 1 | **Medição Weblyzer pós-#112** | Fechar os alvos do plano: Security **≥90** (era 88 com `unsafe-inline`) e PageLoad **≤3.5s / requests ≤25** (critério do AdSense pós-load) | Rodar o Weblyzer em produção e registrar o print aqui | 2026-11-04 |
-| 2 | **`style-src` sem `unsafe-inline`** | Última permissão inline da CSP; registrada como escopo separado no docstring de `loja/security_headers.py` | Nonce nos 12 blocos `<style>` + refactor dos 9 atributos `style=""` → classes utilitárias; teste atualiza `test_csp_drops_unsafe_inline_and_eval` | 2026-11-04 |
+| 2 | ~~**`style-src` sem `unsafe-inline`**~~ | ~~Última permissão inline da CSP~~ | **Concluído em 2026-10-04** (PR P4b): nonce nos 12 blocos `<style>`, 9 atributos `style=""` → classes Tailwind, `style-src-attr 'none'` | ✅ |
 | 3 | **Cache de cupons com TTL** — [#113](https://github.com/sharktank-tech/PolloModas/issues/113) | `_restore_checkout_coupon` reconsulta o Supabase a cada render do checkout (`routes.py:1031`) | Implementar via `loja/cache.py` (TTL 60s + invalidação nos mutations de admin) conforme a issue | 2026-11-04 |
 | 4 | **Monitorar cold start pós-deploy** | Em 2026-10-04, logo após o merge do #112, produção retornou `FUNCTION_INVOCATION_FAILED` (500) em todas as rotas por ~3 min; preview do mesmo commit esteve sempre 200 e a produção se recuperou sozinho | Se recorrer: coletar logs da Vercel e checar limite de import/cold-start do `api/app.py` | 2026-11-04 |
 

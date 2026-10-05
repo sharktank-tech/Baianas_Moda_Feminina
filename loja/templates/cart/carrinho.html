@@ -3,7 +3,7 @@
 {% block title %}Carrinho — {{ site.name }}{% endblock %}
 
 {% block extra_head %}
-<style>
+<style nonce="{{ csp_nonce }}">
 :root {
     --cart-accent: #EC008C;
     --cart-accent-dark: #B0006A;

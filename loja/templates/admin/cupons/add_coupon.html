@@ -5,7 +5,7 @@
 {% block extra_head %}
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/dashboard_admin.css') }}">
 
-<style>
+<style nonce="{{ csp_nonce }}">
   .coupon-page {
     width: min(920px, calc(100% - 2rem));
     margin: 3rem auto;

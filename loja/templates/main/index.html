@@ -19,7 +19,7 @@
 
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/styles.css') }}">
 
-  <style>
+  <style nonce="{{ csp_nonce }}">
     /* Hero carousel */
     .hero-carousel {
       position: relative;
