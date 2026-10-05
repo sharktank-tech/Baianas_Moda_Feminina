@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from loja import db, csrf
 from loja.utils import utcnow
 from loja.modules.models import (
+    Address,
     Cart,
     Coupon,
     Product,
@@ -453,6 +454,39 @@ def _get_customer_data():
         ),
         "state": state,
     }
+
+
+def _upsert_checkout_address(user, customer_data):
+    """P2 — o endereço digitado no checkout vira endereço do cadastro.
+
+    Antes disso os dados ficavam só nas colunas de endereço do pedido
+    (snapshot) e "Meu Perfil → Endereços" nunca via nada: o único
+    ``Address()`` do sistema era a rota de edição de perfil. Atualiza o
+    endereço principal do usuário (ou cria o primeiro); os demais
+    endereços cadastrados não são tocados.
+    """
+    existing = list(user.addresses)
+    address = next(
+        (row for row in existing if row.is_default),
+        existing[0] if existing else None,
+    )
+    if address is None:
+        address = Address(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            is_default=True,
+        )
+        db.session.add(address)
+
+    address.recipient_name = customer_data["customer_name"]
+    address.phone = customer_data["customer_phone"] or None
+    address.zip_code = customer_data["zip_code"]
+    address.street = customer_data["street"]
+    address.number = customer_data["number"]
+    address.complement = customer_data["complement"]
+    address.neighborhood = customer_data["neighborhood"]
+    address.city = customer_data["city"]
+    address.state = customer_data["state"]
 
 
 def _resolve_payment_variant(product, raw_variant_id, fallback_size):
@@ -958,6 +992,8 @@ def create_mercado_pago_payment():
         if cart is not None:
             for cart_item in list(cart.items):
                 db.session.delete(cart_item)
+
+        _upsert_checkout_address(current_user, customer_data)
 
         db.session.commit()
 
