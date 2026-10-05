@@ -236,6 +236,10 @@ def create_app():
     from loja.security_headers import install_security_headers
     install_security_headers(app)
 
+    # Performance (plano Weblyzer): borda serve /static sem invocar a função.
+    from loja.static_cache import install_static_cache
+    install_static_cache(app)
+
     from loja.modules.models import User             # corrigido: User
     from loja.modules import canary_evidence_models  # registra tabelas no bootstrap
 
