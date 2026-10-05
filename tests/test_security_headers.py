@@ -251,6 +251,6 @@ def test_templates_have_no_style_attributes():
 
 def test_converted_utilities_are_in_built_css():
     """O tailwind.css versionado foi regerado com as classes das conversões."""
-    css = Path("loja/static/styles/tailwind.css").read_text(encoding="utf-8")
+    css = Path("public/static/styles/tailwind.css").read_text(encoding="utf-8")
     for probe in ("mt-7", "mt-2\\.5", "fef2f2", "ef4444", "991b1b", "1.15rem"):
         assert probe in css, probe

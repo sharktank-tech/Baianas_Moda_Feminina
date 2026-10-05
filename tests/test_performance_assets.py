@@ -46,7 +46,7 @@ def test_font_weights_preserved_as_decided():
 
     Após o PR #104 os pesos vivem em ``fonts.css`` local (mesmos woff2).
     """
-    css = Path("loja/static/styles/fonts.css").read_text(encoding="utf-8")
+    css = Path("public/static/styles/fonts.css").read_text(encoding="utf-8")
     blocks = re.findall(r"@font-face\s*\{[^}]+\}", css)
     poppins = {
         int(m.group(1))

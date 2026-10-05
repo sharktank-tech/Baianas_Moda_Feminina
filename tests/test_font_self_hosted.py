@@ -1,10 +1,10 @@
 """PR #104 — fontes auto-hospedadas (plano Weblyzer, P3a).
 
 Escopo aprovado:
-- woff2 de Poppins (400..800) e DM Sans variável em ``loja/static/fonts/``
+- woff2 de Poppins (400..800) e DM Sans variável em ``public/static/fonts/``
   (espelho do CSS do Google; subset devanagari descartado — site PT-BR,
   o ``unicode-range`` nunca casa e o browser jamais o baixaria);
-- ``@font-face`` locais em ``loja/static/styles/fonts.css`` (regras
+- ``@font-face`` locais em ``public/static/styles/fonts.css`` (regras
   verbatim do Google, só a URL mudou) com ``font-display: swap``;
 - remoção do ``<link>`` de fonts.googleapis.com e dos dois preconnects.
 
@@ -15,8 +15,8 @@ Justificativa: o stylesheet externo era o único render-blocking da home
 import re
 from pathlib import Path
 
-FONTS_DIR = Path("loja/static/fonts")
-FONTS_CSS = Path("loja/static/styles/fonts.css")
+FONTS_DIR = Path("public/static/fonts")
+FONTS_CSS = Path("public/static/styles/fonts.css")
 BASE = Path("loja/templates/base.html")
 
 

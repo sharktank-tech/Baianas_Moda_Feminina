@@ -287,7 +287,7 @@ def test_sanitized_description_keeps_valid_images_removes_style_and_onerror():
 
 
 def test_description_css_has_responsive_image_rules():
-    css_path = "loja/static/styles/produtos_individual.css"
+    css_path = "public/static/styles/produtos_individual.css"
     with open(css_path, encoding="utf-8") as fh:
         css = fh.read()
     # Regras para imagens da descrição responsivas.

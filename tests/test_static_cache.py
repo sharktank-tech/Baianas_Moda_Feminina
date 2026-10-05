@@ -49,3 +49,16 @@ def test_static_has_no_vary_cookie(client):
     resp = client.get("/static/styles/tailwind.css")
     vary = resp.headers.get("Vary", "")
     assert "Cookie" not in vary, vary
+
+
+def test_static_folder_is_public_static(app):
+    """P7 — os assets vivem em public/static (raiz), servidos pela Vercel
+    direto do filesystem antes de invocar a função; o Flask aponta para o
+    mesmo diretório como fallback local."""
+    import os
+
+    assert os.path.abspath(app.static_folder) == os.path.abspath(
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "public", "static")
+    )
+    for rel in ("styles/tailwind.css", "scripts/index.js", "styles/fonts.css"):
+        assert os.path.isfile(os.path.join(app.static_folder, rel)), rel
