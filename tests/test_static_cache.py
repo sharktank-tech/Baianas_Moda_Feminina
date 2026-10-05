@@ -41,3 +41,11 @@ def test_static_keeps_security_headers(client):
     resp = client.get("/static/styles/tailwind.css")
     assert resp.headers.get("X-Content-Type-Options") == "nosniff"
     assert "Content-Security-Policy" in resp.headers
+
+
+def test_static_has_no_vary_cookie(client):
+    """'Vary: Cookie' (marcado pela sessão do Flask) impede o cache da
+    borda da Vercel — em /static ele precisa sair."""
+    resp = client.get("/static/styles/tailwind.css")
+    vary = resp.headers.get("Vary", "")
+    assert "Cookie" not in vary, vary
