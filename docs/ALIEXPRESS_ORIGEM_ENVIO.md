@@ -186,8 +186,10 @@ Suítes relevantes (venv `venv-payment-guard`, sem rede):
 
 1. Testes `*_pg.py` (migração em PostgreSQL) **não rodam neste ambiente**
    (não há Postgres local; a URL do `.env` aponta para o banco remoto e a
-   checagem de segurança `IS_SAFE_POSTGRES` os pula). Executar em CI/local com
-   PG descartável antes do merge.
+   checagem de segurança `IS_SAFE_POSTGRES` os pula). `tests/test_shipping_origin_pg.py`
+   foi incluído na lista do job `pytest-postgres` do CI
+   (`.github/workflows/pr14-pytest.yml`) e roda lá; localmente continue
+   executando com um PG descartável `pollo*` em loopback.
 2. `record_api_observation()` permanece sem chamador em produção até haver
    observação real de `ship_from_country` (limitação 2 da seção 2).
 3. Novos SKUs detectados por sincronização entram **inativos**; a ativação de
