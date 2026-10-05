@@ -112,6 +112,7 @@ jobs:
           tests/test_aliexpress_status_sync_pg.py
           tests/test_aliexpress_submission_pg.py
           tests/test_draft_import_pg.py
+          tests/test_shipping_origin_pg.py
           tests/test_stock_reservation_cleanup_pg.py
           tests/test_payment_concurrency_pg.py
           tests/test_checkout_idempotency_pg.py

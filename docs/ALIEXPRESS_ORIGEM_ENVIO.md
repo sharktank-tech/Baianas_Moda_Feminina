@@ -148,7 +148,7 @@ Conflitos controlados abortam **antes** de qualquer escrita:
 ## 5. Como aplicar e operar
 
 1. **Migração**: `migrations/0034_shipping_origin_evidence.sql` (e
-   `0034_shipping_origin_evidence.down.sql` para reverter). Idempotente
+   `0034_shipping_origin_evidence_down.sql` para reverter). Idempotente
    (`CREATE TABLE IF NOT EXISTS`/`ADD COLUMN IF NOT EXISTS`), schema
    `pollomodas`, aplica-se com a ferramenta de migração usual do projeto.
    A coluna nova nasce `FALSE` (sem backfill): nenhum produto é considerado
