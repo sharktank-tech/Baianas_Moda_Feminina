@@ -1615,6 +1615,12 @@ class ProductVariant(db.Model):
     weight_kg = db.Column(db.Numeric(8, 3))
     dimensions = db.Column(db.Text)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
+    # Seleção de operação nacional (Etapa 1): somente variante marcada e ativa
+    # participa do gate de origem nacional. FALSE = catálogo internacional
+    # comum, que NUNCA bloqueia por este recurso.
+    national_shipping_operation = db.Column(
+        db.Boolean, nullable=False, default=False, server_default=db.false()
+    )
     created_at = db.Column(db.DateTime, default=utcnow)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
@@ -1719,6 +1725,105 @@ class SupplierProduct(db.Model):
         db.CheckConstraint(
             "landed_cost IS NULL OR landed_cost >= 0",
             name="ck_supplier_product_landed_cost_nonneg",
+        ),
+    )
+
+
+# ==========================================================
+# Origem de envio com evidência (integração AliExpress, Etapa 1)
+# ==========================================================
+class SupplierSkuShippingOrigin(db.Model):
+    """Classificação de origem de envio por SKU ou por cobertura do vínculo.
+
+    Duas escritas independentes e nunca misturadas:
+      * ``manual_origin``: declaração do admin, SEMPRE com ``evidence_ref`` e
+        ``confirmed_at`` (CHECK no banco). É a fonte que um humano assume.
+      * ``api_origin``: valor observado em dado do fornecedor, com
+        ``api_observed_at``. Nunca sobrescreve a confirmação manual.
+    Conflito manual × api é sinalizado na resolução, nunca silenciado.
+
+    Escopo XOR por linha (``supplier_sku_id`` OU ``covers_all_variants``);
+    a resolução dá precedência ao SKU sobre a cobertura. Ausência de linha =
+    origem desconhecida (fail-closed); nada é presumido como nacional.
+    """
+
+    __tablename__ = "supplier_sku_shipping_origins"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    supplier_product_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("supplier_products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    supplier_sku_id = db.Column(db.String(64))
+    covers_all_variants = db.Column(
+        db.Boolean, nullable=False, default=False, server_default=db.false()
+    )
+    api_origin = db.Column(db.String(16))
+    manual_origin = db.Column(db.String(16))
+    origin_country = db.Column(db.String(2))
+    evidence_ref = db.Column(db.Text)
+    confirmed_by_user_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    confirmed_at = db.Column(db.DateTime)
+    api_observed_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime, default=utcnow, onupdate=utcnow
+    )
+
+    supplier_product = db.relationship("SupplierProduct", lazy=True)
+
+    __table_args__ = (
+        # Índices únicos parciais (mesmos nomes da migration 0034): uma linha
+        # por SKU e no máximo uma linha de cobertura total por vínculo.
+        db.Index(
+            "uq_shipping_origin_variant_sku",
+            "supplier_product_id", "supplier_sku_id",
+            unique=True,
+            sqlite_where=db.text("supplier_sku_id IS NOT NULL"),
+            postgresql_where=db.text("supplier_sku_id IS NOT NULL"),
+        ),
+        db.Index(
+            "uq_shipping_origin_cover_all",
+            "supplier_product_id",
+            unique=True,
+            sqlite_where=db.text("covers_all_variants"),
+            postgresql_where=db.text("covers_all_variants"),
+        ),
+        db.CheckConstraint(
+            "(supplier_sku_id IS NOT NULL AND covers_all_variants = FALSE) "
+            "OR (supplier_sku_id IS NULL AND covers_all_variants = TRUE)",
+            name="ck_shipping_origin_scope",
+        ),
+        db.CheckConstraint(
+            "api_origin IS NULL OR api_origin IN ('brazil', 'foreign')",
+            name="ck_shipping_origin_api_origin",
+        ),
+        db.CheckConstraint(
+            "manual_origin IS NULL OR manual_origin IN ('brazil', 'foreign')",
+            name="ck_shipping_origin_manual_origin",
+        ),
+        db.CheckConstraint(
+            "manual_origin IS NULL OR "
+            "(evidence_ref IS NOT NULL AND confirmed_at IS NOT NULL)",
+            name="ck_shipping_origin_manual_evidence",
+        ),
+        db.CheckConstraint(
+            "api_origin IS NULL OR api_observed_at IS NOT NULL",
+            name="ck_shipping_origin_api_evidence",
+        ),
+        db.CheckConstraint(
+            "origin_country IS NULL OR length(origin_country) = 2",
+            name="ck_shipping_origin_country",
         ),
     )
 

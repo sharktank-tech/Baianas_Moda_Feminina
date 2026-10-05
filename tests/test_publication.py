@@ -423,3 +423,109 @@ def test_non_literal_gate_values_remain_off(db, monkeypatch):
         )
         assert evaluate_publication(product).allowed is True
 
+
+# --------------------------------------------------------------------------
+# operação nacional: origem de envio com evidência (Etapa 1)
+# --------------------------------------------------------------------------
+
+def _select_national(db, product):
+    variant = product.variants[0]
+    variant.national_shipping_operation = True
+    db.session.flush()
+    return variant
+
+
+def test_unselected_variant_publishes_without_origin_evidence(db):
+    product, _ = _prepared(db)
+    # nenhuma variante selecionada: o gate de origem não participa.
+    decision = evaluate_publication(product)
+    assert decision.allowed is True
+    assert not [r for r in decision.reasons if r.startswith("national_origin")]
+
+
+def test_national_selected_without_origin_never_publishes(db):
+    product, _ = _prepared(db)
+    _select_national(db, product)
+    _assert_not_published(product, ["national_origin_unproven"])
+
+
+def test_national_foreign_origin_never_publishes(db):
+    from loja.services.shipping_origin import record_manual_confirmation
+
+    product, supplier_product = _prepared(db)
+    _select_national(db, product)
+    record_manual_confirmation(
+        supplier_product_id=supplier_product.id,
+        origin="foreign",
+        evidence_ref="PROVA-EXTERIOR-1",
+        covers_all=True,
+    )
+    db.session.flush()
+    _assert_not_published(product, ["national_origin_foreign"])
+
+
+def test_national_conflict_never_publishes(db):
+    from loja.services.shipping_origin import (
+        record_api_observation,
+        record_manual_confirmation,
+    )
+
+    product, supplier_product = _prepared(db)
+    _select_national(db, product)
+    record_manual_confirmation(
+        supplier_product_id=supplier_product.id,
+        origin="brazil",
+        evidence_ref="PROVA-BR-1",
+        covers_all=True,
+    )
+    record_api_observation(
+        supplier_product_id=supplier_product.id,
+        origin="foreign",
+        covers_all=True,
+    )
+    db.session.flush()
+    _assert_not_published(product, ["national_origin_conflict"])
+
+
+def test_national_with_brazil_evidence_publishes(db):
+    from loja.services.shipping_origin import record_manual_confirmation
+
+    product, supplier_product = _prepared(db)
+    _select_national(db, product)
+    record_manual_confirmation(
+        supplier_product_id=supplier_product.id,
+        origin="brazil",
+        evidence_ref="PROVA-BR-1",
+        covers_all=True,
+    )
+    db.session.flush()
+
+    decision = evaluate_publication(product)
+    assert decision.allowed is True, decision.reasons
+    publish_product(product)
+    db.session.commit()
+    db.session.refresh(product)
+    assert product.is_draft is False
+    assert product.is_active is True
+
+
+def test_national_gate_never_deactivates_published_product(db):
+    """Seleção nova sem evidência bloqueia PUBLICAR, nunca despublica."""
+    product, _ = _prepared(db, is_active=False, is_draft=True)
+    publish_product(product)
+    db.session.commit()
+    db.session.refresh(product)
+    assert product.is_active is True
+
+    _select_national(db, product)
+    db.session.flush()
+
+    decision = evaluate_publication(product)
+    assert decision.allowed is False
+    assert "national_origin_unproven" in decision.reasons
+
+    # Avaliar/reavaliar não mexe no estado de venda do produto.
+    db.session.refresh(product)
+    assert product.is_active is True
+    assert product.is_draft is False
+

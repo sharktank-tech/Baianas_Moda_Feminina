@@ -20,6 +20,13 @@ Códigos estáveis de bloqueio (NUNCA usar mensagens livres como lógica):
     sale_price_invalid      -> Product.price NULL ou <= 0
     margin_below_target     -> preço abaixo do mínimo para a margem alvo
     no_sellable_variant     -> nenhuma variante do fornecedor ATIVO com estoque
+    national_origin_unproven -> variante selecionada sem origem comprovada
+    national_origin_foreign  -> variante selecionada com envio exterior
+    national_origin_conflict -> origem manual divergente da observação da API
+
+A origem de envio é o único requisito NOVO da publicação (Etapa 1): variante
+ativa com ``national_shipping_operation`` precisa ter evidência de origem BR.
+Avaliar NÃO despublica nada que já esteja à venda — somente impede publicar.
 """
 
 from __future__ import annotations
@@ -191,6 +198,15 @@ def evaluate_publication(product: Product) -> PublicationDecision:
         )
     if not has_sellable:
         reasons.append("no_sellable_variant")
+
+    # Operação nacional (Etapa 1): variante ativa selecionada precisa de
+    # origem de envio comprovada como BR. Nunca despublica: este módulo só
+    # decide se PUBLICAR é permitido.
+    from .shipping_origin import national_operation_reasons
+
+    for origin_reason in national_operation_reasons(product):
+        if origin_reason not in reasons:
+            reasons.append(origin_reason)
 
     return PublicationDecision(allowed=not reasons, reasons=reasons)
 

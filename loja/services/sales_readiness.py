@@ -29,7 +29,10 @@ Mapa de campos canônicos utilizados (conferidos em modelos/migrations):
   vale apenas para o cenário de referência, nunca para qualquer endereço.
 - origem: mesma semântica de ``classify_line`` (aliexpress / domestic /
   unknown); estoque próprio exige origem 'own' comprovada via
-  ``resolve_group_origin``.
+  ``resolve_group_origin``. Operação nacional (AliExpress) exige origem de
+  envio por variante com evidência (``loja.services.shipping_origin``):
+  variante ativa selecionada sem evidência, exterior ou conflito manual ×
+  API bloqueiam; variante não selecionada nunca bloqueia por este recurso.
 
 Estados: PRONTO (tudo comprovado), REVISÃO (sem falha definitiva, falta
 evidência operacional), BLOQUEADO (inconsistência, dado inválido ou risco
@@ -80,6 +83,12 @@ REASON_SEVERITY = {
     "shipping_quote_expired": BLOCKING,
     "economics_incomplete": BLOCKING,
     "negative_margin": BLOCKING,
+    # Operação nacional (Etapa 1 AliExpress): só variante ativa SELECIONADA
+    # (national_shipping_operation) entra aqui. Catálogo internacional não
+    # selecionado nunca bloqueia; ausência de evidência nunca vira PRONTO.
+    "national_origin_unproven": BLOCKING,
+    "national_origin_foreign": BLOCKING,
+    "national_origin_conflict": BLOCKING,
     "manual_fulfillment_required": INFO,
 }
 
@@ -104,6 +113,15 @@ REASON_LABELS = {
     "shipping_quote_expired": "Cotação de frete vencida",
     "economics_incomplete": "Economia unitária incompleta",
     "negative_margin": "Margem negativa (prejuízo)",
+    "national_origin_unproven": (
+        "Operação nacional selecionada sem origem de envio comprovada"
+    ),
+    "national_origin_foreign": (
+        "Variante selecionada com origem de envio no exterior"
+    ),
+    "national_origin_conflict": (
+        "Origem divergente entre confirmação manual e observação da API"
+    ),
     "manual_fulfillment_required": "Tratamento manual obrigatório após pagamento",
 }
 
@@ -416,6 +434,14 @@ def evaluate_product_readiness(
             stock = 0
         if stock <= 0:
             _add("no_stock")
+
+    # ── Operação nacional (Etapa 1 AliExpress) ──
+    # Só variantes ativas SELECIONADAS participam; a seleção sem evidência de
+    # origem (ou com origem exterior/conflito) é BLOQUEIO, nunca PRONTO.
+    from loja.services.shipping_origin import national_operation_reasons
+
+    for code in national_operation_reasons(product):
+        _add(code)
 
     # ── Custo/economia (serviço canônico, sem fórmulas duplicadas) ──
     proven_cost = None

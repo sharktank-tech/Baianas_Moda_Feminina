@@ -122,6 +122,10 @@ REQUIRED_COLUMNS = {
     },
     # product_variants (atributos brutos do SKU AliExpress)
     ("product_variants", "attributes"): {"type": "jsonb", "nullable": True},
+    # product_variants (seleção de operação nacional, Etapa 1 AliExpress)
+    ("product_variants", "national_shipping_operation"): {
+        "type": "boolean", "nullable": False, "default": "FALSE",
+    },
     # products (dropshipping / sincronização)
     ("products", "external_id"): {"type": "string", "length": 64, "nullable": True},
     ("products", "source"): {

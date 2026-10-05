@@ -1093,3 +1093,129 @@ def test_readiness_requires_both_payment_scenarios(db, full_policy, monkeypatch,
         assert 'economics_incomplete' in result.reasons
     elif installment == '60':
         assert 'negative_margin' in result.reasons
+
+
+# ── Operação nacional: origem de envio com evidência (Etapa 1) ───────────
+#
+# Só variante ativa SELECIONADA participa do gate. Sem seleção, o produto
+# continua PRONTO mesmo sem origem comprovada (catálogo internacional comum
+# nunca bloqueia por este recurso).
+
+def _origin_variant(db, product, link, *, sku, selected=True):
+    variant = _variant(db, product, link)
+    variant.supplier_sku_id = sku
+    variant.national_shipping_operation = selected
+    db.session.flush()
+    return variant
+
+
+def _aliexpress_ready(db):
+    product = _product(db, source="aliexpress")
+    supplier = _supplier(db, channel="aliexpress", seller_id="SELLER-1")
+    link = _link(db, product, supplier)
+    return product, link
+
+
+def _confirm_origin(db, link, origin, **kwargs):
+    from loja.services.shipping_origin import record_manual_confirmation
+
+    row = record_manual_confirmation(
+        supplier_product_id=link.id,
+        origin=origin,
+        evidence_ref=kwargs.pop("evidence_ref", "PROVA-ORIGEM-1"),
+        now=FROZEN_NOW,
+        **kwargs,
+    )
+    db.session.commit()
+    return row
+
+
+def test_national_selected_without_origin_blocks(db, full_policy):
+    from loja.services import sales_readiness as sr
+    from loja.services.shipping_origin import REASON_NATIONAL_UNPROVEN
+
+    product, link = _aliexpress_ready(db)
+    _origin_variant(db, product, link, sku="SKU-NAC-1")
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.BLOCKED
+    assert REASON_NATIONAL_UNPROVEN in result.reasons
+
+
+def test_national_selected_with_brazil_origin_stays_pronto(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product, link = _aliexpress_ready(db)
+    _origin_variant(db, product, link, sku="SKU-NAC-1")
+    _confirm_origin(db, link, "brazil", sku_id="SKU-NAC-1")
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.READY
+
+
+def test_national_not_selected_never_blocks_by_origin(db, full_policy):
+    from loja.services import sales_readiness as sr
+
+    product, link = _aliexpress_ready(db)
+    _origin_variant(db, product, link, sku="SKU-INT-1", selected=False)
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.READY
+    assert not any(code.startswith("national_origin") for code in result.reasons)
+
+
+def test_national_foreign_origin_blocks(db, full_policy):
+    from loja.services import sales_readiness as sr
+    from loja.services.shipping_origin import REASON_NATIONAL_FOREIGN
+
+    product, link = _aliexpress_ready(db)
+    _origin_variant(db, product, link, sku="SKU-NAC-1")
+    _confirm_origin(db, link, "foreign", sku_id="SKU-NAC-1")
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.BLOCKED
+    assert REASON_NATIONAL_FOREIGN in result.reasons
+
+
+def test_national_conflict_blocks(db, full_policy):
+    from loja.services import sales_readiness as sr
+    from loja.services.shipping_origin import (
+        REASON_NATIONAL_CONFLICT,
+        record_api_observation,
+    )
+
+    product, link = _aliexpress_ready(db)
+    _origin_variant(db, product, link, sku="SKU-NAC-1")
+    _confirm_origin(db, link, "brazil", sku_id="SKU-NAC-1")
+    record_api_observation(
+        supplier_product_id=link.id,
+        origin="foreign",
+        sku_id="SKU-NAC-1",
+        now=FROZEN_NOW,
+    )
+    db.session.commit()
+
+    result = _evaluate(product, fresh_quotes=_fresh(link.id))
+
+    assert result.state == sr.BLOCKED
+    assert REASON_NATIONAL_CONFLICT in result.reasons
+
+
+def test_national_reason_labels_are_present():
+    from loja.services.sales_readiness import (
+        BLOCKING,
+        REASON_LABELS,
+        REASON_SEVERITY,
+    )
+
+    for code in (
+        "national_origin_unproven",
+        "national_origin_foreign",
+        "national_origin_conflict",
+    ):
+        assert REASON_SEVERITY[code] == BLOCKING
+        assert REASON_LABELS[code].strip()
