@@ -8,9 +8,23 @@
   POST /admin/integrations/aliexpress/rascunho/<product_id>/frete -> frete manual
   POST /admin/integrations/aliexpress/publicado/<product_id>/frete -> renovação
        (GET .../publicado/<product_id>/frete -> formulário de renovação)
- POST /admin/integrations/aliexpress/rascunho/<product_id>/margem-> precificação (serviço)
- POST /admin/integrations/aliexpress/rascunho/<product_id>/publicar -> publicação (serviço)
- POST /admin/integrations/aliexpress/encerrar                    -> limpa cookie admin
+  POST /admin/integrations/aliexpress/rascunho/<product_id>/margem-> precificação (serviço)
+  POST /admin/integrations/aliexpress/rascunho/<product_id>/publicar -> publicação (serviço)
+  POST /admin/integrations/aliexpress/rascunho/<product_id>/origem  -> origem manual + evidência
+  POST /admin/integrations/aliexpress/publicado/<product_id>/origem -> idem (publicado)
+  POST /admin/integrations/aliexpress/rascunho/<product_id>/nacional-> seleção de variantes
+  POST /admin/integrations/aliexpress/publicado/<product_id>/nacional -> idem (publicado)
+  POST /admin/integrations/aliexpress/encerrar                    -> limpa cookie admin
+
+Origem de envio (Etapa 2):
+  * Resultado de busca e detalhe NUNCA exibem selo "Brasil": só produtos já
+    importados aparecem com etiqueta de origem (chips "Origem não
+    verificada" quando não há evidência).
+  * POST .../origem grava/apaga a classificação manual COM evidence_ref
+    obrigatório, escopo XOR (uma variante ou todas) e transação única.
+  * POST .../nacional define quem participa da operação nacional; a
+    publicação continua exigindo origem Brasil comprovada por variante.
+
 
 Segurança:
   * Todas as rotas exigem @admin_required (Flask-Login) + credencial admin
@@ -43,6 +57,7 @@ from flask import (
     request,
     url_for,
 )
+from flask_login import current_user
 from sqlalchemy.orm import selectinload
 
 from loja import db
@@ -69,6 +84,18 @@ from loja.services.pricing import (
     price_dropshipping_product,
 )
 from loja.services.publication import PublicationBlocked, publish_product
+from loja.services.sales_readiness import REASON_LABELS as READINESS_REASON_LABELS
+from loja.services.shipping_origin import (
+    ShippingOriginError,
+    clear_manual_confirmation,
+    list_origin_rows,
+    national_operation_reasons,
+    record_manual_confirmation,
+    resolve_product_summary,
+    resolve_product_summaries,
+    set_national_operation,
+    summary_label,
+)
 from loja.utils.decorators import admin_required
 
 aliexpress_admin_blueprint = Blueprint(
@@ -79,6 +106,11 @@ SEARCH_LOCALE = "en_US"
 SEARCH_COUNTRY_CODE = "BR"
 SEARCH_CURRENCY = "BRL"
 SEARCH_PAGE_SIZE = 20
+
+#: Filtros administrativos de origem do catálogo importado (Etapa 2).
+ORIGIN_FILTERS = ("brazil", "foreign", "unknown", "mixed", "conflict")
+#: Teto de produtos importados listados por chamada (painel, sem full scan).
+IMPORTED_LIMIT = 50
 
 
 @aliexpress_admin_blueprint.context_processor
@@ -570,6 +602,254 @@ def _load_published(product_id: str) -> Optional[Product]:
 
 
 # --------------------------------------------------------------------------
+# origem de envio / operação nacional (Etapa 2)
+# --------------------------------------------------------------------------
+
+#: Mensagens estáveis de rejeição (o serviço devolve um código, nunca texto).
+ORIGIN_ERROR_MESSAGES = {
+    "origin_required": "Informe a origem do envio: Brasil ou exterior.",
+    "origin_invalid": "Origem inválida: use Brasil ou exterior.",
+    "origin_country_invalid": "País inválido: informe 2 letras (ex: BR, CN).",
+    "evidence_ref_required": (
+        "Informe a referência da evidência. Obrigatória para confirmar origem."
+    ),
+    "evidence_ref_too_long": (
+        "Referência da evidência muito longa (máx. 200 caracteres)."
+    ),
+    "scope_required": "Informe o escopo: uma variante ou todas.",
+    "scope_invalid": "Escopo inválido (variante não pertence a este produto).",
+    "variant_without_supplier_sku": (
+        "Esta variante não tem SKU do fornecedor: use a cobertura "
+        "total (todas as variantes)."
+    ),
+}
+
+
+def _origin_error_message(code: str) -> str:
+    return ORIGIN_ERROR_MESSAGES.get(code, "Dados de origem inválidos.")
+
+
+def _parse_origin_scope(product):
+    """Escopo XOR do formulário. Retorna (sku_id, covers_all, erro|None)."""
+    raw = (request.form.get("origin_scope") or "").strip()
+    if not raw:
+        return None, False, "scope_required"
+    if raw == "all":
+        return None, True, None
+    variants = {
+        str(variant.id): variant
+        for variant in (getattr(product, "variants", None) or [])
+    }
+    variant = variants.get(raw)
+    if variant is None:
+        return None, False, "scope_invalid"
+    sku_id = getattr(variant, "supplier_sku_id", None)
+    if not sku_id:
+        return None, False, "variant_without_supplier_sku"
+    return str(sku_id), False, None
+
+
+def _origin_context(product, supplier_product):
+    """Contexto de origem das páginas de rascunho/publicado (uma consulta)."""
+    summary = resolve_product_summary(product)
+    return {
+        "origin_summary": summary,
+        "origin_display": summary_label(summary.label),
+        "origin_reason_labels": [
+            READINESS_REASON_LABELS.get(code, code)
+            for code in national_operation_reasons(product)
+        ],
+        "origin_rows": list_origin_rows(
+            supplier_product.id if supplier_product is not None else None
+        ),
+    }
+
+
+def _back_to(back_endpoint: str, product_id: str):
+    return redirect(url_for(back_endpoint, product_id=product_id))
+
+
+def _apply_origin_update(product, supplier_product, *, back_endpoint,
+                         product_id):
+    """Grava/apaga a classificação manual de origem (Etapa 2).
+
+    Valida tudo ANTES de mutar; evidência é obrigatória para salvar; a
+    operação inteira acontece em uma transação com commit único. Nenhuma
+    chamada de fornecedor e nenhum valor presumido.
+    """
+    action = (request.form.get("origin_action") or "").strip().lower()
+    sku_id, covers_all, scope_error = _parse_origin_scope(product)
+    if scope_error is not None:
+        flash(_origin_error_message(scope_error), "warning")
+        return _back_to(back_endpoint, product_id)
+    if action not in ("save", "clear"):
+        flash("Ação de origem inválida.", "warning")
+        return _back_to(back_endpoint, product_id)
+
+    scope_label = "all" if covers_all else "sku"
+    try:
+        if action == "clear":
+            cleared = clear_manual_confirmation(
+                supplier_product_id=supplier_product.id,
+                sku_id=sku_id,
+                covers_all=covers_all,
+            )
+            db.session.commit()
+        else:
+            record_manual_confirmation(
+                supplier_product_id=supplier_product.id,
+                origin=request.form.get("origin_kind"),
+                evidence_ref=request.form.get("origin_evidence_ref"),
+                sku_id=sku_id,
+                covers_all=covers_all,
+                origin_country=request.form.get("origin_country"),
+                user_id=(
+                    current_user.id
+                    if getattr(current_user, "is_authenticated", False)
+                    else None
+                ),
+            )
+            db.session.commit()
+            cleared = None
+    except ShippingOriginError as exc:
+        db.session.rollback()
+        code = exc.args[0] if exc.args else "unknown"
+        current_app.logger.info("origem admin: rejected reason=%s", code)
+        flash(_origin_error_message(str(code)), "warning")
+        return _back_to(back_endpoint, product_id)
+    except Exception:
+        db.session.rollback()
+        current_app.logger.warning("origem admin: falha ao salvar", exc_info=True)
+        flash("Erro ao salvar a origem de envio. Nada foi alterado.", "danger")
+        return _back_to(back_endpoint, product_id)
+
+    current_app.logger.info(
+        "origem admin: action=%s scope=%s", action, scope_label
+    )
+    if action == "clear":
+        flash(
+            "Confirmação manual de origem removida."
+            if cleared
+            else "Nenhuma confirmação manual neste escopo.",
+            "info",
+        )
+    else:
+        flash(
+            "Origem de envio registrada com evidência. A publicação só "
+            "libera a operação nacional com origem Brasil comprovada.",
+            "success",
+        )
+    return _back_to(back_endpoint, product_id)
+
+
+def _apply_national_update(product, *, back_endpoint, product_id):
+    """Seleção explícita de variantes da operação nacional (Etapa 2)."""
+    selected_ids = request.form.getlist("national_variant")
+    try:
+        selected = set_national_operation(product, selected_ids)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.warning(
+            "nacional admin: falha ao salvar", exc_info=True
+        )
+        flash("Erro ao salvar a seleção de operação nacional.", "danger")
+        return _back_to(back_endpoint, product_id)
+    current_app.logger.info("nacional admin: selected=%d", selected)
+    flash(
+        "%d variante(s) marcada(s) para a operação nacional. Cada uma "
+        "precisa de origem Brasil comprovada para publicar." % selected,
+        "success",
+    )
+    return _back_to(back_endpoint, product_id)
+
+
+def _imported_origin_rows(origin_filter=None):
+    """Produtos AliExpress já importados + resumo honesto de origem."""
+    products = (
+        Product.query.options(
+            selectinload(Product.variants),
+            selectinload(Product.supplier_links),
+        )
+        .filter_by(source="aliexpress")
+        .order_by(Product.name.asc(), Product.id.asc())
+        .limit(IMPORTED_LIMIT)
+        .all()
+    )
+    summaries = resolve_product_summaries(products)
+    rows = []
+    for product in products:
+        summary = summaries.get(str(product.id))
+        if summary is None:
+            continue
+        if origin_filter and summary.label != origin_filter:
+            continue
+        variants = [
+            variant
+            for variant in (product.variants or [])
+            if getattr(variant, "is_active", False)
+        ]
+        selected = [
+            variant
+            for variant in variants
+            if getattr(variant, "national_shipping_operation", False)
+        ]
+        published = bool(product.is_active) and not product.is_draft
+        if published:
+            href = url_for(
+                "aliexpress_admin.publicado_frete_form",
+                product_id=product.external_id or "",
+            )
+            state = "Publicado"
+        else:
+            href = url_for(
+                "aliexpress_admin.rascunho",
+                product_id=product.external_id or "",
+            )
+            state = "Rascunho"
+        rows.append(
+            {
+                "product": product,
+                "label": summary.label,
+                "text": summary_label(summary.label),
+                "selected": len(selected),
+                "total": len(variants),
+                "href": href,
+                "state": state,
+            }
+        )
+    return rows
+
+
+def _origin_info_for_ids(external_ids):
+    """Só produtos JÁ IMPORTADOS entram aqui: o resto nunca ganha selo."""
+    ids = {str(value) for value in external_ids if value}
+    if not ids:
+        return {}
+    products = (
+        Product.query.options(
+            selectinload(Product.variants),
+            selectinload(Product.supplier_links),
+        )
+        .filter(Product.source == "aliexpress", Product.external_id.in_(ids))
+        .all()
+    )
+    if not products:
+        return {}
+    summaries = resolve_product_summaries(products)
+    info = {}
+    for product in products:
+        summary = summaries.get(str(product.id))
+        if summary is None or not product.external_id:
+            continue
+        info[str(product.external_id)] = {
+            "label": summary.label,
+            "text": summary_label(summary.label),
+        }
+    return info
+
+
+# --------------------------------------------------------------------------
 # rotas
 # --------------------------------------------------------------------------
 
@@ -579,11 +859,17 @@ def index():
     payload, err = _resolve_ali_session()
     connected = err is None and payload is not None
     session_expired = err == "expired_invalid"
+    origin_filter = (request.args.get("origem") or "").strip().lower()
+    if origin_filter not in ORIGIN_FILTERS:
+        origin_filter = None
     return render_template(
         "admin/aliexpress/catalogo.html",
         connected=connected,
         session_expired=session_expired,
         results=None,
+        imported=_imported_origin_rows(origin_filter),
+        origin_filter=origin_filter,
+        origin_filters=ORIGIN_FILTERS,
     )
 
 
@@ -614,13 +900,26 @@ def buscar():
             connected=True,
             session_expired=False,
             results=None,
+            imported=_imported_origin_rows(),
+            origin_filter=None,
+            origin_filters=ORIGIN_FILTERS,
         )
 
+    # Resultado de busca NUNCA nasce "nacional": só produtos já importados
+    # exibem a etiqueta de origem (com evidência) na listagem.
+    origin_info = _origin_info_for_ids(
+        (product.item_id or product.external_id)
+        for product in (getattr(results, "products", None) or [])
+    )
     return render_template(
         "admin/aliexpress/catalogo.html",
         connected=True,
         session_expired=False,
         results=results,
+        imported=_imported_origin_rows(),
+        origin_filter=None,
+        origin_filters=ORIGIN_FILTERS,
+        origin_info=origin_info,
     )
 
 
@@ -638,6 +937,8 @@ def detalhe(product_id: str):
     return render_template(
         "admin/aliexpress/detalhe.html",
         detail=detail,
+        # Detalhe é anterior à importação: sem importação não há etiqueta.
+        origin_info=_origin_info_for_ids([product_id]),
     )
 
 
@@ -687,6 +988,7 @@ def rascunho(product_id: str):
         "admin/aliexpress/rascunho.html",
         product=product,
         supplier_product=supplier_product,
+        **_origin_context(product, supplier_product),
     )
 
 
@@ -744,6 +1046,7 @@ def publicado_frete_form(product_id: str):
         product=product,
         supplier_product=supplier_product,
         live_evidence=live_evidence,
+        **_origin_context(product, supplier_product),
     )
 
 
@@ -761,6 +1064,80 @@ def publicado_frete(product_id: str):
         back_endpoint="aliexpress_admin.publicado_frete_form",
         product_id=product_id,
         published=True,
+    )
+
+
+# ── Origem de envio + seleção de operação nacional (Etapa 2) ─────────────
+
+@aliexpress_admin_blueprint.route("/rascunho/<product_id>/origem", methods=["POST"])
+@admin_required
+@ali_session_required
+def rascunho_origem(product_id: str):
+    """Classificação manual de origem do envio de um RASCUNHO."""
+    product = _load_draft(product_id)
+    supplier_product = _active_supplier_product(product)
+    if product is None or supplier_product is None:
+        flash("Rascunho/supplier não encontrado.", "warning")
+        return redirect(url_for("aliexpress_admin.index"))
+    return _apply_origin_update(
+        product,
+        supplier_product,
+        back_endpoint="aliexpress_admin.rascunho",
+        product_id=product_id,
+    )
+
+
+@aliexpress_admin_blueprint.route("/publicado/<product_id>/origem", methods=["POST"])
+@admin_required
+@ali_session_required
+def publicado_origem(product_id: str):
+    """Classificação manual de origem do envio de um PUBLICADO.
+
+    Não mexe em preço, custo, frete, publicação ou estoque: a origem é um
+    fato operacional com evidência, não uma decisão de precificação.
+    """
+    product = _load_published(product_id)
+    supplier_product = _active_supplier_product(product)
+    if product is None or supplier_product is None:
+        flash("Produto publicado não encontrado.", "warning")
+        return redirect(url_for("aliexpress_admin.index"))
+    return _apply_origin_update(
+        product,
+        supplier_product,
+        back_endpoint="aliexpress_admin.publicado_frete_form",
+        product_id=product_id,
+    )
+
+
+@aliexpress_admin_blueprint.route("/rascunho/<product_id>/nacional", methods=["POST"])
+@admin_required
+@ali_session_required
+def rascunho_nacional(product_id: str):
+    """Seleção de variantes da operação nacional de um RASCUNHO."""
+    product = _load_draft(product_id)
+    if product is None:
+        flash("Rascunho não encontrado.", "warning")
+        return redirect(url_for("aliexpress_admin.index"))
+    return _apply_national_update(
+        product,
+        back_endpoint="aliexpress_admin.rascunho",
+        product_id=product_id,
+    )
+
+
+@aliexpress_admin_blueprint.route("/publicado/<product_id>/nacional", methods=["POST"])
+@admin_required
+@ali_session_required
+def publicado_nacional(product_id: str):
+    """Seleção de variantes da operação nacional de um PUBLICADO."""
+    product = _load_published(product_id)
+    if product is None:
+        flash("Produto publicado não encontrado.", "warning")
+        return redirect(url_for("aliexpress_admin.index"))
+    return _apply_national_update(
+        product,
+        back_endpoint="aliexpress_admin.publicado_frete_form",
+        product_id=product_id,
     )
 
 

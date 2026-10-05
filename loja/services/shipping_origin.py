@@ -265,21 +265,31 @@ def _relevant_variants(product) -> List:
     return active or variants
 
 
-def resolve_product_summary(product) -> ProductOriginSummary:
-    """Resumo honesto da origem do produto (uma consulta por chamada)."""
+def _supplier_ids_for(product) -> set:
+    """Vínculos de fornecedor cujas linhas de origem interessam ao produto."""
     variants = _relevant_variants(product)
-    supplier_product_ids = {
-        getattr(v, "supplier_product_id", None) for v in variants
-    } - {None}
-
-    # Produto sem variantes: só a cobertura total do vínculo ativo serve.
+    ids = {getattr(v, "supplier_product_id", None) for v in variants} - {None}
     if not variants:
+        # Produto sem variantes: só a cobertura total do vínculo ativo serve.
         for link in getattr(product, "supplier_links", None) or []:
             if getattr(link, "is_active", False):
-                supplier_product_ids.add(link.id)
+                ids.add(link.id)
                 break
+    return ids
 
-    origin_rows = load_origin_rows(supplier_product_ids)
+
+def resolve_product_summary(
+    product, origin_rows: Optional[Dict[str, List]] = None
+) -> ProductOriginSummary:
+    """Resumo honesto da origem do produto.
+
+    `origin_rows` opcional evita consulta quando o chamador já carregou as
+    linhas de vários produtos (lote administrativo).
+    """
+    variants = _relevant_variants(product)
+    supplier_product_ids = _supplier_ids_for(product)
+    if origin_rows is None:
+        origin_rows = load_origin_rows(supplier_product_ids)
 
     resolutions: List[OriginResolution] = []
     for variant in variants:
@@ -315,6 +325,35 @@ def resolve_product_summary(product) -> ProductOriginSummary:
         foreign=sum(1 for o in known if o == ORIGIN_FOREIGN),
         unknown=unknown,
         conflicts=conflicts,
+    )
+
+
+def resolve_product_summaries(products) -> Dict[str, ProductOriginSummary]:
+    """Resumo de vários produtos em UMA consulta de origem (lista admin)."""
+    products = list(products or ())
+    supplier_product_ids = set()
+    for product in products:
+        supplier_product_ids |= _supplier_ids_for(product)
+    origin_rows = load_origin_rows(supplier_product_ids)
+    return {
+        str(product.id): resolve_product_summary(product, origin_rows)
+        for product in products
+    }
+
+
+def list_origin_rows(supplier_product_id) -> List:
+    """Linhas de origem de um vínculo, na ordem estável de exibição."""
+    if not supplier_product_id:
+        return []
+    rows = SupplierSkuShippingOrigin.query.filter_by(
+        supplier_product_id=supplier_product_id
+    ).all()
+    return sorted(
+        rows,
+        key=lambda row: (
+            0 if row.covers_all_variants else 1,
+            str(row.supplier_sku_id or ""),
+        ),
     )
 
 
@@ -564,6 +603,8 @@ __all__ = [
     "load_origin_rows",
     "resolve_variant_origin",
     "resolve_product_summary",
+    "resolve_product_summaries",
+    "list_origin_rows",
     "selected_national_variants",
     "national_operation_reasons",
     "record_manual_confirmation",

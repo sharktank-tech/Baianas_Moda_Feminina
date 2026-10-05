@@ -28,6 +28,11 @@ from loja.modules.models import (
     ProductVariant,
     Supplier,
     SupplierProduct,
+    SupplierSkuShippingOrigin,
+)
+from loja.services.shipping_origin import (
+    national_operation_reasons,
+    resolve_product_summary,
 )
 
 ADMIN_MODULE = "loja.views.aliexpress_admin_routes"
@@ -149,6 +154,9 @@ def _clean_aliexpress_data(db):
     supplier_product_ids = db.session.query(SupplierProduct.id).filter(
         SupplierProduct.supplier_id.in_(supplier_ids)
     )
+    # SQLite roda sem FK/cascade: as evidências de origem precisam de limpeza
+    # explícita antes de apagar os vínculos de fornecedor.
+    SupplierSkuShippingOrigin.query.delete(synchronize_session=False)
     ProductSync.query.filter(ProductSync.product_id.in_(product_ids)).delete(
         synchronize_session=False
     )
@@ -336,6 +344,45 @@ def _supplier_product_from_db(db, product_id=PRODUCT_ID):
     )
 
 
+def _origem(client, product_id=PRODUCT_ID, *, action="save", scope="all",
+            kind="brazil", evidence="ORIGEM-TEST-001", country="BR",
+            follow=True, extra=None, prefix="rascunho"):
+    data = {
+        "origin_action": action,
+        "origin_scope": scope,
+        "origin_kind": kind,
+        "origin_evidence_ref": evidence,
+        "origin_country": country,
+    }
+    if extra:
+        data.update(extra)
+    return client.post(
+        f"{PREFIX}/{prefix}/{product_id}/origem",
+        data=data,
+        follow_redirects=follow,
+    )
+
+
+def _nacional(client, product_id=PRODUCT_ID, *, selected=(), follow=True,
+              prefix="rascunho"):
+    return client.post(
+        f"{PREFIX}/{prefix}/{product_id}/nacional",
+        data={"national_variant": list(selected)},
+        follow_redirects=follow,
+    )
+
+
+def _origin_rows(db, product_id=PRODUCT_ID):
+    product = _draft_from_db(product_id)
+    if product is None:
+        return []
+    return (
+        db.session.query(SupplierSkuShippingOrigin)
+        .filter_by(supplier_product_id=_supplier_product_from_db(db, product_id).id)
+        .all()
+    )
+
+
 # --------------------------------------------------------------------------
 # 1) Admin obrigatório
 # --------------------------------------------------------------------------
@@ -369,6 +416,10 @@ def test_regular_user_denied(client, regular_user, login):
         ("POST", f"{PREFIX}/rascunho/{PRODUCT_ID}/frete"),
         ("POST", f"{PREFIX}/rascunho/{PRODUCT_ID}/margem"),
         ("POST", f"{PREFIX}/rascunho/{PRODUCT_ID}/publicar"),
+        ("POST", f"{PREFIX}/rascunho/{PRODUCT_ID}/origem"),
+        ("POST", f"{PREFIX}/publicado/{PRODUCT_ID}/origem"),
+        ("POST", f"{PREFIX}/rascunho/{PRODUCT_ID}/nacional"),
+        ("POST", f"{PREFIX}/publicado/{PRODUCT_ID}/nacional"),
         ("POST", f"{PREFIX}/encerrar"),
     ],
 )
@@ -1376,3 +1427,352 @@ def test_purchase_tax_storage_failure_rolls_back_every_amount(admin_catalog, db,
     assert sp.cost == original_cost
     assert sp.import_duty == 0 and sp.icms == 0
     assert _draft_from_db().price == original_price
+
+
+# --------------------------------------------------------------------------
+# 10) Etapa 2: origem de envio com evidência (rotas administrativas)
+# --------------------------------------------------------------------------
+
+def test_origem_rascunho_grava_com_evidencia(admin_catalog, db, admin_user):
+    _import(admin_catalog)
+    resp = _origem(admin_catalog)
+    body = resp.get_data(as_text=True)
+    assert "Origem de envio registrada com evidência." in body
+    assert "Origem Brasil confirmada" in body
+
+    rows = _origin_rows(db)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.covers_all_variants is True
+    assert row.supplier_sku_id is None
+    assert row.manual_origin == "brazil"
+    assert row.evidence_ref == "ORIGEM-TEST-001"
+    assert row.origin_country == "BR"
+    assert row.confirmed_at is not None
+    assert row.confirmed_by_user_id == admin_user.id
+    # Nada presumido pela API: a coluna observada segue vazia.
+    assert row.api_origin is None and row.api_observed_at is None
+
+    product = _draft_from_db()
+    summary = resolve_product_summary(product)
+    assert summary.label == "brazil"
+    assert summary.is_national is True
+
+    # Etapa 2 não pode gerar nenhuma chamada de frete.
+    assert freight_calls() == []
+
+
+def test_origem_sem_evidencia_e_rejeitado(admin_catalog, db):
+    _import(admin_catalog)
+    resp = _origem(admin_catalog, evidence="   ")
+    assert "Informe a referência da evidência." in resp.get_data(as_text=True)
+
+    assert _origin_rows(db) == []
+    assert resolve_product_summary(_draft_from_db()).label == "unknown"
+
+
+@pytest.mark.parametrize(
+    "kwargs,message",
+    [
+        ({"scope": ""}, "Informe o escopo:"),
+        ({"scope": "nao-existe"}, "Escopo inválido"),
+        ({"kind": ""}, "Informe a origem do envio:"),
+        ({"kind": "martiano"}, "Origem inválida"),
+        ({"country": "BRA"}, "País inválido"),
+        ({"action": "destruir"}, "Ação de origem inválida."),
+        ({"evidence": "x" * 201}, "Referência da evidência muito longa"),
+    ],
+)
+def test_origem_valida_entrada_sem_persistir(admin_catalog, db, kwargs, message):
+    _import(admin_catalog)
+    resp = _origem(admin_catalog, **kwargs)
+    assert message in resp.get_data(as_text=True)
+    assert _origin_rows(db) == []
+    assert resolve_product_summary(_draft_from_db()).label == "unknown"
+    assert freight_calls() == []
+
+
+def test_origem_limpar_confirmação_remove_linha(admin_catalog, db):
+    _import(admin_catalog)
+    _origem(admin_catalog)
+    assert len(_origin_rows(db)) == 1
+
+    resp = _origem(admin_catalog, action="clear", follow=True)
+    assert "Confirmação manual de origem removida." in resp.get_data(as_text=True)
+    assert _origin_rows(db) == []
+    assert resolve_product_summary(_draft_from_db()).label == "unknown"
+
+    # Limpar de novo é idempotente e não quebra a página.
+    resp = _origem(admin_catalog, action="clear")
+    assert "Nenhuma confirmação manual neste escopo." in resp.get_data(as_text=True)
+
+
+def test_origem_escopo_por_variante_nao_vira_nacional_parcial(admin_catalog, db):
+    # 2 SKUs: BR comprovado em UM + desconhecido => "mixed", nunca nacional.
+    FakeAliExpressClient.details[MULTI_ID] = make_multi_detail(
+        ["27.59", "39.09"], [5, 3]
+    )
+    _import(admin_catalog, MULTI_ID)
+    product = _draft_from_db(MULTI_ID)
+    variants = sorted(product.variants, key=lambda v: str(v.supplier_sku_id))
+    assert len(variants) == 2
+
+    resp = _origem(admin_catalog, MULTI_ID, scope=variants[0].id)
+    assert "Origem de envio registrada com evidência." in resp.get_data(as_text=True)
+
+    summary = resolve_product_summary(_draft_from_db(MULTI_ID))
+    assert summary.total == 2
+    assert summary.brazil == 1
+    assert summary.unknown == 1
+    assert summary.label == "mixed"
+    assert summary.is_national is False
+
+    rows = _origin_rows(db, MULTI_ID)
+    assert len(rows) == 1
+    assert rows[0].supplier_sku_id == str(variants[0].supplier_sku_id)
+    assert rows[0].covers_all_variants is False
+
+    # Comprovando a segunda variante o produto fica integralmente BR.
+    _origem(admin_catalog, MULTI_ID, scope=variants[1].id, evidence="ORIGEM-002")
+    summary = resolve_product_summary(_draft_from_db(MULTI_ID))
+    assert summary.label == "brazil"
+    assert summary.brazil == 2 and summary.unknown == 0
+
+    # Precedência SKU > cobertura: limpar a cobertura total não afeta o SKU.
+    _origem(admin_catalog, MULTI_ID, action="clear", scope="all")
+    assert resolve_product_summary(_draft_from_db(MULTI_ID)).label == "brazil"
+
+
+def test_origem_escopo_de_variante_de_outro_produto(admin_catalog, db):
+    # Escopo precisa ser variante DESTE produto (escopo XOR validado na rota).
+    FakeAliExpressClient.details[MULTI_ID] = make_multi_detail(
+        ["27.59", "39.09"], [5, 3]
+    )
+    _import(admin_catalog)
+    _import(admin_catalog, MULTI_ID)
+    other = _draft_from_db(MULTI_ID).variants[0]
+
+    resp = _origem(admin_catalog, scope=other.id)
+    assert "Escopo inválido" in resp.get_data(as_text=True)
+    assert _origin_rows(db) == []
+
+
+# --------------------------------------------------------------------------
+# 11) Etapa 2: exibição honesta (busca/detalhe) + filtro de importados
+# --------------------------------------------------------------------------
+
+def test_busca_nunca_apresenta_resultado_como_nacional(admin_catalog, db):
+    resp = admin_catalog.post(f"{PREFIX}/buscar", data={"q": "vestido"})
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert "Origem não verificada" in body
+    assert "Origem Brasil confirmada" not in body
+    assert "Origem exterior confirmada" not in body
+
+
+def test_detalhe_antes_da_importacao_nao_tem_etiqueta_nacional(admin_catalog):
+    resp = admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/detalhe")
+    body = resp.get_data(as_text=True)
+    assert "Origem não verificada" in body
+    assert "Origem Brasil confirmada" not in body
+
+
+def test_detalhe_mostra_origem_confirmada_apos_importar(admin_catalog, db):
+    _import(admin_catalog)
+    _origem(admin_catalog)
+    body = admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/detalhe").get_data(
+        as_text=True
+    )
+    assert "Origem Brasil confirmada" in body
+
+
+def test_index_lista_importados_com_filtro_de_origem(admin_catalog, db):
+    _import(admin_catalog)
+
+    body = admin_catalog.get(f"{PREFIX}/?origem=foreign").get_data(as_text=True)
+    assert "Nenhum produto importado com esta origem." in body
+
+    body = admin_catalog.get(f"{PREFIX}/?origem=brazil").get_data(as_text=True)
+    assert TITLE not in body
+
+    _origem(admin_catalog)
+    body = admin_catalog.get(f"{PREFIX}/?origem=brazil").get_data(as_text=True)
+    assert TITLE in body
+    assert "Origem Brasil confirmada" in body
+
+    # Filtro desconhecido é ignorado (não filtra, não quebra a página).
+    body = admin_catalog.get(f"{PREFIX}/?origem=qualquer-coisa").get_data(
+        as_text=True
+    )
+    assert TITLE in body
+    assert freight_calls() == []
+
+
+# --------------------------------------------------------------------------
+# 12) Etapa 2: seleção de operação nacional e gate de publicação
+# --------------------------------------------------------------------------
+
+def test_selecao_nacional_por_variante(admin_catalog, db):
+    FakeAliExpressClient.details[MULTI_ID] = make_multi_detail(
+        ["27.59", "39.09"], [5, 3]
+    )
+    _import(admin_catalog, MULTI_ID)
+    product = _draft_from_db(MULTI_ID)
+    variants = sorted(product.variants, key=lambda v: str(v.supplier_sku_id))
+
+    resp = _nacional(admin_catalog, MULTI_ID, selected=[variants[1].id])
+    assert "1 variante(s) marcada(s)" in resp.get_data(as_text=True)
+
+    db.session.refresh(product)
+    flags = {v.id: v.national_shipping_operation for v in product.variants}
+    assert flags[variants[1].id] is True
+    assert flags[variants[0].id] is False
+
+    # Lista vazia limpa a seleção inteira.
+    _nacional(admin_catalog, MULTI_ID, selected=[])
+    db.session.refresh(product)
+    assert all(v.national_shipping_operation is False for v in product.variants)
+    assert freight_calls() == []
+
+
+def test_rascunho_exibe_bloqueio_de_origem_sem_comprovacao(admin_catalog, db):
+    _import(admin_catalog)
+    _nacional(admin_catalog, selected=[v.id for v in _draft_from_db().variants])
+
+    body = admin_catalog.get(f"{PREFIX}/rascunho/{PRODUCT_ID}").get_data(
+        as_text=True
+    )
+    assert "Bloqueios de operação nacional ativos:" in body
+    assert "Operação nacional selecionada sem origem de envio comprovada" in body
+
+    # Com evidência BR o bloqueio some (produto segue rascunho).
+    _origem(admin_catalog)
+    body = admin_catalog.get(f"{PREFIX}/rascunho/{PRODUCT_ID}").get_data(
+        as_text=True
+    )
+    assert "Bloqueios de operação nacional ativos:" not in body
+
+
+def test_publicacao_bloqueada_selecionada_sem_origem_comprovada(admin_catalog, db):
+    _import(admin_catalog)
+    _frete(admin_catalog)
+    _margem(admin_catalog, margin="30")
+    _nacional(admin_catalog, selected=[v.id for v in _draft_from_db().variants])
+
+    resp = _publicar(admin_catalog)
+    body = resp.get_data(as_text=True)
+    assert "Publicação bloqueada" in body
+    assert "national_origin_unproven" in body
+
+    product = _draft_from_db()
+    assert product.is_draft is True
+    assert product.is_active is False
+
+    # Evidência BR destrava a publicação.
+    _origem(admin_catalog)
+    resp = _publicar(admin_catalog)
+    assert "Produto publicado" in resp.get_data(as_text=True)
+    product = _draft_from_db()
+    assert product.is_draft is False
+    assert product.is_active is True
+    assert freight_calls() == []
+
+
+def test_publicacao_bloqueada_quando_selecionada_no_exterior(admin_catalog, db):
+    _import(admin_catalog)
+    _frete(admin_catalog)
+    _margem(admin_catalog, margin="30")
+    _origem(admin_catalog, kind="foreign", country="CN")
+    _nacional(admin_catalog, selected=[v.id for v in _draft_from_db().variants])
+
+    resp = _publicar(admin_catalog)
+    body = resp.get_data(as_text=True)
+    assert "Publicação bloqueada" in body
+    assert "national_origin_foreign" in body
+
+    product = _draft_from_db()
+    assert product.is_draft is True and product.is_active is False
+
+
+def test_publicacao_sem_selecao_nacional_nao_exige_origem(admin_catalog, db):
+    # Catálogo internacional (nada selecionado) segue publicando sem origem.
+    _import(admin_catalog)
+    _frete(admin_catalog)
+    _margem(admin_catalog, margin="30")
+    resp = _publicar(admin_catalog)
+    assert "Produto publicado" in resp.get_data(as_text=True)
+    assert _draft_from_db().is_active is True
+
+
+def test_publicado_permite_origem_e_selecao_sem_despublicar(admin_catalog, db):
+    _import(admin_catalog)
+    _frete(admin_catalog)
+    _margem(admin_catalog, margin="30")
+    _publicar(admin_catalog)
+
+    resp = _origem(admin_catalog, prefix="publicado")
+    assert "Origem de envio registrada com evidência." in resp.get_data(
+        as_text=True
+    )
+
+    product = _draft_from_db()
+    assert product.is_active is True and product.is_draft is False
+    assert len(_origin_rows(db)) == 1
+
+    # Selecionar a variante do produto já publicado NÃO despublica.
+    resp = _nacional(
+        admin_catalog, prefix="publicado",
+        selected=[v.id for v in product.variants],
+    )
+    assert "1 variante(s) marcada(s)" in resp.get_data(as_text=True)
+
+    db.session.refresh(product)
+    assert product.is_active is True and product.is_draft is False
+    # ...mas passa a exigir origem BR na próxima publicação/republicação.
+    selected = [v for v in product.variants if v.national_shipping_operation]
+    assert len(selected) == 1
+    assert national_operation_reasons(product) == []
+    assert freight_calls() == []
+
+
+def test_publicado_com_selecao_exterior_fica_bloqueado_para_republicacao(
+    admin_catalog, db
+):
+    _import(admin_catalog)
+    _frete(admin_catalog)
+    _margem(admin_catalog, margin="30")
+    _publicar(admin_catalog)
+    product = _draft_from_db()
+
+    _origem(admin_catalog, kind="foreign", prefix="publicado")
+    _nacional(admin_catalog, prefix="publicado",
+              selected=[v.id for v in product.variants])
+
+    db.session.refresh(product)
+    assert product.is_active is True  # nunca é despublicado por este recurso
+    assert national_operation_reasons(product) == ["national_origin_foreign"]
+
+
+# --------------------------------------------------------------------------
+# 13) Etapa 2: segurança (logs, sessão, chamadas de fornecedor)
+# --------------------------------------------------------------------------
+
+def test_origem_nao_registra_evidencia_nos_logs(admin_catalog, db, caplog):
+    _import(admin_catalog)
+    secret = "ORIGEM-SEGREDO-LOG-999"
+    with caplog.at_level(logging.INFO):
+        _origem(admin_catalog, evidence=secret, follow=False)
+
+    assert _origin_rows(db)[0].evidence_ref == secret
+    assert secret not in caplog.text
+    # Nenhuma credencial/token de sessão AliExpress nos logs do fluxo.
+    assert ACCESS_TOKEN not in caplog.text
+
+
+def test_origem_sem_sessao_aliexpress_redireciona(admin_catalog, db):
+    _import(admin_catalog)
+    admin_catalog.delete_cookie(admin_session.COOKIE_NAME)
+    resp = _origem(admin_catalog, follow=False)
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith(PREFIX + "/")
+    assert _origin_rows(db) == []

@@ -51,6 +51,13 @@
         </form>
     </div>
 
+    {# Etapa 2: origem de envio com evidência + seleção de operação nacional
+       (produto publicado: a seleção nova passa a bloquear republicação,
+       mas nunca despublica o que já está à venda). #}
+    {% set origin_endpoint = 'aliexpress_admin.publicado_origem' %}
+    {% set nacional_endpoint = 'aliexpress_admin.publicado_nacional' %}
+    {% include "admin/aliexpress/_origin_fields.html" %}
+
 </div>
 
 {% endblock %}
