@@ -142,9 +142,10 @@ def _indexes(engine, schema, table):
         rows = connection.execute(
             text(
                 "SELECT indexname FROM pg_indexes "
-                "WHERE table_name = :t AND indexname LIKE 'uq_shipping_origin%'"
+                "WHERE schemaname = :s AND tablename = :t "
+                "AND indexname LIKE 'uq_shipping_origin%'"
             ),
-            {"t": table},
+            {"s": schema, "t": table},
         ).all()
     return {r[0] for r in rows}
 
