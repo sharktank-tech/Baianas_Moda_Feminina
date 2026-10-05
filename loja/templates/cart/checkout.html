@@ -753,7 +753,7 @@
                             type="tel"
                             name="telefone"
                             id="telefone"
-                            value="{{ current_user.phone or (saved_address.phone if saved_address else '') }}"
+                            value="{{ current_user.phone or ((saved_address.phone or '') if saved_address else '') }}"
                             autocomplete="tel"
                             placeholder="(00) 00000-0000"
                         >
@@ -804,7 +804,7 @@
                             type="text"
                             name="complemento"
                             id="complemento"
-                            value="{{ saved_address.complement if saved_address else '' }}"
+                            value="{{ (saved_address.complement or '') if saved_address else '' }}"
                             autocomplete="address-line3"
                             placeholder="Apartamento, bloco, referência..."
                         >

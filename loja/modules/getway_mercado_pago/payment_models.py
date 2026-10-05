@@ -317,6 +317,26 @@ class Order(db.Model):
         ),
     )
 
+    @property
+    def shipping_address(self):
+        """Dict do endereço de entrega para o template do detalhe do pedido.
+
+        Os campos vivem como colunas do pedido (snapshot do checkout); o
+        template exige um mapping (``is mapping``) — antes desta property
+        o atributo era Undefined e o bloco "Entrega" nunca renderizava.
+        """
+        return {
+            "recipient_name": self.customer_name,
+            "phone": self.customer_phone,
+            "zip_code": self.zip_code,
+            "street": self.street,
+            "number": self.number,
+            "complement": self.complement,
+            "neighborhood": self.neighborhood,
+            "city": self.city,
+            "state": self.state,
+        }
+
     def __repr__(self):
         return (
             f"<Order {self.order_number} id={self.id} "
