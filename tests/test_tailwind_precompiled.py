@@ -3,7 +3,7 @@
 Mudança aprovada (opção: package.json + CSS gerado commitado):
 - remove o render/eval do ``cdn.tailwindcss.com`` (terceiro-party, era a
   única fonte de ``'unsafe-eval'`` da CSP e contribuía pro DCL);
-- gera ``loja/static/styles/tailwind.css`` versionado (Vercel sem Node);
+- gera ``public/static/styles/tailwind.css`` versionado (Vercel sem Node);
 - ``package.json`` + ``tailwind.config.js`` + ``src/tailwind.input.css``
   documentam o build (binário standalone ou npx).
 
@@ -16,7 +16,7 @@ from pathlib import Path
 
 CONFIG = Path("tailwind.config.js")
 INPUT = Path("src/tailwind.input.css")
-OUTPUT = Path("loja/static/styles/tailwind.css")
+OUTPUT = Path("public/static/styles/tailwind.css")
 PKG = Path("package.json")
 TEMPLATES = Path("loja/templates")
 

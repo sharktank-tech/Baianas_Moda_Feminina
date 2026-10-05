@@ -189,7 +189,16 @@ def create_app():
     # Werkzeug (nunca registra ?code=/&state= do callback OAuth em log).
     _harden_werkzeug_access_log()
 
-    app = Flask(__name__)
+    # /static vive em public/static (raiz do repo): a Vercel serve esses
+    # arquivos direto do filesystem/CDN antes de invocar a função — o caminho
+    # crítico de CSS/JS não depende do cold start da Lambda (plano Weblyzer).
+    # O Flask continua servindo o mesmo diretório como fallback local.
+    app = Flask(
+        __name__,
+        static_folder=os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "public", "static"
+        ),
+    )
 
     app.config.from_object('config.Config')
 

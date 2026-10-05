@@ -1,10 +1,10 @@
 {
   "name": "pollomodas",
   "private": true,
-  "description": "Tooling de build do storefront — Tailwind pré-compilado (PR P3b). O CSS gerado é versionado em loja/static/styles/tailwind.css e a Vercel NÃO precisa de Node.",
+  "description": "Tooling de build do storefront — Tailwind pré-compilado (PR P3b). O CSS gerado é versionado em public/static/styles/tailwind.css e a Vercel NÃO precisa de Node.",
   "scripts": {
-    "build:css": "tailwindcss -i ./src/tailwind.input.css -o ./loja/static/styles/tailwind.css --minify",
-    "watch:css": "tailwindcss -i ./src/tailwind.input.css -o ./loja/static/styles/tailwind.css --watch"
+    "build:css": "tailwindcss -i ./src/tailwind.input.css -o ./public/static/styles/tailwind.css --minify",
+    "watch:css": "tailwindcss -i ./src/tailwind.input.css -o ./public/static/styles/tailwind.css --watch"
   },
   "devDependencies": {
     "tailwindcss": "^3.4.17"
