@@ -126,6 +126,11 @@ REQUIRED_COLUMNS = {
     ("product_variants", "national_shipping_operation"): {
         "type": "boolean", "nullable": False, "default": "FALSE",
     },
+    # supplier_sku_shipping_origins (cobertura explícita da confirmação
+    # coletiva: só os SKUs listados são cobertos; NULL = nada coberto)
+    ("supplier_sku_shipping_origins", "covered_supplier_sku_ids"): {
+        "type": "text", "nullable": True,
+    },
     # products (dropshipping / sincronização)
     ("products", "external_id"): {"type": "string", "length": 64, "nullable": True},
     ("products", "source"): {

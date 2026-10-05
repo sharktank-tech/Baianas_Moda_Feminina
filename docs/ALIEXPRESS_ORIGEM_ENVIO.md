@@ -1,9 +1,22 @@
 # AliExpress — Origem de envio e sincronização técnica (Etapas 1–3)
 
 **Status:** implementado na branch `feature/aliexpress-origem-envio`
-(commits `0ecb9ee`, `1aea6e0`, `ef0176d`). Nenhum merge, deploy, compra,
-pedido real ou cron foi criado por este trabalho. Nada aqui despublica um
-produto já à venda.
+(commits `0ecb9ee`, `1aea6e0`, `ef0176d` + correções da revisão do PR #123).
+Nenhum merge, deploy, compra, pedido real ou cron foi criado por este
+trabalho. Nada aqui despublica um produto já à venda.
+
+---
+
+## 0. Revisão do PR #123 — o que foi corrigido
+
+| # | Ponto da revisão | Onde ficou |
+| --- | --- | --- |
+| 1 | Divergência de custo/moeda **invalida a aprovação operacional** e **bloqueia novas compras** pelos controles canônicos, preservando preço/conteúdo | `loja/services/purchase_controls.py`, `sales_readiness.py` (`supplier_cost_divergence`/`supplier_currency_divergence`), gates em `_reserve_stock` e `_validate_cart_for_checkout`, `pricing_status='stale'` (migração `0035`) |
+| 2 | Origem nacional validada **por variante no checkout**, incluindo confirmação removida **depois** da publicação | `purchase_controls.national_origin_code()` + mesmos dois gates de checkout |
+| 3 | Reconciliação de SKUs não presume completude pela presença de SKUs | `published_sync.catalog_census()` (`CatalogCensus`): só contagem/agregado **declarado** e conferente autoriza desativar SKU ausente; sem prova ⇒ `catalog_complete=False` + `catalog_code` |
+| 4 | Sync de estoque integrado a **locks + contabilidade de reservas**, com teste de concorrência em PostgreSQL | `published_sync._locked_variants()` (ordem Product → ProductVariant, igual ao checkout), `stock_reservations.reserved_quantities_by_variant()`, `tests/test_published_sync_concurrency_pg.py` |
+| 5 | Confirmação coletiva (`covers_all_variants`) restrita aos SKUs **cobertos no momento da escrita** | coluna `covered_supplier_sku_ids` (migração `0036`), snapshot em `record_manual_confirmation`/`record_api_observation`, `shipping_origin._covers_sku()` |
+| 6 | Tentativas/falhas de sincronização **persistidas** (não só flash) | tabela `aliexpress_sync_attempts` (migração `0037`), `AliExpressSyncAttempt`, seção *Tentativas recentes* na página de renovação |
 
 ---
 
@@ -62,7 +75,11 @@ produto já à venda.
   pela rota: o módulo não tem credenciais, não constrói cliente e não faz
   nenhuma chamada de frete, compra ou pedido.
 - Divergência de custo/moeda é comparada e **sinalizada** (`sync_error` com
-  código estável) sem ser aplicada; nunca gera `stale` nem reprecificação.
+  código estável) sem ser aplicada ao custo, à moeda, ao preço ou à margem;
+  ela **invalida a aprovação operacional** (`pricing_status='stale'` com o
+  código em `pricing_error`, aceito pela guarda da migração `0035`) e é
+  bloqueada para **nova compra** por `loja/services/purchase_controls.py`.
+  República exige `priced` de novo: o admin resolve renovando/reprecificando.
 
 ---
 
@@ -111,6 +128,11 @@ ship from"*, `ship_to_country` — *"Country to ship to"*).
    pedido) — campo obrigatório; sem ele nada é gravado.
 4. A linha é gravada em transação única. **Limpar confirmação** remove a
    linha manual e preserva qualquer observação da API.
+   A **cobertura explícita** grava, no momento da escrita, quais SKUs ela
+   cobre (`covered_supplier_sku_ids`, migração `0036`): um SKU que nascer
+   depois (sincronização) **não herda** a origem BR — continua desconhecido
+   até o admin reconfirmar (a reconfirmação redeclara o escopo) ou gravar
+   uma linha própria.
 5. Em **Operação nacional** o admin marca quais variantes ativas participam da
    operação nacional. A seleção é explícita e reversível.
 6. Efeito: cada variante **selecionada** precisa de origem **Brasil
@@ -130,14 +152,36 @@ ship from"*, `ship_to_country` — *"Country to ship to"*).
 | --- | --- |
 | `ProductVariant.stock` (SKU do payload) | `Product.name`, `description`, `image1..4` + galeria, `category`/`category_id` |
 | Desativação de variante com estoque `0` ou SKUs sumidos do catálogo | `Product.price`, `target_margin_percent`, `currency`, `cost` |
-| Novos SKUs entram **inativos** (nunca à venda sozinhos) | `pricing_status`/`pricing_error` (nunca vira `stale` sozinho) |
-| `Product.stock` (soma das variantes ativas) | `is_draft` / `is_active` — **nunca despublica** |
-| `sync_status` / `last_sync_at` / `sync_error` (produto, vínculo) | frete, landed cost e evidência de cotação |
+| Novos SKUs entram **inativos** (nunca à venda sozinhos) | `pricing_status`/`pricing_error` (só muda para `stale` quando há **divergência sinalizada**; a sync nunca reprecifica) |
+| `Product.stock` (soma das variantes ativas), sempre `fornecedor − reservas` | `is_draft` / `is_active` — **nunca despublica** |
+| Desativação de SKU ausente **só com completude comprovada** (`catalog_code`) | frete, landed cost e evidência de cotação |
+| `sync_status` / `last_sync_at` / `sync_error` (produto, vínculo) | origem de envio e seleção de operação nacional |
 | `ProductSync.last_synced_at` / `error` (`state` preservado) | origem de envio e seleção de operação nacional |
-| — | atributos/cor/tamanho/preço das variantes existentes; variante desativada nunca é reativada |
+| **Toda tentativa** gravada em `aliexpress_sync_attempts` (`applied`/`rejected`/`failed`/`api_error`) | atributos/cor/tamanho/preço das variantes existentes; variante desativada nunca é reativada |
 
 Divergências sinalizadas em `sync_error`: `supplier_cost_changed`,
 `currency_changed` (aviso no flash: *divergência sinalizada SEM aplicar*).
+Efeito da divergência em produto publicado: preço, margem, conteúdo e
+publicação **ficam intactos**, a precificação fica `stale` e
+`purchase_controls` bloqueia nova compra (códigos
+`supplier_cost_divergence`/`supplier_currency_divergence` no readiness e no
+checkout) até o admin resolver.
+
+Completude do catálogo (`catalog_census`, fail-closed): a presença de SKUs
+nunca prova que a resposta é completa. Só a **contagem declarada**
+(`ae_item_sku_info_dtos.sku_count` e cia.) ou o **agregado declarado**
+(`available_stock`) conferindo com o observado autoriza desativar SKUs
+ausentes; sem prova, `catalog_complete=False` com
+`catalog_census_empty`/`catalog_census_unproven`/`catalog_sku_count_mismatch`/
+`catalog_stock_mismatch` — os SKUs presentes atualizam normal e nada é
+desativado (aviso no flash e `catalog_code` na tentativa persistida).
+
+Estoque: as variantes são travadas (`SELECT ... FOR UPDATE`) na **mesma
+ordem do checkout** (Product → ProductVariant) e o valor absoluto aplicado é
+`estoque do fornecedor − reservas locais ainda debitadas` — pedido pendente
+nunca tem estoque devolvido por sync, e pedido já **submetido** ao fornecedor
+não é debitado duas vezes.
+
 Conflitos controlados abortam **antes** de qualquer escrita:
 `not_published`, `external_id_mismatch`, `link_mismatch`,
 `missing_supplier_price`, `missing_currency`, `currency_mismatch`,
@@ -147,25 +191,36 @@ Conflitos controlados abortam **antes** de qualquer escrita:
 
 ## 5. Como aplicar e operar
 
-1. **Migração**: `migrations/0034_shipping_origin_evidence.sql` (e
-   `0034_shipping_origin_evidence_down.sql` para reverter). Idempotente
-   (`CREATE TABLE IF NOT EXISTS`/`ADD COLUMN IF NOT EXISTS`), schema
-   `pollomodas`, aplica-se com a ferramenta de migração usual do projeto.
-   A coluna nova nasce `FALSE` (sem backfill): nenhum produto é considerado
-   nacional só por causa da migração.
+1. **Migrações** (todas aditivas, idempotentes, schema `pollomodas`, com
+   `_down.sql` correspondente e aplicáveis com a ferramenta usual do projeto):
+   - `0034_shipping_origin_evidence.sql` — origem por variante com evidência;
+     a coluna nova nasce `FALSE` (sem backfill): nenhum produto é considerado
+     nacional só por causa da migração;
+   - `0035_published_divergence_guard.sql` — permite `pricing_status='stale'`
+     em produto AliExpress **publicado** (divergência sinalizada);
+     `unpriced`/`blocked` em produto ativo continua rejeitado. O `_down`
+     volta a exigir `priced` (não execute com produto publicado `stale`);
+   - `0036_shipping_origin_cover_snapshot.sql` — coluna
+     `covered_supplier_sku_ids` (sem backfill: `NULL` = nada coberto);
+   - `0037_aliexpress_sync_attempts.sql` — tabela + índice de tentativas.
 2. **Após aplicar**: nenhum passo manual adicional. Rota de catálogo passa a
-   exibir o painel de importados e os selos de origem.
+   exibir o painel de importados e os selos de origem; a página de renovação
+   passa a mostrar *Tentativas recentes*.
 3. **Rotina de origem**: importar → cotar frete com evidência → precificar →
    (opcional) confirmar origem por variante com evidência → marcar variantes
    da operação nacional → publicar. Publicar sem origem comprovada continua
    permitido **enquanto nenhuma variante estiver marcada como operação
-   nacional**.
+   nacional**. A confirmação coletiva vale só para os SKUs existentes naquele
+   momento (reconfirmar inclui os novos).
 4. **Rotina de sincronização**: na página do produto publicado, *Sincronizar
-   estoque agora*. Revisar o aviso de divergência de custo/moeda antes de
-   renovar frete/reprecificar (essa decisão continua explícita).
-5. **Rollback**: reverter a migração desativa os dados novos; o produto
-   publicado permanece ativo (o gate deixa de valer quando a coluna/cadastro
-   não existe mais).
+   estoque agora*. Divergência de custo/moeda **bloqueia a venda** enquanto
+   durar (produto fica `stale`, checkout recusa): renove frete/reprecifique
+   para resolver; a decisão de preço continua explícita. Recusa/falha fica
+   registrada em *Tentativas recentes*.
+5. **Rollback**: reverter as migrações na ordem inversa desativa os dados
+   novos; o produto publicado permanece ativo (o gate deixa de valer quando a
+   coluna/cadastro não existe mais). Com `0035` revertido, um produto
+   publicado `stale` passa a violar a guarda — resolva a divergência antes.
 
 ---
 
@@ -174,26 +229,43 @@ Conflitos controlados abortam **antes** de qualquer escrita:
 Suítes relevantes (venv `venv-payment-guard`, sem rede):
 
 - `tests/test_shipping_origin_evidence.py` — serviço, modelo e CHECKs (39);
-- `tests/test_shipping_origin_pg.py` — ida/venida da migração em PostgreSQL
-  descartável (só roda com PG local);
+- `tests/test_shipping_origin_pg.py` — ida/venida das migrações `0034`/`0036`
+  em PostgreSQL descartável (só roda com PG local);
 - `tests/test_admin_sales_readiness.py`, `tests/test_publication.py` — gates
   de origem nos dois níveis;
 - `tests/test_aliexpress_admin_catalog.py` — rotas de origem/nacional,
   exibição honesta, filtro de importados, validação de entrada, logs;
-- `tests/test_published_product_sync.py` — sincronização técnica (15).
+- `tests/test_published_product_sync.py` — sincronização técnica (15);
+- `tests/test_aliexpress_checkout_guards.py` — **bloqueios no fluxo real de
+  checkout** (abertura do carrinho + criação do pedido): divergência de
+  custo/moeda, origem por variante e confirmação removida após publicação,
+  com pedido real criado (ou recusado) nos controles;
+- `tests/test_published_sync_resilience.py` — completude não provada, reservas
+  na sincronização, persistência de tentativas e cobertura de SKUs;
+- `tests/test_published_sync_concurrency_pg.py` — **concorrência** sync ×
+  checkout × release em PostgreSQL (locks + reservas);
+- `tests/test_aliexpress_sync_attempts_pg.py` — migração `0037` em PostgreSQL;
+- `tests/test_pricing_publication_pg.py` — migrações `0005`/`0035` (guarda de
+  publicação com `stale`) em PostgreSQL.
 
 **Pendências declaradas**
 
-1. Testes `*_pg.py` (migração em PostgreSQL) **não rodam neste ambiente**
-   (não há Postgres local; a URL do `.env` aponta para o banco remoto e a
-   checagem de segurança `IS_SAFE_POSTGRES` os pula). `tests/test_shipping_origin_pg.py`
-   foi incluído na lista do job `pytest-postgres` do CI
-   (`.github/workflows/pr14-pytest.yml`) e roda lá; localmente continue
-   executando com um PG descartável `pollo*` em loopback.
+1. Testes `*_pg.py` (migração e concorrência em PostgreSQL) **não rodam
+   neste ambiente** (não há Postgres local; a URL do `.env` aponta para o
+   banco remoto e a checagem de segurança `IS_SAFE_POSTGRES` os pula).
+   Eles estão na lista dos jobs do CI (`.github/workflows/pr14-pytest.yml`):
+   `pytest-postgres` (`test_shipping_origin_pg.py`,
+   `test_aliexpress_sync_attempts_pg.py`,
+   `test_published_sync_concurrency_pg.py`) e `pytest-pricing-pg`
+   (`test_pricing_publication_pg.py`); localmente continue executando com um
+   PG descartável `pollo*` em loopback.
 2. `record_api_observation()` permanece sem chamador em produção até haver
    observação real de `ship_from_country` (limitação 2 da seção 2).
 3. Novos SKUs detectados por sincronização entram **inativos**; a ativação de
    uma nova opção de venda é decisão comercial manual (ainda não há tela para
    isso).
-4. Nenhum merge/deploy sem aprovação; mudança visível (painel de importados,
-   selos, botões) exige aprovação prévia.
+4. Resolução de divergência de **moeda** em produto publicado não tem tela
+   própria: o bloqueio permanece até o admin resolver com a rotina de
+   reprecificação (fora do escopo desta revisão).
+5. Nenhum merge/deploy sem aprovação; mudança visível (painel de importados,
+   selos, botões, *Tentativas recentes*) exige aprovação prévia.

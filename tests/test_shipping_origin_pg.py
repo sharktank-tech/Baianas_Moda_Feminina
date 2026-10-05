@@ -354,3 +354,109 @@ def test_migration_0034_down_removes_and_up_restores(pg_env):
     )
     for constraint in ORIGIN_CONSTRAINTS:
         assert constraint in _constraints(engine, schema, TABLE)
+
+
+# --------------------------------------------------------------------------
+# Migration 0036 — snapshot de SKUs cobertos pela confirmação coletiva
+# --------------------------------------------------------------------------
+
+UP_COVER = "0036_shipping_origin_cover_snapshot.sql"
+DOWN_COVER = "0036_shipping_origin_cover_snapshot_down.sql"
+COVER_COLUMN = "covered_supplier_sku_ids"
+
+
+def _run_migration_v2(engine, schema, filename):
+    r"""Migration com `\set` + `SET search_path` (0036 em diante)."""
+    from test_draft_import_pg import _split_sql_statements
+
+    sql = Path("migrations", filename).read_text()
+    sql = sql.replace("pollomodas.", '"%s".' % schema)
+    sql = sql.replace(
+        "SET search_path TO pollomodas;",
+        'SET search_path TO "%s";' % schema,
+    )
+    with engine.begin() as connection:
+        for stmt in _split_sql_statements(sql):
+            connection.exec_driver_sql(stmt)
+
+
+def _public_has_cover_column():
+    engine = create_engine(DATABASE_URL)
+    try:
+        with engine.connect() as connection:
+            row = connection.execute(
+                text(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema = 'public' "
+                    "AND table_name = 'supplier_sku_shipping_origins' "
+                    "AND column_name = :c"
+                ),
+                {"c": COVER_COLUMN},
+            ).first()
+        return row is not None
+    finally:
+        engine.dispose()
+
+
+def test_migration_0036_adiciona_snapshot_idempotente(pg_env):
+    engine, schema = pg_env
+    supplier_product_id, _variant_id = _seed(engine, schema)
+    public_before = _public_has_cover_column()
+
+    _run_migration(engine, schema, UP)
+    _run_migration_v2(engine, schema, UP_COVER)
+    _run_migration_v2(engine, schema, UP_COVER)  # idempotente
+
+    assert COVER_COLUMN in _columns(engine, schema, TABLE)
+
+    # Coluna nasce NULL (sem backfill) e persiste a lista coberta.
+    _insert_origin(
+        engine, schema,
+        supplier_product_id=supplier_product_id,
+        covers_all_variants=True,
+        manual_origin="brazil",
+        evidence_ref="PROVA-COB-1",
+        confirmed_at="2030-06-15 10:00:00",
+        origin_country="BR",
+        covered_supplier_sku_ids='["SKU-PG-1"]',
+    )
+    with engine.begin() as connection:
+        value = connection.execute(
+            text(
+                "SELECT %s FROM \"%s\".%s"
+                % (COVER_COLUMN, schema, TABLE)
+            )
+        ).scalar()
+    assert value == '["SKU-PG-1"]'
+
+    # Linha sem snapshot continua NULL (fail-closed na resolução).
+    with engine.begin() as connection:
+        nulls = connection.execute(
+            text(
+                "SELECT count(*) FROM \"%s\".%s "
+                "WHERE covers_all_variants = TRUE AND %s IS NULL"
+                % (schema, TABLE, COVER_COLUMN)
+            )
+        ).scalar()
+    assert nulls == 0
+
+    assert _public_has_cover_column() == public_before, "public foi alterado!"
+
+
+def test_migration_0036_down_remove_e_up_restaura(pg_env):
+    engine, schema = pg_env
+    _seed(engine, schema)
+    public_before = _public_has_cover_column()
+
+    _run_migration(engine, schema, UP)
+    _run_migration_v2(engine, schema, UP_COVER)
+    assert COVER_COLUMN in _columns(engine, schema, TABLE)
+
+    _run_migration_v2(engine, schema, DOWN_COVER)
+    _run_migration_v2(engine, schema, DOWN_COVER)  # idempotente
+    assert COVER_COLUMN not in _columns(engine, schema, TABLE)
+
+    _run_migration_v2(engine, schema, UP_COVER)
+    assert COVER_COLUMN in _columns(engine, schema, TABLE)
+
+    assert _public_has_cover_column() == public_before, "public foi alterado!"

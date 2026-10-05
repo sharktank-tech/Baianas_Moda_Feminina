@@ -9,10 +9,15 @@ fechados.
 from dataclasses import dataclass
 
 from flask import current_app
+from sqlalchemy import func, select
 
 from loja import db
-from loja.modules.getway_mercado_pago.payment_models import Order, Payment
-from loja.modules.models import Product, ProductVariant
+from loja.modules.getway_mercado_pago.payment_models import (
+    Order,
+    OrderItem,
+    Payment,
+)
+from loja.modules.models import AliExpressOrder, Product, ProductVariant
 from loja.services.reservation_policy import (
     DEFAULT_RESERVATION_HOURS,
     load_reservation_hours,
@@ -146,6 +151,49 @@ def find_active_stock_reservations(*, limit=None, now=None):
         if payment is None or payment.status != "approved":
             eligible.append(order)
     return eligible
+
+
+def reserved_quantities_by_variant(variant_ids):
+    """Quantidades ainda debitadas do estoque LOCAL por variante.
+
+    Contabilidade canônica para qualquer rotina que RECALCULE estoque
+    absoluto a partir do fornecedor (sincronização técnica do produto
+    publicado): toda linha com ``stock_reserved`` verdadeiro continua
+    debitada aqui, e por isso NUNCA pode ser devolvida por um valor
+    absoluto vindo do fornecedor. Pedido cujo fulfillment já foi SUBMETIDO
+    ao fornecedor é excluído: nesse caso o abatimento já consta no estoque
+    reportado pelo fornecedor e subtrair de novo duplicaria a baixa.
+
+    Somente leitura e sem lock. Quem recalcula absolutos trava produto e
+    variantes na mesma ordem do checkout (Product -> ProductVariant).
+    """
+    ids = {value for value in (variant_ids or []) if value is not None}
+    if not ids:
+        return {}
+
+    # `order_id` anulável: um registro submetido SEM pedido vinculado não
+    # pode virar NULL no conjunto (NOT IN com NULL anularia TODAS as
+    # reservas — a sync voltaria a devolver estoque já debitado).
+    submitted_orders = select(AliExpressOrder.order_id).where(
+        AliExpressOrder.submitted_at.isnot(None),
+        AliExpressOrder.order_id.isnot(None),
+    )
+    rows = (
+        db.session.query(OrderItem.variant_id, func.sum(OrderItem.quantity))
+        .join(Order, Order.id == OrderItem.order_id)
+        .filter(
+            Order.stock_reserved.is_(True),
+            Order.id.not_in(submitted_orders),
+            OrderItem.variant_id.in_(ids),
+        )
+        .group_by(OrderItem.variant_id)
+        .all()
+    )
+    return {
+        variant_id: int(total or 0)
+        for variant_id, total in rows
+        if variant_id is not None
+    }
 
 
 def count_unproven_stock_reservations():

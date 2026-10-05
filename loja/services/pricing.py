@@ -257,6 +257,17 @@ def price_dropshipping_product(
     product.pricing_status = PRICED
     product.pricing_error = None
     product.pricing_updated_at = utcnow()
+    # Repricação explícita do administrador: ele assumiu o custo/moeda
+    # vigentes, então uma divergência sinalizada pela sincronização deixa de
+    # bloquear a compra (controles canônicos leem `sync_error`). Só os
+    # códigos de divergência são limpos — qualquer outro erro de sync é
+    # assunto do módulo que o gravou.
+    from .purchase_controls import DIVERGENCE_CODES
+
+    if getattr(product, "sync_error", None) in DIVERGENCE_CODES:
+        product.sync_error = None
+    if getattr(supplier_product, "sync_error", None) in DIVERGENCE_CODES:
+        supplier_product.sync_error = None
     logger.info("pricing: success")
     return PricingResult(
         landed_cost=landed_cost,

@@ -86,7 +86,11 @@ from loja.integrations.aliexpress.published_sync import (
     PublishedSyncError,
     sync_published_product,
 )
-from loja.modules.models import Product, SupplierProduct
+from loja.modules.models import (
+    AliExpressSyncAttempt,
+    Product,
+    SupplierProduct,
+)
 from loja.modules.services import get_layout_data
 from loja.services.pricing import (
     PRICED,
@@ -1192,6 +1196,44 @@ def publicado_nacional(product_id: str):
     )
 
 
+def _sync_attempt(
+    *,
+    product,
+    supplier_product,
+    status,
+    code=None,
+    result=None,
+) -> AliExpressSyncAttempt:
+    """Monta a auditoria de UMA tentativa (sem payload/token/ID externo)."""
+    return AliExpressSyncAttempt(
+        product_id=getattr(product, "id", None),
+        supplier_product_id=getattr(supplier_product, "id", None),
+        status=status,
+        code=(str(code)[:64] if code else None),
+        divergence=getattr(result, "divergence", None),
+        catalog_code=getattr(result, "catalog_code", None),
+        variants_updated=int(getattr(result, "variants_updated", 0) or 0),
+        variants_deactivated=int(
+            getattr(result, "variants_deactivated", 0) or 0
+        ),
+        variants_created=int(getattr(result, "variants_created", 0) or 0),
+        stock_before=getattr(result, "stock_before", None),
+        stock_after=getattr(result, "stock_after", None),
+    )
+
+
+def _persist_sync_attempt(**kwargs) -> None:
+    """Grava a tentativa em transação própria (após rollback da falha)."""
+    try:
+        db.session.add(_sync_attempt(**kwargs))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.warning(
+            "sincronização publicado: falha ao gravar tentativa", exc_info=True
+        )
+
+
 @aliexpress_admin_blueprint.route(
     "/publicado/<product_id>/sincronizar", methods=["POST"]
 )
@@ -1203,8 +1245,11 @@ def publicado_sincronizar(product_id: str):
     Atualiza somente estoque/dados técnicos a partir do detalhe do catálogo.
     Nunca altera decisões comerciais (preço, margem, custo, moeda, imagens,
     categoria, publicação) e nunca despublica; divergência de custo/moeda é
-    sinalizada em `sync_error` sem ser aplicada. Nenhuma chamada de frete,
-    compra ou pedido.
+    sinalizada em `sync_error`, invalida a aprovação operacional (preço em
+    `stale`) e não é aplicada. Nenhuma chamada de frete, compra ou pedido.
+
+    Toda tentativa — sucesso, recusa, falha ou erro de API — é persistida em
+    `aliexpress_sync_attempts`; o flash é só o resumo imediato.
     """
     back_endpoint = "aliexpress_admin.publicado_frete_form"
     product = _load_published(product_id)
@@ -1217,10 +1262,22 @@ def publicado_sincronizar(product_id: str):
         client = _aliexpress_client()
         detail = client.get_product(product_id=product_id)
     except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+        _persist_sync_attempt(
+            product=product,
+            supplier_product=supplier_product,
+            status=AliExpressSyncAttempt.STATUS_API_ERROR,
+            code=getattr(exc, "code", None) or "api_error",
+        )
         flash(_sanitized_api_error(exc), "danger")
         return _back_to(back_endpoint, product_id)
 
     if detail is None:
+        _persist_sync_attempt(
+            product=product,
+            supplier_product=supplier_product,
+            status=AliExpressSyncAttempt.STATUS_REJECTED,
+            code="product_not_found",
+        )
         flash("Produto não encontrado no catálogo do fornecedor.", "warning")
         return _back_to(back_endpoint, product_id)
 
@@ -1228,11 +1285,25 @@ def publicado_sincronizar(product_id: str):
         result = sync_published_product(
             detail=detail, product=product, supplier_product=supplier_product
         )
+        db.session.add(
+            _sync_attempt(
+                product=product,
+                supplier_product=supplier_product,
+                status=AliExpressSyncAttempt.STATUS_APPLIED,
+                result=result,
+            )
+        )
         db.session.commit()
     except PublishedSyncError as exc:
         db.session.rollback()
         code = exc.args[0] if exc.args else "unknown"
         current_app.logger.info("sincronização publicado: rejected reason=%s", code)
+        _persist_sync_attempt(
+            product=product,
+            supplier_product=supplier_product,
+            status=AliExpressSyncAttempt.STATUS_REJECTED,
+            code=code,
+        )
         flash(
             PUBLISHED_SYNC_MESSAGES.get(str(code), "Sincronização recusada."),
             "warning",
@@ -1242,6 +1313,12 @@ def publicado_sincronizar(product_id: str):
         db.session.rollback()
         current_app.logger.warning(
             "sincronização publicado: falha", exc_info=True
+        )
+        _persist_sync_attempt(
+            product=product,
+            supplier_product=supplier_product,
+            status=AliExpressSyncAttempt.STATUS_FAILED,
+            code="unexpected_error",
         )
         flash("Falha na sincronização. Nenhuma alteração foi aplicada.", "danger")
         return _back_to(back_endpoint, product_id)
@@ -1259,6 +1336,12 @@ def publicado_sincronizar(product_id: str):
         ),
         "success",
     )
+    if not result.catalog_complete:
+        flash(
+            "Resposta do fornecedor sem completude comprovada (%s): os SKUs "
+            "ausentes NÃO foram desativados." % (result.catalog_code or "sem motivo"),
+            "warning",
+        )
     if result.divergence:
         flash(
             PUBLISHED_SYNC_DIVERGENCE_MESSAGES.get(

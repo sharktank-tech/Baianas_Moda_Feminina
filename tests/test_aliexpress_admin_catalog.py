@@ -23,6 +23,7 @@ from loja.integrations.aliexpress.models import (
     AliExpressSearchResult,
 )
 from loja.modules.models import (
+    AliExpressSyncAttempt,
     Product,
     ProductSync,
     ProductVariant,
@@ -157,6 +158,7 @@ def _clean_aliexpress_data(db):
     # SQLite roda sem FK/cascade: as evidências de origem precisam de limpeza
     # explícita antes de apagar os vínculos de fornecedor.
     SupplierSkuShippingOrigin.query.delete(synchronize_session=False)
+    AliExpressSyncAttempt.query.delete(synchronize_session=False)
     ProductSync.query.filter(ProductSync.product_id.in_(product_ids)).delete(
         synchronize_session=False
     )
@@ -639,6 +641,9 @@ def make_multi_detail(sku_prices, stocks, product_id=MULTI_ID):
     ]
     detail = make_detail(product_id=product_id)
     detail.skus = skus
+    # Agregado coerente com a soma dos SKUs: é a prova de completude usada
+    # pela sincronização (sem ela a resposta não autoriza desativar SKUs).
+    detail.available_stock = sum(stocks)
     return detail
 
 
@@ -660,6 +665,8 @@ def make_multi_detail_with_stock(sku_prices, stocks, product_id=MULTI_ID):
     ]
     detail = make_detail(product_id=product_id)
     detail.skus = skus
+    # Agregado coerente com a soma dos SKUs (prova de completude da resposta).
+    detail.available_stock = sum(stocks)
     return detail
 
 

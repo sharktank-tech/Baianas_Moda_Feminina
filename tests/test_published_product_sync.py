@@ -16,6 +16,8 @@ from decimal import Decimal
 
 from loja.integrations.aliexpress import admin_session
 from loja.modules.models import ProductSync
+from loja.services.purchase_controls import purchase_block_codes
+from loja.services.sales_readiness import evaluate_product_readiness
 from tests.test_aliexpress_admin_catalog import (
     ACCESS_TOKEN,
     ADMIN_SESSION_KEY,
@@ -221,15 +223,22 @@ def test_divergencia_de_custo_sinalizada_sem_aplicar(admin_catalog, db):
     db.session.expire_all()
     product = _draft_from_db()
     sp = _supplier_product_from_db(db)
-    # Custo/moeda/precificação intocados: nada de stale automático.
+    # Custo/moeda/preço/margem/conteúdo intocados: divergência nunca é
+    # aplicada. A aprovação operacional, sim, deixa de valer.
     assert sp.cost == Decimal("80.00")
     assert product.cost == Decimal("80.00")
-    assert product.pricing_status == "priced"
-    assert product.pricing_error is None
+    assert product.pricing_status == "stale"
+    assert product.pricing_error == "supplier_cost_changed"
     assert product.price == price_before == Decimal("142.86")
+    assert product.target_margin_percent == Decimal("30.00")
     assert sp.sync_error == "supplier_cost_changed"
     assert product.sync_error == "supplier_cost_changed"
+    # Continua publicado (nunca despublica), mas não vende mais.
     assert product.is_active is True
+    assert product.is_draft is False
+    assert purchase_block_codes(product) == ["supplier_cost_changed"]
+    decision = evaluate_product_readiness(product)
+    assert "supplier_cost_divergence" in decision.reasons
 
 
 def test_divergencia_de_moeda_sinalizada_sem_aplicar(admin_catalog, db):
@@ -247,11 +256,13 @@ def test_divergencia_de_moeda_sinalizada_sem_aplicar(admin_catalog, db):
     sp = _supplier_product_from_db(db)
     assert product.currency == "BRL"
     assert sp.currency == "BRL"
-    assert product.pricing_status == "priced"
+    assert product.pricing_status == "stale"
+    assert product.pricing_error == "currency_changed"
     assert product.price == Decimal("142.86")
     assert sp.sync_error == "currency_changed"
     assert product.sync_error == "currency_changed"
     assert product.is_active is True
+    assert purchase_block_codes(product) == ["currency_changed"]
     assert freight_calls() == []
 
 

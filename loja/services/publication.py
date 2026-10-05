@@ -23,6 +23,8 @@ Códigos estáveis de bloqueio (NUNCA usar mensagens livres como lógica):
     national_origin_unproven -> variante selecionada sem origem comprovada
     national_origin_foreign  -> variante selecionada com envio exterior
     national_origin_conflict -> origem manual divergente da observação da API
+    supplier_cost_divergence -> divergência de custo sinalizada pela sincronização
+    supplier_currency_divergence -> divergência de moeda sinalizada pela sincronização
 
 A origem de envio é o único requisito NOVO da publicação (Etapa 1): variante
 ativa com ``national_shipping_operation`` precisa ter evidência de origem BR.
@@ -162,6 +164,19 @@ def evaluate_publication(product: Product) -> PublicationDecision:
 
     if product.pricing_status != PRICED:
         reasons.append("pricing_not_ready")
+
+    # Divergência de custo/moeda sinalizada pela sincronização do publicado
+    # invalida a aprovação operacional: republicação bloqueada até renovar.
+    from .purchase_controls import (
+        DIVERGENCE_READINESS_CODES,
+        supplier_divergence_code,
+    )
+
+    divergence = supplier_divergence_code(product)
+    if divergence:
+        divergence_reason = DIVERGENCE_READINESS_CODES[divergence]
+        if divergence_reason not in reasons:
+            reasons.append(divergence_reason)
 
     sale = to_decimal(product.price)
     if sale is None or sale <= 0:

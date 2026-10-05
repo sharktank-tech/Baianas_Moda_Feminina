@@ -89,6 +89,10 @@ REASON_SEVERITY = {
     "national_origin_unproven": BLOCKING,
     "national_origin_foreign": BLOCKING,
     "national_origin_conflict": BLOCKING,
+    # Divergência de custo/moeda sinalizada pela sincronização do publicado:
+    # a aprovação operacional deixa de valer até o admin renovar.
+    "supplier_cost_divergence": BLOCKING,
+    "supplier_currency_divergence": BLOCKING,
     "manual_fulfillment_required": INFO,
 }
 
@@ -121,6 +125,12 @@ REASON_LABELS = {
     ),
     "national_origin_conflict": (
         "Origem divergente entre confirmação manual e observação da API"
+    ),
+    "supplier_cost_divergence": (
+        "Custo do fornecedor divergente do cadastro (divergência sinalizada)"
+    ),
+    "supplier_currency_divergence": (
+        "Moeda do fornecedor divergente do cadastro (divergência sinalizada)"
     ),
     "manual_fulfillment_required": "Tratamento manual obrigatório após pagamento",
 }
@@ -268,6 +278,10 @@ def evaluate_product_readiness(
     from datetime import timezone
 
     from loja.services.pricing import normalize_currency, to_decimal
+    from loja.services.purchase_controls import (
+        DIVERGENCE_READINESS_CODES,
+        supplier_divergence_code,
+    )
     from loja.services.shipping_quote import (
         normalize_cep,
         resolve_group_origin,
@@ -299,6 +313,11 @@ def evaluate_product_readiness(
         _add("product_draft")
     if getattr(product, "pricing_status", None) != "priced":
         _add("pricing_not_ready")
+    # Divergência de custo/moeda sinalizada pela sincronização do publicado
+    # invalida a aprovação operacional (mesmo com preço comercial intacto).
+    divergence = supplier_divergence_code(product)
+    if divergence:
+        _add(DIVERGENCE_READINESS_CODES[divergence])
     price = to_decimal(getattr(product, "price", None))
     if price is None or not price.is_finite() or price <= 0:
         _add("missing_sale_price")

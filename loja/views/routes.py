@@ -18,6 +18,7 @@ from loja.services.product_content import (
     sanitize_product_description_html,
     sanitize_product_description_without_images,
 )
+from loja.services.purchase_controls import assert_purchase_allowed
 from loja.services.variant_attributes import (
     VARIANT_LABEL_MAX_LEN,
     variant_attribute_value,
@@ -1136,9 +1137,15 @@ def _validate_cart_for_checkout(cart):
                     f"A quantidade de {product.name} excede o estoque. "
                     f"Disponível: {int(locked_variant.stock or 0)}."
                 )
+            # Controle canônicos de NOVA compra avaliados POR VARIANTE
+            # (divergência do fornecedor + origem da opção escolhida).
+            assert_purchase_allowed(
+                product, locked_variant, product_name=product.name
+            )
             continue
 
         # Apenas produto realmente legacy (sem variantes) usa selected_size.
+        assert_purchase_allowed(product, None, product_name=product.name)
         stock = getattr(product, "stock", None)
 
         if stock is not None:

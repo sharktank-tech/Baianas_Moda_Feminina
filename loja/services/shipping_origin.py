@@ -10,6 +10,9 @@ Regras invariantes:
   * Ausência de linha = desconhecido (fail-closed). Nada é presumido.
   * Escopo XOR por linha: SKU específico ou cobertura total do vínculo; a
     resolução dá precedência ao SKU sobre a cobertura.
+  * A cobertura total só vale para os SKUs EXPLICITAMENTE cobertos no
+    momento da escrita (`covered_supplier_sku_ids`): SKU novo do vínculo
+    nunca herda origem brasileira sozinho — sem snapshot, nada é coberto.
   * Classificação manual (admin) e observação de dado do fornecedor ficam em
     colunas separadas; a API NUNCA sobrescreve a confirmação manual. Divergência
     entre as duas é `conflict=True`, sinalizado — nunca silenciado.
@@ -25,12 +28,13 @@ token, nenhuma compra, nenhum pedido.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Set
 from uuid import UUID
 
 from loja import db
-from loja.modules.models import SupplierSkuShippingOrigin
+from loja.modules.models import ProductVariant, SupplierSkuShippingOrigin
 
 ORIGIN_BRAZIL = "brazil"
 ORIGIN_FOREIGN = "foreign"
@@ -146,23 +150,99 @@ def _row_conflict(row: Optional[SupplierSkuShippingOrigin]) -> bool:
     return row.manual_origin != row.api_origin
 
 
+# --------------------------------------------------------------------------
+# cobertura explícita da linha de cobertura total
+# --------------------------------------------------------------------------
+
+def current_supplier_skus(supplier_product_id) -> List[Optional[str]]:
+    """SKUs do vínculo NO MOMENTO da escrita (ordem estável, sem duplicata).
+
+    Inclui variantes inativas (a origem já confirmada de uma opção
+    momentaneamente desativada continua sendo a mesma). `None` representa
+    variante do vínculo sem `supplier_sku_id`.
+    """
+    if supplier_product_id is None:
+        return []
+    rows = (
+        db.session.query(ProductVariant.supplier_sku_id)
+        .filter_by(supplier_product_id=supplier_product_id)
+        .distinct()
+        .all()
+    )
+    skus = {value if value is None else str(value) for (value,) in rows}
+    if not skus:
+        # Vínculo ainda sem variantes: a cobertura total cobre o escopo do
+        # produto (resolução sem supplier_sku_id) até existirem SKUs.
+        return [None]
+    present = sorted((s for s in skus if s is not None))
+    if None in skus:
+        present.append(None)
+    return present
+
+
+def _snapshot_covered_skus(supplier_product_id) -> str:
+    """JSON dos SKUs cobertos agora (gravação da cobertura total)."""
+    return json.dumps(current_supplier_skus(supplier_product_id))
+
+
+def covered_supplier_skus(row: Optional[SupplierSkuShippingOrigin]) -> Optional[Set]:
+    """SKUs explicitamente cobertos pela linha, ou None quando não há snapshot.
+
+    Fail-closed: linha de cobertura total sem snapshot não cobre NINGUÉM.
+    """
+    if row is None:
+        return None
+    raw = getattr(row, "covered_supplier_sku_ids", None)
+    if raw is None:
+        return None
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, list):
+        return None
+    return {
+        None if value is None else str(value)
+        for value in data
+    }
+
+
+def _covers_sku(
+    row: Optional[SupplierSkuShippingOrigin], supplier_sku_id
+) -> bool:
+    """A linha de cobertura total cobre este SKU? (nunca presume)."""
+    covered = covered_supplier_skus(row)
+    if covered is None:
+        return False
+    if supplier_sku_id is None:
+        return None in covered
+    return str(supplier_sku_id) in covered
+
+
 def resolve_rows(
     rows: Sequence[SupplierSkuShippingOrigin], supplier_sku_id
 ) -> OriginResolution:
     """Resolve a origem para um SKU a partir das linhas já carregadas.
 
-    Precedência: linha do SKU > linha de cobertura total. Conflito é avaliado
-    na linha que vence a precedência.
+    Precedência: linha do SKU > linha de cobertura total. A cobertura total
+    só entra quando o SKU está entre os explicitamente cobertos no momento
+    da confirmação; SKU novo fica desconhecido até ganhar escrita própria.
+    Conflito é avaliado na linha que vence a precedência.
     """
+    sku_id = str(supplier_sku_id) if supplier_sku_id else None
     by_id = {
         str(row.supplier_sku_id): row
         for row in rows
         if row.supplier_sku_id
     }
     cover_all = next(
-        (row for row in rows if row.covers_all_variants), None
+        (
+            row
+            for row in rows
+            if row.covers_all_variants and _covers_sku(row, sku_id)
+        ),
+        None,
     )
-    sku_id = str(supplier_sku_id) if supplier_sku_id else None
     row = by_id.get(sku_id) if sku_id else None
     scope = SCOPE_SKU if row is not None else None
     if row is None and cover_all is not None:
@@ -463,6 +543,12 @@ def record_manual_confirmation(
     row.evidence_ref = evidence_ref
     row.confirmed_by_user_id = user_id
     row.confirmed_at = now or utcnow()
+    if covers_all:
+        # Reconfirmar a cobertura total redefine quem ela cobre: os SKUs
+        # existentes AGORA. SKU nascido depois fica fora até nova escrita.
+        row.covered_supplier_sku_ids = _snapshot_covered_skus(
+            supplier_product_id
+        )
     db.session.flush()
     return row
 
@@ -529,6 +615,7 @@ def record_api_observation(
         sku_id=None if covers_all else sku_id,
         covers_all=covers_all,
     )
+    created = row is None
     if row is None:
         row = SupplierSkuShippingOrigin(
             supplier_product_id=supplier_product_id,
@@ -540,6 +627,12 @@ def record_api_observation(
     if country is not None:
         row.origin_country = country
     row.api_observed_at = observed_at or now or utcnow()
+    if covers_all and created:
+        # A observação da API tampouco herda SKUs futuros: a cobertura é
+        # fixada nos SKUs existentes quando a linha nasce.
+        row.covered_supplier_sku_ids = _snapshot_covered_skus(
+            supplier_product_id
+        )
     db.session.flush()
     return row
 

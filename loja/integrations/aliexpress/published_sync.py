@@ -14,8 +14,9 @@ ATUALIZADO (técnico):
 
 PRESERVADO (decisão comercial — nunca escrito aqui):
   * nome, descrição, imagens, categoria;
-  * `price`, `target_margin_percent`, `currency`, `cost`,
-    `pricing_status`/`pricing_error` (nunca vira `stale` sozinho);
+  * `price`, `target_margin_percent`, `currency`, `cost`
+    (divergência deixa a precificação STALE, mas preço/margem/conteúdo
+    permanecem intactos até o administrador renovar);
   * `is_draft`/`is_active` (NUNCA despublica), frete/landed/evidência;
   * origem de envio e seleção de operação nacional;
   * atributos/cor/tamanho/preço de variante já existentes, e reativação de
@@ -23,7 +24,23 @@ PRESERVADO (decisão comercial — nunca escrito aqui):
 
 DIVERGÊNCIA DE CUSTO/MOEDA: comparada e SINALIZADA em `sync_error` com código
 estável (`supplier_cost_changed`/`currency_changed`) — nunca aplicada ao
-custo, à moeda ou à precificação; o administrador decide a renovação.
+custo, à moeda, ao preço ou à margem — e INVALIDA a aprovação operacional:
+`pricing_status` vira `stale` (guarda de banco na migração 0035 permite
+`stale` em produto publicado). Enquanto durar, os controles canônicos de
+compra (`loja.services.purchase_controls`) impedem nova venda e a
+publicação/republicação segue bloqueada; o administrador resolve
+renovando/reprecificando.
+
+CONCORRÊNCIA: as variantes são travadas (`SELECT ... FOR UPDATE`) na MESMA
+ordem do checkout (Product -> ProductVariant) e o valor absoluto aplicado é
+`estoque do fornecedor - reservas locais ainda debitadas`
+(`stock_reservations.reserved_quantities_by_variant`), para nunca devolver
+estoque que um pedido pendente já consumiu.
+
+CATÁLOGO COMPLETO: SKUs ausentes só são desativados quando a resposta PROVA
+completude (contagem agregada declarada confere com o observado). A simples
+presença de SKUs nunca prova completude; sem prova, os SKUs presentes são
+atualizados e nada é desativado (`catalog_code` no resultado).
 
 Transação única: esta API só faz `flush()`; o commit/rollback é da rota.
 Nunca persiste nem loga token, app_secret, seller_id, product_id externo,
@@ -34,7 +51,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Mapping, Optional, Tuple
 
 from loja import db
 from loja.modules.models import (
@@ -43,7 +60,8 @@ from loja.modules.models import (
     ProductVariant,
     SupplierProduct,
 )
-from loja.services.pricing import to_decimal
+from loja.services.pricing import STALE, to_decimal
+from loja.services.stock_reservations import reserved_quantities_by_variant
 from loja.services.variant_attributes import (
     VARIANT_COLOR_MAX_LEN,
     VARIANT_LABEL_MAX_LEN,
@@ -69,6 +87,12 @@ DIVERGENCE_COST = "supplier_cost_changed"
 DIVERGENCE_CURRENCY = "currency_changed"
 DIVERGENCE_CODES = (DIVERGENCE_COST, DIVERGENCE_CURRENCY)
 
+#: Códigos de completude não provada do catálogo (fail-closed).
+CATALOG_CENSUS_EMPTY = "catalog_census_empty"
+CATALOG_CENSUS_UNPROVEN = "catalog_census_unproven"
+CATALOG_COUNT_MISMATCH = "catalog_sku_count_mismatch"
+CATALOG_STOCK_MISMATCH = "catalog_stock_mismatch"
+
 
 class PublishedSyncError(Exception):
     """Falha controlada da sincronização (mensagem é um código estável)."""
@@ -80,7 +104,7 @@ class PublishedSyncConflict(PublishedSyncError):
 
 @dataclass
 class PublishedSyncResult:
-    """Contagens e divergência de uma sincronização (para o log/flash)."""
+    """Contagens, divergência e completude de uma sincronização."""
 
     product_id: Optional[object] = None
     variants_updated: int = 0
@@ -89,6 +113,10 @@ class PublishedSyncResult:
     stock_before: int = 0
     stock_after: int = 0
     divergence: Optional[str] = None
+    #: True só quando a resposta PROVOU completude do catálogo.
+    catalog_complete: bool = True
+    #: Código estável de completude não provada (None quando comprovada).
+    catalog_code: Optional[str] = None
 
 
 def sync_published_product(
@@ -121,11 +149,12 @@ def sync_published_product(
         raise PublishedSyncConflict("external_id_mismatch")
 
     divergence = _observe_divergence(detail, supplier_product)
+    census = catalog_census(detail)
     now = now or utcnow()
 
     stock_before = int(product.stock or 0)
     updated, deactivated, created = _sync_variant_stocks(
-        product, supplier_product, detail, now
+        product, supplier_product, detail, now, census
     )
     stock_after = int(product.stock or 0)
 
@@ -140,16 +169,19 @@ def sync_published_product(
         stock_before=stock_before,
         stock_after=stock_after,
         divergence=divergence,
+        catalog_complete=census.complete,
+        catalog_code=census.code,
     )
     logger.info(
         "published sync: variants_updated=%d variants_deactivated=%d "
-        "variants_created=%d stock=%d->%d divergence=%s",
+        "variants_created=%d stock=%d->%d divergence=%s catalog=%s",
         result.variants_updated,
         result.variants_deactivated,
         result.variants_created,
         result.stock_before,
         result.stock_after,
         divergence or "none",
+        "complete" if census.complete else str(census.code),
     )
     return result
 
@@ -187,20 +219,140 @@ def _observe_divergence(
 
 
 # --------------------------------------------------------------------------
+# completude do catálogo (nunca presumida pela presença de SKUs)
+# --------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class CatalogCensus:
+    """Resultado do censo de completude da resposta do fornecedor."""
+
+    complete: bool
+    code: Optional[str] = None
+    declared: Optional[int] = None
+    observed: int = 0
+
+
+def _declared_sku_total(detail: AliExpressProductDetail) -> Optional[int]:
+    """Contagem de SKUs DECLARADA pela resposta (None quando não declarada)."""
+    raw = getattr(detail, "raw", None)
+    if not isinstance(raw, Mapping):
+        return None
+    container = raw.get("ae_item_sku_info_dtos")
+    sources = []
+    if isinstance(container, Mapping):
+        sources.append(container)
+    base = raw.get("ae_item_base_info_dto")
+    if isinstance(base, Mapping):
+        sources.append(base)
+    sources.append(raw)
+
+    # Nome genérico ("total"/"count") só vale DENTRO do container de SKUs,
+    # onde não pode significar outra coisa.
+    container_keys = ("sku_count", "total_skus", "sku_total", "total", "count")
+    base_keys = ("sku_count", "total_skus", "sku_total")
+    for index, source in enumerate(sources):
+        keys = container_keys if index == 0 else base_keys
+        for key in keys:
+            if key not in source:
+                continue
+            try:
+                return int(source[key])
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _declared_stock_total(detail: AliExpressProductDetail) -> Optional[int]:
+    """Estoque agregado DECLARADO pela resposta (None quando não declarado)."""
+    value = getattr(detail, "available_stock", None)
+    if value is None:
+        raw = getattr(detail, "raw", None)
+        base = raw.get("ae_item_base_info_dto") if isinstance(raw, Mapping) else None
+        value = base.get("available_stock") if isinstance(base, Mapping) else None
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def catalog_census(detail: AliExpressProductDetail) -> CatalogCensus:
+    """Completude PROVADA do catálogo recebido (fail-closed).
+
+    A presença de SKUs nunca prova completude (a resposta pode trazer só
+    parte do catálogo). Só a contagem ou o agregado DECLARADOS pela
+    resposta, conferindo com o observado, autorizam desativar SKUs
+    ausentes. Sem prova, os SKUs presentes continuam atualizando normal e
+    nada é desativado.
+    """
+    seen = set()
+    observed_stock = 0
+    for sku in detail.skus or []:
+        if not sku.sku_id:
+            continue
+        sku_id = str(sku.sku_id)
+        if sku_id in seen:
+            continue
+        seen.add(sku_id)
+        observed_stock += _stock_of(sku)
+
+    observed = len(seen)
+    if observed == 0:
+        # Resposta sem nenhum SKU nunca prova "catálogo vazio".
+        return CatalogCensus(False, CATALOG_CENSUS_EMPTY, None, 0)
+
+    declared_count = _declared_sku_total(detail)
+    if declared_count is not None:
+        if declared_count == observed:
+            return CatalogCensus(True, None, declared_count, observed)
+        return CatalogCensus(
+            False, CATALOG_COUNT_MISMATCH, declared_count, observed
+        )
+
+    declared_stock = _declared_stock_total(detail)
+    if declared_stock is not None:
+        if declared_stock == observed_stock:
+            return CatalogCensus(True, None, declared_stock, observed)
+        return CatalogCensus(
+            False, CATALOG_STOCK_MISMATCH, declared_stock, observed
+        )
+
+    return CatalogCensus(False, CATALOG_CENSUS_UNPROVEN, None, observed)
+
+
+# --------------------------------------------------------------------------
 # estoque (única escrita de negócio desta API)
 # --------------------------------------------------------------------------
+
+def _locked_variants(product: Product, supplier_product: SupplierProduct):
+    """Trava Product -> ProductVariant na MESMA ordem usada no checkout."""
+    Product.query.filter_by(id=product.id).with_for_update().first()
+    return (
+        ProductVariant.query
+        .filter_by(supplier_product_id=supplier_product.id)
+        .with_for_update()
+        .order_by(ProductVariant.id)
+        .all()
+    )
+
 
 def _sync_variant_stocks(
     product: Product,
     supplier_product: SupplierProduct,
     detail: AliExpressProductDetail,
     now,
+    census: CatalogCensus,
 ) -> Tuple[int, int, int]:
-    """Atualiza estoque das variantes; retorna (atualizadas, desativadas, criadas)."""
-    existing = ProductVariant.query.filter_by(
-        supplier_product_id=supplier_product.id
-    ).all()
-    by_supplier_sku = {v.supplier_sku_id: v for v in existing if v.supplier_sku_id}
+    """Atualiza estoque das variantes; retorna (atualizadas, desativadas, criadas).
+
+    O valor absoluto aplicado é sempre
+    ``estoque do fornecedor - reservas locais ainda debitadas``: um
+    pedido pendente nunca tem o estoque que ele já consumiu devolvido por
+    uma sincronização. SKU ausente só é desativado quando o censo provou a
+    completude da resposta.
+    """
+    variants = _locked_variants(product, supplier_product)
+    reserved = reserved_quantities_by_variant([v.id for v in variants])
+    by_supplier_sku = {v.supplier_sku_id: v for v in variants if v.supplier_sku_id}
 
     seen = set()
     updated = deactivated = created = 0
@@ -211,13 +363,17 @@ def _sync_variant_stocks(
         if sku_id in seen:
             continue
         seen.add(sku_id)
-        stock = _stock_of(sku)
         variant = by_supplier_sku.get(sku_id)
+        observed = _stock_of(sku)
         if variant is None:
             created += _create_inactive_variant(
-                product, supplier_product, sku, sku_id, stock
+                product, supplier_product, sku, sku_id, observed
             )
             continue
+
+        # Fornecedor reporta o TOTAL disponível; a reserva local ainda
+        # debitada (pedido pendente) segue debitada — nunca é devolvida.
+        stock = max(observed - reserved.get(variant.id, 0), 0)
 
         # Só estoque: atributos/cor/tamanho/preço da variante são preservados
         # (mudança visível na vitrine exige decisão comercial explícita).
@@ -230,15 +386,17 @@ def _sync_variant_stocks(
             updated += 1
 
     # SKU sumido do catálogo: deixa de estar à venda (nunca é deletado).
-    for sku_id, variant in by_supplier_sku.items():
-        if sku_id in seen:
-            continue
-        if variant.is_active or (variant.stock or 0):
-            variant.stock = 0
-            variant.is_active = False
-            variant.updated_at = now
-            updated += 1
-            deactivated += 1
+    # Exige completude comprovada — resposta parcial não desativa nada.
+    if census.complete:
+        for sku_id, variant in by_supplier_sku.items():
+            if sku_id in seen:
+                continue
+            if variant.is_active or (variant.stock or 0):
+                variant.stock = 0
+                variant.is_active = False
+                variant.updated_at = now
+                updated += 1
+                deactivated += 1
 
     active_stocks = [
         max(v.stock or 0, 0)
@@ -305,7 +463,12 @@ def _mark_technical_sync(
 ) -> None:
     """Carimbo de sincronização técnica + divergência sinalizada.
 
-    NÃO escreve em cost/currency/price/pricing_status/is_active/is_draft.
+    NÃO escreve em cost/currency/price/target_margin/is_active/is_draft.
+    Divergência de custo/moeda INVALIDA a aprovação operacional: a
+    precificação passa a `stale` com o código estável em `pricing_error`,
+    sem alterar preço, margem ou conteúdo (migração 0005/0035 aceita
+    `stale` em produto publicado; os controles canônicos de compra
+    bloqueiam a venda enquanto durar).
     """
     supplier_product.sync_status = "synced"
     supplier_product.last_sync_at = now
@@ -313,6 +476,9 @@ def _mark_technical_sync(
     product.sync_status = "synced"
     product.last_sync_at = now
     product.sync_error = divergence
+    if divergence:
+        product.pricing_status = STALE
+        product.pricing_error = divergence
 
     product_sync = ProductSync.query.filter_by(
         product_id=product.id, supplier_id=supplier_product.supplier_id
@@ -334,11 +500,17 @@ def _mark_technical_sync(
 
 
 __all__ = [
+    "CATALOG_CENSUS_EMPTY",
+    "CATALOG_CENSUS_UNPROVEN",
+    "CATALOG_COUNT_MISMATCH",
+    "CATALOG_STOCK_MISMATCH",
     "DIVERGENCE_COST",
     "DIVERGENCE_CURRENCY",
     "DIVERGENCE_CODES",
+    "CatalogCensus",
     "PublishedSyncError",
     "PublishedSyncConflict",
     "PublishedSyncResult",
+    "catalog_census",
     "sync_published_product",
 ]
