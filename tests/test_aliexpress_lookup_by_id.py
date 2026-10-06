@@ -966,6 +966,88 @@ def test_comparar_produto_ausente_e_inviavel(admin_catalog, monkeypatch):
     assert "produto não retornado" in body
 
 # --------------------------------------------------------------------------
+# 10) Moeda: resposta → normalização → linha (sem fallback silencioso)
+# --------------------------------------------------------------------------
+
+def _detail_currency(product_id, sku_currency, product_currency, price="69.85"):
+    sku = AliExpressProductSku(
+        sku_id="%s-M-AZUL" % product_id,
+        sale_price=Decimal(price),
+        original_price=Decimal(price),
+        currency=sku_currency,
+        available_stock=7,
+        attributes=[{"name": "Cor", "value": "Azul"}],
+    )
+    return AliExpressProductDetail(
+        product_id=product_id,
+        title="Moeda",
+        description="",
+        images=[],
+        skus=[sku],
+        available_stock=7,
+        sale_price=Decimal(price),
+        original_price=Decimal(price),
+        currency=product_currency,
+    )
+
+
+def test_moeda_explicita_da_variante_preservada(admin_catalog):
+    FakeAliExpressClient.details[PRODUCT_ID] = _detail_currency(
+        PRODUCT_ID, "USD", "BRL"
+    )
+    body = admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/detalhe").get_data(
+        as_text=True
+    )
+    segs = [
+        s.split("</tr>")[0]
+        for s in body.split("<tr")
+        if "%s-M-AZUL" % PRODUCT_ID in s
+    ]
+    assert len(segs) == 1
+    # A linha da variante mostra a moeda dela, não a do produto.
+    assert "USD" in segs[0]
+
+
+def test_moeda_so_no_produto_propagada_para_linha(admin_catalog):
+    FakeAliExpressClient.details[PRODUCT_ID] = _detail_currency(
+        PRODUCT_ID, None, "EUR"
+    )
+    body = admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/detalhe").get_data(
+        as_text=True
+    )
+    segs = [
+        s.split("</tr>")[0]
+        for s in body.split("<tr")
+        if "%s-M-AZUL" % PRODUCT_ID in s
+    ]
+    assert len(segs) == 1
+    assert "EUR" in segs[0]
+
+
+def test_moeda_ausente_mostra_nao_fornecida_sem_fabricar_brl(admin_catalog):
+    """Sem currency_code na resposta, a tela diz; o BRL do destino
+    (sempre pedido pela rota) nunca vira moeda da resposta."""
+    FakeAliExpressClient.details[PRODUCT_ID] = _detail_currency(
+        PRODUCT_ID, None, None
+    )
+    body = admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/detalhe").get_data(
+        as_text=True
+    )
+    assert "Moeda: Não fornecida" in body
+    segs = [
+        s.split("</tr>")[0]
+        for s in body.split("<tr")
+        if "%s-M-AZUL" % PRODUCT_ID in s
+    ]
+    assert len(segs) == 1
+    # A célula de moeda da variante não fabrica o BRL do destino.
+    assert "Não fornecida" in segs[0]
+    assert "BRL" not in segs[0]
+    # Preço e identificadores intactos apesar da moeda ausente.
+    assert "%s-M-AZUL" % PRODUCT_ID in body
+    assert "69,85" in body
+
+# --------------------------------------------------------------------------
 # 5) Candidato sintético com 2 variantes: importação, origem e confirmação
 # --------------------------------------------------------------------------
 

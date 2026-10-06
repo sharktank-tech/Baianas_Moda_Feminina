@@ -85,7 +85,7 @@
                     {% endif %}
                 </div>
                 <p class="text-gray-500">
-                    {% if priced_skus %}Moeda: {{ ns.currency }}{% endif %}
+                    {% if priced_skus %}Moeda: {{ ns.currency or 'Não fornecida' }}{% endif %}
                     &middot; Estoque disponível:
                     {{ detail.available_stock if detail.available_stock is not none else '—' }}
                 </p>
@@ -161,7 +161,7 @@
                                     {{ ptx(row.price) if row.price else '—' }}
                                 </td>
                                 <td class="py-2 pr-4 text-gray-700">
-                                    {{ row.currency or '—' }}
+                                    {{ row.currency or 'Não fornecida' }}
                                 </td>
                             </tr>
                         {% endfor %}

@@ -310,6 +310,81 @@ Coberta para CÉU AZUL / M do piloto via relato do usuário (tabela acima).
 Restam: P e G do piloto, evidência formal arquivada, e a correspondência
 do `sku_id` (P5). **Sem comprovação, a origem permanece `unknown`.**
 
+### Novo anúncio: `1005010660869000` (tênis) — evidência do usuário, 06/10/2026
+
+**Fonte:** conteúdo fornecido pelo usuário — **não** é captura arquivada
+nem verificação independente. A página foi relatada como "Compra
+internacional": **nenhum país de despacho deduzido, nenhuma origem
+confirmada no banco**.
+
+| Campo | Evidência fornecida |
+| --- | --- |
+| Anúncio | `1005010660869000` |
+| Variante | A08White / 36 |
+| ID bruto do SKU | `14:193#A08White;200000124:200000334` |
+| sku_attr | `14:193;200000124:200000334` |
+| Estoque informado pela API | 1099998 |
+| Preço exibido no painel | 76,99 |
+| Moeda exibida no painel | Ausente |
+| CEP do checkout | `77066520` |
+| Subtotal | R$ 76,99 |
+| Frete | R$ 27,03 |
+| Imposto de importação | R$ 0,00 |
+| ICMS | R$ 21,34 |
+| Total | R$ 125,36 |
+
+**Conclusão estrita:** mesmo anúncio e variante, coincidência numérica
+entre preço da API (76,99) e subtotal do checkout (R$ 76,99); moeda da API
+ainda não esclarecida. Quantidade de uma unidade **pendente de
+confirmação explícita**. Observação: o `id` bruto confirma o formato
+combinação com fragmento (`pid:vid#Rótulo;...`), como previsto na
+auditoria de identidade.
+
+### Moeda ausente — causa e correção
+
+Rastreio `ds.product.get` → normalização → `_detalhe_sku_rows` → template:
+a resposta oficial traz `currency_code` no SKU e na base, e o código
+preserva os dois (`sku.currency`, `detail.currency`); a linha usa o da
+variante com fallback para o do produto. **Nada se perde no caminho** — a
+ausência exibida reflete ausência na resposta. Correção aplicada: sem
+moeda retornada, a tela mostra **"Não fornecida"** (células e linha
+"Moeda:"), e o BRL do destino nunca é usado como fallback silencioso
+(coberto por teste). Para fechar a causa-raiz no caso concreto, falta a
+evidência: os campos `currency_code` brutos (SKU e base) da resposta live
+de `1005010660869000` — sem pedir tokens; basta o trecho sanitizado.
+
+### Auditoria do custo completo de aquisição (sem gravar valores)
+
+Consumidores do preço verificados: importação (custo base do maior SKU),
+precificação (`landed = cost + shipping + import_duty + icms`, fail-closed
+por `observed_amount`; margem comercial aplicada **depois**, sobre o
+landed), sincronização (sinaliza divergência, nunca aplica), margem
+(`target_margin_percent` explícito, 0–100). Para o checkout informado:
+76,99 + 27,03 + 0,00 + 21,34 = 125,36 — aritmética confere, mas **R$ 76,99
+não é custo completo** (falta frete + tributos), e os tributos só entram
+uma vez (sem soma dupla no código). Moeda única exigida (sem camada FX).
+**Lacunas:** (a) mapeamento desses valores para os campos por unidade
+(`cost`, `shipping_cost`, `import_duty`, `icms`) exige quantidade 1
+confirmada — pendente; (b) docstring de `calculate_landed_cost` diz só
+"cost + shipping" (desatualizada ante os tributos) — correção proposta em
+separado, sem impacto funcional. **Nenhum valor do relato foi gravado como
+cotação ou custo validado de produção.**
+
+### Consolidação desta rodada (relatos do usuário + verificações)
+
+- `1005010478234256`, CÉU AZUL/M: API R$ 34,80; outra conta apresentou
+  R$ 58,00.
+- `1005010502074833`, CÉU AZUL/M: API R$ 31,20; outra conta apresentou
+  R$ 52,00.
+- "Do Brasil" e frete grátis relatados em ambos; quantidade e impostos sem
+  confirmação explícita.
+- Três rodadas on/off por anúncio sem diferenças: "nenhuma diferença
+  observada; efeito inconclusivo" (registrado como relato; sem reexecução
+  local por falta de sessão).
+- A causa da divergência dos vestidos permanece desconhecida; o caso do
+  tênis não valida todos os preços da API. Rodadas não repetidas; padrão
+  de `remove_personal_benefit` inalterado.
+
 ### Caminhos validados para executar P3 (somente leitura, sem importar)
 
 **Via Preview do PR (com o formulário novo) — validado por código e sonda
@@ -427,7 +502,7 @@ sugestivo.
 
 ## 6. Testes executados, resultados e skips
 
-Novo: `tests/test_aliexpress_lookup_by_id.py` — **43 passed**.
+Novo: `tests/test_aliexpress_lookup_by_id.py` — **46 passed**.
 Cobre: parser (IDs/URLs válidos e recusas, incl. host malicioso
 `aliexpress.com.evil.com`), rota (sucesso por ID e por URL, inválido sem
 chamar a API, ausente, erro sanitizado sem vazar `raw`, nota de limitação
@@ -446,12 +521,15 @@ runner `--compare-benefit` com flag, rodada e mercado registrados por
 chamada (erro isolado por flag) e classificação em vocabulário exato
 (iguais → efeito inconclusivo; diferentes → ainda não atribuída), ação
 `comparar-preco` com alternância por paridade, falhas parciais
-sanitizadas, rodada inválida e ausência total de escritas no banco.
+sanitizadas, rodada inválida e ausência total de escritas no banco,
+moeda por nível (variante, produto, ausente → "Não fornecida" sem
+fabricar o BRL do destino).
 
 Suítes pertinentes: `test_aliexpress_admin_catalog.py` +
 `test_aliexpress_client.py` + `test_aliexpress_product.py` +
-`test_aliexpress_lookup_by_id.py` = **153 passed**;
+`test_aliexpress_lookup_by_id.py` = **156 passed**;
 `test_aliexpress_search.py` + `test_draft_import.py` +
 `test_published_sync_resilience.py` = **80 passed**.
+Suíte completa: **2233 passed, 107 skipped**.
 Sem skips novos; nenhum teste PG (sem alteração de persistência, consultas
 ou migrações). `git diff --check` limpo.
