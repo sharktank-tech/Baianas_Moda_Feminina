@@ -1,0 +1,208 @@
+{# ────────────────────────────────────────────────────────────────────────
+   Origem de envio + seleção de operação nacional (Etapa 2).
+
+   Compartilhado entre rascunho.html e renovar_frete.html. Os pais definem:
+       origin_endpoint    -> rota POST de classificação de origem
+       nacional_endpoint  -> rota POST de seleção de variantes
+
+   Contexto: product, supplier_product, origin_summary, origin_display,
+   origin_reason_labels, origin_rows.
+
+   Honesty rules (nunca mudar aqui):
+     * sem evidência gravada a etiqueta é "Origem não verificada";
+     * uma classificação manual exige reference (campo obrigatório);
+     * a seleção nacional sem origem Brasil comprovada bloqueia publicação,
+       mas nunca despublica um produto já à venda.
+   ──────────────────────────────────────────────────────────────────────── #}
+
+<div class="bg-white rounded-2xl shadow p-6 mb-6">
+    <h2 class="text-lg font-semibold text-gray-800 mb-1">Origem de envio</h2>
+    <p class="text-xs text-gray-500 mb-4">
+        Classifique de onde o fornecedor envia este produto. A resposta só vale
+        com uma referência de evidência (link, número de pedido ou anotação do
+        fornecedor). Sem evidência, a origem continua <strong>não
+        verificada</strong> — nunca presumimos Brasil.
+    </p>
+
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+        <span class="text-sm font-medium px-3 py-1 rounded-full border
+                     {% if origin_summary.label == 'brazil' %}text-green-700 bg-green-50 border-green-200
+                     {% elif origin_summary.label == 'foreign' %}text-blue-700 bg-blue-50 border-blue-200
+                     {% elif origin_summary.label == 'conflict' %}text-red-700 bg-red-50 border-red-200
+                     {% else %}text-gray-600 bg-gray-50 border-gray-200{% endif %}">
+            {{ origin_display }}
+        </span>
+        <span class="text-xs text-gray-500">
+            {{ origin_summary.brazil }} Brasil &middot;
+            {{ origin_summary.foreign }} exterior &middot;
+            {{ origin_summary.unknown }} sem prova
+            ({{ origin_summary.total }} variante(s) avaliada(s))
+        </span>
+        {% if origin_summary.conflicts %}
+            <span class="text-xs font-medium px-2 py-1 rounded-full text-red-700 bg-red-50 border border-red-200">
+                {{ origin_summary.conflicts }} conflito(s) manual × API
+            </span>
+        {% endif %}
+    </div>
+
+    {% if origin_reason_labels %}
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+            <p class="text-xs font-semibold text-yellow-800 mb-1">
+                Bloqueios de operação nacional ativos:
+            </p>
+            <ul class="text-xs text-yellow-700 list-disc pl-5 space-y-1">
+                {% for reason in origin_reason_labels %}
+                    <li>{{ reason }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+
+    {% if origin_rows %}
+        <div class="overflow-x-auto mb-4">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-left text-gray-500 border-b">
+                        <th class="py-2 pr-3">Escopo</th>
+                        <th class="py-2 pr-3">Manual</th>
+                        <th class="py-2 pr-3">Observado na API</th>
+                        <th class="py-2 pr-3">Evidência</th>
+                        <th class="py-2">Confirmado em</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in origin_rows %}
+                        <tr class="border-b">
+                            <td class="py-2 pr-3 text-gray-700">
+                                {% if row.covers_all_variants %}
+                                    Todas as variantes
+                                {% else %}
+                                    SKU {{ row.supplier_sku_id }}
+                                {% endif %}
+                            </td>
+                            <td class="py-2 pr-3 text-gray-700">
+                                {{ row.manual_origin or '—' }}
+                            </td>
+                            <td class="py-2 pr-3 text-gray-700">
+                                {{ row.api_origin or '—' }}
+                            </td>
+                            <td class="py-2 pr-3 text-gray-700">
+                                {{ row.evidence_ref or '—' }}
+                            </td>
+                            <td class="py-2 text-gray-700">
+                                {{ row.confirmed_at.strftime('%d/%m/%Y %H:%M') if row.confirmed_at else '—' }}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+
+    <form method="POST" action="{{ url_for(origin_endpoint, product_id=product.external_id or '') }}"
+          class="space-y-4">
+        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+
+        <label class="block">
+            <span class="text-sm font-medium text-gray-700">Escopo *</span>
+            <select name="origin_scope" required
+                    class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+                <option value="">— selecione —</option>
+                <option value="all">Todas as variantes (cobertura explícita)</option>
+                {% for v in product.variants or [] %}
+                    {% if v.supplier_sku_id %}
+                        <option value="{{ v.id }}">Variante {{ v.supplier_sku_id }}{% if v.size %} · {{ v.size }}{% endif %}{% if v.color %} · {{ v.color }}{% endif %}</option>
+                    {% endif %}
+                {% endfor %}
+            </select>
+        </label>
+
+        <fieldset class="block">
+            <legend class="text-sm font-medium text-gray-700">Origem do envio *</legend>
+            <div class="mt-1 flex flex-wrap gap-4">
+                <label class="flex items-center gap-2 text-sm text-gray-700">
+                    <input type="radio" name="origin_kind" value="brazil" required>
+                    Brasil
+                </label>
+                <label class="flex items-center gap-2 text-sm text-gray-700">
+                    <input type="radio" name="origin_kind" value="foreign" required>
+                    Exterior
+                </label>
+            </div>
+        </fieldset>
+
+        <label class="block">
+            <span class="text-sm font-medium text-gray-700">País (2 letras, opcional)</span>
+            <input type="text" name="origin_country" maxlength="2"
+                   placeholder="Ex: BR, CN"
+                   class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+        </label>
+
+        <label class="block">
+            <span class="text-sm font-medium text-gray-700">Referência da evidência *</span>
+            <input type="text" name="origin_evidence_ref" maxlength="200" required
+                   placeholder="Ex: link do anúncio, print do vendedor, pedido AE-123"
+                   class="mt-1 w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+        </label>
+
+        <div class="flex flex-wrap gap-3">
+            <button type="submit" name="origin_action" value="save"
+                    class="bg-pink-600 hover:bg-pink-700 text-white font-semibold px-6 py-3 rounded-lg">
+                Salvar classificação
+            </button>
+            <button type="submit" name="origin_action" value="clear" formnovalidate
+                    class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-6 py-3 rounded-lg">
+                Limpar confirmação
+            </button>
+        </div>
+    </form>
+</div>
+
+<div class="bg-white rounded-2xl shadow p-6">
+    <h2 class="text-lg font-semibold text-gray-800 mb-1">Operação nacional</h2>
+    <p class="text-xs text-gray-500 mb-4">
+        Marque as variantes que passam a ser tratadas como operação nacional.
+        Cada variante marcada precisa de origem Brasil comprovada para ser
+        publicada; desmarcar remove o requisito. A publicação nunca é
+        removida automaticamente por este recurso.
+    </p>
+
+    {% set active_variants = [] %}
+    {% for v in product.variants or [] %}
+        {% if v.is_active %}
+            {% if active_variants.append(v) %}{% endif %}
+        {% endif %}
+    {% endfor %}
+
+    <form method="POST" action="{{ url_for(nacional_endpoint, product_id=product.external_id or '') }}"
+          class="space-y-4">
+        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+
+        {% if active_variants %}
+            <div class="space-y-2">
+                {% for v in active_variants %}
+                    <label class="flex items-start gap-3 text-sm text-gray-700 border rounded-lg px-4 py-3">
+                        <input type="checkbox" name="national_variant" value="{{ v.id }}"
+                               class="mt-1"
+                               {% if v.national_shipping_operation %}checked{% endif %}>
+                        <span>
+                            <span class="font-medium">
+                                {{ v.supplier_sku_id or v.sku or v.id }}
+                            </span>
+                            {% if v.color %} · {{ v.color }}{% endif %}
+                            {% if v.size %} · {{ v.size }}{% endif %}
+                            <span class="text-gray-400">(estoque {{ v.stock or 0 }})</span>
+                        </span>
+                    </label>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="text-sm text-gray-500">Nenhuma variante ativa neste produto.</p>
+        {% endif %}
+
+        <button type="submit"
+                class="bg-pink-600 hover:bg-pink-700 text-white font-semibold px-6 py-3 rounded-lg">
+            Salvar seleção
+        </button>
+    </form>
+</div>

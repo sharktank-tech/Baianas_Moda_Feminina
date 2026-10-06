@@ -242,8 +242,12 @@ class Product(db.Model):
     pricing_updated_at = db.Column(db.DateTime)
 
     # Defesa de banco: AliExpress só pode ficar ATIVO se NÃO for rascunho E
-    # estiver priced. O resto da validação (landed cost, moeda, margem alvo,
-    # variantes) é responsabilidade de publication.evaluate_publication().
+    # estiver priced OU stale. `stale` cobre a divergência de custo/moeda
+    # sinalizada pela sincronização do publicado: a aprovação operacional
+    # deixa de valer (compra bloqueada pelos controles canônicos), mas o
+    # produto JÁ À VENDA nunca é despublicado por esse caminho. O resto da
+    # validação (landed cost, moeda, margem alvo, variantes) é
+    # responsabilidade de publication.evaluate_publication().
     __table_args__ = (
         db.CheckConstraint(
             "target_margin_percent IS NULL "
@@ -253,7 +257,7 @@ class Product(db.Model):
         db.CheckConstraint(
             "source != 'aliexpress' "
             "OR is_active = false "
-            "OR (is_draft = false AND pricing_status = 'priced')",
+            "OR (is_draft = false AND pricing_status IN ('priced', 'stale'))",
             name="ck_product_aliexpress_publication_guard",
         ),
         # Estados canônicos de pricing (unpriced | blocked | ready | priced |
@@ -1609,12 +1613,23 @@ class ProductVariant(db.Model):
     size = db.Column(db.String(40))
     attributes = db.Column(JSONB)
     stock = db.Column(db.Integer, nullable=False, default=0)
+    # Total informado pelo FORNECEDOR na última sincronização técnica
+    # (NULL = nunca sincronizado). É o teto da liberação de reserva: quando
+    # o fornecedor reduz o estoque, devolver a reserva nunca infla o estoque
+    # local acima deste valor (migração 0038; sem backfill).
+    supplier_stock = db.Column(db.Integer, nullable=True)
     price = db.Column(db.Numeric(10, 2))
     sale_price = db.Column(db.Numeric(10, 2))
     image_url = db.Column(db.Text)
     weight_kg = db.Column(db.Numeric(8, 3))
     dimensions = db.Column(db.Text)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
+    # Seleção de operação nacional (Etapa 1): somente variante marcada e ativa
+    # participa do gate de origem nacional. FALSE = catálogo internacional
+    # comum, que NUNCA bloqueia por este recurso.
+    national_shipping_operation = db.Column(
+        db.Boolean, nullable=False, default=False, server_default=db.false()
+    )
     created_at = db.Column(db.DateTime, default=utcnow)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
@@ -1719,6 +1734,113 @@ class SupplierProduct(db.Model):
         db.CheckConstraint(
             "landed_cost IS NULL OR landed_cost >= 0",
             name="ck_supplier_product_landed_cost_nonneg",
+        ),
+    )
+
+
+# ==========================================================
+# Origem de envio com evidência (integração AliExpress, Etapa 1)
+# ==========================================================
+class SupplierSkuShippingOrigin(db.Model):
+    """Classificação de origem de envio por SKU ou por cobertura do vínculo.
+
+    Duas escritas independentes e nunca misturadas:
+      * ``manual_origin``: declaração do admin, SEMPRE com ``evidence_ref`` e
+        ``confirmed_at`` (CHECK no banco). É a fonte que um humano assume.
+      * ``api_origin``: valor observado em dado do fornecedor, com
+        ``api_observed_at``. Nunca sobrescreve a confirmação manual.
+    Conflito manual × api é sinalizado na resolução, nunca silenciado.
+
+    Escopo XOR por linha (``supplier_sku_id`` OU ``covers_all_variants``);
+    a resolução dá precedência ao SKU sobre a cobertura. A cobertura total
+    só vale para os SKUs listados em ``covered_supplier_sku_ids`` (snapshot
+    do momento da escrita): SKU novo nunca herda origem sozinho. Ausência
+    de linha = origem desconhecida (fail-closed); nada é presumido como
+    nacional.
+    """
+
+    __tablename__ = "supplier_sku_shipping_origins"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    supplier_product_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("supplier_products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    supplier_sku_id = db.Column(db.String(64))
+    covers_all_variants = db.Column(
+        db.Boolean, nullable=False, default=False, server_default=db.false()
+    )
+    # Cobertura EXPLÍCITA (JSON: lista de supplier_sku_id, com `null` para
+    # variante sem SKU). Só quem está na lista é coberto pela linha de
+    # cobertura total; SKU nascido depois nunca herda origem sozinho.
+    # NULL = nada coberto (fail-closed).
+    covered_supplier_sku_ids = db.Column(db.Text)
+    api_origin = db.Column(db.String(16))
+    manual_origin = db.Column(db.String(16))
+    origin_country = db.Column(db.String(2))
+    evidence_ref = db.Column(db.Text)
+    confirmed_by_user_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    confirmed_at = db.Column(db.DateTime)
+    api_observed_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime, default=utcnow, onupdate=utcnow
+    )
+
+    supplier_product = db.relationship("SupplierProduct", lazy=True)
+
+    __table_args__ = (
+        # Índices únicos parciais (mesmos nomes da migration 0034): uma linha
+        # por SKU e no máximo uma linha de cobertura total por vínculo.
+        db.Index(
+            "uq_shipping_origin_variant_sku",
+            "supplier_product_id", "supplier_sku_id",
+            unique=True,
+            sqlite_where=db.text("supplier_sku_id IS NOT NULL"),
+            postgresql_where=db.text("supplier_sku_id IS NOT NULL"),
+        ),
+        db.Index(
+            "uq_shipping_origin_cover_all",
+            "supplier_product_id",
+            unique=True,
+            sqlite_where=db.text("covers_all_variants"),
+            postgresql_where=db.text("covers_all_variants"),
+        ),
+        db.CheckConstraint(
+            "(supplier_sku_id IS NOT NULL AND covers_all_variants = FALSE) "
+            "OR (supplier_sku_id IS NULL AND covers_all_variants = TRUE)",
+            name="ck_shipping_origin_scope",
+        ),
+        db.CheckConstraint(
+            "api_origin IS NULL OR api_origin IN ('brazil', 'foreign')",
+            name="ck_shipping_origin_api_origin",
+        ),
+        db.CheckConstraint(
+            "manual_origin IS NULL OR manual_origin IN ('brazil', 'foreign')",
+            name="ck_shipping_origin_manual_origin",
+        ),
+        db.CheckConstraint(
+            "manual_origin IS NULL OR "
+            "(evidence_ref IS NOT NULL AND confirmed_at IS NOT NULL)",
+            name="ck_shipping_origin_manual_evidence",
+        ),
+        db.CheckConstraint(
+            "api_origin IS NULL OR api_observed_at IS NOT NULL",
+            name="ck_shipping_origin_api_evidence",
+        ),
+        db.CheckConstraint(
+            "origin_country IS NULL OR length(origin_country) = 2",
+            name="ck_shipping_origin_country",
         ),
     )
 
@@ -2116,5 +2238,86 @@ class ProductSync(db.Model):
     __table_args__ = (
         db.UniqueConstraint(
             "product_id", "supplier_id", name="uq_product_sync"
+        ),
+    )
+
+
+class AliExpressSyncAttempt(db.Model):
+    """Tentativa de sincronização técnica de produto publicado (auditoria).
+
+    Persiste o RESULTADO de cada tentativa da rota administrativa — sucesso,
+    recusa controlada, falha inesperada ou erro de API — para que a história
+    não viva apenas em flash de sessão. Nunca guarda payload do fornecedor,
+    token, sku_id, product_id externo ou endereço do cliente.
+
+    `code` é o código estável de recusa/falha; `divergence` e `catalog_code`
+    são os códigos estáveis sinalizados pela sincronização (divergência de
+    custo/moeda e completude não provada do catálogo).
+    """
+
+    __tablename__ = "aliexpress_sync_attempts"
+
+    #: Statuses canônicos (constraint ck_aliexpress_sync_attempt_status).
+    STATUS_APPLIED = "applied"
+    STATUS_REJECTED = "rejected"
+    STATUS_FAILED = "failed"
+    STATUS_API_ERROR = "api_error"
+    STATUSES = (
+        STATUS_APPLIED,
+        STATUS_REJECTED,
+        STATUS_FAILED,
+        STATUS_API_ERROR,
+    )
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    product_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    supplier_product_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("supplier_products.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    status = db.Column(db.String(16), nullable=False)
+    code = db.Column(db.String(64))
+    divergence = db.Column(db.String(64))
+    catalog_code = db.Column(db.String(64))
+    variants_updated = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0"
+    )
+    variants_deactivated = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0"
+    )
+    variants_created = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0"
+    )
+    stock_before = db.Column(db.Integer)
+    stock_after = db.Column(db.Integer)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    product = db.relationship(
+        "Product",
+        backref=db.backref(
+            "sync_attempts",
+            lazy=True,
+            order_by="AliExpressSyncAttempt.created_at.desc()",
+        ),
+    )
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "status IN ('applied', 'rejected', 'failed', 'api_error')",
+            name="ck_aliexpress_sync_attempt_status",
+        ),
+        db.Index(
+            "ix_aliexpress_sync_attempts_product_created",
+            "product_id",
+            "created_at",
         ),
     )

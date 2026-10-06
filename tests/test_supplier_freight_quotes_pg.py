@@ -1,5 +1,4 @@
 """PostgreSQL real: constraint e concorrência da cotação de referência."""
-import os
 import secrets
 import threading
 import uuid
@@ -11,7 +10,12 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+from conftest import ORIGINAL_DATABASE_URL
+
+# O conftest troca DATABASE_URL por SQLite temporário ANTES da importação;
+# sem usar a URL original os dois testes aqui pulam também no CI e deixam a
+# constraint/concorrência sem cobertura em PostgreSQL.
+DATABASE_URL = ORIGINAL_DATABASE_URL
 try:
     _url = make_url(DATABASE_URL) if DATABASE_URL else None
     SAFE = bool(

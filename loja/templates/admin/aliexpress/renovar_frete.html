@@ -51,6 +51,60 @@
         </form>
     </div>
 
+    {# Etapa 2: origem de envio com evidência + seleção de operação nacional
+       (produto publicado: a seleção nova passa a bloquear republicação,
+       mas nunca despublica o que já está à venda). #}
+    {% set origin_endpoint = 'aliexpress_admin.publicado_origem' %}
+    {% set nacional_endpoint = 'aliexpress_admin.publicado_nacional' %}
+    {% include "admin/aliexpress/_origin_fields.html" %}
+
+    {# Etapa 3: sincronização técnica — só estoque/dados técnicos. #}
+    <div class="bg-white rounded-2xl shadow p-6">
+        <h2 class="text-lg font-semibold text-gray-800 mb-1">
+            Sincronização técnica
+        </h2>
+        <p class="text-xs text-gray-500 mb-4">
+            Atualiza apenas o estoque e os dados técnicos a partir do catálogo
+            do fornecedor. Nome, descrição, imagens, categoria, preço, margem,
+            custo, moeda e a publicação ficam exatamente como estão; uma
+            divergência de custo/moeda é sinalizada aqui e nunca aplicada
+            automaticamente. Novos tamanhos/cores entram inativos.
+        </p>
+        <form method="POST"
+              action="{{ url_for('aliexpress_admin.publicado_sincronizar', product_id=product.external_id or '') }}">
+            {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+            <button type="submit"
+                    class="bg-gray-800 hover:bg-gray-900 text-white font-semibold px-6 py-3 rounded-lg">
+                Sincronizar estoque agora
+            </button>
+        </form>
+
+        {# História persistida da sincronização (tentativas, recusas, falhas).
+           O flash é só o resumo imediato do último clique. #}
+        {% set attempts = (product.sync_attempts or [])[:5] %}
+        {% if attempts %}
+        <div class="mt-5 border-t border-gray-100 pt-4">
+            <h3 class="text-sm font-semibold text-gray-700 mb-2">
+                Tentativas recentes
+            </h3>
+            <ul class="space-y-1 text-xs text-gray-500">
+                {% for attempt in attempts %}
+                <li>
+                    {{ attempt.created_at.strftime('%d/%m/%Y %H:%M') if attempt.created_at else '—' }}
+                    — <span class="font-medium text-gray-700">{{ attempt.status }}</span>
+                    {% if attempt.code %}({{ attempt.code }}){% endif %}
+                    {% if attempt.divergence %} · divergência: {{ attempt.divergence }}{% endif %}
+                    {% if attempt.catalog_code %} · catálogo incompleto: {{ attempt.catalog_code }}{% endif %}
+                    {% if attempt.status == 'applied' %}
+                      · estoque {{ attempt.stock_before }} → {{ attempt.stock_after }}
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+
 </div>
 
 {% endblock %}

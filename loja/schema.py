@@ -122,6 +122,18 @@ REQUIRED_COLUMNS = {
     },
     # product_variants (atributos brutos do SKU AliExpress)
     ("product_variants", "attributes"): {"type": "jsonb", "nullable": True},
+    # product_variants (total informado pelo fornecedor: teto da liberação
+    # de reserva; NULL = nunca sincronizado, sem backfill)
+    ("product_variants", "supplier_stock"): {"type": "integer", "nullable": True},
+    # product_variants (seleção de operação nacional, Etapa 1 AliExpress)
+    ("product_variants", "national_shipping_operation"): {
+        "type": "boolean", "nullable": False, "default": "FALSE",
+    },
+    # supplier_sku_shipping_origins (cobertura explícita da confirmação
+    # coletiva: só os SKUs listados são cobertos; NULL = nada coberto)
+    ("supplier_sku_shipping_origins", "covered_supplier_sku_ids"): {
+        "type": "text", "nullable": True,
+    },
     # products (dropshipping / sincronização)
     ("products", "external_id"): {"type": "string", "length": 64, "nullable": True},
     ("products", "source"): {
@@ -196,6 +208,8 @@ def _sql_type(dialect, generic):
         return "NUMERIC(10,2)"
     if generic == "numeric5":
         return "NUMERIC(5,2)"
+    if generic == "integer":
+        return "INTEGER"
     if generic == "jsonb":
         return "JSONB" if dialect == "postgresql" else "JSON"
     if generic == "datetime":

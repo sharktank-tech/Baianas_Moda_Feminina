@@ -41,6 +41,7 @@ from loja.modules.getway_mercado_pago.payment_service import (
     mp_status_to_order_status,
     validate_webhook_signature,
 )
+from loja.services.purchase_controls import assert_purchase_allowed
 from loja.services.shipping_quote import (
     QuoteUnavailable,
     quote_for_items,
@@ -807,6 +808,13 @@ def _reserve_stock(item_data):
                 raise ValueError(
                     f"Uma variação de {product.name} não está mais disponível."
                 )
+
+        # Controles canônicos de NOVA compra (divergência de custo/moeda do
+        # fornecedor; origem nacional por VARIANTE). Roda sob o lock do
+        # produto/variante, dentro da mesma transação do pedido.
+        assert_purchase_allowed(
+            product, variant, product_name=item["product_name"]
+        )
 
         if variant is not None:
             if int(variant.stock or 0) < item["quantity"]:

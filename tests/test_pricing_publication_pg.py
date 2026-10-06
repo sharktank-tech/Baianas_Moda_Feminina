@@ -418,3 +418,95 @@ def test_pricing_and_publish_roundtrip_in_disposable_schema(env, monkeypatch):
         assert db.session.get(Product, half_ready.id) is None
 
     assert _public_columns_snapshot(eng) == public_before, "public foi alterado!"
+
+
+# --------------------------------------------------------------------------
+# Migration 0035 — divergência de custo/moeda em produto publicado (stale)
+# --------------------------------------------------------------------------
+
+_MIGRATION_0035 = (
+    pathlib.Path(__file__).resolve().parents[1]
+    / "migrations"
+    / "0035_published_divergence_guard.sql"
+)
+_MIGRATION_0035_DOWN = (
+    pathlib.Path(__file__).resolve().parents[1]
+    / "migrations"
+    / "0035_published_divergence_guard_down.sql"
+)
+
+
+def _apply_named_migration(engine, schema, path):
+    """Aplica migration aditiva no schema descartável (sempre reexecutável)."""
+    sql = path.read_text()
+    sql = sql.replace(
+        "SET search_path TO pollomodas;",
+        'SET search_path TO "%s";' % schema,
+    )
+    sql = sql.replace(
+        "'pollomodas.products'::regclass",
+        "'%s.products'::regclass" % schema,
+    )
+    with engine.begin() as c:
+        for stmt in _split_sql_statements(sql):
+            c.execute(text(stmt))
+
+
+def test_migration_0035_aceita_publicado_stale_e_rejeita_unpriced(env):
+    """Publicado com divergência (stale) é commitável; unpriced segue fora."""
+    schema, eng = env
+    before = _public_columns_snapshot(eng)
+
+    se = _engine_with_search_path(DATABASE_URL, schema)
+    with se.begin() as c:
+        c.execute(text(_LEGACY_PRODUCTS))
+    _apply_migration(se, schema)
+    _apply_named_migration(se, schema, _MIGRATION_0035)
+    _apply_named_migration(se, schema, _MIGRATION_0035)  # idempotente
+
+    # Sinalização de divergência em produto publicado não pode ser
+    # rejeitada pela guarda (custo/moeda continua bloqueando a VENDA).
+    _insert_product(
+        se, id=str(uuid.uuid4()), name="divergente", price="150.00",
+        source="aliexpress", is_active=True, is_draft=False,
+        pricing_status="stale", target_margin_percent="20",
+    )
+
+    # AliExpress ativo não precificado continua bloqueado no banco.
+    _expect_rejected(
+        se, "ck_product_aliexpress_publication_guard",
+        id=str(uuid.uuid4()), name="nao-precificado", price="10.00",
+        source="aliexpress", is_active=True, is_draft=False,
+        pricing_status="unpriced",
+    )
+
+    names = _constraint_names_for_products(se, schema)
+    assert "ck_product_aliexpress_publication_guard" in names
+    assert _public_columns_snapshot(eng) == before, "public foi alterado!"
+
+
+def test_migration_0035_down_restaura_guarda_estrita(env):
+    schema, eng = env
+    before = _public_columns_snapshot(eng)
+
+    se = _engine_with_search_path(DATABASE_URL, schema)
+    with se.begin() as c:
+        c.execute(text(_LEGACY_PRODUCTS))
+    _apply_migration(se, schema)
+    _apply_named_migration(se, schema, _MIGRATION_0035)
+    _apply_named_migration(se, schema, _MIGRATION_0035_DOWN)
+    _apply_named_migration(se, schema, _MIGRATION_0035_DOWN)  # idempotente
+
+    # DOWN volta a exigir priced: stale publicado passa a violar.
+    _expect_rejected(
+        se, "ck_product_aliexpress_publication_guard",
+        id=str(uuid.uuid4()), name="stale-depois-do-down", price="10.00",
+        source="aliexpress", is_active=True, is_draft=False,
+        pricing_status="stale",
+    )
+    _insert_product(
+        se, id=str(uuid.uuid4()), name="priced-ok", price="150.00",
+        source="aliexpress", is_active=True, is_draft=False,
+        pricing_status="priced", target_margin_percent="20",
+    )
+    assert _public_columns_snapshot(eng) == before, "public foi alterado!"

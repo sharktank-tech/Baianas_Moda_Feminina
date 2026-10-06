@@ -90,6 +90,18 @@
                                 <p class="text-xs text-gray-400 mt-1">
                                     ID: {{ p.item_id or p.external_id }}
                                 </p>
+                                {# Etapa 2: resultado de busca NUNCA nasce
+                                   "Brasil". Sem produto importado com
+                                   evidência, o selo é sempre "não
+                                   verificada". #}
+                                {% set origin = origin_info.get(p.item_id or p.external_id) if origin_info else None %}
+                                <span class="inline-block mt-2 text-xs font-medium px-2 py-1 rounded-full border
+                                             {% if origin and origin.label == 'brazil' %}text-green-700 bg-green-50 border-green-200
+                                             {% elif origin and origin.label == 'foreign' %}text-blue-700 bg-blue-50 border-blue-200
+                                             {% elif origin and origin.label == 'conflict' %}text-red-700 bg-red-50 border-red-200
+                                             {% else %}text-gray-500 bg-gray-50 border-gray-200{% endif %}">
+                                    {{ origin.text if origin else 'Origem não verificada' }}
+                                </span>
                                 <div class="mt-2 flex items-center justify-between">
                                     <span class="text-pink-600 font-bold">
                                         R$ {{ "%.2f"|format(p.sale_price or p.original_price or 0) }}
@@ -113,6 +125,84 @@
             {% endif %}
         {% endif %}
     {% endif %}
+
+    {# Etapa 2: produtos JÁ importados, com o rótulo de origem que a
+       evidência permite afirmar + filtro administrativo por origem. #}
+    <div class="mt-8 bg-white rounded-2xl shadow p-6">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <h2 class="text-xl font-semibold text-gray-800">
+                Produtos importados
+            </h2>
+            <nav class="flex flex-wrap gap-2 text-sm">
+                <a href="{{ url_for('aliexpress_admin.index') }}"
+                   class="px-3 py-1 rounded-full border {% if not origin_filter %}bg-gray-800 text-white border-gray-800{% else %}text-gray-600 hover:bg-gray-100{% endif %}">
+                    Todos
+                </a>
+                {% for filter_id in origin_filters %}
+                    <a href="{{ url_for('aliexpress_admin.index', origem=filter_id) }}"
+                       class="px-3 py-1 rounded-full border {% if origin_filter == filter_id %}bg-gray-800 text-white border-gray-800{% else %}text-gray-600 hover:bg-gray-100{% endif %}">
+                        {% if filter_id == 'brazil' %}Brasil
+                        {% elif filter_id == 'foreign' %}Exterior
+                        {% elif filter_id == 'unknown' %}Não verificada
+                        {% elif filter_id == 'mixed' %}Mista
+                        {% else %}Divergente{% endif %}
+                    </a>
+                {% endfor %}
+            </nav>
+        </div>
+
+        {% if imported %}
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-gray-500 border-b">
+                            <th class="py-2 pr-4">Produto</th>
+                            <th class="py-2 pr-4">Estado</th>
+                            <th class="py-2 pr-4">Origem do envio</th>
+                            <th class="py-2 pr-4">Operação nacional</th>
+                            <th class="py-2"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in imported %}
+                            <tr class="border-b">
+                                <td class="py-3 pr-4 text-gray-800">
+                                    {{ row.product.name }}
+                                </td>
+                                <td class="py-3 pr-4 text-gray-600">
+                                    {{ row.state }}
+                                </td>
+                                <td class="py-3 pr-4">
+                                    <span class="text-xs font-medium px-2 py-1 rounded-full border
+                                                 {% if row.label == 'brazil' %}text-green-700 bg-green-50 border-green-200
+                                                 {% elif row.label == 'foreign' %}text-blue-700 bg-blue-50 border-blue-200
+                                                 {% elif row.label == 'conflict' %}text-red-700 bg-red-50 border-red-200
+                                                 {% else %}text-gray-500 bg-gray-50 border-gray-200{% endif %}">
+                                        {{ row.text }}
+                                    </span>
+                                </td>
+                                <td class="py-3 pr-4 text-gray-600">
+                                    {{ row.selected }}/{{ row.total }} variante(s)
+                                </td>
+                                <td class="py-3 text-right">
+                                    <a href="{{ row.href }}"
+                                       class="text-pink-600 hover:underline">Abrir</a>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="text-gray-500">
+                {% if origin_filter %}
+                    Nenhum produto importado com esta origem.
+                {% else %}
+                    Nenhum produto importado ainda.
+                {% endif %}
+            </p>
+        {% endif %}
+    </div>
 
 </div>
 

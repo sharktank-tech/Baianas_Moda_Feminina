@@ -29,7 +29,10 @@ Mapa de campos canônicos utilizados (conferidos em modelos/migrations):
   vale apenas para o cenário de referência, nunca para qualquer endereço.
 - origem: mesma semântica de ``classify_line`` (aliexpress / domestic /
   unknown); estoque próprio exige origem 'own' comprovada via
-  ``resolve_group_origin``.
+  ``resolve_group_origin``. Operação nacional (AliExpress) exige origem de
+  envio por variante com evidência (``loja.services.shipping_origin``):
+  variante ativa selecionada sem evidência, exterior ou conflito manual ×
+  API bloqueiam; variante não selecionada nunca bloqueia por este recurso.
 
 Estados: PRONTO (tudo comprovado), REVISÃO (sem falha definitiva, falta
 evidência operacional), BLOQUEADO (inconsistência, dado inválido ou risco
@@ -80,6 +83,16 @@ REASON_SEVERITY = {
     "shipping_quote_expired": BLOCKING,
     "economics_incomplete": BLOCKING,
     "negative_margin": BLOCKING,
+    # Operação nacional (Etapa 1 AliExpress): só variante ativa SELECIONADA
+    # (national_shipping_operation) entra aqui. Catálogo internacional não
+    # selecionado nunca bloqueia; ausência de evidência nunca vira PRONTO.
+    "national_origin_unproven": BLOCKING,
+    "national_origin_foreign": BLOCKING,
+    "national_origin_conflict": BLOCKING,
+    # Divergência de custo/moeda sinalizada pela sincronização do publicado:
+    # a aprovação operacional deixa de valer até o admin renovar.
+    "supplier_cost_divergence": BLOCKING,
+    "supplier_currency_divergence": BLOCKING,
     "manual_fulfillment_required": INFO,
 }
 
@@ -104,6 +117,21 @@ REASON_LABELS = {
     "shipping_quote_expired": "Cotação de frete vencida",
     "economics_incomplete": "Economia unitária incompleta",
     "negative_margin": "Margem negativa (prejuízo)",
+    "national_origin_unproven": (
+        "Operação nacional selecionada sem origem de envio comprovada"
+    ),
+    "national_origin_foreign": (
+        "Variante selecionada com origem de envio no exterior"
+    ),
+    "national_origin_conflict": (
+        "Origem divergente entre confirmação manual e observação da API"
+    ),
+    "supplier_cost_divergence": (
+        "Custo do fornecedor divergente do cadastro (divergência sinalizada)"
+    ),
+    "supplier_currency_divergence": (
+        "Moeda do fornecedor divergente do cadastro (divergência sinalizada)"
+    ),
     "manual_fulfillment_required": "Tratamento manual obrigatório após pagamento",
 }
 
@@ -250,6 +278,10 @@ def evaluate_product_readiness(
     from datetime import timezone
 
     from loja.services.pricing import normalize_currency, to_decimal
+    from loja.services.purchase_controls import (
+        DIVERGENCE_READINESS_CODES,
+        supplier_divergence_code,
+    )
     from loja.services.shipping_quote import (
         normalize_cep,
         resolve_group_origin,
@@ -281,6 +313,11 @@ def evaluate_product_readiness(
         _add("product_draft")
     if getattr(product, "pricing_status", None) != "priced":
         _add("pricing_not_ready")
+    # Divergência de custo/moeda sinalizada pela sincronização do publicado
+    # invalida a aprovação operacional (mesmo com preço comercial intacto).
+    divergence = supplier_divergence_code(product)
+    if divergence:
+        _add(DIVERGENCE_READINESS_CODES[divergence])
     price = to_decimal(getattr(product, "price", None))
     if price is None or not price.is_finite() or price <= 0:
         _add("missing_sale_price")
@@ -416,6 +453,14 @@ def evaluate_product_readiness(
             stock = 0
         if stock <= 0:
             _add("no_stock")
+
+    # ── Operação nacional (Etapa 1 AliExpress) ──
+    # Só variantes ativas SELECIONADAS participam; a seleção sem evidência de
+    # origem (ou com origem exterior/conflito) é BLOQUEIO, nunca PRONTO.
+    from loja.services.shipping_origin import national_operation_reasons
+
+    for code in national_operation_reasons(product):
+        _add(code)
 
     # ── Custo/economia (serviço canônico, sem fórmulas duplicadas) ──
     proven_cost = None
