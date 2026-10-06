@@ -103,6 +103,7 @@ from loja.services.pricing import (
 )
 from loja.services.publication import PublicationBlocked, publish_product
 from loja.services.sales_readiness import REASON_LABELS as READINESS_REASON_LABELS
+from loja.services.variant_attributes import variant_attribute_value
 from loja.services.shipping_origin import (
     ShippingOriginError,
     clear_manual_confirmation,
@@ -1012,12 +1013,53 @@ def buscar_id():
     return _render_detalhe(product_id, detail)
 
 
+def _detalhe_sku_rows(detail):
+    """Linhas da tabela de variações: IDs e dimensões por SKU.
+
+    Montado a partir da resposta JÁ consultada (nenhuma chamada adicional,
+    nenhuma persistência). Cor/tamanho usam o classificador canônico
+    (`variant_attributes`, mesma regra da importação); `property_ids`
+    amarra cada atributo ao seu `sku_property_id` para a correspondência
+    com os IDs exigidos pelo pedido no fornecedor.
+    """
+    rows = []
+    for sku in detail.skus or []:
+        attributes = sku.attributes or []
+        prop_ids = "; ".join(
+            "%s: %s" % (attr.get("name"), attr.get("sku_property_id"))
+            for attr in attributes
+            if isinstance(attr, dict) and attr.get("sku_property_id")
+        )
+        labels = ", ".join(
+            str(attr.get("value"))
+            for attr in attributes
+            if isinstance(attr, dict) and attr.get("value") not in (None, "")
+        )
+        price = (
+            sku.sale_price if sku.sale_price is not None else sku.original_price
+        )
+        rows.append(
+            {
+                "sku_id": sku.sku_id,
+                "attributes": labels or None,
+                "color": variant_attribute_value(attributes, "color"),
+                "size": variant_attribute_value(attributes, "size"),
+                "property_ids": prop_ids or None,
+                "stock": sku.available_stock,
+                "price": price,
+                "currency": sku.currency or detail.currency,
+            }
+        )
+    return rows
+
+
 def _render_detalhe(product_id: str, detail):
     return render_template(
         "admin/aliexpress/detalhe.html",
         detail=detail,
         # Detalhe é anterior à importação: sem importação não há etiqueta.
         origin_info=_origin_info_for_ids([product_id]),
+        sku_rows=_detalhe_sku_rows(detail) if detail is not None else [],
     )
 
 

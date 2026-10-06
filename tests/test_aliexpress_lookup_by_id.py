@@ -343,6 +343,62 @@ def test_busca_geral_nao_envia_filtro_de_despacho():
 
 
 # --------------------------------------------------------------------------
+# 6) Detalhe exibe IDs DS e dimensões por variante (mesma resposta)
+# --------------------------------------------------------------------------
+
+def test_detalhe_exibe_ids_e_dimensoes_por_variante(admin_catalog):
+    """Cada linha amarra sku_id, cor, tamanho e sku_property_ids."""
+    import re
+
+    FakeAliExpressClient.details[BR_ID] = _br_candidate_detail()
+    resp = admin_catalog.get(f"{PREFIX}/{BR_ID}/detalhe")
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert "IDs propriedade" in body
+
+    def row_for(sku_id):
+        segs = [s.split("</tr>")[0] for s in body.split("<tr") if sku_id in s]
+        assert len(segs) == 1, sku_id
+        return segs[0]
+
+    azul = row_for("%s-M-AZUL" % BR_ID)
+    assert "Azul" in azul
+    assert re.search(r">\s*M\s*<", azul)
+    assert "Tamanho: 14" in azul and "Cor: 10" in azul
+    assert "69,85" in azul and "79,90" not in azul
+    assert "Vermelho" not in azul
+    assert "BRL" in azul
+
+    vermelho = row_for("%s-G-VERMELHO" % BR_ID)
+    assert "Vermelho" in vermelho
+    assert re.search(r">\s*G\s*<", vermelho)
+    assert "Tamanho: 14" in vermelho and "Cor: 10" in vermelho
+    assert "79,90" in vermelho and "69,85" not in vermelho
+    assert "Azul" not in vermelho
+
+
+def test_detalhe_sem_ids_mostra_traco(admin_catalog):
+    FakeAliExpressClient.details[PRODUCT_ID] = make_detail()
+    body = admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/detalhe").get_data(
+        as_text=True
+    )
+    assert "%s-1" % PRODUCT_ID in body  # sku_id exibido mesmo sem IDs
+    assert "IDs propriedade" in body
+
+
+def test_detalhe_exige_login_admin(client):
+    resp = client.get(f"{PREFIX}/{PRODUCT_ID}/detalhe")
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/login")
+
+
+def test_detalhe_exige_sessao_aliexpress(client, admin_user, login, ae_env, fake_client):
+    login(admin_user.email)
+    resp = client.get(f"{PREFIX}/{PRODUCT_ID}/detalhe")
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith(PREFIX + "/")
+
+# --------------------------------------------------------------------------
 # 5) Candidato sintético com 2 variantes: importação, origem e confirmação
 # --------------------------------------------------------------------------
 

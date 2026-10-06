@@ -122,27 +122,42 @@
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-left text-gray-500 border-b">
+                            <th class="py-2 pr-4">SKU (ID DS)</th>
                             <th class="py-2 pr-4">Atributos</th>
+                            <th class="py-2 pr-4">Cor</th>
+                            <th class="py-2 pr-4">Tamanho</th>
+                            <th class="py-2 pr-4">IDs propriedade</th>
                             <th class="py-2 pr-4">Estoque</th>
-                            <th class="py-2 pr-4">Preço ({{ ns.currency }})</th>
+                            <th class="py-2 pr-4">Preço</th>
+                            <th class="py-2 pr-4">Moeda</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for sku in detail.skus %}
-                            {% set sp = sku.sale_price if sku.sale_price is not none else sku.original_price %}
+                        {% for row in sku_rows %}
                             <tr class="border-b">
-                                <td class="py-2 pr-4 text-gray-700">
-                                    {% if sku.attributes %}
-                                        {{ sku.attributes|map(attribute='value')|join(', ') }}
-                                    {% else %}
-                                        —
-                                    {% endif %}
+                                <td class="py-2 pr-4 text-gray-700 font-mono text-xs">
+                                    {{ row.sku_id or '—' }}
                                 </td>
                                 <td class="py-2 pr-4 text-gray-700">
-                                    {{ sku.available_stock if sku.available_stock is not none else '—' }}
+                                    {{ row.attributes or '—' }}
                                 </td>
                                 <td class="py-2 pr-4 text-gray-700">
-                                    {{ ptx(sp) if sp else '—' }}
+                                    {{ row.color or '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ row.size or '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700 font-mono text-xs">
+                                    {{ row.property_ids or '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ row.stock if row.stock is not none else '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ ptx(row.price) if row.price else '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ row.currency or '—' }}
                                 </td>
                             </tr>
                         {% endfor %}

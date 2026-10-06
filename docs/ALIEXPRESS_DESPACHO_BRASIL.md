@@ -275,6 +275,12 @@ mais a honestidade na interface:
 - `catalogo.html`: segundo formulário "Consultar anúncio direto por ID ou
   URL" + nota curta e factual: sem filtro de despacho na busca, consultar
   por ID/URL e conferir por variante, BR só com evidência por variante.
+- `detalhe.html` (+ `_detalhe_sku_rows` / `_render_detalhe` na rota): a
+  tabela de variações passa a exibir, por variante, `sku_id` DS,
+  `sku_property_id`s (`Atributo: id`), cor, tamanho, preço, moeda e
+  estoque — montados da resposta já consultada (nenhuma chamada adicional,
+  nenhuma persistência), sob os mesmos `@admin_required` +
+  `@ali_session_required`.
 - `summarize_product_detail()` / `format_candidate_error()` (`product.py`):
   registro sanitizado para a matriz live (sem `raw`/segredos).
 - O filtro `?origem=` dos importados **não** foi renomeado nem
@@ -315,15 +321,17 @@ sugestivo.
 
 ## 6. Testes executados, resultados e skips
 
-Novo: `tests/test_aliexpress_lookup_by_id.py` — **16 passed**.
+Novo: `tests/test_aliexpress_lookup_by_id.py` — **20 passed**.
 Cobre: parser (IDs/URLs válidos e recusas, incl. host malicioso
 `aliexpress.com.evil.com`), rota (sucesso por ID e por URL, inválido sem
 chamar a API, ausente, erro sanitizado sem vazar `raw`, nota de limitação
 na UI), resumo sanitizado e erro sanitizado, busca geral sem parâmetros de
-despacho, importação idempotente do candidato sintético (identidade, SKUs,
-estoque, preço, moeda, `sku_property_id`/`property_value_id`), origem
-`unknown` pós-importação e confirmação de uma variante resultando em
-`mixed` (nunca `brazil` global).
+despacho, tabela de detalhe com IDs e dimensões por variante
+(correspondência atributo↔ID por linha, caso sem IDs, login admin e sessão
+AliExpress exigidos), importação idempotente do candidato sintético
+(identidade, SKUs, estoque, preço, moeda, `sku_property_id`/
+`property_value_id`), origem `unknown` pós-importação e confirmação de uma
+variante resultando em `mixed` (nunca `brazil` global).
 
 Suítes pertinentes: `test_aliexpress_admin_catalog.py` +
 `test_aliexpress_client.py` + `test_aliexpress_product.py` +
