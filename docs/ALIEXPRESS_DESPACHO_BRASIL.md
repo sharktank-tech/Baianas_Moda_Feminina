@@ -246,6 +246,35 @@ nada importado, publicado ou comprado. Comportamento atual preservado
 mudança de padrão é proposta separada, com avaliação dos consumidores do
 preço (importação/custo, precificação, divergência de sync, exibição).
 
+### Mecanismo de credenciais do runner e execução pendente
+
+**Verificação (fato):** o runner usa `create_client_from_env(require_token=True)` —
+`ALIEXPRESS_APP_KEY` + `ALIEXPRESS_APP_SECRET` + `ALIEXPRESS_ACCESS_TOKEN`
+via ambiente, sem imprimir, copiar ou persistir segredos (saída só com
+resumo/erro sanitizado). É o mesmo padrão seguro dos smoke scripts do repo.
+Reuso do `credential_store` (tokens criptografados no banco por supplier)
+foi avaliado e **rejeitado**: exigiria ler o banco de produção + a chave
+`ALIEXPRESS_CREDENTIAL_KEY` no ambiente — superfície maior, sem reduzir o
+que precisa ser fornecido. Nenhum token em documentos (só nomes).
+
+**Execução pendente (sem credenciais neste ambiente — verificado por
+presença, sem ler valores):** shell com as 3 envs exportadas, repo + venv +
+rede para `api-sg.aliexpress.com`, e então, sem ecoar segredos:
+`PYTHONPATH=. python scripts/query_aliexpress_candidates.py --compare-benefit --repeat 3`.
+Identificação inequívoca de CÉU AZUL / M = `sku_id` + `sku_attr` completo +
+atributos com IDs (rótulos "CÉU AZUL"/"M" sozinhos não bastam); a tabela
+abaixo é o molde sanitizado a preencher.
+
+| Produto | Flag | Rodada | SKU CÉU AZUL / M (`sku_id`) | `sku_attr` | Preço (BRL) | Estoque | Horário | Veredito |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `1005010478234256` | on/off ×3 | 0–2 | pendente | pendente | pendente | pendente | pendente | pendente |
+| `1005010502074833` | on/off ×3 | 0–2 | pendente | pendente | pendente | pendente | pendente | pendente |
+
+Erros, se houver, vão em registros próprios (`type`/`code`/`sub_code`/
+`message`, sem `raw`) e a rodada correspondente classifica como
+"comparação inviável"; diferenças nunca são atribuídas ao parâmetro sem
+evidência adicional.
+
 ### Preparação do cadastro do piloto (não executada)
 
 Procedimento preparado com os fluxos existentes, para revisão — **nenhuma
