@@ -104,6 +104,7 @@ from loja.services.pricing import (
 from loja.services.publication import PublicationBlocked, publish_product
 from loja.services.sales_readiness import REASON_LABELS as READINESS_REASON_LABELS
 from loja.services.variant_attributes import variant_attribute_value
+from loja.integrations.aliexpress.sku_attr import build_sku_attr
 from loja.services.shipping_origin import (
     ShippingOriginError,
     clear_manual_confirmation,
@@ -1017,19 +1018,41 @@ def _detalhe_sku_rows(detail):
     """Linhas da tabela de variações: IDs e dimensões por SKU.
 
     Montado a partir da resposta JÁ consultada (nenhuma chamada adicional,
-    nenhuma persistência). Cor/tamanho usam o classificador canônico
-    (`variant_attributes`, mesma regra da importação); `property_ids`
-    amarra cada atributo ao seu `sku_property_id` para a correspondência
-    com os IDs exigidos pelo pedido no fornecedor.
+    nenhuma persistência). Os três identificadores vão em colunas
+    SEPARADAS, exatamente como retornados — sem substituir um pelo outro:
+      * ``sku_id``: o campo `id` bruto (pode vir como combinação
+        `pid:vid;...` no live; ausente vira None e a tela mostra
+        "Não fornecido");
+      * ``sku_attr``: combinação canônica `pid:vid` construída pelos IDs
+        dos atributos (mesma função do envio de pedidos); None quando os
+        atributos não trazem identidade numérica completa;
+      * ``property_ids``: cada atributo com seu par de IDs
+        (`Nome (pid) = Valor (vid)`).
+    Cor/tamanho usam o classificador canônico (`variant_attributes`,
+    mesma regra da importação).
     """
     rows = []
     for sku in detail.skus or []:
         attributes = sku.attributes or []
-        prop_ids = "; ".join(
-            "%s: %s" % (attr.get("name"), attr.get("sku_property_id"))
-            for attr in attributes
-            if isinstance(attr, dict) and attr.get("sku_property_id")
-        )
+        pairs = []
+        for attr in attributes:
+            if not isinstance(attr, dict) or not attr.get("sku_property_id"):
+                continue
+            if attr.get("property_value_id"):
+                pairs.append(
+                    "%s (%s) = %s (%s)"
+                    % (
+                        attr.get("name"),
+                        attr.get("sku_property_id"),
+                        attr.get("value"),
+                        attr.get("property_value_id"),
+                    )
+                )
+            else:
+                pairs.append(
+                    "%s (%s) = %s"
+                    % (attr.get("name"), attr.get("sku_property_id"), attr.get("value"))
+                )
         labels = ", ".join(
             str(attr.get("value"))
             for attr in attributes
@@ -1040,11 +1063,12 @@ def _detalhe_sku_rows(detail):
         )
         rows.append(
             {
-                "sku_id": sku.sku_id,
+                "sku_id": sku.sku_id or None,
+                "sku_attr": build_sku_attr(attributes),
                 "attributes": labels or None,
                 "color": variant_attribute_value(attributes, "color"),
                 "size": variant_attribute_value(attributes, "size"),
-                "property_ids": prop_ids or None,
+                "property_ids": "; ".join(pairs) or None,
                 "stock": sku.available_stock,
                 "price": price,
                 "currency": sku.currency or detail.currency,

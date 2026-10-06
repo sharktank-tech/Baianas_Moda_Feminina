@@ -446,7 +446,7 @@ def test_detalhe_exibe_ids_e_dimensoes_por_variante(admin_catalog):
     resp = admin_catalog.get(f"{PREFIX}/{BR_ID}/detalhe")
     body = resp.get_data(as_text=True)
     assert resp.status_code == 200
-    assert "IDs propriedade" in body
+    assert "IDs atributo/valor" in body
 
     def row_for(sku_id):
         segs = [s.split("</tr>")[0] for s in body.split("<tr") if sku_id in s]
@@ -456,7 +456,9 @@ def test_detalhe_exibe_ids_e_dimensoes_por_variante(admin_catalog):
     azul = row_for("%s-M-AZUL" % BR_ID)
     assert "Azul" in azul
     assert re.search(r">\s*M\s*<", azul)
-    assert "Tamanho: 14" in azul and "Cor: 10" in azul
+    assert "Tamanho (14) = M (771)" in azul
+    assert "Cor (10) = Azul (19)" in azul
+    assert "10:19;14:771" in azul
     assert "69,85" in azul and "79,90" not in azul
     assert "Vermelho" not in azul
     assert "BRL" in azul
@@ -464,9 +466,74 @@ def test_detalhe_exibe_ids_e_dimensoes_por_variante(admin_catalog):
     vermelho = row_for("%s-G-VERMELHO" % BR_ID)
     assert "Vermelho" in vermelho
     assert re.search(r">\s*G\s*<", vermelho)
-    assert "Tamanho: 14" in vermelho and "Cor: 10" in vermelho
+    assert "Tamanho (14) = G (772)" in vermelho
+    assert "Cor (10) = Vermelho (20)" in vermelho
+    assert "10:20;14:772" in vermelho
+    assert "10:19;14:771" not in vermelho
     assert "79,90" in vermelho and "69,85" not in vermelho
     assert "Azul" not in vermelho
+
+
+def test_sku_id_e_sku_attr_nunca_se_confunden_e_ausente_e_explicito(admin_catalog):
+    """sku_id, combinação e IDs vão em células separadas, sem substituição.
+
+    SKU X tem id numérico distinto da combinação; SKU Y não tem id — a
+    combinação aparece mesmo assim, e a célula do ID diz "Não fornecido"
+    em vez de repetir a combinação.
+    """
+    import re
+
+    def sku(color, size, pid_c, vid_c, pid_t, vid_t, sku_id):
+        def attr(name, value, pid, vid):
+            return {
+                "name": name,
+                "value": value,
+                "sku_property_id": pid,
+                "property_value_id": vid,
+            }
+
+        return AliExpressProductSku(
+            sku_id=sku_id,
+            sale_price=Decimal("69.85"),
+            original_price=Decimal("69.85"),
+            currency="BRL",
+            available_stock=7,
+            attributes=[
+                attr("Tamanho", size, pid_t, vid_t),
+                attr("Cor", color, pid_c, vid_c),
+            ],
+        )
+
+    detail = _br_candidate_detail()
+    detail.skus = [
+        sku("Azul", "M", "10", "20", "14", "772", "1005000000001"),
+        sku("Vermelho", "G", "10", "21", "14", "773", None),
+    ]
+    FakeAliExpressClient.details[BR_ID] = detail
+
+    body = admin_catalog.get(f"{PREFIX}/{BR_ID}/detalhe").get_data(as_text=True)
+
+    def cells_for(marker):
+        segs = [
+            s.split("</tr>")[0] for s in body.split("<tr") if marker in s
+        ]
+        assert len(segs) == 1, marker
+        return [
+            re.sub(r"\s+", " ", t).strip()
+            for t in re.findall(r"<td\b[^>]*>(.*?)</td>", segs[0], re.S)
+        ]
+
+    com_id = cells_for("1005000000001")
+    assert com_id[0] == "1005000000001"  # SKU (ID DS)
+    assert com_id[1] == "10:20;14:772"  # Combinação (sku_attr)
+    assert com_id[0] != com_id[1]
+
+    sem_id = cells_for("10:21;14:773")
+    assert sem_id[0] == "Não fornecido"
+    assert sem_id[1] == "10:21;14:773"
+
+    # ID do produto junto à tabela (identifica exportações).
+    assert ("Produto %s" % BR_ID) in body
 
 
 def test_detalhe_sem_ids_mostra_traco(admin_catalog):
@@ -475,7 +542,7 @@ def test_detalhe_sem_ids_mostra_traco(admin_catalog):
         as_text=True
     )
     assert "%s-1" % PRODUCT_ID in body  # sku_id exibido mesmo sem IDs
-    assert "IDs propriedade" in body
+    assert "IDs atributo/valor" in body
 
 
 def test_detalhe_exige_login_admin(client):

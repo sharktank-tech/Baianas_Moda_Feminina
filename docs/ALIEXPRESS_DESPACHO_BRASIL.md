@@ -280,11 +280,21 @@ mais a honestidade na interface:
   `tailwind.css` compilado (purgada) — botão sem fundo, invisível no cartão
   branco; trocado por `bg-gray-800 hover:bg-gray-900` (presentes no build).
 - `detalhe.html` (+ `_detalhe_sku_rows` / `_render_detalhe` na rota): a
-  tabela de variações passa a exibir, por variante, `sku_id` DS,
-  `sku_property_id`s (`Atributo: id`), cor, tamanho, preço, moeda e
-  estoque — montados da resposta já consultada (nenhuma chamada adicional,
-  nenhuma persistência), sob os mesmos `@admin_required` +
-  `@ali_session_required`.
+  tabela de variações exibe, por variante, `sku_id` DS **só** com o campo
+  `id` bruto (ausente → "Não fornecido", sem substituir), `sku_attr`
+  canônico `pid:vid` construído pelos IDs dos atributos (mesma função do
+  envio de pedidos), pares `Nome (pid) = Valor (vid)`, cor, tamanho, preço,
+  moeda e estoque — montados da resposta já consultada (nenhuma chamada
+  adicional, nenhuma persistência), sob os mesmos `@admin_required` +
+  `@ali_session_required`; ID do produto junto ao título da tabela.
+- Auditoria de fallback de identidade (sem alterar registros): importação
+  pula SKU sem id e grava o `id` verbatim (igualdade de strings no sync e
+  no enrichment; nenhum `int()` em IDs em todo o módulo); fulfillment exige
+  `supplier_sku_id` presente mas envia `sku_attr` canônico dos atributos
+  (fail-closed sem ele); frete repassa o id bruto. Único fallback por
+  derivação está em `buyer_freight_get.canonical_freight_sku_id` (caminho de
+  frete com provider bloqueado, sem efeito em produção) — documentado, não
+  alterado.
 - `catalogo.html`: sem sessão AliExpress possível (env ausente), a página
   explicava nada — cabeçalho seguido direto da tabela de importados. Agora
   exibe o aviso "Integração AliExpress não configurada neste ambiente".
@@ -332,7 +342,7 @@ sugestivo.
 
 ## 6. Testes executados, resultados e skips
 
-Novo: `tests/test_aliexpress_lookup_by_id.py` — **25 passed**.
+Novo: `tests/test_aliexpress_lookup_by_id.py` — **26 passed**.
 Cobre: parser (IDs/URLs válidos e recusas, incl. host malicioso
 `aliexpress.com.evil.com`), rota (sucesso por ID e por URL, inválido sem
 chamar a API, ausente, erro sanitizado sem vazar `raw`, nota de limitação
@@ -345,7 +355,8 @@ AliExpress exigidos), importação idempotente do candidato sintético
 variante resultando em `mixed` (nunca `brazil` global), aviso explícito
 quando a integração não está configurada (sem formulários fantasmas),
 piloto `1005010478234256` abrindo o detalhe exato via `/buscar-id`,
-exclusividade/estrutura/visibilidade-CSS do botão "Consultar anúncio".
+exclusividade/estrutura/visibilidade-CSS do botão "Consultar anúncio",
+separação `sku_id` × `sku_attr` × IDs (ausente → "Não fornecido").
 
 Suítes pertinentes: `test_aliexpress_admin_catalog.py` +
 `test_aliexpress_client.py` + `test_aliexpress_product.py` +

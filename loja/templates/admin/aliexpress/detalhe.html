@@ -116,17 +116,18 @@
     {% if detail.skus %}
         <div class="bg-white rounded-2xl shadow p-6">
             <h2 class="text-xl font-semibold text-gray-800 mb-4">
-                Variações ({{ detail.skus|length }})
+                Variações ({{ detail.skus|length }}) · Produto {{ detail.product_id or '—' }}
             </h2>
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-left text-gray-500 border-b">
                             <th class="py-2 pr-4">SKU (ID DS)</th>
+                            <th class="py-2 pr-4">Combinação (sku_attr)</th>
                             <th class="py-2 pr-4">Atributos</th>
                             <th class="py-2 pr-4">Cor</th>
                             <th class="py-2 pr-4">Tamanho</th>
-                            <th class="py-2 pr-4">IDs propriedade</th>
+                            <th class="py-2 pr-4">IDs atributo/valor</th>
                             <th class="py-2 pr-4">Estoque</th>
                             <th class="py-2 pr-4">Preço</th>
                             <th class="py-2 pr-4">Moeda</th>
@@ -136,7 +137,10 @@
                         {% for row in sku_rows %}
                             <tr class="border-b">
                                 <td class="py-2 pr-4 text-gray-700 font-mono text-xs">
-                                    {{ row.sku_id or '—' }}
+                                    {{ row.sku_id or 'Não fornecido' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700 font-mono text-xs">
+                                    {{ row.sku_attr or '—' }}
                                 </td>
                                 <td class="py-2 pr-4 text-gray-700">
                                     {{ row.attributes or '—' }}
