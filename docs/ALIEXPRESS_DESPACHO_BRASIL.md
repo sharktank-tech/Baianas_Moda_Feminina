@@ -92,8 +92,10 @@ com `product_id`, `ship_to_country="BR"`, `target_currency="BRL"`,
 - H3. `remove_personal_benefit=true` *pode* remover benefícios
   personalizados/de primeira compra dos preços (retornando valores
   recorrentes) — coerente com F10 e com o caso R$ 14,23 × R$ 34,80, mas sem
-  confirmação oficial e sem teste live; parâmetro ignorado pelo provider é
-  indistinguível de aceito sem comparar as respostas.
+  confirmação oficial e sem teste live. Registrado como **experimental**:
+  sem respaldo na doc oficial consultada, **não usado como garantia** de
+  exclusão de primeira compra, e o comportamento atual (`true` por padrão)
+  fica **preservado** nesta rodada.
 
 ### Verificações pendentes
 
@@ -113,11 +115,12 @@ com `product_id`, `ship_to_country="BR"`, `target_currency="BRL"`,
   conferência no checkout da conta de compra (variante exata, 1 unidade,
   CEP real), sem concluir a compra; ver checklist no §3.
 - P7. Comparação `remove_personal_benefit` on/off (testa H3): **pendente**
-  de sessão — `scripts/query_aliexpress_candidates.py --compare-benefit`
-  consulta `1005010478234256` e `1005010502074833` com a flag ligada e
-  desligada (mercado fixo BR/BRL/pt), registrando a flag por chamada.
-  Saídas idênticas com flags diferentes = parâmetro ignorado (nunca
-  sucesso); só divergência de preços comprova efeito.
+  de sessão — `scripts/query_aliexpress_candidates.py --compare-benefit
+  [--repeat N]` consulta `1005010478234256` e `1005010502074833` com a flag
+  ligada e desligada (mercado fixo BR/BRL/pt), repetindo em sequência
+  alternada. Vocabulário exato da classificação: iguais → "nenhuma
+  diferença observada; efeito inconclusivo"; diferentes → "diferença
+  observada, ainda não atribuída ao parâmetro".
 
 ---
 
@@ -231,13 +234,17 @@ validado** — sem simular valor removendo descontos por cálculo.
 `1005010502074833` (cartão da vitrine: vestido, preço original R$ 52,00;
 variante CÉU AZUL / M a confirmar na resposta) entra na comparação com o
 piloto: ambos consultados com `remove_personal_benefit` ligado e desligado
-(mercado fixo BR/BRL/pt), registrando por chamada ID bruto, `sku_attr`,
-preço, moeda, estoque e data/hora. Saídas idênticas com flags diferentes =
-parâmetro ignorado (nunca sucesso); só divergência de preços comprova
-efeito (testa H3). Sem sessão, as chamadas estão preparadas em
-`scripts/query_aliexpress_candidates.py --compare-benefit` (testes offline
-verdes); custos cadastrados e origem atual preservados — nada importado,
-publicado ou comprado.
+(mercado fixo BR/BRL/pt, repetições em sequência alternada via `--repeat`),
+registrando por chamada ID bruto, `sku_attr`, preço, moeda, estoque e
+data/hora. Classificação em vocabulário exato: iguais → "nenhuma diferença
+observada; efeito inconclusivo"; diferentes → "diferença observada, ainda
+não atribuída ao parâmetro" (testa H3). Sem sessão, as chamadas estão
+preparadas em `scripts/query_aliexpress_candidates.py --compare-benefit`
+(testes offline verdes); custos cadastrados e origem atual preservados —
+nada importado, publicado ou comprado. Comportamento atual preservado
+(`true` por padrão em `get_product()` e nas rotas); eventual remoção ou
+mudança de padrão é proposta separada, com avaliação dos consumidores do
+preço (importação/custo, precificação, divergência de sync, exibição).
 
 ### Preparação do cadastro do piloto (não executada)
 
@@ -372,7 +379,7 @@ sugestivo.
 
 ## 6. Testes executados, resultados e skips
 
-Novo: `tests/test_aliexpress_lookup_by_id.py` — **32 passed**.
+Novo: `tests/test_aliexpress_lookup_by_id.py` — **34 passed**.
 Cobre: parser (IDs/URLs válidos e recusas, incl. host malicioso
 `aliexpress.com.evil.com`), rota (sucesso por ID e por URL, inválido sem
 chamar a API, ausente, erro sanitizado sem vazar `raw`, nota de limitação
@@ -387,8 +394,9 @@ quando a integração não está configurada (sem formulários fantasmas),
 piloto `1005010478234256` abrindo o detalhe exato via `/buscar-id`,
 exclusividade/estrutura/visibilidade-CSS do botão "Consultar anúncio",
 separação `sku_id` × `sku_attr` × IDs (ausente → "Não fornecido"),
-runner `--compare-benefit` com flag e mercado registrados por chamada
-(erro isolado por flag).
+runner `--compare-benefit` com flag, rodada e mercado registrados por
+chamada (erro isolado por flag) e classificação em vocabulário exato
+(iguais → efeito inconclusivo; diferentes → ainda não atribuída).
 
 Suítes pertinentes: `test_aliexpress_admin_catalog.py` +
 `test_aliexpress_client.py` + `test_aliexpress_product.py` +

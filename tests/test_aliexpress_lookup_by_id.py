@@ -613,8 +613,8 @@ def test_compare_benefit_registra_flag_e_mercado_por_chamada():
 
 
 def test_compare_benefit_isola_erro_por_flag():
-    """Erro numa flag não contamina a outra: saídas iguais com flags
-    diferentes são evidência de parâmetro ignorado — nunca sucesso."""
+    """Erro numa flag não contamina a outra; cada registro carrega a flag
+    que o produziu, permitindo classificar sem atribuir causa. """
     qc = _load_query_module()
     client = _FakeQueryClient(
         _br_candidate_detail(), errors={("1005010478234256", False)}
@@ -641,6 +641,143 @@ def test_sem_comparacao_chama_uma_vez_ligado():
     assert failed == 0
     assert len(records) == len(qc.CANDIDATES)
     assert {r["remove_personal_benefit"] for r in records} == {True}
+
+# --------------------------------------------------------------------------
+# 8) Classificação on/off (vocabulário exato, offline, sem rede)
+# --------------------------------------------------------------------------
+
+import pytest
+
+
+class _FlaggedQueryClient:
+    """Fake por (produto, flag): detalhe distinto ou erro por chamada."""
+
+    def __init__(self, details, *, default_detail=None):
+        self.details = details
+        self.default_detail = default_detail
+        self.calls = []
+
+    def get_product(self, *, product_id, remove_personal_benefit=True, **kwargs):
+        self.calls.append((product_id, remove_personal_benefit))
+        value = self.details.get(
+            (product_id, remove_personal_benefit), self.default_detail
+        )
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
+def _detail_with_price(base, price):
+    import copy
+
+    detail = copy.deepcopy(base)
+    for sku in detail.skus:
+        sku.sale_price = Decimal(price)
+    return detail
+
+
+def test_classificacao_iguais_e_efeito_inconclusivo():
+    qc = _load_query_module()
+    detail = _br_candidate_detail()
+    client = _FlaggedQueryClient(
+        {
+            ("1005010478234256", True): detail,
+            ("1005010478234256", False): detail,
+            ("1005010502074833", True): detail,
+            ("1005010502074833", False): detail,
+        },
+        default_detail=detail,
+    )
+    records, failed = qc.query_candidates(client, compare_benefit=True)
+    assert failed == 0
+    comps = {c["product_id"]: c for c in qc.compare_benefit_records(records)}
+    for pid in ("1005010478234256", "1005010502074833"):
+        # Vocabulário exato da classificação (efeito inconclusivo).
+        assert comps[pid]["overall"] == (
+            "nenhuma diferença observada; efeito inconclusivo"
+        )
+        assert comps[pid]["experimental_parameter"] is True
+        assert "experimental" in comps[pid]["parameter_note"]
+        assert "não usado como garantia" in comps[pid]["parameter_note"]
+
+
+def test_classificacao_diferentes_nao_atribui_ao_parametro():
+    qc = _load_query_module()
+    client = _FlaggedQueryClient(
+        {
+            ("1005010478234256", True): _br_candidate_detail(),
+            ("1005010478234256", False): _detail_with_price(
+                _br_candidate_detail(), "35.90"
+            ),
+            ("1005010502074833", True): _br_candidate_detail(),
+            ("1005010502074833", False): _br_candidate_detail(),
+        },
+        default_detail=_br_candidate_detail(),
+    )
+    records, failed = qc.query_candidates(client, compare_benefit=True)
+    assert failed == 0
+    comps = {c["product_id"]: c for c in qc.compare_benefit_records(records)}
+    assert comps["1005010478234256"]["overall"] == qc.VERDICT_DIFF
+    assert comps["1005010478234256"]["overall"] == (
+        "diferença observada, ainda não atribuída ao parâmetro"
+    )
+    assert comps["1005010502074833"]["overall"] == qc.VERDICT_NO_DIFF
+
+
+def test_classificacao_erro_inviabiliza_sem_atribuir():
+    qc = _load_query_module()
+    client = _FlaggedQueryClient(
+        {
+            ("1005010478234256", True): _br_candidate_detail(),
+            ("1005010478234256", False): AliExpressAPIError(
+                "falha simulada", code="40001"
+            ),
+            ("1005010502074833", True): _br_candidate_detail(),
+            ("1005010502074833", False): _br_candidate_detail(),
+        },
+        default_detail=_br_candidate_detail(),
+    )
+    records, failed = qc.query_candidates(client, compare_benefit=True)
+    assert failed == 1
+    comps = {c["product_id"]: c for c in qc.compare_benefit_records(records)}
+    assert comps["1005010478234256"]["overall"] == qc.VERDICT_UNVIABLE
+
+
+def test_repeticao_alterna_ordem_das_flags():
+    qc = _load_query_module()
+    detail = _br_candidate_detail()
+    client = _FlaggedQueryClient(
+        {
+            (pid, flag): detail
+            for pid in ("1005010478234256", "1005010502074833")
+            for flag in (True, False)
+        },
+        default_detail=detail,
+    )
+    records, failed = qc.query_candidates(
+        client, compare_benefit=True, repeat=2
+    )
+    assert failed == 0
+    # Ordem real registrada pelo fake: rodada 0 (on, off), rodada 1 (off, on).
+    seq = [(pid, flag) for pid, flag in client.calls if pid == "1005010478234256"]
+    assert seq == [
+        ("1005010478234256", True),
+        ("1005010478234256", False),
+        ("1005010478234256", False),
+        ("1005010478234256", True),
+    ]
+    rounds = [
+        r["round"]
+        for r in records
+        if r["product_id"] == "1005010478234256"
+    ]
+    assert rounds == [0, 0, 1, 1]
+
+
+def test_repeat_invalido_rejeitado_sem_rede():
+    qc = _load_query_module()
+    with pytest.raises(SystemExit):
+        qc.main(["--compare-benefit", "--repeat", "0"])
 
 # --------------------------------------------------------------------------
 # 5) Candidato sintético com 2 variantes: importação, origem e confirmação
