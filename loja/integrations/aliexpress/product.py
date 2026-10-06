@@ -278,6 +278,57 @@ def _normalize_skus(items: Any) -> List[AliExpressProductSku]:
     return out
 
 
+def summarize_product_detail(detail: "AliExpressProductDetail") -> Dict[str, Any]:
+    """Resumo sanitizado de um detalhe para registro de investigação.
+
+    Contém só identidade, preços, estoque e atributos por SKU — nunca
+    `raw`, credenciais ou parâmetros assinados. Seguro para imprimir e
+    anexar a relatórios.
+    """
+    skus = []
+    for sku in detail.skus or []:
+        attributes = []
+        for attr in sku.attributes or []:
+            if not isinstance(attr, Mapping):
+                continue
+            attributes.append(
+                {"name": _as_str(attr.get("name")), "value": _as_str(attr.get("value"))}
+            )
+        skus.append(
+            {
+                "sku_id": _as_str(sku.sku_id),
+                "attributes": attributes,
+                "available_stock": sku.available_stock,
+                "sale_price": str(sku.sale_price) if sku.sale_price is not None else None,
+                "original_price": (
+                    str(sku.original_price) if sku.original_price is not None else None
+                ),
+                "currency": _as_str(sku.currency),
+            }
+        )
+    description = detail.description or ""
+    return {
+        "product_id": _as_str(detail.product_id),
+        "title": _as_str(detail.title),
+        "category_id": _as_str(detail.category_id),
+        "currency": _as_str(detail.currency),
+        "images": len(detail.images or []),
+        "description_chars": len(description),
+        "skus": skus,
+    }
+
+
+def format_candidate_error(exc: Exception) -> Dict[str, Any]:
+    """Erro sanitizado para registro (tipo/código/mensagem; nunca `raw`)."""
+    message = getattr(exc, "message", None) or str(exc)
+    return {
+        "type": type(exc).__name__,
+        "code": getattr(exc, "code", None),
+        "sub_code": getattr(exc, "sub_code", None),
+        "message": message,
+    }
+
+
 def _normalize_images(multimedia: Any) -> List[str]:
     """Multimídia tolera: wrapper {image_urls}, string, lista de URLs ou de objetos."""
     if multimedia is None:
@@ -351,4 +402,6 @@ __all__ = [
     "normalize_product_detail",
     "first_not_none",
     "parse_aliexpress_product_ref",
+    "summarize_product_detail",
+    "format_candidate_error",
 ]

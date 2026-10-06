@@ -254,8 +254,59 @@ def test_buscar_id_erro_da_api_e_sanitizado(admin_catalog):
     assert "ASSINATURA" not in body
 
 
+def test_catalogo_expoe_consulta_por_id_e_nota_de_limitacao(admin_catalog):
+    """A limitação (sem filtro de despacho) é comunicada na interface."""
+    resp = admin_catalog.get(f"{PREFIX}/")
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert 'name="ref"' in body
+    assert "não tem filtro por país de despacho" in body
+    assert "origem brasileira só vale com evidência por variante" in body
+
+
 # --------------------------------------------------------------------------
-# 3) Busca geral preservada, sem filtro de despacho
+# 3) Resumo sanitizado para o registro live (sem rede, detalhe sintético)
+# --------------------------------------------------------------------------
+
+def test_summarize_registra_produto_e_skus_sem_raw_ou_segredos():
+    from loja.integrations.aliexpress.product import summarize_product_detail
+
+    summary = summarize_product_detail(_br_candidate_detail())
+    assert summary["product_id"] == BR_ID
+    assert "Vestido" in (summary["title"] or "")
+    assert summary["currency"] == "BRL"
+    assert len(summary["skus"]) == 2
+    first = summary["skus"][0]
+    assert first["sku_id"] == "%s-M-AZUL" % BR_ID
+    assert first["available_stock"] == 7
+    assert first["sale_price"] == "69.85"
+    assert {"name": "Tamanho", "value": "M"} in first["attributes"]
+    assert "raw" not in summary
+    assert all("raw" not in sku for sku in summary["skus"])
+    dumped = str(summary)
+    assert "SEGREDO" not in dumped
+
+
+def test_format_candidate_error_nunca_inclui_raw():
+    from loja.integrations.aliexpress.product import format_candidate_error
+
+    formatted = format_candidate_error(
+        AliExpressAPIError(
+            "falha simulada",
+            code="40001",
+            sub_code="isv.invalid",
+            raw={"app_secret": "SEGREDO", "sign": "ASSINATURA"},
+        )
+    )
+    assert formatted == {
+        "type": "AliExpressAPIError",
+        "code": "40001",
+        "sub_code": "isv.invalid",
+        "message": "falha simulada",
+    }
+
+# --------------------------------------------------------------------------
+# 4) Busca geral preservada, sem filtro de despacho
 # --------------------------------------------------------------------------
 
 def test_busca_geral_nao_envia_filtro_de_despacho():
@@ -292,7 +343,7 @@ def test_busca_geral_nao_envia_filtro_de_despacho():
 
 
 # --------------------------------------------------------------------------
-# 4) Candidato sintético com 2 variantes: importação, origem e confirmação
+# 5) Candidato sintético com 2 variantes: importação, origem e confirmação
 # --------------------------------------------------------------------------
 
 def _br_candidate_detail(product_id=BR_ID):

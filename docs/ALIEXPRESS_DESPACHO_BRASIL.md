@@ -47,60 +47,73 @@ com `product_id`, `ship_to_country="BR"`, `target_currency="BRL"`,
 `target_language="pt"` (defaults; rotas `detalhe`/`importar` não alteram).
 `ship_to_country` é **destino** (para preço/frete ao comprador BR).
 
-### Referências oficiais verificadas
+### Referências oficiais (conferidas em 2026-10-06)
 
-- `aliexpress.ds.product.get` — doc oficial TOP (apiId 60452, conferida em
-  2026-10-06): request = `ship_to_country` ("Country"), `product_id`,
-  `target_currency`, `target_language` (todos opcionais). **Nenhum parâmetro
-  de origem de despacho.** Resposta (`AeItemQueryResultDTO`) =
-  `ae_item_base_info_dto`, `ae_item_sku_info_dtos`, `ae_multimedia_info_dto`,
-  `package_info_dto`, `logistics_info_dto` (**só `delivery_time` +
-  `ship_to_country`, ou seja, destino**), `ae_item_properties`,
-  `ae_store_info` (loja/avaliações — **não é despacho**),
-  `product_id_converter_result` (`sub_product_id` = mapa país de
-  **destino** → ID alternativo — **não é despacho**). Nenhum campo de
-  despacho em nenhum ponto do schema oficial.
-- `aliexpress.ds.text.search` — conjunto de parâmetros corroborado pelo
-  código live, SDKs TOP e integrações DS de terceiros: `keyWord`, `local`,
-  `countryCode`, `categoryId`, `sortBy`, `pageIndex`, `pageSize`,
-  `currency`, `searchExtend`, `selectionName`. **Nenhum filtro oficial por
-  país de despacho localizado**; `searchExtend`/`selectionName` não têm
-  semântica documentada — não foram adotados (sem parâmetros por nome
-  sugestivo). O `shipFromCountry`/`shipFrom` existe **só na busca pública
-  do site** (filtro de vitrine), não na Open Platform DS.
-- `aliexpress.ds.image.search` (apiId 60453): `shpt_to` = destino. Mesma
-  conclusão.
+- API Reference (índice oficial): <https://openservice.aliexpress.com/doc/api.htm>
+- `aliexpress.ds.product.get` (request + resposta completos):
+  <https://developer.alibaba.com/docs/api.htm?apiId=60452>
+- `aliexpress.ds.image.search` (`shpt_to` = destino):
+  <https://developer.alibaba.com/docs/api.htm?apiId=60453>
+- `aliexpress.ds.text.search`: sem página oficial recuperada com a lista de
+  parâmetros; o conjunto usado (`keyWord`, `local`, `countryCode`,
+  `categoryId`, `sortBy`, `pageIndex`, `pageSize`, `currency`,
+  `searchExtend`, `selectionName`) é corroborado pelo código live do repo,
+  pelos SDKs TOP e por integrações DS de terceiros — ver hipótese H2.
 
-### Há restrição de catálogo?
+### Fatos (verificados)
 
-**Não.** Nenhum parâmetro enviado restringe por despacho:
-`countryCode=BR` é país do **comprador** (preços em BRL para BR) e
-`ship_to_country=BR` é **destino** — nenhum dos dois comprova nem filtra
-origem brasileira. A ausência de produtos nacionais nos resultados se
-explica por (a) **inexistência de filtro de despacho no método oficial** e
-(b) ordenação fixa `orders,desc` (mais vendidos primeiro, majoritariamente
-CN). Paginação existe na API (`pageIndex`/`pageSize`) e foi preservada no
-cliente; só não é exposta na UI.
+- F1. A busca envia exatamente os parâmetros da tabela acima; `categoryId`,
+  `searchExtend` e `selectionName` nunca são enviados pelo painel.
+- F2. O painel expõe um único input de busca (`q`); não há filtro de
+  despacho, ordenação, categoria ou paginação na UI.
+- F3. O filtro `?origem=` atua só sobre produtos já importados (banco
+  local); não é busca nacional no fornecedor.
+- F4. `countryCode=BR` (busca) e `ship_to_country=BR` (detalhe) são país do
+  comprador/destino — não provam nem filtram despacho brasileiro.
+- F5. O schema oficial de `ds.product.get` não contém nenhum campo de país
+  de despacho (resposta cobre base, SKUs, multimídia, pacote, logística de
+  destino, propriedades, loja e conversor de IDs).
+- F6. `searchExtend`/`selectionName` não têm semântica documentada
+  localizada; não foram adotados.
+- F7. O `shipFromCountry`/`shipFrom` existe na busca pública do site
+  (filtro de vitrine), não na Open Platform DS.
+- F8. Neste ambiente não há `ALIEXPRESS_APP_SECRET` nem
+  `ALIEXPRESS_ACCESS_TOKEN`; a sessão do painel exige OAuth do admin via
+  cookie criptografado de TTL curto (nunca persistido).
 
-### Limitações que permanecem
+### Hipóteses (não testadas — não adotar como premissa de código)
 
-1. Sem filtro oficial de despacho, a busca geral sempre mistura origens.
-2. O detalhe oficial não devolve despacho por variante em campo
-   documentado — a origem por variante continua dependendo de evidência
-   externa + confirmação manual (fluxo da Etapa 1, inalterado).
-3. `searchExtend`/`selectionName` seguem sem semântica comprovada.
+- H1. A predominância de anúncios CN nos resultados pode decorrer da
+  ordenação fixa `orders,desc` e/ou da composição do catálogo DS — não
+  medido; nenhum parâmetro enviado restringe por despacho (F1, F4).
+- H2. `searchExtend`/`selectionName` *podem* ter semântica útil de seleção
+  (a resposta live traz `selection_search_product`) — sem confirmação
+  oficial, seguem sem uso.
+
+### Verificações pendentes
+
+- P1. Repetir buscas gerais em live e medir a presença de despacho BR nos
+  resultados (testa H1).
+- P2. Confirmar na documentação oficial a lista de parâmetros de
+  `ds.text.search` (cobrir H2).
+- P3. Com sessão administrativa (ver §3), consultar os candidatos por ID e
+  registrar produto/SKUs/erros — testa se o catálogo DS os contém.
+- P4. Confirmar por variante, no anúncio com login, a opção de despacho BR
+  (testa a evidência do §2 por variante).
 
 ---
 
 ## 2. Candidatos com despacho brasileiro (vitrine pública, somente leitura)
 
-Método: busca pública filtrada por `shipFromCountry=BR`
-(`Local de envio: Brasil` ativo), 2026-10-06, sem login e sem compra.
-Cada cartão carrega telemetria `"shipFrom":"BR"` amarrada ao `skuId` do
-cartão (SKU padrão do anúncio). **Evidência em nível de anúncio, não de
-variante escolhida** — a página do anúncio exige login/JS para as opções
-de envio por variante (ver §5), por isso **nenhum candidato é apresentado
-como confirmado**.
+**Fato:** busca pública filtrada por `shipFromCountry=BR`
+(`Local de envio: Brasil` ativo), 2026-10-06, sem login e sem compra —
+60 cartões retornados, todos com telemetria `"shipFrom":"BR"` amarrada ao
+`skuId` do cartão (SKU padrão de cada anúncio).
+
+**Pendente (P4):** a indicação acima é em nível de anúncio/SKU padrão; o
+despacho da **variante escolhida** (tamanho/cor) só aparece no anúncio com
+login/JS — página inacessível a fetch sem login. Por isso **nenhum
+candidato é apresentado como confirmado**.
 
 Destino de teste: CEP **77000000** (Palmas — mesmo CEP de teste do repo).
 
@@ -117,26 +130,31 @@ Controle internacional (para a matriz do §3): os IDs sintéticos do repo
 
 ## 3. Matriz de consultas por ID (`aliexpress.ds.product.get`)
 
-**Não executada em live neste ambiente** — e o motivo é auditável, não
-falta de tentativa:
+**Fato:** não executada em live neste ambiente — sem `ALIEXPRESS_APP_SECRET`
+nem `ALIEXPRESS_ACCESS_TOKEN` (F8); a sessão do painel exige OAuth do admin
+via browser, fora do alcance desta entrega.
 
-- o ambiente não possui `ALIEXPRESS_APP_SECRET` nem `ALIEXPRESS_ACCESS_TOKEN`;
-- a sessão do painel exige OAuth do admin via cookie criptografado de TTL
-  curto (nunca persistido); concluir o fluxo exigiria credenciais + browser,
-  fora do alcance desta entrega;
-- **mesmo com credenciais, o schema oficial (§1) não contém campo de
-  despacho** — a consulta retornaria produto/SKUs/estoque/preço, mas
-  "origem comprovável" seria igualmente impossível por esse método.
+**Pendente (P3):** com sessão administrativa, consultar os três candidatos
+e um produto internacional real, registrando produto retornado, SKUs
+correspondentes e erros sanitizados — sem publicar nem comprar. O runner
+`scripts/query_aliexpress_candidates.py` executa exatamente essas 4
+consultas read-only (`ds.product.get` com os defaults do painel) e imprime
+só o resumo sanitizado (`summarize_product_detail`) ou o erro sanitizado
+(`format_candidate_error`) — nenhum segredo na saída. Só então se saberá
+se o catálogo DS contém esses anúncios. A ausência de campo de despacho no
+schema (F5) não impede esse teste: produto/SKUs/estoque/preço podem ser
+verificados e a origem seguir confirmada manualmente por variante.
 
-| Candidato | Produto acessível | Variante acessível | Origem comprovável | Diferença vitrine × API |
+| Candidato | Produto retornado | SKUs correspondentes | Origem comprovável | Erro (sanitizado) |
 | --- | --- | --- | --- | --- |
-| 1 (`...1750`) | não executável aqui (sem credencial) | idem | **não** — campo inexistente no schema oficial | a vitrine tem `shipFrom` (site); a API DS não expõe |
-| 2 (`...3897`) | idem | idem | **não** — idem | idem |
-| 3 (`...4256`) | idem | idem | **não** — idem | idem |
-| Controle (`2000000000001`) | sim, via Fake (testes) | sim | n/a (sintético, sem despacho) | — |
+| 1 (`...1750`) | pendente (P3) | pendente (P3) | pendente — schema oficial não prevê campo (F5) | — |
+| 2 (`...3897`) | pendente (P3) | pendente (P3) | pendente — idem | — |
+| 3 (`...4256`) | pendente (P3) | pendente (P3) | pendente — idem | — |
+| Controle internacional (`1005009519310498`, produto real citado em `docs/SUPPLIER_PURCHASE_TAXES.md`) | pendente (P3) | pendente (P3) | n/a | — |
 
 Nenhuma chamada de compra/submissão foi feita. Nenhum endpoint novo foi
-tentado (FREIGHT_PROBE.md continua encerrado).
+tentado (FREIGHT_PROBE.md continua encerrado). Os IDs sintéticos do repo
+(`2000000000001`, `2000000000009`) seguem como controle offline nos testes.
 
 ---
 
@@ -155,15 +173,18 @@ mais a honestidade na interface:
   do `detalhe` (refatorado para `_render_detalhe`); ID inválido/ausente e
   erro de API viram flash sanitizado, sem exceção e sem vazar `raw`.
 - `catalogo.html`: segundo formulário "Consultar anúncio direto por ID ou
-  URL" + nota explícita de que a busca do fornecedor não filtra por país
-  de despacho e que a origem deve ser conferida variante a variante.
+  URL" + nota curta e factual: sem filtro de despacho na busca, consultar
+  por ID/URL e conferir por variante, BR só com evidência por variante.
+- `summarize_product_detail()` / `format_candidate_error()` (`product.py`):
+  registro sanitizado para a matriz live (sem `raw`/segredos).
 - O filtro `?origem=` dos importados **não** foi renomeado nem
   reapresentado como busca nacional.
 
-**Limitações assumidas:** sem filtro nacional no catálogo do fornecedor
-(inexistente na API oficial); sem prova de despacho por variante via API;
-importação de candidato real não testada em live (sem credencial) — o fluxo
-de importação foi validado com detalhe sintético (§5/Testes). Nenhum
+**Limites desta entrega (fatos):** sem filtro de despacho na busca oficial
+(F1–F7); sem prova de despacho por variante via API (F5) — a origem segue
+por evidência externa + confirmação manual por variante (fluxo da Etapa 1,
+inalterado); importação de candidato real não testada em live (P3) — o
+fluxo de importação foi validado com detalhe sintético (§6). Nenhum
 rascunho foi publicado; frete/impostos/custo/margem seguem obrigatórios e
 nenhum valor ausente é preenchido com zero. Operação internacional
 intocada; confirmação nacional continua por variante explícita.
@@ -172,34 +193,33 @@ intocada; confirmação nacional continua por variante explícita.
 
 ## 5. Diagnóstico e próximos caminhos
 
-Diferenciação dos candidatos não acessíveis (§3): **falha de configuração
-para este ambiente** (sem `APP_SECRET`/token; sessão OAuth indisponível)
-**combinada com limitação do catálogo do método** (schema oficial sem
-campo de despacho — com credencial, o produto e a variante seriam
-acessíveis, mas a origem continuaria não comprovável por esse método).
+Candidatos não acessíveis em live: **fato** — F8 (sem `APP_SECRET`/token;
+OAuth indisponível neste ambiente). Nada se afirma sobre a presença deles
+no catálogo DS: é a verificação **P3**, pendente de sessão administrativa.
 
-Métodos oficiais avaliados antes de propor mudança: `ds.text.search` (sem
-filtro de despacho), `ds.product.get` (sem campo de despacho),
-`ds.image.search` (`shpt_to` = destino), fretes DS/buyer (FREIGHT_PROBE
-encerrado: provider indisponível para a App Key). **Nenhuma migração da
-integração é proposta.**
+Métodos oficiais avaliados antes de propor mudança: `ds.text.search`
+(parâmetros auditados, sem filtro de despacho), `ds.product.get` (schema
+oficial completo, sem campo de despacho), `ds.image.search` (`shpt_to` =
+destino), fretes DS/buyer (FREIGHT_PROBE encerrado: provider indisponível
+para a App Key). **Nenhuma migração da integração é proposta.**
 
-Próximos caminhos possíveis (fora desta entrega): concluir o OAuth do admin
-e repetir a matriz do §3 em live; instrumentar a observação de
-`ship_from_country` quando o frete voltar a responder (etapa já prevista na
-Etapa 1); avaliar, com conta e permissões adequadas, se algum método DS
-mais recente expõe despacho — sem adotar nada por nome sugestivo.
+Próximos caminhos (fora desta entrega): P1–P4 acima; instrumentar a
+observação de `ship_from_country` quando o frete voltar a responder (etapa
+já prevista na Etapa 1); avaliar, com conta e permissões adequadas, se
+algum método DS mais recente expõe despacho — sem adotar nada por nome
+sugestivo.
 
 ## 6. Testes executados, resultados e skips
 
-Novo: `tests/test_aliexpress_lookup_by_id.py` — **13 passed**.
+Novo: `tests/test_aliexpress_lookup_by_id.py` — **16 passed**.
 Cobre: parser (IDs/URLs válidos e recusas, incl. host malicioso
 `aliexpress.com.evil.com`), rota (sucesso por ID e por URL, inválido sem
-chamar a API, ausente, erro sanitizado sem vazar `raw`), busca geral sem
-parâmetros de despacho, importação idempotente do candidato sintético
-(identidade, SKUs, estoque, preço, moeda, `sku_property_id`/
-`property_value_id`), origem `unknown` pós-importação e confirmação de uma
-variante resultando em `mixed` (nunca `brazil` global).
+chamar a API, ausente, erro sanitizado sem vazar `raw`, nota de limitação
+na UI), resumo sanitizado e erro sanitizado, busca geral sem parâmetros de
+despacho, importação idempotente do candidato sintético (identidade, SKUs,
+estoque, preço, moeda, `sku_property_id`/`property_value_id`), origem
+`unknown` pós-importação e confirmação de uma variante resultando em
+`mixed` (nunca `brazil` global).
 
 Suítes pertinentes: `test_aliexpress_admin_catalog.py` +
 `test_aliexpress_client.py` + `test_aliexpress_product.py` +
