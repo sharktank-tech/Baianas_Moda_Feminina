@@ -96,8 +96,11 @@ com `product_id`, `ship_to_country="BR"`, `target_currency="BRL"`,
   resultados (testa H1).
 - P2. Confirmar na documentação oficial a lista de parâmetros de
   `ds.text.search` (cobrir H2).
-- P3. Com sessão administrativa (ver §3), consultar os candidatos por ID e
-  registrar produto/SKUs/erros — testa se o catálogo DS os contém.
+- P3. Consultar os candidatos por ID com sessão administrativa: **parcial**
+  — acessibilidade por ID confirmada para os 4 (§3). Restam a
+  correspondência dos `sku_id`s e a evidência de despacho por variante. O
+  runner `scripts/query_aliexpress_candidates.py` repete essas 4 consultas
+  read-only com saída sanitizada.
 - P4. Confirmar por variante, no anúncio com login, a opção de despacho BR
   (testa a evidência do §2 por variante).
 
@@ -130,31 +133,39 @@ Controle internacional (para a matriz do §3): os IDs sintéticos do repo
 
 ## 3. Matriz de consultas por ID (`aliexpress.ds.product.get`)
 
-**Fato:** não executada em live neste ambiente — sem `ALIEXPRESS_APP_SECRET`
-nem `ALIEXPRESS_ACCESS_TOKEN` (F8); a sessão do painel exige OAuth do admin
-via browser, fora do alcance desta entrega.
+**Fato (2026-10-06, via painel — detalhe read-only, sem importar):**
+consulta de detalhe **bem-sucedida para os quatro produtos** (fonte:
+`info.txt` fornecido pelo operador; conteúdo transcrito abaixo, arquivo
+mantido fora do versionamento). Nenhum erro retornado em nenhuma consulta.
 
-**Pendente (P3):** com sessão administrativa, consultar os três candidatos
-e um produto internacional real, registrando produto retornado, SKUs
-correspondentes e erros sanitizados — sem publicar nem comprar. O runner
-`scripts/query_aliexpress_candidates.py` executa exatamente essas 4
-consultas read-only (`ds.product.get` com os defaults do painel) e imprime
-só o resumo sanitizado (`summarize_product_detail`) ou o erro sanitizado
-(`format_candidate_error`) — nenhum segredo na saída. Só então se saberá
-se o catálogo DS contém esses anúncios. A ausência de campo de despacho no
-schema (F5) não impede esse teste: produto/SKUs/estoque/preço podem ser
-verificados e a origem seguir confirmada manualmente por variante.
-
-| Candidato | Produto retornado | SKUs correspondentes | Origem comprovável | Erro (sanitizado) |
+| Candidato | Produto retornado | SKUs / variações | Origem comprovável | Erro (sanitizado) |
 | --- | --- | --- | --- | --- |
-| 1 (`...1750`) | pendente (P3) | pendente (P3) | pendente — schema oficial não prevê campo (F5) | — |
-| 2 (`...3897`) | pendente (P3) | pendente (P3) | pendente — idem | — |
-| 3 (`...4256`) | pendente (P3) | pendente (P3) | pendente — idem | — |
-| Controle internacional (`1005009519310498`, produto real citado em `docs/SUPPLIER_PURCHASE_TAXES.md`) | pendente (P3) | pendente (P3) | n/a | — |
+| 1 (`1005013003211750`) | sim — "Vestido Feminino 2026 com Estampa Floral, Alças Finas, Estilo Boho", categoria `200000347` | 20 variações, preço uniforme R$ 69,85; estoques 9999 na maioria (0/122/130 em algumas) | pendente — resposta sem campo de despacho | nenhum |
+| 2 (`1005012926123897`) | sim — "Vestidos de Verão Femininos, Vestido Maxi Floral", categoria `200000347` | 16 variações; R$ 62,50 (maioria) e R$ 59,50 (Verde P/M/G, Verde GG); estoques 119–2000 | pendente — idem | nenhum |
+| 3 / piloto (`1005010478234256`) | sim — "Vestido Sem Manga em Algodão", categoria `200000347` | 3 variações (CÉU AZUL P/M/G), preço uniforme R$ 34,80, estoque 1111 em cada | pendente — idem | nenhum |
+| Controle (`1005009519310498`) | sim — "Outono feminino agasalho com zíper e calças", categoria `201530602` | 12 variações, preço uniforme R$ 312,99; estoques 217–433 | n/a (controle internacional) | nenhum |
 
-Nenhuma chamada de compra/submissão foi feita. Nenhum endpoint novo foi
-tentado (FREIGHT_PROBE.md continua encerrado). Os IDs sintéticos do repo
-(`2000000000001`, `2000000000009`) seguem como controle offline nos testes.
+**Conclusão parcial (fato):** os três candidatos são acessíveis por ID via
+`ds.product.get` — detalhe completo (título, categoria, variações, estoque,
+preço) retornado para todos.
+**Pendentes:** (a) despacho nacional por variante — a resposta não traz o
+campo e o TXT não registra despacho; (b) correspondência dos IDs de SKU —
+o TXT lista atributos/estoque/preço, mas não os `sku_id`s, então não há
+como amarrar cada linha ao identificador da API.
+
+### Piloto de validação: `1005010478234256`
+
+Escolhido por ter a menor superfície: 3 variações (CÉU AZUL P/M/G), preço
+uniforme R$ 34,80 e estoque 1111 em cada — qualquer divergência futura
+(estoque, preço, SKU ausente) é imediatamente visível.
+
+### Verificação de despacho por variante (pendente)
+
+Protocolo, no anúncio com sessão: selecionar a variante (ex.: CÉU AZUL /
+M), informar o CEP real de entrega **77000000** (Palmas) e registrar — ID
+do SKU, atributos, país de despacho exibido, frete, prazo, impostos
+apresentados e data da evidência. **Sem comprovação, a origem permanece
+`unknown`** — nada é confirmado sem evidência por variante.
 
 ### Caminhos validados para executar P3 (somente leitura, sem importar)
 
@@ -216,9 +227,12 @@ intocada; confirmação nacional continua por variante explícita.
 
 ## 5. Diagnóstico e próximos caminhos
 
-Candidatos não acessíveis em live: **fato** — F8 (sem `APP_SECRET`/token;
-OAuth indisponível neste ambiente). Nada se afirma sobre a presença deles
-no catálogo DS: é a verificação **P3**, pendente de sessão administrativa.
+Candidatos não acessíveis em live: **fato** — F8 (sem `APP_SECRET`/token
+neste ambiente; OAuth indisponível aqui). A acessibilidade por ID foi
+confirmada via painel pelo operador (§3): os 4 produtos retornam detalhe
+completo, sem erros. Seguem pendentes a correspondência dos `sku_id`s e a
+evidência de despacho por variante (protocolo no §3; origem `unknown` até
+lá).
 
 Métodos oficiais avaliados antes de propor mudança: `ds.text.search`
 (parâmetros auditados, sem filtro de despacho), `ds.product.get` (schema
