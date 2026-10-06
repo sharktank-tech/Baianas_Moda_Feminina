@@ -309,8 +309,24 @@ def test_format_candidate_error_nunca_inclui_raw():
         "message": "falha simulada",
     }
 
+def test_catalogo_sem_config_explica_em_vez_de_ocultar_formularios(
+    client, admin_user, login, fake_client, monkeypatch
+):
+    """Preview sem env: sem sessão possível, a página explica (não some)."""
+    monkeypatch.delenv("ALIEXPRESS_ADMIN_SESSION_KEY", raising=False)
+    login(admin_user.email)
+    resp = client.get(f"{PREFIX}/")
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert "não configurada neste ambiente" in body
+    # Sem sessão não há formulários que funcionem — e a tabela de
+    # importados (dados existentes) continua visível.
+    assert "/buscar-id" not in body
+    assert "Produtos importados" in body
+
+
 # --------------------------------------------------------------------------
-# 4) Busca geral preservada, sem filtro de despacho
+# 3) Busca geral preservada, sem filtro de despacho
 # --------------------------------------------------------------------------
 
 def test_busca_geral_nao_envia_filtro_de_despacho():

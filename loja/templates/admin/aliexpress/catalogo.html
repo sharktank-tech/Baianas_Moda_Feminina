@@ -42,6 +42,18 @@
                 Autorizar novamente
             </a>
         </div>
+    {% elif not connected %}
+        <div class="bg-gray-50 border border-gray-200 rounded-2xl p-6 mb-8">
+            <h2 class="text-xl font-semibold text-gray-800">
+                Integração AliExpress não configurada neste ambiente
+            </h2>
+            <p class="text-gray-600 mt-2">
+                A busca e a consulta de anúncios exigem a credencial
+                administrativa configurada no deployment
+                (ALIEXPRESS_ADMIN_SESSION_KEY e APP_KEY). Verifique as
+                variáveis de ambiente e faça login novamente em seguida.
+            </p>
+        </div>
     {% endif %}
 
     {% if connected %}

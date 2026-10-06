@@ -281,6 +281,13 @@ mais a honestidade na interface:
   estoque — montados da resposta já consultada (nenhuma chamada adicional,
   nenhuma persistência), sob os mesmos `@admin_required` +
   `@ali_session_required`.
+- `catalogo.html`: sem sessão AliExpress possível (env ausente), a página
+  explicava nada — cabeçalho seguido direto da tabela de importados. Agora
+  exibe o aviso "Integração AliExpress não configurada neste ambiente".
+  Divergência código × Preview investigada via Deployments API: o alias da
+  branch aponta para o deployment `success` mais recente (98d6ee9); sem
+  sessão, os formulários ficam ocultos por construção (`{% if connected %}`),
+  pois exigem o token — comportamento preservado.
 - `summarize_product_detail()` / `format_candidate_error()` (`product.py`):
   registro sanitizado para a matriz live (sem `raw`/segredos).
 - O filtro `?origem=` dos importados **não** foi renomeado nem
@@ -321,7 +328,7 @@ sugestivo.
 
 ## 6. Testes executados, resultados e skips
 
-Novo: `tests/test_aliexpress_lookup_by_id.py` — **20 passed**.
+Novo: `tests/test_aliexpress_lookup_by_id.py` — **21 passed**.
 Cobre: parser (IDs/URLs válidos e recusas, incl. host malicioso
 `aliexpress.com.evil.com`), rota (sucesso por ID e por URL, inválido sem
 chamar a API, ausente, erro sanitizado sem vazar `raw`, nota de limitação
@@ -331,7 +338,8 @@ despacho, tabela de detalhe com IDs e dimensões por variante
 AliExpress exigidos), importação idempotente do candidato sintético
 (identidade, SKUs, estoque, preço, moeda, `sku_property_id`/
 `property_value_id`), origem `unknown` pós-importação e confirmação de uma
-variante resultando em `mixed` (nunca `brazil` global).
+variante resultando em `mixed` (nunca `brazil` global), aviso explícito
+quando a integração não está configurada (sem formulários fantasmas).
 
 Suítes pertinentes: `test_aliexpress_admin_catalog.py` +
 `test_aliexpress_client.py` + `test_aliexpress_product.py` +
