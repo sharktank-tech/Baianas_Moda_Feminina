@@ -398,7 +398,7 @@ def test_catalogo_sem_config_explica_em_vez_de_ocultar_formularios(
 
 
 # --------------------------------------------------------------------------
-# 3) Busca geral preservada, sem filtro de despacho
+# 4) Busca geral preservada, sem filtro de despacho
 # --------------------------------------------------------------------------
 
 def test_busca_geral_nao_envia_filtro_de_despacho():
@@ -556,6 +556,91 @@ def test_detalhe_exige_sessao_aliexpress(client, admin_user, login, ae_env, fake
     resp = client.get(f"{PREFIX}/{PRODUCT_ID}/detalhe")
     assert resp.status_code == 302
     assert resp.headers["Location"].endswith(PREFIX + "/")
+
+# --------------------------------------------------------------------------
+# 7) Runner de comparação on/off (offline, cliente fake, sem rede)
+# --------------------------------------------------------------------------
+
+def _load_query_module():
+    import sys
+    from pathlib import Path
+
+    scripts = str(Path("scripts").resolve())
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import query_aliexpress_candidates as qc
+    return qc
+
+
+class _FakeQueryClient:
+    """Fake mínimo: registra flags e devolve detalhe ou erro por (id, flag)."""
+
+    def __init__(self, detail, errors=()):
+        self.detail = detail
+        self.errors = set(errors)
+        self.calls = []
+
+    def get_product(self, *, product_id, remove_personal_benefit=True, **kwargs):
+        self.calls.append((product_id, remove_personal_benefit))
+        if (product_id, remove_personal_benefit) in self.errors:
+            raise AliExpressAPIError("falha simulada", code="40001")
+        return self.detail
+
+
+def test_compare_benefit_registra_flag_e_mercado_por_chamada():
+    qc = _load_query_module()
+    client = _FakeQueryClient(_br_candidate_detail())
+    records, failed = qc.query_candidates(client, compare_benefit=True)
+
+    assert failed == 0
+    by_flag = {}
+    for record in records:
+        assert record["ok"] is True
+        assert record["market"] == {
+            "ship_to_country": "BR",
+            "target_currency": "BRL",
+            "target_language": "pt",
+        }
+        by_flag.setdefault(record["product_id"], []).append(
+            record["remove_personal_benefit"]
+        )
+    # Comparação on/off só nos dois produtos; demais, uma vez ligada.
+    assert sorted(by_flag["1005010478234256"]) == [False, True]
+    assert sorted(by_flag["1005010502074833"]) == [False, True]
+    assert by_flag["1005013003211750"] == [True]
+    assert client.calls.count(("1005010478234256", True)) == 1
+    assert client.calls.count(("1005010478234256", False)) == 1
+
+
+def test_compare_benefit_isola_erro_por_flag():
+    """Erro numa flag não contamina a outra: saídas iguais com flags
+    diferentes são evidência de parâmetro ignorado — nunca sucesso."""
+    qc = _load_query_module()
+    client = _FakeQueryClient(
+        _br_candidate_detail(), errors={("1005010478234256", False)}
+    )
+    records, failed = qc.query_candidates(client, compare_benefit=True)
+
+    assert failed == 1
+    flagged = {
+        (r["product_id"], r["remove_personal_benefit"]): r for r in records
+    }
+    bad = flagged[("1005010478234256", False)]
+    assert bad["ok"] is False
+    assert bad["error"]["code"] == "40001"
+    good = flagged[("1005010478234256", True)]
+    assert good["ok"] is True
+    assert good["detail"]["product_id"] == BR_ID
+
+
+def test_sem_comparacao_chama_uma_vez_ligado():
+    qc = _load_query_module()
+    client = _FakeQueryClient(_br_candidate_detail())
+    records, failed = qc.query_candidates(client, compare_benefit=False)
+
+    assert failed == 0
+    assert len(records) == len(qc.CANDIDATES)
+    assert {r["remove_personal_benefit"] for r in records} == {True}
 
 # --------------------------------------------------------------------------
 # 5) Candidato sintético com 2 variantes: importação, origem e confirmação

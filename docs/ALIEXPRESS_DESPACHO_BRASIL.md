@@ -89,6 +89,11 @@ com `product_id`, `ship_to_country="BR"`, `target_currency="BRL"`,
 - H2. `searchExtend`/`selectionName` *podem* ter semântica útil de seleção
   (a resposta live traz `selection_search_product`) — sem confirmação
   oficial, seguem sem uso.
+- H3. `remove_personal_benefit=true` *pode* remover benefícios
+  personalizados/de primeira compra dos preços (retornando valores
+  recorrentes) — coerente com F10 e com o caso R$ 14,23 × R$ 34,80, mas sem
+  confirmação oficial e sem teste live; parâmetro ignorado pelo provider é
+  indistinguível de aceito sem comparar as respostas.
 
 ### Verificações pendentes
 
@@ -107,6 +112,12 @@ com `product_id`, `ship_to_country="BR"`, `target_currency="BRL"`,
 - P6. Custo recorrente de aquisição do piloto: **pendente** — exige
   conferência no checkout da conta de compra (variante exata, 1 unidade,
   CEP real), sem concluir a compra; ver checklist no §3.
+- P7. Comparação `remove_personal_benefit` on/off (testa H3): **pendente**
+  de sessão — `scripts/query_aliexpress_candidates.py --compare-benefit`
+  consulta `1005010478234256` e `1005010502074833` com a flag ligada e
+  desligada (mercado fixo BR/BRL/pt), registrando a flag por chamada.
+  Saídas idênticas com flags diferentes = parâmetro ignorado (nunca
+  sucesso); só divergência de preços comprova efeito.
 
 ---
 
@@ -196,18 +207,37 @@ confirmado no banco**.
 
 ### Custo recorrente (pendente — P6)
 
-Os três preços têm significados diferentes e **nenhum substitui
-automaticamente o custo cadastrado**:
-- R$ 14,23 = benefício de primeira compra → não serve como custo recorrente;
-- R$ 58,00 = preço original exibido → não prova o valor cobrado;
-- R$ 34,80 = preço observado pela API → a confrontar com o cenário de
-  aquisição (preço observado ≠ custo total validado).
-Checklist pendente, na conta de compra, sem concluir: variante exata,
-1 unidade, CEP `77066520` — registrar subtotal sem benefício de primeira
-compra, descontos e condições, frete, impostos/outras cobranças, total
-final, despacho e prazo dessa mesma consulta. Se a conta exibir só a oferta
-de primeira compra, o custo recorrente **não pôde ser validado** — sem
-simular valor removendo descontos por cálculo.
+Quatro conceitos distintos — **nenhum substitui automaticamente o custo
+cadastrado**, e os dois "originais" abaixo **não** são custos recorrentes
+comprovados:
+- preço da API = `offer_sale_price` com `remove_personal_benefit=true`
+  (piloto: R$ 34,80) → a confrontar com o cenário de aquisição (preço
+  observado ≠ custo total validado);
+- oferta pessoal = benefício de primeira compra/Welcome Deal, só na conta
+  elegível (piloto: R$ 14,23) → não serve como custo recorrente;
+- preço de referência = original exibido no anúncio (piloto: R$ 58,00;
+  produto `1005010502074833`: R$ 52,00, preço original do cartão) → não
+  prova o valor cobrado;
+- total de checkout = subtotal + descontos + frete + impostos na conta de
+  compra, variante exata, 1 unidade, CEP `77066520`, sem concluir.
+Checklist pendente, na conta de compra: registrar subtotal sem benefício
+de primeira compra, descontos e condições, frete, impostos/outras
+cobranças, total final, despacho e prazo dessa mesma consulta. Se a conta
+exibir só a oferta de primeira compra, o custo recorrente **não pôde ser
+validado** — sem simular valor removendo descontos por cálculo.
+
+### Segundo produto e comparação on/off (pendente — P7)
+
+`1005010502074833` (cartão da vitrine: vestido, preço original R$ 52,00;
+variante CÉU AZUL / M a confirmar na resposta) entra na comparação com o
+piloto: ambos consultados com `remove_personal_benefit` ligado e desligado
+(mercado fixo BR/BRL/pt), registrando por chamada ID bruto, `sku_attr`,
+preço, moeda, estoque e data/hora. Saídas idênticas com flags diferentes =
+parâmetro ignorado (nunca sucesso); só divergência de preços comprova
+efeito (testa H3). Sem sessão, as chamadas estão preparadas em
+`scripts/query_aliexpress_candidates.py --compare-benefit` (testes offline
+verdes); custos cadastrados e origem atual preservados — nada importado,
+publicado ou comprado.
 
 ### Preparação do cadastro do piloto (não executada)
 
@@ -342,7 +372,7 @@ sugestivo.
 
 ## 6. Testes executados, resultados e skips
 
-Novo: `tests/test_aliexpress_lookup_by_id.py` — **26 passed**.
+Novo: `tests/test_aliexpress_lookup_by_id.py` — **32 passed**.
 Cobre: parser (IDs/URLs válidos e recusas, incl. host malicioso
 `aliexpress.com.evil.com`), rota (sucesso por ID e por URL, inválido sem
 chamar a API, ausente, erro sanitizado sem vazar `raw`, nota de limitação
@@ -356,7 +386,9 @@ variante resultando em `mixed` (nunca `brazil` global), aviso explícito
 quando a integração não está configurada (sem formulários fantasmas),
 piloto `1005010478234256` abrindo o detalhe exato via `/buscar-id`,
 exclusividade/estrutura/visibilidade-CSS do botão "Consultar anúncio",
-separação `sku_id` × `sku_attr` × IDs (ausente → "Não fornecido").
+separação `sku_id` × `sku_attr` × IDs (ausente → "Não fornecido"),
+runner `--compare-benefit` com flag e mercado registrados por chamada
+(erro isolado por flag).
 
 Suítes pertinentes: `test_aliexpress_admin_catalog.py` +
 `test_aliexpress_client.py` + `test_aliexpress_product.py` +
