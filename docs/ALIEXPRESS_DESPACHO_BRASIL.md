@@ -156,6 +156,29 @@ Nenhuma chamada de compra/submissão foi feita. Nenhum endpoint novo foi
 tentado (FREIGHT_PROBE.md continua encerrado). Os IDs sintéticos do repo
 (`2000000000001`, `2000000000009`) seguem como controle offline nos testes.
 
+### Caminhos validados para executar P3 (somente leitura, sem importar)
+
+**Via Preview do PR (com o formulário novo) — validado por código e sonda
+em 2026-10-06:** rotas montadas e gate/CSRF ativos (catálogo, detalhe e
+`POST /buscar-id` respondem; callback branch-aware
+`https://<branch>/integrations/aliexpress/callback` via Node → cookies →
+`/callback/complete` com state de uso único de 10 min). Passos no browser:
+abrir o catálogo do Preview, login admin, autorizar o AliExpress se pedir,
+usar "Consultar anúncio direto por ID ou URL" para cada ID abaixo e
+registrar a página de detalhe. **Não clicar em "Importar como rascunho".**
+Ressalva honesta: `APP_KEY`/`SECRET` no env do Preview e o callback do
+Preview registrado no console do app AliExpress não são verificáveis daqui
+— se o AliExpress recusar o `redirect_uri`, usar o fallback.
+
+**Fallback em produção (fluxo existente, já aceita qualquer ID no path):**
+com admin + sessão AliExpress ativos, abrir cada URL e registrar título,
+SKUs/variações, preços e estoque — sem importar:
+
+- `https://www.pollomodas.com.br/admin/integrations/aliexpress/1005013003211750/detalhe`
+- `https://www.pollomodas.com.br/admin/integrations/aliexpress/1005012926123897/detalhe`
+- `https://www.pollomodas.com.br/admin/integrations/aliexpress/1005010478234256/detalhe`
+- `https://www.pollomodas.com.br/admin/integrations/aliexpress/1005009519310498/detalhe` (controle)
+
 ---
 
 ## 4. Mudanças implementadas e limitações
