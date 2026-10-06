@@ -1,0 +1,448 @@
+"""Consulta direta por ID/URL e importação de candidato com despacho BR.
+
+Contexto: a API oficial de busca (`aliexpress.ds.text.search`) não oferece
+filtro por país de despacho, e o detalhe (`aliexpress.ds.product.get`) não
+devolve origem de despacho em nenhum campo documentado. Para avaliar um
+anúncio específico, o painel oferece a consulta direta por ID/URL
+(`POST /buscar-id`), que usa somente o caminho existente de detalhe por ID.
+
+Cobre, sem nenhuma chamada real de rede:
+- validação estrita de ID/URL (só hosts AliExpress e caminho `/item/`);
+- a rota de consulta direta (sucesso, inválido, ausente, erro sanitizado);
+- busca geral preservada e sem parâmetros de despacho;
+- importação idempotente de um candidato sintético com 2 variantes:
+  identidade/SKUs/estoque/preço/moeda/atributos preservados, origem
+  `unknown` até confirmação manual, e confirmação de UMA variante não
+  marca as demais como nacionais (`mixed`, nunca `brazil`).
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+from loja.integrations.aliexpress.errors import AliExpressAPIError
+from loja.integrations.aliexpress.models import (
+    AliExpressProductDetail,
+    AliExpressProductSku,
+)
+from loja.integrations.aliexpress.product import parse_aliexpress_product_ref
+from tests.test_aliexpress_admin_catalog import (  # noqa: F401  (fixtures)
+    PREFIX,
+    PRODUCT_ID,
+    TITLE,
+    FakeAliExpressClient,
+    admin_catalog,  # noqa: F401
+    ae_env,  # noqa: F401
+    catalog,  # noqa: F401
+    fake_client,  # noqa: F401
+    make_detail,
+    reference_quote_table,  # noqa: F401
+)
+
+import pytest
+
+from loja.modules.models import (
+    AliExpressSyncAttempt,
+    Product,
+    ProductSync,
+    ProductVariant,
+    Supplier,
+    SupplierProduct,
+    SupplierSkuShippingOrigin,
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_br_candidate_data(db):
+    """Isola os rascunhos/vínculos/evidências criados pelos testes deste módulo."""
+    product_ids = db.session.query(Product.id).filter_by(source="aliexpress")
+    supplier_ids = db.session.query(Supplier.id).filter_by(channel_type="aliexpress")
+    SupplierSkuShippingOrigin.query.delete(synchronize_session=False)
+    AliExpressSyncAttempt.query.delete(synchronize_session=False)
+    ProductSync.query.filter(ProductSync.product_id.in_(product_ids)).delete(
+        synchronize_session=False
+    )
+    ProductVariant.query.filter(ProductVariant.product_id.in_(product_ids)).delete(
+        synchronize_session=False
+    )
+    SupplierProduct.query.filter(SupplierProduct.supplier_id.in_(supplier_ids)).delete(
+        synchronize_session=False
+    )
+    Product.query.filter(Product.id.in_(product_ids)).delete(synchronize_session=False)
+    Supplier.query.filter(Supplier.id.in_(supplier_ids)).delete(synchronize_session=False)
+    db.session.commit()
+    yield
+    db.session.rollback()
+
+BR_ID = "1005013003211750"
+BR_URL = "https://pt.aliexpress.com/item/1005013003211750.html"
+
+
+# --------------------------------------------------------------------------
+# 1) Validação de ID/URL (função pura, sem rede)
+# --------------------------------------------------------------------------
+
+def test_aceita_id_numerico():
+    assert parse_aliexpress_product_ref(BR_ID) == BR_ID
+    assert parse_aliexpress_product_ref("  %s  " % BR_ID) == BR_ID
+    assert parse_aliexpress_product_ref("32982857990") == "32982857990"
+
+
+def test_aceita_url_de_anuncio_aliexpress():
+    assert parse_aliexpress_product_ref(BR_URL) == BR_ID
+    assert (
+        parse_aliexpress_product_ref(
+            "https://www.aliexpress.com/item/%s.html?src=ibdm&sk=abc" % BR_ID
+        )
+        == BR_ID
+    )
+    assert (
+        parse_aliexpress_product_ref(
+            "http://m.aliexpress.com/item/%s.htm" % BR_ID
+        )
+        == BR_ID
+    )
+    assert (
+        parse_aliexpress_product_ref(
+            "https://aliexpress.us/item/%s.html" % BR_ID
+        )
+        == BR_ID
+    )
+
+
+def test_recusa_nao_ids():
+    assert parse_aliexpress_product_ref(None) is None
+    assert parse_aliexpress_product_ref("") is None
+    assert parse_aliexpress_product_ref("   ") is None
+    assert parse_aliexpress_product_ref("vestido floral") is None
+    assert parse_aliexpress_product_ref("69.85") is None
+    assert parse_aliexpress_product_ref("R$ 69,85") is None
+    assert parse_aliexpress_product_ref("1234567") is None  # curto demais
+    assert parse_aliexpress_product_ref("1" * 21) is None  # longo demais
+
+
+def test_recusa_urls_fora_do_padrao():
+    # Host fora da AliExpress: nunca buscar nada a partir daqui.
+    assert (
+        parse_aliexpress_product_ref(
+            "https://evil-aliexpress.com/item/%s.html" % BR_ID
+        )
+        is None
+    )
+    assert (
+        parse_aliexpress_product_ref(
+            "https://pt.aliexpress.com.evil.com/item/%s.html" % BR_ID
+        )
+        is None
+    )
+    assert (
+        parse_aliexpress_product_ref(
+            "https://exemplo.com/loja/%s" % BR_ID
+        )
+        is None
+    )
+    # Caminhos que não são anúncio (busca, loja, categoria).
+    assert (
+        parse_aliexpress_product_ref(
+            "https://pt.aliexpress.com/w/wholesale-vestido.html"
+        )
+        is None
+    )
+    assert (
+        parse_aliexpress_product_ref(
+            "https://pt.aliexpress.com/store/12345.html"
+        )
+        is None
+    )
+    # ID não numérico no caminho e esquema inseguro.
+    assert (
+        parse_aliexpress_product_ref(
+            "https://pt.aliexpress.com/item/vestido-floral.html"
+        )
+        is None
+    )
+    assert (
+        parse_aliexpress_product_ref(
+            "ftp://pt.aliexpress.com/item/%s.html" % BR_ID
+        )
+        is None
+    )
+    assert (
+        parse_aliexpress_product_ref(
+            "javascript:alert(%s)" % BR_ID
+        )
+        is None
+    )
+    # Host sem esquema não é URL válida (use o ID avulso).
+    assert (
+        parse_aliexpress_product_ref(
+            "pt.aliexpress.com/item/%s.html" % BR_ID
+        )
+        is None
+    )
+
+
+# --------------------------------------------------------------------------
+# 2) Rota POST /buscar-id
+# --------------------------------------------------------------------------
+
+def test_buscar_id_por_numero_renderiza_detalhe(admin_catalog):
+    resp = admin_catalog.post(
+        f"{PREFIX}/buscar-id", data={"ref": PRODUCT_ID}
+    )
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert TITLE in body
+    assert PRODUCT_ID in body
+    assert "Importar como rascunho" in body
+    assert FakeAliExpressClient.calls[-1] == {
+        "op": "get_product",
+        "product_id": PRODUCT_ID,
+    }
+
+
+def test_buscar_id_por_url_extracao_e_detalhe(admin_catalog):
+    FakeAliExpressClient.details[BR_ID] = make_detail(product_id=BR_ID)
+    resp = admin_catalog.post(f"{PREFIX}/buscar-id", data={"ref": BR_URL})
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert BR_ID in body
+    assert FakeAliExpressClient.calls[-1] == {
+        "op": "get_product",
+        "product_id": BR_ID,
+    }
+
+
+def test_buscar_id_invalido_volta_ao_catalogo_sem_chamar_api(admin_catalog):
+    before = list(FakeAliExpressClient.calls)
+    resp = admin_catalog.post(
+        f"{PREFIX}/buscar-id",
+        data={"ref": "loja física no centro"},
+        follow_redirects=True,
+    )
+    body = resp.get_data(as_text=True)
+    assert "ID numérico ou uma URL" in body
+    assert FakeAliExpressClient.calls == before
+
+
+def test_buscar_id_ausente_avisa_sem_chamar_importacao(admin_catalog):
+    resp = admin_catalog.post(
+        f"{PREFIX}/buscar-id",
+        data={"ref": "1005000000000000"},
+        follow_redirects=True,
+    )
+    assert "não encontrado no catálogo do fornecedor" in resp.get_data(
+        as_text=True
+    )
+
+
+def test_buscar_id_erro_da_api_e_sanitizado(admin_catalog):
+    FakeAliExpressClient.detail_error = AliExpressAPIError(
+        "falha simulada",
+        code="40001",
+        sub_code="isv.invalid",
+        raw={"app_secret": "SEGREDO", "sign": "ASSINATURA"},
+    )
+    resp = admin_catalog.post(
+        f"{PREFIX}/buscar-id",
+        data={"ref": PRODUCT_ID},
+        follow_redirects=True,
+    )
+    body = resp.get_data(as_text=True)
+    assert "falha simulada" in body
+    assert "SEGREDO" not in body
+    assert "ASSINATURA" not in body
+
+
+# --------------------------------------------------------------------------
+# 3) Busca geral preservada, sem filtro de despacho
+# --------------------------------------------------------------------------
+
+def test_busca_geral_nao_envia_filtro_de_despacho():
+    from loja.integrations.aliexpress.search import build_search_params
+
+    params = build_search_params(
+        keyword="vestido floral",
+        locale="en_US",
+        country_code="BR",
+        currency="BRL",
+        category_id=None,
+        sort_by="orders,desc",
+        page_index=1,
+        page_size=20,
+        search_extend=None,
+        selection_name=None,
+    )
+    # countryCode é destino/moeda local (comprador BR), nunca prova de
+    # despacho; nenhum parâmetro de origem de envio existe aqui.
+    assert params["countryCode"] == "BR"
+    lowered = {str(k).lower() for k in params}
+    assert not {
+        k for k in lowered if "ship" in k or "dispatch" in k or "origin" in k
+    }
+    assert set(params) == {
+        "local",
+        "countryCode",
+        "currency",
+        "sortBy",
+        "pageIndex",
+        "pageSize",
+        "keyWord",
+    }
+
+
+# --------------------------------------------------------------------------
+# 4) Candidato sintético com 2 variantes: importação, origem e confirmação
+# --------------------------------------------------------------------------
+
+def _br_candidate_detail(product_id=BR_ID):
+    """Rascunho sintético no formato do anúncio BR observado (2 variantes).
+
+    Os valores espelham o anúncio público listado na investigação
+    (vestido, ~R$ 69,85, 2 opções de tamanho/cor); a origem NÃO vem na
+    resposta — entra só por confirmação manual com evidência.
+    """
+    skus = [
+        AliExpressProductSku(
+            sku_id="%s-M-AZUL" % product_id,
+            sale_price=Decimal("69.85"),
+            original_price=Decimal("69.85"),
+            currency="BRL",
+            available_stock=7,
+            attributes=[
+                {
+                    "name": "Tamanho",
+                    "value": "M",
+                    "sku_property_id": "14",
+                    "property_value_id": "771",
+                },
+                {
+                    "name": "Cor",
+                    "value": "Azul",
+                    "sku_property_id": "10",
+                    "property_value_id": "19",
+                },
+            ],
+        ),
+        AliExpressProductSku(
+            sku_id="%s-G-VERMELHO" % product_id,
+            sale_price=Decimal("79.90"),
+            original_price=Decimal("79.90"),
+            currency="BRL",
+            available_stock=4,
+            attributes=[
+                {
+                    "name": "Tamanho",
+                    "value": "G",
+                    "sku_property_id": "14",
+                    "property_value_id": "772",
+                },
+                {
+                    "name": "Cor",
+                    "value": "Vermelho",
+                    "sku_property_id": "10",
+                    "property_value_id": "20",
+                },
+            ],
+        ),
+    ]
+    return AliExpressProductDetail(
+        product_id=product_id,
+        title="Vestido candidato BR (sintético)",
+        description="Detalhe sintético para o fluxo de origem.",
+        images=["https://ae.example/br1.jpg"],
+        skus=skus,
+        available_stock=11,
+        sale_price=Decimal("69.85"),
+        original_price=Decimal("79.90"),
+        currency="BRL",
+    )
+
+
+def _draft_from_db(product_id=BR_ID):
+    from loja.modules.models import Product
+
+    return Product.query.filter_by(
+        source="aliexpress", external_id=product_id, is_draft=True
+    ).first()
+
+
+def test_importacao_do_candidato_preserva_identidade_e_e_idempotente(
+    admin_catalog, db
+):
+    FakeAliExpressClient.details[BR_ID] = _br_candidate_detail()
+
+    first = admin_catalog.post(
+        f"{PREFIX}/{BR_ID}/importar", follow_redirects=True
+    )
+    assert "Produto importado como rascunho" in first.get_data(as_text=True)
+
+    product = _draft_from_db()
+    assert product is not None
+    variants = {v.supplier_sku_id: v for v in product.variants}
+    assert set(variants) == {"%s-M-AZUL" % BR_ID, "%s-G-VERMELHO" % BR_ID}
+    # Estoque, preços e moeda coerentes com o anúncio.
+    assert variants["%s-M-AZUL" % BR_ID].stock == 7
+    assert variants["%s-G-VERMELHO" % BR_ID].stock == 4
+    assert product.currency == "BRL"
+    assert product.price == Decimal("69.85")
+    # Atributos necessários ao pedido no fornecedor preservados por SKU.
+    attrs = {
+        a["name"]: a
+        for a in variants["%s-M-AZUL" % BR_ID].attributes or []
+    }
+    assert attrs["Tamanho"]["sku_property_id"] == "14"
+    assert attrs["Tamanho"]["property_value_id"] == "771"
+    assert attrs["Cor"]["property_value_id"] == "19"
+
+    # Reimportação idempotente: sem duplicatas.
+    second = admin_catalog.post(
+        f"{PREFIX}/{BR_ID}/importar", follow_redirects=True
+    )
+    assert "Produto importado como rascunho" in second.get_data(as_text=True)
+    db.session.expire_all()
+    assert len(_draft_from_db().variants) == 2
+
+
+def test_candidato_importado_nasce_com_origem_desconhecida(admin_catalog, db):
+    from loja.services.shipping_origin import resolve_product_summary
+
+    FakeAliExpressClient.details[BR_ID] = _br_candidate_detail()
+    admin_catalog.post(f"{PREFIX}/{BR_ID}/importar", follow_redirects=True)
+
+    db.session.expire_all()
+    summary = resolve_product_summary(_draft_from_db())
+    assert summary.label == "unknown"
+    assert summary.unknown == 2
+
+
+def test_confirmacao_de_uma_variante_nao_nacionaliza_as_demais(
+    admin_catalog, db
+):
+    from loja.modules.models import SupplierProduct
+    from loja.services.shipping_origin import (
+        record_manual_confirmation,
+        resolve_product_summary,
+    )
+
+    FakeAliExpressClient.details[BR_ID] = _br_candidate_detail()
+    admin_catalog.post(f"{PREFIX}/{BR_ID}/importar", follow_redirects=True)
+
+    db.session.expire_all()
+    supplier_product = SupplierProduct.query.filter_by(
+        product_id=_draft_from_db().id
+    ).first()
+    record_manual_confirmation(
+        supplier_product_id=supplier_product.id,
+        origin="brazil",
+        evidence_ref="https://pt.aliexpress.com/item/%s.html" % BR_ID,
+        sku_id="%s-M-AZUL" % BR_ID,
+    )
+    db.session.commit()
+
+    db.session.expire_all()
+    summary = resolve_product_summary(_draft_from_db())
+    # 1 BR + 1 desconhecida = mixed; jamais "brazil" para o produto todo.
+    assert summary.label == "mixed"
+    assert summary.brazil == 1
+    assert summary.unknown == 1

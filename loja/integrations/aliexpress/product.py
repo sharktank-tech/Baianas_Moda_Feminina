@@ -20,12 +20,72 @@ Campos desconhecidos são preservados em `raw` (sem inventar valores).
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from typing import Any, Dict, List, Mapping, Optional
+from urllib.parse import urlparse
 
 from .errors import AliExpressAPIError
 from .models import AliExpressProductDetail, AliExpressProductSku
 from .search import _as_int, _as_str, _abs_url, parse_price
+
+
+#: IDs de produto AliExpress são numéricos (ex.: 1005013003211750).
+#: A faixa aceita cobre os formatos curtos legados e os longos atuais,
+#: sem aceitar valores que claramente não são IDs (preços, quantidades).
+_PRODUCT_ID_RE_MIN_DIGITS = 8
+_PRODUCT_ID_RE_MAX_DIGITS = 20
+
+#: Hosts explicitamente suportados para consulta por URL. Qualquer outro
+#: host é recusado: nunca fazemos requisições arbitrárias a partir de URLs
+#: fornecidas no painel.
+_ALIEXPRESS_HOSTS = ("aliexpress.com", "aliexpress.us")
+
+
+def parse_aliexpress_product_ref(value: Any) -> Optional[str]:
+    """Extrai o ID de produto de um ID avulso ou URL de anúncio AliExpress.
+
+    Aceita:
+      - ID numérico (`1005013003211750`);
+      - URL de anúncio AliExpress (`https://pt.aliexpress.com/item/<id>.html`,
+        incluindo subdomínios de loja/idioma e query strings).
+
+    Qualquer outra coisa (host fora da AliExpress, caminho que não seja
+    `/item/<id>.html`, ID não numérico, string vazia) devolve None.
+    Função pura: nunca toca na rede.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.isdigit():
+        return text if _looks_like_product_id(text) else None
+    if "://" not in text:
+        return None
+    try:
+        parsed = urlparse(text)
+    except (ValueError, AttributeError):
+        return None
+    if parsed.scheme not in ("http", "https"):
+        return None
+    host = (parsed.hostname or "").lower()
+    if not host or not any(
+        host == base or host.endswith("." + base) for base in _ALIEXPRESS_HOSTS
+    ):
+        return None
+    match = re.match(r"^/item/(\d+)\.html?$", parsed.path or "")
+    if not match:
+        return None
+    candidate = match.group(1)
+    return candidate if _looks_like_product_id(candidate) else None
+
+
+def _looks_like_product_id(candidate: str) -> bool:
+    return (
+        candidate.isdigit()
+        and _PRODUCT_ID_RE_MIN_DIGITS <= len(candidate) <= _PRODUCT_ID_RE_MAX_DIGITS
+    )
 
 
 def first_not_none(*values: Any) -> Any:
@@ -290,4 +350,5 @@ __all__ = [
     "build_product_detail_params",
     "normalize_product_detail",
     "first_not_none",
+    "parse_aliexpress_product_ref",
 ]

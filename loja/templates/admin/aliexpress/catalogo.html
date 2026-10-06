@@ -69,6 +69,26 @@
                     Buscar
                 </button>
             </form>
+            <form method="POST"
+                  action="{{ url_for('aliexpress_admin.buscar_id') }}"
+                  class="flex gap-3 mt-3">
+                {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+                <input type="text"
+                       name="ref"
+                       required
+                       placeholder="Consultar anúncio direto por ID ou URL (ex: 1005013003211750)"
+                       class="flex-1 border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+                <button type="submit"
+                        class="bg-gray-700 hover:bg-gray-800 text-white font-semibold px-6 py-3 rounded-lg">
+                    Consultar
+                </button>
+            </form>
+            <p class="text-xs text-gray-500 mt-3">
+                A busca do fornecedor não oferece filtro por país de despacho —
+                os resultados sempre misturam origens. Para avaliar um anúncio
+                específico (inclusive com envio do Brasil), consulte pelo
+                ID/URL e confira a origem variante a variante antes de importar.
+            </p>
         </div>
 
         {% if results is not none %}

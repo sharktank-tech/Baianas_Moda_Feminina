@@ -37,6 +37,7 @@ from .models import (
 from .product import (
     build_product_detail_params,
     normalize_product_detail,
+    parse_aliexpress_product_ref,
 )
 from .search import (
     build_search_params,
@@ -271,6 +272,7 @@ __all__: Iterable[str] = [
     "parse_price",
     "build_product_detail_params",
     "normalize_product_detail",
+    "parse_aliexpress_product_ref",
     "build_freight_params",
     "normalize_freight_response",
     "build_buyer_freight_params",

@@ -81,6 +81,7 @@ from loja.integrations.aliexpress.importer import (
     DraftImportError,
     import_product_draft,
 )
+from loja.integrations.aliexpress.product import parse_aliexpress_product_ref
 from loja.integrations.aliexpress.published_sync import (
     PublishedSyncConflict,
     PublishedSyncError,
@@ -978,6 +979,48 @@ def buscar():
     )
 
 
+@aliexpress_admin_blueprint.route("/buscar-id", methods=["POST"])
+@admin_required
+@ali_session_required
+def buscar_id():
+    """Consulta direta por ID ou URL de anúncio (sem passar pela busca).
+
+    A API oficial de busca (`aliexpress.ds.text.search`) não oferece filtro
+    por país de despacho: para avaliar um anúncio específico (ex.: com
+    envio do Brasil), o caminho comprovado é consultar o detalhe pelo ID
+    e conferir variante a variante. Aceita somente ID numérico ou URL
+    `/item/` da AliExpress — qualquer outra URL é recusada sem requisição.
+    """
+    ref = (request.form.get("ref") or "").strip()
+    product_id = parse_aliexpress_product_ref(ref)
+    if not product_id:
+        flash(
+            "Informe um ID numérico ou uma URL de anúncio AliExpress "
+            "(/item/<id>.html).",
+            "warning",
+        )
+        return redirect(url_for("aliexpress_admin.index"))
+    try:
+        client = _aliexpress_client()
+        detail = client.get_product(product_id=product_id)
+    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+        flash(_sanitized_api_error(exc), "danger")
+        return redirect(url_for("aliexpress_admin.index"))
+    if detail is None:
+        flash("Produto não encontrado no catálogo do fornecedor.", "warning")
+        return redirect(url_for("aliexpress_admin.index"))
+    return _render_detalhe(product_id, detail)
+
+
+def _render_detalhe(product_id: str, detail):
+    return render_template(
+        "admin/aliexpress/detalhe.html",
+        detail=detail,
+        # Detalhe é anterior à importação: sem importação não há etiqueta.
+        origin_info=_origin_info_for_ids([product_id]),
+    )
+
+
 @aliexpress_admin_blueprint.route("/<product_id>/detalhe", methods=["GET"])
 @admin_required
 @ali_session_required
@@ -989,12 +1032,7 @@ def detalhe(product_id: str):
         flash(_sanitized_api_error(exc), "danger")
         return redirect(url_for("aliexpress_admin.index"))
 
-    return render_template(
-        "admin/aliexpress/detalhe.html",
-        detail=detail,
-        # Detalhe é anterior à importação: sem importação não há etiqueta.
-        origin_info=_origin_info_for_ids([product_id]),
-    )
+    return _render_detalhe(product_id, detail)
 
 
 @aliexpress_admin_blueprint.route("/<product_id>/importar", methods=["POST"])
