@@ -213,6 +213,20 @@ def test_buscar_id_por_url_extracao_e_detalhe(admin_catalog):
     }
 
 
+def test_buscar_id_do_piloto_abre_detalhe_exato(admin_catalog):
+    """1005010478234256 (piloto): consulta por ID abre o detalhe com as
+    3 variações e seus IDs — o mesmo caminho do navegador, sem importar."""
+    FakeAliExpressClient.details[BR_ID] = _br_candidate_detail()
+    resp = admin_catalog.post(f"{PREFIX}/buscar-id", data={"ref": BR_ID})
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert BR_ID in body
+    assert "Variações (2)" in body
+    assert "%s-M-AZUL" % BR_ID in body
+    assert "%s-G-VERMELHO" % BR_ID in body
+    assert "Importar como rascunho" in body
+
+
 def test_buscar_id_invalido_volta_ao_catalogo_sem_chamar_api(admin_catalog):
     before = list(FakeAliExpressClient.calls)
     resp = admin_catalog.post(
@@ -266,6 +280,64 @@ def test_catalogo_expoe_consulta_por_id_e_nota_de_limitacao(admin_catalog):
     # e da tabela de importados: facilmente acessível no topo.
     assert body.index("/buscar-id") < body.index('/buscar"')
     assert body.index("/buscar-id") < body.index("Produtos importados")
+
+
+def _form_segment(body, action_suffix):
+    """Segmento <form ...>...</form> da action indicada (único).
+
+    O sufixo casa até a aspa de fechamento: "/buscar" não confunde com
+    "/buscar-id".
+    """
+    import re
+
+    pattern = re.compile(
+        r'<form\b[^>]*action="[^"]*%s"[^>]*>(.*?)</form>' % action_suffix,
+        re.S,
+    )
+    matches = pattern.findall(body)
+    assert len(matches) == 1, action_suffix
+    return matches[0]
+
+
+def test_botao_consultar_anuncio_pertence_so_ao_form_buscar_id(admin_catalog):
+    """Botão visível e exclusivo: só o form /buscar-id o contém."""
+    body = admin_catalog.get(f"{PREFIX}/").get_data(as_text=True)
+    lookup = _form_segment(body, "/buscar-id")
+    assert 'type="submit"' in lookup
+    assert "Consultar anúncio" in lookup
+    search = _form_segment(body, '/buscar')
+    assert "Consultar anúncio" not in search
+
+
+def test_enter_no_campo_id_envia_o_proprio_formulario(admin_catalog):
+    """Cada campo está dentro do seu form com submit próprio (Enter envia o
+    form que contém o campo focado, sem JS e sem cruzar formulários)."""
+    body = admin_catalog.get(f"{PREFIX}/").get_data(as_text=True)
+    lookup = _form_segment(body, "/buscar-id")
+    assert 'name="ref"' in lookup
+    search = _form_segment(body, '/buscar')
+    assert 'name="q"' in search
+    assert 'name="ref"' not in search
+
+
+def test_botao_usa_so_classes_existentes_no_css_compilado(admin_catalog):
+    """Regressão do botão invisível: bg-gray-700 não existe no tailwind.css
+    compilado (purgado). O botão só pode usar classes presentes no build."""
+    import re
+    from pathlib import Path
+
+    body = admin_catalog.get(f"{PREFIX}/").get_data(as_text=True)
+    lookup = _form_segment(body, "/buscar-id")
+    btn = re.search(r"<button\b[^>]*class=\"([^\"]+)\"", lookup)
+    assert btn, "botão com class no form /buscar-id"
+    css = Path("public/static/styles/tailwind.css").read_text()
+    for cls in btn.group(1).split():
+        selector = cls.replace("hover:", r"hover\:") if ":" in cls else "." + cls
+        if ":" in cls:
+            assert selector in css, cls
+        else:
+            assert ("." + cls) in css, cls
+    assert "bg-gray-700" not in lookup
 
 
 # --------------------------------------------------------------------------

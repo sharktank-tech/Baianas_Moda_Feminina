@@ -272,9 +272,13 @@ mais a honestidade na interface:
   `client.get_product()` (read-only existente) e reaproveita a renderização
   do `detalhe` (refatorado para `_render_detalhe`); ID inválido/ausente e
   erro de API viram flash sanitizado, sem exceção e sem vazar `raw`.
-- `catalogo.html`: segundo formulário "Consultar anúncio direto por ID ou
-  URL" + nota curta e factual: sem filtro de despacho na busca, consultar
-  por ID/URL e conferir por variante, BR só com evidência por variante.
+- `catalogo.html`: formulário de consulta por ID **primeira ação** do
+  catálogo (antes da busca geral e da tabela de importados) com botão
+  visível "Consultar anúncio" ligado só ao `POST /buscar-id`; cada campo
+  está no próprio form com submit próprio (Enter não cruza formulários).
+  Correção real aplicada: o botão usava `bg-gray-700`, classe ausente no
+  `tailwind.css` compilado (purgada) — botão sem fundo, invisível no cartão
+  branco; trocado por `bg-gray-800 hover:bg-gray-900` (presentes no build).
 - `detalhe.html` (+ `_detalhe_sku_rows` / `_render_detalhe` na rota): a
   tabela de variações passa a exibir, por variante, `sku_id` DS,
   `sku_property_id`s (`Atributo: id`), cor, tamanho, preço, moeda e
@@ -328,7 +332,7 @@ sugestivo.
 
 ## 6. Testes executados, resultados e skips
 
-Novo: `tests/test_aliexpress_lookup_by_id.py` — **21 passed**.
+Novo: `tests/test_aliexpress_lookup_by_id.py` — **25 passed**.
 Cobre: parser (IDs/URLs válidos e recusas, incl. host malicioso
 `aliexpress.com.evil.com`), rota (sucesso por ID e por URL, inválido sem
 chamar a API, ausente, erro sanitizado sem vazar `raw`, nota de limitação
@@ -339,7 +343,9 @@ AliExpress exigidos), importação idempotente do candidato sintético
 (identidade, SKUs, estoque, preço, moeda, `sku_property_id`/
 `property_value_id`), origem `unknown` pós-importação e confirmação de uma
 variante resultando em `mixed` (nunca `brazil` global), aviso explícito
-quando a integração não está configurada (sem formulários fantasmas).
+quando a integração não está configurada (sem formulários fantasmas),
+piloto `1005010478234256` abrindo o detalhe exato via `/buscar-id`,
+exclusividade/estrutura/visibilidade-CSS do botão "Consultar anúncio".
 
 Suítes pertinentes: `test_aliexpress_admin_catalog.py` +
 `test_aliexpress_client.py` + `test_aliexpress_product.py` +
