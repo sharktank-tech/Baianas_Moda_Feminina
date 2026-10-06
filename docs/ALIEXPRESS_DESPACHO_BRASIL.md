@@ -97,12 +97,16 @@ com `product_id`, `ship_to_country="BR"`, `target_currency="BRL"`,
 - P2. Confirmar na documentação oficial a lista de parâmetros de
   `ds.text.search` (cobrir H2).
 - P3. Consultar os candidatos por ID com sessão administrativa: **parcial**
-  — acessibilidade por ID confirmada para os 4 (§3). Restam a
-  correspondência dos `sku_id`s e a evidência de despacho por variante. O
+  — acessibilidade por ID confirmada para os 4 (§3). Resta a
+  correspondência dos `sku_id`s (**P5**, pendente de resposta estruturada
+  autenticada — sem deduzir por posição na lista ou só pelo título). O
   runner `scripts/query_aliexpress_candidates.py` repete essas 4 consultas
   read-only com saída sanitizada.
-- P4. Confirmar por variante, no anúncio com login, a opção de despacho BR
-  (testa a evidência do §2 por variante).
+- P4. Evidência de despacho por variante: **parcial** — relato do usuário
+  para o piloto cobre só CÉU AZUL / M (§3); P e G seguem sem evidência.
+- P6. Custo recorrente de aquisição do piloto: **pendente** — exige
+  conferência no checkout da conta de compra (variante exata, 1 unidade,
+  CEP real), sem concluir a compra; ver checklist no §3.
 
 ---
 
@@ -159,13 +163,75 @@ Escolhido por ter a menor superfície: 3 variações (CÉU AZUL P/M/G), preço
 uniforme R$ 34,80 e estoque 1111 em cada — qualquer divergência futura
 (estoque, preço, SKU ausente) é imediatamente visível.
 
-### Verificação de despacho por variante (pendente)
+### Evidência fornecida pelo usuário (relato de tela, 06/10/2026)
 
-Protocolo, no anúncio com sessão: selecionar a variante (ex.: CÉU AZUL /
-M), informar o CEP real de entrega **77000000** (Palmas) e registrar — ID
-do SKU, atributos, país de despacho exibido, frete, prazo, impostos
-apresentados e data da evidência. **Sem comprovação, a origem permanece
-`unknown`** — nada é confirmado sem evidência por variante.
+**Fonte:** relato do usuário sobre a tela do AliExpress — **não** é captura
+arquivada nem verificação independente. Alcance: **somente CÉU AZUL / M**;
+nada se estende a P ou G.
+
+| Campo | Evidência fornecida |
+| --- | --- |
+| Produto | `1005010478234256` |
+| Variante | CÉU AZUL / M |
+| País de despacho exibido | Brasil |
+| CEP consultado | `77066520` |
+| Frete exibido | Grátis |
+| Método | Entrega Padrão 3PL — J&T-Commercial |
+| Entrega estimada | 13/10/2026 (observação do momento, não prazo fixo da loja) |
+| Data do relato | 06/10/2026 |
+| Preço promocional | R$ 14,23 — oferta de primeira compra (não é custo recorrente) |
+| Preço original informado | R$ 58,00 (exibido; não prova o valor cobrado) |
+| Preço retornado pela API | R$ 34,80 (observado; a confrontar com o cenário de aquisição) |
+| Quantidade | **pendente** — sem confirmação explícita no relato |
+| Impostos | **pendente** — sem confirmação explícita no relato |
+
+### Identificação do SKU exato (pendente — P5)
+
+Sem sessão autenticada neste ambiente, a correspondência de CÉU AZUL / M
+ao `sku_id` externo, `sku_property_id`, atributos, preço/moeda/estoque e
+data/hora da consulta **não foi feita**. Não deduzir por posição na lista
+nem só pelo título; o `skuId` do cartão da vitrine é formato de storefront,
+não o `sku_id` da API DS. Enquanto houver ambiguidade, **nada de origem é
+confirmado no banco**.
+
+### Custo recorrente (pendente — P6)
+
+Os três preços têm significados diferentes e **nenhum substitui
+automaticamente o custo cadastrado**:
+- R$ 14,23 = benefício de primeira compra → não serve como custo recorrente;
+- R$ 58,00 = preço original exibido → não prova o valor cobrado;
+- R$ 34,80 = preço observado pela API → a confrontar com o cenário de
+  aquisição (preço observado ≠ custo total validado).
+Checklist pendente, na conta de compra, sem concluir: variante exata,
+1 unidade, CEP `77066520` — registrar subtotal sem benefício de primeira
+compra, descontos e condições, frete, impostos/outras cobranças, total
+final, despacho e prazo dessa mesma consulta. Se a conta exibir só a oferta
+de primeira compra, o custo recorrente **não pôde ser validado** — sem
+simular valor removendo descontos por cálculo.
+
+### Preparação do cadastro do piloto (não executada)
+
+Procedimento preparado com os fluxos existentes, para revisão — **nenhuma
+importação ou alteração executada**:
+1. importar como rascunho pelo fluxo existente, reaproveitando eventual
+   vínculo (sem publicar);
+2. confirmar despacho BR **exclusivamente** para o SKU de CÉU AZUL / M após
+   P5, com a evidência acima como referência;
+3. manter P e G como `unknown` até verificação própria;
+4. cadastrar cotação de frete **zero** pelo fluxo manual existente somente
+   para SKU/CEP/quantidade validados (quantidade 1 assumida do padrão,
+   **a confirmar** — evidência sem confirmação explícita), com data e
+   validade exigidas; sem generalizar para outros CEPs/quantidades; prazo
+   13/10 tratado como observação, não SLA;
+5. impostos: **não registrar zero** — ausência de informação não equivale a
+   zero (bloqueia precificação corretamente até haver comprovação).
+Produtos internacionais existentes: nada a excluir ou reimportar.
+
+### Verificação de despacho por variante (parcial)
+
+Coberta para CÉU AZUL / M do piloto via relato do usuário (tabela acima).
+Restam: P e G do piloto, evidência formal arquivada, e a correspondência
+do `sku_id` (P5). **Sem comprovação, a origem permanece `unknown`.**
 
 ### Caminhos validados para executar P3 (somente leitura, sem importar)
 
@@ -218,10 +284,11 @@ mais a honestidade na interface:
 (F1–F7); sem prova de despacho por variante via API (F5) — a origem segue
 por evidência externa + confirmação manual por variante (fluxo da Etapa 1,
 inalterado); importação de candidato real não testada em live (P3) — o
-fluxo de importação foi validado com detalhe sintético (§6). Nenhum
-rascunho foi publicado; frete/impostos/custo/margem seguem obrigatórios e
-nenhum valor ausente é preenchido com zero. Operação internacional
-intocada; confirmação nacional continua por variante explícita.
+fluxo de importação foi validado com detalhe sintético (§6); cadastro do
+piloto **preparado, não executado** (P5/P6 pendentes). Nenhum rascunho foi
+publicado; frete/impostos/custo/margem seguem obrigatórios e nenhum valor
+ausente é preenchido com zero. Operação internacional intocada;
+confirmação nacional continua por variante explícita.
 
 ---
 
