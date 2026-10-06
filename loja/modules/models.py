@@ -1613,6 +1613,11 @@ class ProductVariant(db.Model):
     size = db.Column(db.String(40))
     attributes = db.Column(JSONB)
     stock = db.Column(db.Integer, nullable=False, default=0)
+    # Total informado pelo FORNECEDOR na última sincronização técnica
+    # (NULL = nunca sincronizado). É o teto da liberação de reserva: quando
+    # o fornecedor reduz o estoque, devolver a reserva nunca infla o estoque
+    # local acima deste valor (migração 0038; sem backfill).
+    supplier_stock = db.Column(db.Integer, nullable=True)
     price = db.Column(db.Numeric(10, 2))
     sale_price = db.Column(db.Numeric(10, 2))
     image_url = db.Column(db.Text)

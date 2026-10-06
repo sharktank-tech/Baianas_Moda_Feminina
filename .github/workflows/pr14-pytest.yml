@@ -123,6 +123,7 @@ jobs:
           tests/test_supplier_freight_quotes_pg.py
           tests/test_acquisition_costs_pg.py
           tests/test_variant_selected_size_pg.py
+          tests/test_variant_supplier_stock_pg.py
           tests/test_aliexpress_sync_attempts_pg.py
           tests/test_published_sync_concurrency_pg.py
 

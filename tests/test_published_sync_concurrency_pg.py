@@ -9,7 +9,10 @@ PostgreSQL real que:
    locks (nada de lost update: a reserva feita depois nunca é engolida);
 2. a liberação de reserva vencida serializa com a sincronização — o
    resultado final é o mesmo nas duas ordens (nunca perde nem duplica
-   estoque).
+   estoque);
+3. o caminho inverso: a sincronização ESPERA o checkout, recarrega os
+   objetos já carregados sob o lock (`populate_existing`) e aplica o
+   absoluto por cima dos valores frescos (nunca o snapshot anterior).
 
 Somente banco descartável loopback com nome pollo*. Cada teste usa schema
 pollo_test_sync_race_* e nunca toca public ou produção.
@@ -19,6 +22,7 @@ from __future__ import annotations
 
 import secrets
 import threading
+import time
 import uuid
 from decimal import Decimal
 
@@ -464,3 +468,130 @@ def test_release_antes_da_sync_mantem_mesmo_resultado(pg_app):
     with pg_app.app_context():
         order = db.session.get(Order, ids["order_id"])
         assert order.status == "expired"
+
+
+def test_sync_aguarda_checkout_e_recarrega_registros(pg_app, monkeypatch):
+    """O caminho inverso: a sync ESPERA o checkout e recarrega os objetos.
+
+    Ordem da corrida: a sessão da sync carrega produto/variante (snapshot
+    3/3); um checkout concorrente debita 1 unidade e COMMITA; só então a
+    sincronização adquire os locks — bloqueada atrás do checkout — e, sob
+    o lock, RECARREGA as instâncias já presentes no identity map
+    (`populate_existing`) antes de decidir.
+
+    Sem o recarregamento, `stock_before` sairia velho (3) e o comparador
+    veria "3 == 3", não gravando nada: o banco ficaria com a variante na
+    2 do checkout e o produto na 3 calculada a partir do snapshot — fora
+    de sincronia. Com o recarregamento, o absoluto do fornecedor (5 − 2
+    reservadas = 3) é aplicado por cima dos valores frescos.
+    """
+    from loja import db
+    from loja.integrations.aliexpress import published_sync as ps
+    from loja.modules.models import Product, ProductVariant, SupplierProduct
+    from loja.views import payments_routes
+    from loja.views.payments_routes import _reserve_stock
+
+    ids = _materialize(pg_app)
+
+    checkout_holding_lock = threading.Event()
+    allow_checkout = threading.Event()
+    checkout_committed = threading.Event()
+    sync_reached_locks = threading.Event()
+    checkout_errors = []
+    errors = []
+    results = []
+
+    original_allowed = payments_routes.assert_purchase_allowed
+
+    def paused_allowed(product, variant=None, *, product_name=None):
+        # Neste ponto o checkout já segura Product + ProductVariant.
+        checkout_holding_lock.set()
+        assert allow_checkout.wait(10)
+        return original_allowed(product, variant, product_name=product_name)
+
+    monkeypatch.setattr(
+        payments_routes, "assert_purchase_allowed", paused_allowed
+    )
+
+    def checkout_worker():
+        try:
+            with pg_app.app_context():
+                product = db.session.get(Product, ids["product_id"])
+                _reserve_stock(
+                    [
+                        {
+                            "product_id": ids["product_id"],
+                            "product_name": product.name,
+                            "variant_id": ids["variant_id"],
+                            "selected_size": "M",
+                            "quantity": 1,
+                        }
+                    ]
+                )
+                # Mantém os locks ocupados enquanto a sync chega a eles.
+                time.sleep(0.1)
+                db.session.commit()
+        except Exception as exc:
+            checkout_errors.append(exc)
+        finally:
+            checkout_committed.set()
+
+    def releaser_worker():
+        # Só solta o checkout quando a sync já chegou aos locks.
+        assert sync_reached_locks.wait(10)
+        allow_checkout.set()
+
+    checkout_thread = threading.Thread(target=checkout_worker)
+    releaser_thread = threading.Thread(target=releaser_worker)
+
+    with pg_app.app_context():
+        # Snapshot da sessão da sync ANTES do checkout commitar.
+        product = db.session.get(Product, ids["product_id"])
+        variant = db.session.get(ProductVariant, ids["variant_id"])
+        assert int(product.stock) == 3 and int(variant.stock) == 3
+
+        checkout_thread.start()
+        assert checkout_holding_lock.wait(10)
+
+        original_locked = ps._locked_variants
+
+        def signal_locked(locked_product, supplier_product):
+            # Chegou aos locks COM o checkout ainda dono deles.
+            assert not checkout_committed.is_set()
+            sync_reached_locks.set()
+            return original_locked(locked_product, supplier_product)
+
+        monkeypatch.setattr(ps, "_locked_variants", signal_locked)
+        releaser_thread.start()
+
+        try:
+            results.append(
+                ps.sync_published_product(
+                    detail=_detail(5),
+                    product=product,
+                    supplier_product=db.session.get(
+                        SupplierProduct, ids["link_id"]
+                    ),
+                )
+            )
+            db.session.commit()
+        except Exception as exc:
+            errors.append(exc)
+
+    checkout_thread.join(15)
+    releaser_thread.join(15)
+    assert not checkout_thread.is_alive() and not releaser_thread.is_alive()
+    assert errors == [] and checkout_errors == []
+    assert checkout_committed.is_set()
+
+    # Recarregado sob o lock: o checkout já debitou (2), não o 3 velho.
+    assert results[0].stock_before == 2
+    # Absoluto do fornecedor (5) − 2 reservadas = 3.
+    assert results[0].stock_after == 3
+
+    with pg_app.app_context():
+        variant = db.session.get(ProductVariant, ids["variant_id"])
+        product = db.session.get(Product, ids["product_id"])
+        assert int(variant.stock) == 3
+        assert int(variant.supplier_stock) == 5
+        assert int(product.stock) == 3

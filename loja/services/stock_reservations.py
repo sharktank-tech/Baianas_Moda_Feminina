@@ -4,6 +4,13 @@ A rotina nunca consulta nem cancela recursos no Mercado Pago. Somente pedidos
 com prazo persistido, já vencido, ainda pending_payment e sem pagamento
 canônico aprovado podem devolver estoque. Pedidos legados sem prazo falham
 fechados.
+
+A devolução NUNCA infla o estoque acima do que o fornecedor ainda informa:
+quando `ProductVariant.supplier_stock` (espelho gravado pela sincronização
+técnica) é conhecido, o teto é `supplier_stock - outras reservas` — se o
+fornecedor reduziu o estoque depois da sync, o pedido vencido devolve só o
+que cabe nesse teto. Sem espelho (variante nunca sincronizada) mantém-se o
+comportamento histórico de devolver a quantidade integral.
 """
 
 from dataclasses import dataclass
@@ -196,6 +203,45 @@ def reserved_quantities_by_variant(variant_ids):
     }
 
 
+def _own_reserved_by_variant(order):
+    """Reserva deste pedido por variante (itens sem variante ficam fora)."""
+    totals = {}
+    for item in order.items:
+        if item.variant_id is None:
+            continue
+        totals[item.variant_id] = totals.get(item.variant_id, 0) + int(
+            item.quantity or 0
+        )
+    return totals
+
+
+def _restock_variant(variant, quantity, *, others_reserved):
+    """Devolve ``quantity`` à variante COM teto no estoque do fornecedor.
+
+    O espelho ``ProductVariant.supplier_stock`` (escrito pela sincronização
+    técnica) limita a restituição a
+    ``supplier_stock - outras reservas ainda debitadas``: quando o
+    fornecedor REDUZIU o estoque depois da última sync, a liberação nunca
+    infla o estoque local acima dele. Sem espelho (nunca sincronizado) o
+    comportamento histórico (``estoque + quantidade``) é preservado.
+    Devolve o delta efetivamente aplicado à variante.
+    """
+    before = int(variant.stock or 0)
+    target = before + int(quantity)
+    supplier_stock = variant.supplier_stock
+    if supplier_stock is not None:
+        ceiling = max(int(supplier_stock) - int(others_reserved), 0)
+        target = min(target, ceiling)
+    variant.stock = target
+    return target - before
+
+
+def _others_reserved_for(variant, own_quantity):
+    """Reservas de OUTROS pedidos sobre a variante (sob a leitura atual)."""
+    total = reserved_quantities_by_variant([variant.id]).get(variant.id, 0)
+    return max(total - own_quantity, 0)
+
+
 def count_unproven_stock_reservations():
     """Contagem fail-closed de reservas sem expiração comprovada.
 
@@ -267,11 +313,15 @@ def release_reserved_stock(order):
     depois (ordem de lock consistente com o abatimento na criação). Se a
     variante não resolver (id inexistente ou pertencente a outro produto),
     ABORTA com erro para que a transação faça rollback — jamais restaura
-    apenas o agregado (Product.stock) e deixa a soma das variantes divergente.
+    apenas o agregado (Product.stock) e deixa a soma das variantes
+    divergente. A devolução é limitada ao estoque informado pelo
+    fornecedor (``supplier_stock``): se ele reduziu o estoque, o pedido
+    vencido não devolve acima do que o fornecedor ainda tem.
     """
     if not order.stock_reserved:
         return
 
+    own = _own_reserved_by_variant(order)
     for item in order.items:
         if item.variant_id is not None:
             # Guard: sem product_id não há como validar a integridade da
@@ -286,6 +336,7 @@ def release_reserved_stock(order):
                 Product.query
                 .filter_by(id=item.product_id)
                 .with_for_update()
+                .populate_existing()
                 .first()
             )
             if product is None:
@@ -297,6 +348,7 @@ def release_reserved_stock(order):
                 ProductVariant.query
                 .filter_by(id=item.variant_id, product_id=item.product_id)
                 .with_for_update()
+                .populate_existing()
                 .first()
             )
             if variant is None:
@@ -305,10 +357,16 @@ def release_reserved_stock(order):
                     f"Variação inválida ao restituir: {item.product_name}."
                 )
 
-            if variant.stock is not None:
-                variant.stock += item.quantity
+            others = 0
+            if variant.supplier_stock is not None:
+                others = _others_reserved_for(
+                    variant, own.get(variant.id, 0)
+                )
+            delta = _restock_variant(
+                variant, item.quantity, others_reserved=others
+            )
             if product.stock is not None:
-                product.stock += item.quantity
+                product.stock += delta
         else:
             if item.product_id is None:
                 continue
@@ -336,6 +394,7 @@ def _release_stock_locked(order):
     if not order.stock_reserved or order.status != "pending_payment":
         return False
 
+    own = _own_reserved_by_variant(order)
     for item in order.items:
         if item.variant_id is not None:
             if item.product_id is None:
@@ -345,6 +404,7 @@ def _release_stock_locked(order):
                 Product.query
                 .filter_by(id=item.product_id)
                 .with_for_update()
+                .populate_existing()
                 .first()
             )
             if product is None:
@@ -354,15 +414,22 @@ def _release_stock_locked(order):
                 ProductVariant.query
                 .filter_by(id=item.variant_id, product_id=item.product_id)
                 .with_for_update()
+                .populate_existing()
                 .first()
             )
             if variant is None:
                 raise ValueError("stock_release_variant_invalid")
 
-            if variant.stock is not None:
-                variant.stock += item.quantity
+            others = 0
+            if variant.supplier_stock is not None:
+                others = _others_reserved_for(
+                    variant, own.get(variant.id, 0)
+                )
+            delta = _restock_variant(
+                variant, item.quantity, others_reserved=others
+            )
             if product.stock is not None:
-                product.stock += item.quantity
+                product.stock += delta
         else:
             if item.product_id is None:
                 continue

@@ -15,6 +15,7 @@ Pontos 3–6 da revisão, sem mockar os controles canônicos:
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 from loja.integrations.aliexpress.errors import AliExpressAPIError
@@ -190,6 +191,31 @@ def test_contagem_declarada_divergente_nao_desativa(admin_catalog, db):
     assert _attempts(MULTI_ID)[0].catalog_code == CATALOG_COUNT_MISMATCH
 
 
+def test_total_de_base_info_dto_nao_e_contagem_de_skus():
+    """`ae_item_base_info_dto.total` NUNCA conta como total de SKUs.
+
+    O bug pareava fonte e chaves por índice: sem o container de SKUs, a
+    base virava o índice 0 e recebia as chaves genéricas (`total`), então
+    um total de itens do anúncio provava completude falsa e autorizava
+    desativar SKUs ausentes. Nome genérico só vale dentro do container.
+    """
+    detail = make_detail()  # 1 SKU observado
+    detail.available_stock = None
+    detail.raw = {"ae_item_base_info_dto": {"total": 7}}
+
+    census = catalog_census(detail)
+    assert census.complete is False
+    assert census.code == CATALOG_CENSUS_UNPROVEN
+    assert census.declared is None
+
+    # O mesmo nome genérico DENTRO do container de SKUs continua valendo.
+    proven = make_detail()
+    proven.raw = {"ae_item_sku_info_dtos": {"total": 1}}
+    census = catalog_census(proven)
+    assert census.complete is True
+    assert census.declared == 1
+
+
 def test_catalogo_vazio_nunca_e_provado_pela_ausencia_de_skus():
     """Resposta sem SKUs não prova "catálogo vazio" (fail-closed)."""
     detail = make_detail()
@@ -312,6 +338,82 @@ def test_estoque_do_fornecedor_menor_que_reserva_fica_em_zero(
     refreshed = _draft_from_db().variants[0]
     assert refreshed.stock == 0
     assert refreshed.is_active is False
+
+
+def test_liberacao_nunca_devolve_acima_do_estoque_do_fornecedor(
+    admin_catalog, db, admin_user
+):
+    """Fornecedor reduziu o estoque: a liberação respeita o teto.
+
+    A sync grava ``max(S - reservas, 0)`` e o espelho ``supplier_stock``.
+    Sem o teto, a liberação de uma reserva vencida faria
+    ``0 + 2 = 2`` acima do ``S = 1`` que o fornecedor ainda tem — estoque
+    fantasma vendável. Com o teto, a devolução é
+    ``min(atual + qtd, S - outras reservas) = 1``.
+    """
+    from loja.services.stock_reservations import (
+        release_single_expired_stock_reservation,
+    )
+
+    _publish(admin_catalog)
+    product = _draft_from_db()
+    variant = product.variants[0]
+    order = _reserved_order(db, admin_user, product, variant, quantity=2)
+    order.mp_preference_expires_at = utcnow() - timedelta(hours=1)
+    db.session.commit()
+    order_id = order.id
+
+    # O fornecedor cai de 5 para 1; com 2 reservadas, local vira 0 e o
+    # espelho registra o total do fornecedor (1).
+    FakeAliExpressClient.details[PRODUCT_ID] = make_detail(stock=1)
+    _sync(admin_catalog)
+
+    db.session.expire_all()
+    synced = _draft_from_db().variants[0]
+    assert synced.stock == 0
+    assert synced.supplier_stock == 1
+
+    assert release_single_expired_stock_reservation(order_id, source="test")
+
+    db.session.expire_all()
+    product = _draft_from_db()
+    variant = product.variants[0]
+    # Teto = fornecedor(1) − outras reservas(0) = 1: nunca 2.
+    assert variant.stock == 1
+    assert variant.supplier_stock == 1
+    assert product.stock == 1
+
+
+def test_liberacao_com_fornecedor_estavel_devolve_integral(
+    admin_catalog, db, admin_user
+):
+    """Controle: com o teto igual ao total, a devolução segue integral."""
+    from loja.services.stock_reservations import (
+        release_single_expired_stock_reservation,
+    )
+
+    _publish(admin_catalog)
+    product = _draft_from_db()
+    variant = product.variants[0]
+    order = _reserved_order(db, admin_user, product, variant, quantity=2)
+    order.mp_preference_expires_at = utcnow() - timedelta(hours=1)
+    db.session.commit()
+    order_id = order.id
+
+    FakeAliExpressClient.details[PRODUCT_ID] = make_detail(stock=5)
+    _sync(admin_catalog)
+
+    db.session.expire_all()
+    synced = _draft_from_db().variants[0]
+    assert synced.stock == 3
+    assert synced.supplier_stock == 5
+
+    assert release_single_expired_stock_reservation(order_id, source="test")
+
+    db.session.expire_all()
+    variant = _draft_from_db().variants[0]
+    assert variant.stock == 5
+    assert variant.supplier_stock == 5
 
 
 # --------------------------------------------------------------------------

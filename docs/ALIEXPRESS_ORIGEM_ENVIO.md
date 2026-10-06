@@ -17,6 +17,10 @@ trabalho. Nada aqui despublica um produto já à venda.
 | 4 | Sync de estoque integrado a **locks + contabilidade de reservas**, com teste de concorrência em PostgreSQL | `published_sync._locked_variants()` (ordem Product → ProductVariant, igual ao checkout), `stock_reservations.reserved_quantities_by_variant()`, `tests/test_published_sync_concurrency_pg.py` |
 | 5 | Confirmação coletiva (`covers_all_variants`) restrita aos SKUs **cobertos no momento da escrita** | coluna `covered_supplier_sku_ids` (migração `0036`), snapshot em `record_manual_confirmation`/`record_api_observation`, `shipping_origin._covers_sku()` |
 | 6 | Tentativas/falhas de sincronização **persistidas** (não só flash) | tabela `aliexpress_sync_attempts` (migração `0037`), `AliExpressSyncAttempt`, seção *Tentativas recentes* na página de renovação |
+| 7 | `ae_item_base_info_dto.total` **nunca** conta como total de SKUs | `published_sync._declared_sku_total()`: chaves pareadas com a **fonte** (`total`/`count` só dentro de `ae_item_sku_info_dtos`); regressão em `tests/test_published_sync_resilience.py` |
+| 8 | Sync **recarrega** produto/variante/vínculo **depois** dos locks | `published_sync._lock_and_reload()` (`populate_existing()` + `refresh()`), chamado ANTES de ler estoque/divergência; teste PG `test_sync_aguarda_checkout_e_recarrega_registros` (a sync espera o checkout) |
+| 9 | Liberação de reserva **nunca infla acima do estoque do fornecedor** | coluna `product_variants.supplier_stock` (migração `0038` + `loja/schema.py`), teto `min(atual+qtd, S − outras reservas)` em `stock_reservations._restock_variant()` |
+| 10 | Os 2 testes de cotação de frete deixam de **pular** em PostgreSQL | `tests/test_supplier_freight_quotes_pg.py` lê `ORIGINAL_DATABASE_URL` do conftest (guards de loopback/`pollo*` mantidos) |
 
 ---
 
@@ -202,7 +206,11 @@ Conflitos controlados abortam **antes** de qualquer escrita:
      volta a exigir `priced` (não execute com produto publicado `stale`);
    - `0036_shipping_origin_cover_snapshot.sql` — coluna
      `covered_supplier_sku_ids` (sem backfill: `NULL` = nada coberto);
-   - `0037_aliexpress_sync_attempts.sql` — tabela + índice de tentativas.
+    - `0037_aliexpress_sync_attempts.sql` — tabela + índice de tentativas;
+    - `0038_variant_supplier_stock.sql` — coluna
+      `product_variants.supplier_stock` (espelho do total informado pelo
+      fornecedor; nasce `NULL`, **sem backfill**: só a próxima sincronização
+      preenche e a liberação de reserva só passa a ter teto a partir daí).
 2. **Após aplicar**: nenhum passo manual adicional. Rota de catálogo passa a
    exibir o painel de importados e os selos de origem; a página de renovação
    passa a mostrar *Tentativas recentes*.
@@ -240,11 +248,16 @@ Suítes relevantes (venv `venv-payment-guard`, sem rede):
   checkout** (abertura do carrinho + criação do pedido): divergência de
   custo/moeda, origem por variante e confirmação removida após publicação,
   com pedido real criado (ou recusado) nos controles;
-- `tests/test_published_sync_resilience.py` — completude não provada, reservas
-  na sincronização, persistência de tentativas e cobertura de SKUs;
+- `tests/test_published_sync_resilience.py` — completude não provada (inclusive
+  `total` do `ae_item_base_info_dto` que **não** conta como SKUs), reservas na
+  sincronização, teto da liberação após queda do fornecedor, persistência de
+  tentativas e cobertura de SKUs;
 - `tests/test_published_sync_concurrency_pg.py` — **concorrência** sync ×
-  checkout × release em PostgreSQL (locks + reservas);
+  checkout × release em PostgreSQL (locks + reservas), inclusive o caminho em
+  que a **sync espera o checkout** e recarrega os objetos sob o lock;
 - `tests/test_aliexpress_sync_attempts_pg.py` — migração `0037` em PostgreSQL;
+- `tests/test_variant_supplier_stock_pg.py` — migração `0038` (coluna
+  `supplier_stock`) em PostgreSQL;
 - `tests/test_pricing_publication_pg.py` — migrações `0005`/`0035` (guarda de
   publicação com `stale`) em PostgreSQL.
 
@@ -256,7 +269,9 @@ Suítes relevantes (venv `venv-payment-guard`, sem rede):
    Eles estão na lista dos jobs do CI (`.github/workflows/pr14-pytest.yml`):
    `pytest-postgres` (`test_shipping_origin_pg.py`,
    `test_aliexpress_sync_attempts_pg.py`,
-   `test_published_sync_concurrency_pg.py`) e `pytest-pricing-pg`
+   `test_variant_supplier_stock_pg.py`,
+   `test_published_sync_concurrency_pg.py`,
+   `test_supplier_freight_quotes_pg.py`) e `pytest-pricing-pg`
    (`test_pricing_publication_pg.py`); localmente continue executando com um
    PG descartável `pollo*` em loopback.
 2. `record_api_observation()` permanece sem chamador em produção até haver

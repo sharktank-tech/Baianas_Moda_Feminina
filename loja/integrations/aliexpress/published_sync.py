@@ -32,10 +32,17 @@ publicação/republicação segue bloqueada; o administrador resolve
 renovando/reprecificando.
 
 CONCORRÊNCIA: as variantes são travadas (`SELECT ... FOR UPDATE`) na MESMA
-ordem do checkout (Product -> ProductVariant) e o valor absoluto aplicado é
+ordem do checkout (Product -> ProductVariant) e os objetos JÁ CARREGADOS
+são recarregados sob o lock (`populate_existing` + refresh do vínculo):
+o `FOR UPDATE` atualiza o banco, não o identity map, e decidir com o
+snapshot anterior ao lock gravaria por cima de um checkout que já
+commitou. O valor absoluto aplicado é
 `estoque do fornecedor - reservas locais ainda debitadas`
 (`stock_reservations.reserved_quantities_by_variant`), para nunca devolver
-estoque que um pedido pendente já consumiu.
+estoque que um pedido pendente já consumiu, e o total informado pelo
+fornecedor fica gravado em `ProductVariant.supplier_stock` — a liberação
+de reserva usa esse valor como TETO e nunca devolve acima dele quando o
+fornecedor reduziu o estoque.
 
 CATÁLOGO COMPLETO: SKUs ausentes só são desativados quando a resposta PROVA
 completude (contagem agregada declarada confere com o observado). A simples
@@ -52,6 +59,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Mapping, Optional, Tuple
+
+from sqlalchemy import inspect
 
 from loja import db
 from loja.modules.models import (
@@ -148,13 +157,21 @@ def sync_published_product(
     if product.external_id and external_id != str(product.external_id):
         raise PublishedSyncConflict("external_id_mismatch")
 
+    # Trava NA ORDEM do checkout (Product -> ProductVariant) e RECARREGA
+    # os registros já carregados ANTES de ler qualquer valor de negócio.
+    # `with_for_update()` não atualiza instâncias do identity map e o
+    # resultado da consulta era descartado: sem este reload a sync decidia
+    # com o snapshot lido ANTES dos locks e gravava por cima do que um
+    # checkout que commitou no intervalo escreveu.
+    locked_variants = _lock_and_reload(product, supplier_product)
+
     divergence = _observe_divergence(detail, supplier_product)
     census = catalog_census(detail)
     now = now or utcnow()
 
     stock_before = int(product.stock or 0)
     updated, deactivated, created = _sync_variant_stocks(
-        product, supplier_product, detail, now, census
+        product, supplier_product, detail, now, census, locked_variants
     )
     stock_after = int(product.stock or 0)
 
@@ -238,20 +255,24 @@ def _declared_sku_total(detail: AliExpressProductDetail) -> Optional[int]:
     if not isinstance(raw, Mapping):
         return None
     container = raw.get("ae_item_sku_info_dtos")
-    sources = []
-    if isinstance(container, Mapping):
-        sources.append(container)
     base = raw.get("ae_item_base_info_dto")
-    if isinstance(base, Mapping):
-        sources.append(base)
-    sources.append(raw)
 
-    # Nome genérico ("total"/"count") só vale DENTRO do container de SKUs,
-    # onde não pode significar outra coisa.
+    # Cada fonte só é lida com as chaves que significam contagem de SKUs
+    # NAQUELA fonte: nome genérico ("total"/"count") só vale DENTRO do
+    # container de SKUs, onde não pode significar outra coisa.
+    # `ae_item_base_info_dto.total` é total de itens/estoque do anúncio,
+    # NUNCA quantidade de SKUs — parear por índice aceitaria esse "total"
+    # como contagem e provaria completude falsa quando o container está
+    # ausente.
     container_keys = ("sku_count", "total_skus", "sku_total", "total", "count")
-    base_keys = ("sku_count", "total_skus", "sku_total")
-    for index, source in enumerate(sources):
-        keys = container_keys if index == 0 else base_keys
+    count_keys = ("sku_count", "total_skus", "sku_total")
+    candidates = []
+    if isinstance(container, Mapping):
+        candidates.append((container, container_keys))
+    if isinstance(base, Mapping):
+        candidates.append((base, count_keys))
+    candidates.append((raw, count_keys))
+    for source, keys in candidates:
         for key in keys:
             if key not in source:
                 continue
@@ -324,15 +345,46 @@ def catalog_census(detail: AliExpressProductDetail) -> CatalogCensus:
 # --------------------------------------------------------------------------
 
 def _locked_variants(product: Product, supplier_product: SupplierProduct):
-    """Trava Product -> ProductVariant na MESMA ordem usada no checkout."""
-    Product.query.filter_by(id=product.id).with_for_update().first()
-    return (
+    """Trava Product -> ProductVariant na MESMA ordem usada no checkout.
+
+    Devolve ``(product, variantes)``. ``populate_existing()`` é obrigatório:
+    sem ele a instância já existente no identity map mantém o snapshot
+    anterior ao lock (o ``FOR UPDATE`` atualiza o BANCO, não o objeto em
+    memória), e o resultado da consulta seria um descarte silencioso.
+    """
+    locked_product = (
+        Product.query
+        .filter_by(id=product.id)
+        .with_for_update()
+        .populate_existing()
+        .first()
+    )
+    variants = (
         ProductVariant.query
         .filter_by(supplier_product_id=supplier_product.id)
         .with_for_update()
+        .populate_existing()
         .order_by(ProductVariant.id)
         .all()
     )
+    return locked_product, variants
+
+
+def _lock_and_reload(product: Product, supplier_product: SupplierProduct):
+    """Trava os registros na ordem do checkout e os RECARREGA no identity map.
+
+    Devolve as variantes travadas. O vínculo (SupplierProduct) também é
+    relido, porque a comparação de divergência de custo/moeda lê o custo
+    gravado — uma reprecificação que commitou depois do load não pode ser
+    comparada contra um valor velho.
+    """
+    locked_product, variants = _locked_variants(product, supplier_product)
+    if locked_product is None:
+        # Linha removida concorrentemente: conflito, nunca sync às cegas.
+        raise PublishedSyncConflict("not_found")
+    if inspect(supplier_product).persistent:
+        db.session.refresh(supplier_product)
+    return variants
 
 
 def _sync_variant_stocks(
@@ -341,6 +393,7 @@ def _sync_variant_stocks(
     detail: AliExpressProductDetail,
     now,
     census: CatalogCensus,
+    variants=None,
 ) -> Tuple[int, int, int]:
     """Atualiza estoque das variantes; retorna (atualizadas, desativadas, criadas).
 
@@ -350,7 +403,8 @@ def _sync_variant_stocks(
     uma sincronização. SKU ausente só é desativado quando o censo provou a
     completude da resposta.
     """
-    variants = _locked_variants(product, supplier_product)
+    if variants is None:
+        variants = _lock_and_reload(product, supplier_product)
     reserved = reserved_quantities_by_variant([v.id for v in variants])
     by_supplier_sku = {v.supplier_sku_id: v for v in variants if v.supplier_sku_id}
 
@@ -375,6 +429,12 @@ def _sync_variant_stocks(
         # debitada (pedido pendente) segue debitada — nunca é devolvida.
         stock = max(observed - reserved.get(variant.id, 0), 0)
 
+        # Espelho do total INFORMADO pelo fornecedor: é o teto que a
+        # liberação de reserva usa para nunca devolver além dele. Conta
+        # como alteração só a mudança de estoque/venda (a liberação não
+        # infla acima desta coluna quando o fornecedor reduziu o estoque).
+        variant.supplier_stock = observed
+
         # Só estoque: atributos/cor/tamanho/preço da variante são preservados
         # (mudança visível na vitrine exige decisão comercial explícita).
         if variant.stock != stock or (stock == 0 and variant.is_active):
@@ -391,6 +451,9 @@ def _sync_variant_stocks(
         for sku_id, variant in by_supplier_sku.items():
             if sku_id in seen:
                 continue
+            # Completude comprovada e SKU ausente: o fornecedor não tem a
+            # opção — o teto de liberação passa a ser zero.
+            variant.supplier_stock = 0
             if variant.is_active or (variant.stock or 0):
                 variant.stock = 0
                 variant.is_active = False
@@ -442,6 +505,7 @@ def _create_inactive_variant(
             color=color,
             size=size,
             stock=stock,
+            supplier_stock=stock,
             price=_effective_supplier_price(sku),
             sale_price=None,
             # decisão comercial: ativação de nova opção é explícita, não automática
