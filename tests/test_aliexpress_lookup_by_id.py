@@ -262,6 +262,10 @@ def test_catalogo_expoe_consulta_por_id_e_nota_de_limitacao(admin_catalog):
     assert 'name="ref"' in body
     assert "não tem filtro por país de despacho" in body
     assert "origem brasileira só vale com evidência por variante" in body
+    # Consulta por ID é a primeira ação do catálogo, antes da busca geral
+    # e da tabela de importados: facilmente acessível no topo.
+    assert body.index("/buscar-id") < body.index('/buscar"')
+    assert body.index("/buscar-id") < body.index("Produtos importados")
 
 
 # --------------------------------------------------------------------------
