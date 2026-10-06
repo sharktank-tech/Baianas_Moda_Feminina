@@ -29,9 +29,11 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from loja.integrations.aliexpress import (
     AliExpressConfigError,
+    BENEFIT_MARKET,
+    compare_benefit_records,
     create_client_from_env,
+    fetch_product_record,
     format_candidate_error,
-    summarize_product_detail,
 )
 
 CANDIDATES = (
@@ -48,31 +50,8 @@ COMPARE_PRODUCTS = (
     ("BR-4", "1005010502074833"),
 )
 
-#: Mercado fixo da investigação (igual ao do painel).
-FIXED_MARKET = {
-    "ship_to_country": "BR",
-    "target_currency": "BRL",
-    "target_language": "pt",
-}
-
-_NOT_FOUND = {
-    "type": "NotFound",
-    "code": None,
-    "sub_code": None,
-    "message": "produto não retornado",
-}
-
-#: Classificações exatas da comparação on/off (vocabulário fixo).
-VERDICT_NO_DIFF = "nenhuma diferença observada; efeito inconclusivo"
-VERDICT_DIFF = "diferença observada, ainda não atribuída ao parâmetro"
-VERDICT_UNVIABLE = "comparação inviável (erro em ao menos uma chamada); efeito inconclusivo"
-
-PARAMETER_NOTE = (
-    "remove_personal_benefit sem respaldo na documentação oficial "
-    "consultada (apiId 60452); tratado como experimental. Comportamento "
-    "atual (true por padrão) preservado; não usado como garantia de "
-    "exclusão de primeira compra."
-)
+#: Mercado fixo da investigação (igual ao do painel; ver BENEFIT_MARKET).
+FIXED_MARKET = dict(BENEFIT_MARKET)
 
 
 def query_candidates(client, *, compare_benefit=False, repeat=1):
@@ -98,88 +77,19 @@ def query_candidates(client, *, compare_benefit=False, repeat=1):
         for label, product_id in CANDIDATES:
             plans.append((label, product_id, True, 0))
 
-    records = []
-    for label, product_id, flag, rnd in plans:
-        base = {
-            "label": label,
-            "product_id": product_id,
-            "remove_personal_benefit": flag,
-            "round": rnd,
-            "market": dict(FIXED_MARKET),
-        }
-        try:
-            detail = client.get_product(
-                product_id=product_id, remove_personal_benefit=flag
-            )
-        except Exception as exc:  # noqa: BLE001 (registro sanitizado)
-            records.append({**base, "ok": False, "error": format_candidate_error(exc)})
-            continue
-        if detail is None:
-            records.append({**base, "ok": False, "error": dict(_NOT_FOUND)})
-            continue
-        records.append({**base, "ok": True, "detail": summarize_product_detail(detail)})
+    records = [
+        fetch_product_record(
+            client,
+            product_id=product_id,
+            label=label,
+            remove_personal_benefit=flag,
+            round=rnd,
+            market=FIXED_MARKET,
+        )
+        for label, product_id, flag, rnd in plans
+    ]
     failed = sum(1 for record in records if not record["ok"])
     return records, failed
-
-
-def compare_benefit_records(records):
-    """Classifica a comparação on/off por produto (vocabulário fixo).
-
-    Só considera registros com flag e rodada (modo comparação). Iguais →
-    efeito inconclusivo; diferentes → diferença ainda não atribuída ao
-    parâmetro; erro em qualquer chamada da rodada → comparação inviável.
-    """
-    by_product = {}
-    for record in records:
-        if "remove_personal_benefit" not in record or "round" not in record:
-            continue
-        by_product.setdefault(
-            (record.get("label"), record.get("product_id")), []
-        ).append(record)
-
-    comparisons = []
-    for (label, product_id), items in by_product.items():
-        flags = {r["remove_personal_benefit"] for r in items}
-        if flags != {True, False}:
-            continue
-        rounds = {}
-        for record in items:
-            rounds.setdefault(record["round"], {})[
-                record["remove_personal_benefit"]
-            ] = record
-        verdicts = []
-        for idx in sorted(rounds):
-            pair = rounds[idx]
-            on, off = pair.get(True), pair.get(False)
-            if (
-                on is None
-                or off is None
-                or not on.get("ok")
-                or not off.get("ok")
-            ):
-                verdicts.append({"round": idx, "verdict": VERDICT_UNVIABLE})
-            elif on.get("detail") == off.get("detail"):
-                verdicts.append({"round": idx, "verdict": VERDICT_NO_DIFF})
-            else:
-                verdicts.append({"round": idx, "verdict": VERDICT_DIFF})
-        if all(v["verdict"] == VERDICT_NO_DIFF for v in verdicts):
-            overall = VERDICT_NO_DIFF
-        elif any(v["verdict"] == VERDICT_DIFF for v in verdicts):
-            overall = VERDICT_DIFF
-        else:
-            overall = VERDICT_UNVIABLE
-        comparisons.append(
-            {
-                "kind": "benefit_comparison",
-                "label": label,
-                "product_id": product_id,
-                "experimental_parameter": True,
-                "parameter_note": PARAMETER_NOTE,
-                "rounds": verdicts,
-                "overall": overall,
-            }
-        )
-    return comparisons
 
 
 def main(argv=None) -> int:

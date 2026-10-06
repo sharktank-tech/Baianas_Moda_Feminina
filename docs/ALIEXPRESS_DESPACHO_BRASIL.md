@@ -275,6 +275,17 @@ Erros, se houver, vão em registros próprios (`type`/`code`/`sub_code`/
 "comparação inviável"; diferenças nunca são atribuídas ao parâmetro sem
 evidência adicional.
 
+### Passos para executar nos dois anúncios (somente leitura)
+
+No catálogo autenticado (sessão AliExpress válida), para cada ID
+(`1005010478234256`, `1005010502074833`): abrir o detalhe (ou consultar
+por ID/URL), clicar **Rodada 1**, **Rodada 2** e **Rodada 3** no card
+"Comparar preço com/sem parâmetro experimental", e registrar por rodada o
+veredito e os preços on/off por variante — sem importar, publicar ou
+comprar. Regra de leitura: qualquer rodada com diferença → "diferença
+observada, ainda não atribuída ao parâmetro"; as 3 iguais → "nenhuma
+diferença observada; efeito inconclusivo".
+
 ### Preparação do cadastro do piloto (não executada)
 
 Procedimento preparado com os fluxos existentes, para revisão — **nenhuma
@@ -353,6 +364,14 @@ mais a honestidade na interface:
   moeda e estoque — montados da resposta já consultada (nenhuma chamada
   adicional, nenhuma persistência), sob os mesmos `@admin_required` +
   `@ali_session_required`; ID do produto junto ao título da tabela.
+- `POST /<id>/comparar-preco` (+ card "Rodada 1/2/3" no `detalhe.html` e
+  página `comparar.html`): **uma rodada por acionamento** (2 consultas
+  sequenciais, ≤20s no pior caso — abaixo do teto de 60s da função;
+  6 chamadas de uma vez arriscariam timeout). Reutiliza cliente e sessão
+  da rota de detalhe (sem credential-store); exige admin, sessão válida e
+  CSRF; mostra por variante ID do anúncio, SKU bruto, `sku_attr` on/off,
+  atributos, preços e estoques on/off, moeda, veredito da rodada e erros
+  sanitizados; parâmetro marcado experimental; **zero acesso ao banco**.
 - Auditoria de fallback de identidade (sem alterar registros): importação
   pula SKU sem id e grava o `id` verbatim (igualdade de strings no sync e
   no enrichment; nenhum `int()` em IDs em todo o módulo); fulfillment exige
@@ -408,7 +427,7 @@ sugestivo.
 
 ## 6. Testes executados, resultados e skips
 
-Novo: `tests/test_aliexpress_lookup_by_id.py` — **34 passed**.
+Novo: `tests/test_aliexpress_lookup_by_id.py` — **43 passed**.
 Cobre: parser (IDs/URLs válidos e recusas, incl. host malicioso
 `aliexpress.com.evil.com`), rota (sucesso por ID e por URL, inválido sem
 chamar a API, ausente, erro sanitizado sem vazar `raw`, nota de limitação
@@ -425,7 +444,9 @@ exclusividade/estrutura/visibilidade-CSS do botão "Consultar anúncio",
 separação `sku_id` × `sku_attr` × IDs (ausente → "Não fornecido"),
 runner `--compare-benefit` com flag, rodada e mercado registrados por
 chamada (erro isolado por flag) e classificação em vocabulário exato
-(iguais → efeito inconclusivo; diferentes → ainda não atribuída).
+(iguais → efeito inconclusivo; diferentes → ainda não atribuída), ação
+`comparar-preco` com alternância por paridade, falhas parciais
+sanitizadas, rodada inválida e ausência total de escritas no banco.
 
 Suítes pertinentes: `test_aliexpress_admin_catalog.py` +
 `test_aliexpress_client.py` + `test_aliexpress_product.py` +

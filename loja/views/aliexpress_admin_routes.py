@@ -81,7 +81,15 @@ from loja.integrations.aliexpress.importer import (
     DraftImportError,
     import_product_draft,
 )
-from loja.integrations.aliexpress.product import parse_aliexpress_product_ref
+from loja.integrations.aliexpress.product import (
+    PARAMETER_NOTE,
+    VERDICT_DIFF,
+    VERDICT_NO_DIFF,
+    VERDICT_UNVIABLE,
+    compare_benefit_records,
+    fetch_product_record,
+    parse_aliexpress_product_ref,
+)
 from loja.integrations.aliexpress.published_sync import (
     PublishedSyncConflict,
     PublishedSyncError,
@@ -1131,6 +1139,116 @@ def importar(product_id: str):
     )
     flash("Produto importado como rascunho.", "success")
     return redirect(url_for("aliexpress_admin.rascunho", product_id=product_id))
+
+
+def _comparar_variant_rows(detail_on, detail_off):
+    """Linhas por variante unindo os dois lados da rodada (só leitura).
+
+    `detail_on`/`detail_off` são resumos sanitizados (`summarize`) ou None
+    (chamada falhou). Chave de união: `sku_id` bruto; ausente agrupa em
+    None e a célula mostra "Não fornecido". `sku_attr` de cada lado usa a
+    mesma função do envio de pedidos. Nenhuma chamada, nenhuma escrita.
+    """
+    by_id = {}
+    for side, detail in (("on", detail_on), ("off", detail_off)):
+        for sku in ((detail or {}).get("skus") or []):
+            if not isinstance(sku, dict):
+                continue
+            by_id.setdefault(sku.get("sku_id"), {})[side] = sku
+
+    rows = []
+    for sku_id in sorted(by_id, key=lambda value: (value is None, value)):
+        sides = by_id[sku_id]
+        on, off = sides.get("on"), sides.get("off")
+        ref = on or off or {}
+        attrs = ref.get("attributes") or []
+        labels = ", ".join(
+            str(a.get("value"))
+            for a in attrs
+            if isinstance(a, dict) and a.get("value") not in (None, "")
+        )
+        rows.append(
+            {
+                "sku_id": sku_id,
+                "attributes": labels or None,
+                "sku_attr_on": build_sku_attr((on or {}).get("attributes")),
+                "sku_attr_off": build_sku_attr((off or {}).get("attributes")),
+                "price_on": (on or {}).get("sale_price"),
+                "price_off": (off or {}).get("sale_price"),
+                "currency": (on or {}).get("currency") or (off or {}).get("currency"),
+                "stock_on": (on or {}).get("available_stock"),
+                "stock_off": (off or {}).get("available_stock"),
+                "diff": on != off,
+            }
+        )
+    return rows
+
+
+@aliexpress_admin_blueprint.route(
+    "/<product_id>/comparar-preco", methods=["POST"]
+)
+@admin_required
+@ali_session_required
+def comparar_preco(product_id: str):
+    """Uma rodada da comparação on/off do parâmetro experimental (2 chamadas).
+
+    Limites: cada acionamento faz exatamente 2 consultas sequenciais
+    (`ds.product.get`, timeout de 10s cada) — bem abaixo do teto de 60s da
+    função serverless. Três rodadas = três acionamentos, com ordem alternada
+    por paridade (ímpar começa ligado, par começa desligado). Somente
+    leitura: nenhum acesso ao banco, nenhuma persistência, sem importar,
+    publicar ou comprar.
+    """
+    try:
+        rodada = int((request.form.get("rodada") or "1").strip())
+    except (TypeError, ValueError):
+        rodada = 0
+    if rodada not in (1, 2, 3):
+        flash("Rodada inválida: escolha 1, 2 ou 3.", "warning")
+        return redirect(
+            url_for("aliexpress_admin.detalhe", product_id=product_id)
+        )
+
+    first, second = (True, False) if rodada % 2 == 1 else (False, True)
+    try:
+        client = _aliexpress_client()
+    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+        flash(_sanitized_api_error(exc), "danger")
+        return redirect(
+            url_for("aliexpress_admin.detalhe", product_id=product_id)
+        )
+
+    label = "comparar-preco-r%d" % rodada
+    rec_first = fetch_product_record(
+        client, product_id=product_id, label=label,
+        remove_personal_benefit=first, round=rodada - 1,
+    )
+    rec_second = fetch_product_record(
+        client, product_id=product_id, label=label,
+        remove_personal_benefit=second, round=rodada - 1,
+    )
+    comparisons = compare_benefit_records([rec_first, rec_second])
+    verdict = comparisons[0]["overall"] if comparisons else VERDICT_UNVIABLE
+    # `detail_on`/`detail_off` referem-se às FLAGS (on=True), não à ordem.
+    on_rec = rec_first if first else rec_second
+    off_rec = rec_second if first else rec_first
+    rows = _comparar_variant_rows(on_rec.get("detail"), off_rec.get("detail"))
+
+    return render_template(
+        "admin/aliexpress/comparar.html",
+        product_id=product_id,
+        rodada=rodada,
+        first_flag=first,
+        second_flag=second,
+        rec_on=on_rec,
+        rec_off=off_rec,
+        verdict=verdict,
+        verdict_no_diff=VERDICT_NO_DIFF,
+        verdict_diff=VERDICT_DIFF,
+        verdict_unviable=VERDICT_UNVIABLE,
+        parameter_note=PARAMETER_NOTE,
+        rows=rows,
+    )
 
 
 @aliexpress_admin_blueprint.route("/rascunho/<product_id>", methods=["GET"])

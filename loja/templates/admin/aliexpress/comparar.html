@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}Comparar preço on/off — {{ product_id }}{% endblock %}
+
+{% block content %}
+
+{# Mesma formatação do detalhe: 2 casas, vírgula decimal; nunca R$ 0,00. #}
+{% macro ptx(v) %}{{ "%.2f"|format(v)|replace('.', ',') }}{% endmacro %}
+
+<div class="max-w-6xl mx-auto px-4 py-8">
+
+    <div class="mb-8">
+        <a href="{{ url_for('aliexpress_admin.detalhe', product_id=product_id) }}"
+           class="text-sm text-gray-500 hover:text-gray-800 underline">
+            &larr; Voltar ao detalhe
+        </a>
+        <h1 class="text-3xl font-bold text-gray-800 mt-2">
+            Comparar preço com/sem parâmetro experimental
+        </h1>
+        <p class="text-gray-500 mt-2">
+            Anúncio {{ product_id }} · Rodada {{ rodada }} de 3
+            (ordem: {{ 'ligado, desligado' if first_flag else 'desligado, ligado' }})
+            · destino BR, moeda BRL, idioma pt — 2 consultas por acionamento.
+        </p>
+        <p class="text-xs text-gray-500 mt-2">
+            Parâmetro experimental: {{ parameter_note }}
+        </p>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow p-6 mb-8">
+        <h2 class="text-xl font-semibold text-gray-800 mb-2">
+            Veredito da rodada
+        </h2>
+        <p class="text-gray-700 font-medium">
+            {{ verdict }}
+        </p>
+        {% if not rec_on.ok or not rec_off.ok %}
+            <div class="mt-4 space-y-2">
+                {% if not rec_on.ok %}
+                    <p class="text-sm text-red-700">
+                        Erro (flag ligada): {{ rec_on.error.type }}
+                        {% if rec_on.error.code %}(code={{ rec_on.error.code }}{% if rec_on.error.sub_code %}, sub_code={{ rec_on.error.sub_code }}{% endif %}){% endif %}:
+                        {{ rec_on.error.message }}
+                    </p>
+                {% endif %}
+                {% if not rec_off.ok %}
+                    <p class="text-sm text-red-700">
+                        Erro (flag desligada): {{ rec_off.error.type }}
+                        {% if rec_off.error.code %}(code={{ rec_off.error.code }}{% if rec_off.error.sub_code %}, sub_code={{ rec_off.error.sub_code }}{% endif %}){% endif %}:
+                        {{ rec_off.error.message }}
+                    </p>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+
+    {% if rows %}
+        <div class="bg-white rounded-2xl shadow p-6 mb-8">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">
+                Variações · Produto {{ product_id }}
+            </h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-gray-500 border-b">
+                            <th class="py-2 pr-4">SKU (ID DS)</th>
+                            <th class="py-2 pr-4">Atributos</th>
+                            <th class="py-2 pr-4">sku_attr (on)</th>
+                            <th class="py-2 pr-4">sku_attr (off)</th>
+                            <th class="py-2 pr-4">Preço (on)</th>
+                            <th class="py-2 pr-4">Preço (off)</th>
+                            <th class="py-2 pr-4">Moeda</th>
+                            <th class="py-2 pr-4">Estoque (on/off)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                            <tr class="border-b">
+                                <td class="py-2 pr-4 text-gray-700 font-mono text-xs">
+                                    {{ row.sku_id or 'Não fornecido' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ row.attributes or '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700 font-mono text-xs">
+                                    {{ row.sku_attr_on or '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700 font-mono text-xs">
+                                    {{ row.sku_attr_off or '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ ptx(row.price_on|float) if row.price_on is not none else '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ ptx(row.price_off|float) if row.price_off is not none else '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ row.currency or '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ row.stock_on if row.stock_on is not none else '—' }}
+                                    /
+                                    {{ row.stock_off if row.stock_off is not none else '—' }}
+                                    {% if row.diff %}<span title="difere entre on/off">≠</span>{% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="bg-white rounded-2xl shadow p-6">
+        <h2 class="text-xl font-semibold text-gray-800 mb-2">
+            Outras rodadas (ordem alternada)
+        </h2>
+        <p class="text-xs text-gray-500 mb-4">
+            Uma rodada por acionamento (2 consultas). Complete as 3 rodadas e
+            aplique a regra: qualquer rodada com diferença → "diferença
+            observada, ainda não atribuída ao parâmetro"; todas iguais →
+            "nenhuma diferença observada; efeito inconclusivo".
+        </p>
+        <div class="flex gap-3">
+            {% for r in [1, 2, 3] %}
+                <form method="POST"
+                      action="{{ url_for('aliexpress_admin.comparar_preco', product_id=product_id) }}">
+                    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+                    <input type="hidden" name="rodada" value="{{ r }}">
+                    <button type="submit"
+                            class="font-semibold px-6 py-3 rounded-lg {% if r == rodada %}bg-gray-800 text-white{% else %}bg-gray-100 hover:bg-gray-200 text-gray-700{% endif %}">
+                        Rodada {{ r }}
+                    </button>
+                </form>
+            {% endfor %}
+        </div>
+    </div>
+
+</div>
+
+{% endblock %}

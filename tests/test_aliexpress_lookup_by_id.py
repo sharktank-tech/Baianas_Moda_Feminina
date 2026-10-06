@@ -356,7 +356,10 @@ def test_summarize_registra_produto_e_skus_sem_raw_ou_segredos():
     assert first["sku_id"] == "%s-M-AZUL" % BR_ID
     assert first["available_stock"] == 7
     assert first["sale_price"] == "69.85"
-    assert {"name": "Tamanho", "value": "M"} in first["attributes"]
+    tamanho = next(a for a in first["attributes"] if a["name"] == "Tamanho")
+    assert tamanho["value"] == "M"
+    assert tamanho["sku_property_id"] == "14"
+    assert tamanho["property_value_id"] == "771"
     assert "raw" not in summary
     assert all("raw" not in sku for sku in summary["skus"])
     dumped = str(summary)
@@ -561,6 +564,13 @@ def test_detalhe_exige_sessao_aliexpress(client, admin_user, login, ae_env, fake
 # 7) Runner de comparação on/off (offline, cliente fake, sem rede)
 # --------------------------------------------------------------------------
 
+from loja.integrations.aliexpress.product import (
+    VERDICT_DIFF,
+    VERDICT_NO_DIFF,
+    VERDICT_UNVIABLE,
+)
+
+
 def _load_query_module():
     import sys
     from pathlib import Path
@@ -717,11 +727,11 @@ def test_classificacao_diferentes_nao_atribui_ao_parametro():
     records, failed = qc.query_candidates(client, compare_benefit=True)
     assert failed == 0
     comps = {c["product_id"]: c for c in qc.compare_benefit_records(records)}
-    assert comps["1005010478234256"]["overall"] == qc.VERDICT_DIFF
+    assert comps["1005010478234256"]["overall"] == VERDICT_DIFF
     assert comps["1005010478234256"]["overall"] == (
         "diferença observada, ainda não atribuída ao parâmetro"
     )
-    assert comps["1005010502074833"]["overall"] == qc.VERDICT_NO_DIFF
+    assert comps["1005010502074833"]["overall"] == VERDICT_NO_DIFF
 
 
 def test_classificacao_erro_inviabiliza_sem_atribuir():
@@ -740,7 +750,7 @@ def test_classificacao_erro_inviabiliza_sem_atribuir():
     records, failed = qc.query_candidates(client, compare_benefit=True)
     assert failed == 1
     comps = {c["product_id"]: c for c in qc.compare_benefit_records(records)}
-    assert comps["1005010478234256"]["overall"] == qc.VERDICT_UNVIABLE
+    assert comps["1005010478234256"]["overall"] == VERDICT_UNVIABLE
 
 
 def test_repeticao_alterna_ordem_das_flags():
@@ -778,6 +788,182 @@ def test_repeat_invalido_rejeitado_sem_rede():
     qc = _load_query_module()
     with pytest.raises(SystemExit):
         qc.main(["--compare-benefit", "--repeat", "0"])
+
+# --------------------------------------------------------------------------
+# 9) Ação comparar-preco: uma rodada por acionamento, só leitura
+# --------------------------------------------------------------------------
+
+def _flagged_get_product(monkeypatch, calls, mapping):
+    """Troca o get_product do Fake por versão que varia por flag.
+
+    Chamadas fora do mapa caem no comportamento padrão do Fake
+    (details/error da classe), para não quebrar redirects que reconsultam.
+    """
+
+    def fake_get_product(self, product_id=None, remove_personal_benefit=True, **kwargs):
+        calls.append((product_id, remove_personal_benefit))
+        if (product_id, remove_personal_benefit) in mapping:
+            value = mapping[(product_id, remove_personal_benefit)]
+            if isinstance(value, Exception):
+                raise value
+            return value
+        if FakeAliExpressClient.detail_error is not None:
+            raise FakeAliExpressClient.detail_error
+        return FakeAliExpressClient.details.get(product_id)
+
+    monkeypatch.setattr(FakeAliExpressClient, "get_product", fake_get_product)
+
+
+def test_comparar_exige_login_admin(client):
+    resp = client.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    )
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/login")
+
+
+def test_comparar_exige_sessao_aliexpress(
+    client, admin_user, login, ae_env, fake_client
+):
+    login(admin_user.email)
+    resp = client.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    )
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith(PREFIX + "/")
+
+
+def test_comparar_get_nao_permitido(admin_catalog):
+    assert (
+        admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/comparar-preco").status_code
+        == 405
+    )
+
+
+def test_comparar_rodada_invalida_volta_ao_detalhe_sem_chamar_api(
+    admin_catalog, monkeypatch
+):
+    calls = []
+    _flagged_get_product(monkeypatch, calls, {})
+    resp = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco",
+        data={"rodada": "9"},
+        follow_redirects=True,
+    )
+    assert "Rodada inválida" in resp.get_data(as_text=True)
+    # A rota não chamou a API; a única chamada é do redirect (detalhe).
+    assert calls == [(PRODUCT_ID, True)]
+
+
+def _pilot_details():
+    from copy import deepcopy
+
+    on = _br_candidate_detail(product_id=PRODUCT_ID)
+    off = deepcopy(on)
+    return on, off
+
+
+def test_comparar_rodada1_ordem_veredito_e_sem_escritas(admin_catalog, db, monkeypatch):
+    on, off = _pilot_details()
+    calls = []
+    _flagged_get_product(
+        monkeypatch,
+        calls,
+        {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off},
+    )
+    before = {
+        "products": Product.query.count(),
+        "variants": ProductVariant.query.count(),
+        "links": SupplierProduct.query.count(),
+        "origins": SupplierSkuShippingOrigin.query.count(),
+    }
+    resp = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    )
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    # Ordem da rodada ímpar: ligado, depois desligado.
+    assert calls == [(PRODUCT_ID, True), (PRODUCT_ID, False)]
+    # Por variante: IDs, combinação dos dois lados, preços e veredito.
+    assert PRODUCT_ID in body
+    assert "10:19;14:771" in body
+    assert "69,85" in body
+    assert "nenhuma diferença observada; efeito inconclusivo" in body
+    assert "experimental" in body
+    # Somente leitura: nada criado no catálogo (contagens intactas).
+    assert Product.query.count() == before["products"]
+    assert ProductVariant.query.count() == before["variants"]
+    assert SupplierProduct.query.count() == before["links"]
+    assert SupplierSkuShippingOrigin.query.count() == before["origins"]
+
+
+def test_comparar_rodada2_inverte_ordem(admin_catalog, monkeypatch):
+    on, off = _pilot_details()
+    calls = []
+    _flagged_get_product(
+        monkeypatch,
+        calls,
+        {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off},
+    )
+    resp = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "2"}
+    )
+    assert resp.status_code == 200
+    assert calls == [(PRODUCT_ID, False), (PRODUCT_ID, True)]
+    assert "Rodada 2 de 3" in resp.get_data(as_text=True)
+
+
+def test_comparar_divergencia_nao_atribui_ao_parametro(admin_catalog, monkeypatch):
+    on, off = _pilot_details()
+    off.skus[0].sale_price = Decimal("35.90")
+    calls = []
+    _flagged_get_product(
+        monkeypatch,
+        calls,
+        {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off},
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    assert "diferença observada, ainda não atribuída ao parâmetro" in body
+    assert "69,85" in body and "35,90" in body
+
+
+def test_comparar_falha_parcial_sanitizada_e_inviavel(admin_catalog, monkeypatch):
+    on, _off = _pilot_details()
+    calls = []
+    _flagged_get_product(
+        monkeypatch,
+        calls,
+        {
+            (PRODUCT_ID, True): on,
+            (PRODUCT_ID, False): AliExpressAPIError(
+                "falha simulada",
+                code="40001",
+                raw={"app_secret": "SEGREDO"},
+            ),
+        },
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "3"}
+    ).get_data(as_text=True)
+    assert "comparação inviável" in body
+    assert "falha simulada" in body
+    assert "SEGREDO" not in body
+
+
+def test_comparar_produto_ausente_e_inviavel(admin_catalog, monkeypatch):
+    calls = []
+    _flagged_get_product(
+        monkeypatch,
+        calls,
+        {(PRODUCT_ID, True): None, (PRODUCT_ID, False): None},
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    assert "comparação inviável" in body
+    assert "produto não retornado" in body
 
 # --------------------------------------------------------------------------
 # 5) Candidato sintético com 2 variantes: importação, origem e confirmação

@@ -291,9 +291,20 @@ def summarize_product_detail(detail: "AliExpressProductDetail") -> Dict[str, Any
         for attr in sku.attributes or []:
             if not isinstance(attr, Mapping):
                 continue
-            attributes.append(
-                {"name": _as_str(attr.get("name")), "value": _as_str(attr.get("value"))}
-            )
+            entry = {
+                "name": _as_str(attr.get("name")),
+                "value": _as_str(attr.get("value")),
+            }
+            # IDs preservados para compor o sku_attr canônico por lado da
+            # comparação (e para o registro da matriz); rótulos sozinhos não
+            # identificam a variante.
+            property_id = _as_str(attr.get("sku_property_id"))
+            property_value_id = _as_str(attr.get("property_value_id"))
+            if property_id:
+                entry["sku_property_id"] = property_id
+            if property_value_id:
+                entry["property_value_id"] = property_value_id
+            attributes.append(entry)
         skus.append(
             {
                 "sku_id": _as_str(sku.sku_id),
@@ -327,6 +338,131 @@ def format_candidate_error(exc: Exception) -> Dict[str, Any]:
         "sub_code": getattr(exc, "sub_code", None),
         "message": message,
     }
+
+
+#: Mercado fixo das comparações de preço (igual ao do painel).
+BENEFIT_MARKET: Dict[str, str] = {
+    "ship_to_country": "BR",
+    "target_currency": "BRL",
+    "target_language": "pt",
+}
+
+#: Classificações exatas da comparação on/off (vocabulário fixo).
+VERDICT_NO_DIFF = "nenhuma diferença observada; efeito inconclusivo"
+VERDICT_DIFF = "diferença observada, ainda não atribuída ao parâmetro"
+VERDICT_UNVIABLE = "comparação inviável (erro em ao menos uma chamada); efeito inconclusivo"
+
+PARAMETER_NOTE = (
+    "remove_personal_benefit sem respaldo na documentação oficial "
+    "consultada (apiId 60452); tratado como experimental. Comportamento "
+    "atual (true por padrão) preservado; não usado como garantia de "
+    "exclusão de primeira compra."
+)
+
+
+def fetch_product_record(
+    client,
+    *,
+    product_id: str,
+    label=None,
+    remove_personal_benefit: bool = True,
+    round: int = 0,
+    market=None,
+) -> Dict[str, Any]:
+    """Uma consulta `ds.product.get` como registro sanitizado (read-only).
+
+    `client` é injetável (testes usam fake, sem rede). Nunca levanta por
+    erro de API: falha vira registro `ok: False` com erro sanitizado.
+    """
+    base = {
+        "label": label,
+        "product_id": str(product_id),
+        "remove_personal_benefit": bool(remove_personal_benefit),
+        "round": int(round),
+        "market": dict(market if market is not None else BENEFIT_MARKET),
+    }
+    try:
+        detail = client.get_product(
+            product_id=str(product_id),
+            ship_to_country=base["market"]["ship_to_country"],
+            target_currency=base["market"]["target_currency"],
+            target_language=base["market"]["target_language"],
+            remove_personal_benefit=bool(remove_personal_benefit),
+        )
+    except Exception as exc:  # noqa: BLE001 (registro sanitizado)
+        return {**base, "ok": False, "error": format_candidate_error(exc)}
+    if detail is None:
+        return {
+            **base,
+            "ok": False,
+            "error": {
+                "type": "NotFound",
+                "code": None,
+                "sub_code": None,
+                "message": "produto não retornado",
+            },
+        }
+    return {**base, "ok": True, "detail": summarize_product_detail(detail)}
+
+
+def compare_benefit_records(records) -> list:
+    """Classifica a comparação on/off por produto (vocabulário fixo).
+
+    Só considera registros com flag e rodada. Iguais → efeito inconclusivo;
+    diferentes → diferença ainda não atribuída ao parâmetro; erro em qualquer
+    chamada da rodada → comparação inviável.
+    """
+    by_product: Dict[Any, list] = {}
+    for record in records or []:
+        if "remove_personal_benefit" not in record or "round" not in record:
+            continue
+        by_product.setdefault(
+            (record.get("label"), record.get("product_id")), []
+        ).append(record)
+
+    comparisons = []
+    for (label, product_id), items in by_product.items():
+        flags = {r["remove_personal_benefit"] for r in items}
+        if flags != {True, False}:
+            continue
+        rounds: Dict[Any, dict] = {}
+        for record in items:
+            rounds.setdefault(record["round"], {})[
+                record["remove_personal_benefit"]
+            ] = record
+        verdicts = []
+        for idx in sorted(rounds):
+            pair = rounds[idx]
+            on, off = pair.get(True), pair.get(False)
+            if (
+                on is None
+                or off is None
+                or not on.get("ok")
+                or not off.get("ok")
+            ):
+                verdicts.append({"round": idx, "verdict": VERDICT_UNVIABLE})
+            elif on.get("detail") == off.get("detail"):
+                verdicts.append({"round": idx, "verdict": VERDICT_NO_DIFF})
+            else:
+                verdicts.append({"round": idx, "verdict": VERDICT_DIFF})
+        if all(v["verdict"] == VERDICT_NO_DIFF for v in verdicts):
+            overall = VERDICT_NO_DIFF
+        elif any(v["verdict"] == VERDICT_DIFF for v in verdicts):
+            overall = VERDICT_DIFF
+        else:
+            overall = VERDICT_UNVIABLE
+        comparisons.append(
+            {
+                "kind": "benefit_comparison",
+                "label": label,
+                "product_id": product_id,
+                "experimental_parameter": True,
+                "parameter_note": PARAMETER_NOTE,
+                "rounds": verdicts,
+                "overall": overall,
+            }
+        )
+    return comparisons
 
 
 def _normalize_images(multimedia: Any) -> List[str]:
@@ -398,7 +534,14 @@ def normalize_product_detail(payload: Mapping[str, Any], *, method: str) -> AliE
 
 
 __all__ = [
+    "BENEFIT_MARKET",
+    "PARAMETER_NOTE",
+    "VERDICT_DIFF",
+    "VERDICT_NO_DIFF",
+    "VERDICT_UNVIABLE",
     "build_product_detail_params",
+    "compare_benefit_records",
+    "fetch_product_record",
     "normalize_product_detail",
     "first_not_none",
     "parse_aliexpress_product_ref",
