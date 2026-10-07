@@ -570,22 +570,23 @@ calculada) e moedas on/off por lado com nota de não comparabilidade,
 tabela validada por parser posicional (célula↔cabeçalho, contraprova
 contra o template anterior).
 
-Rate limit (`tests/test_aliexpress_rate_limit.py` — **42 passed**):
+Rate limit (`tests/test_aliexpress_rate_limit.py` — **45 passed**):
 `ApiCallLimit` em `code`/`sub_code` (payload exato e variações),
 duração "ban will last N seconds", recuperação com `get_product`,
 chamada única em `call()` puro, sem retry em auth/parâmetro/transporte/
 timeout, orçamento compartilhado com relógio fake (redução, bloqueio
 prévio, espera maior que o restante, esgotamento inconclusivo, teto de
-3 chamadas), aviso amigável por lado na comparação (só on, só off,
-ambos), recuperação sem aviso ao final, CSRF exigido, anti-duplo-clique
-nos formulários.
+3 chamadas), espera original verificada antes do teto (120s com 40s de
+orçamento: 1 chamada, 0 esperas), aviso amigável por lado na comparação
+(só on, só off, ambos), recuperação sem aviso ao final, CSRF exigido,
+anti-duplo-clique nos formulários.
 
 Suítes pertinentes: `test_aliexpress_admin_catalog.py` +
 `test_aliexpress_client.py` + `test_aliexpress_product.py` +
 `test_aliexpress_lookup_by_id.py` + `test_aliexpress_rate_limit.py` =
-**242 passed**;
+**245 passed**;
 `test_aliexpress_search.py` + `test_draft_import.py` +
 `test_published_sync_resilience.py` = **80 passed**.
-Suíte completa: **2289 passed, 107 skipped**.
+Suíte completa: **2292 passed, 107 skipped**.
 Sem skips novos; nenhum teste PG (sem alteração de persistência, consultas
 ou migrações). `git diff --check` limpo.

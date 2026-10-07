@@ -164,8 +164,9 @@ def call_with_rate_limit_retry(
     Com `budget`, nenhuma chamada começa se seu timeout (`client.timeout`)
     ultrapassar o restante, e nenhuma espera começa se não couber: nesses
     casos levanta `BudgetExhaustedError` de imediato, sem dormir nem chamar.
-    Espera do fornecedor maior que o restante encerra com o aviso temporário
-    (nunca reduzida para repetir antes do prazo).
+    A espera ORIGINAL do fornecedor é verificada antes de qualquer teto:
+    se exceder o máximo permitido ou o restante do orçamento, encerra com
+    o aviso temporário — nunca truncada para repetir antes do prazo.
     """
     call_timeout = getattr(client, "timeout", None)
     attempts = 0
@@ -184,6 +185,11 @@ def call_with_rate_limit_retry(
             if attempts >= max(int(max_retries), 0):
                 raise
             supplier = supplier_wait_seconds(exc)
+            if supplier is not None and (
+                supplier > float(max_delay)
+                or (budget is not None and supplier > budget.remaining())
+            ):
+                raise BudgetExhaustedError(RATE_LIMIT_MESSAGE) from None
             progressive = float(base_delay) * (2**attempts)
             delay = min(max(supplier or 0.0, progressive), float(max_delay))
             if budget is not None and delay > budget.remaining():

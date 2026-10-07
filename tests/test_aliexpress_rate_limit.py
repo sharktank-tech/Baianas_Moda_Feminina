@@ -498,12 +498,51 @@ def test_espera_do_fornecedor_prevalece_e_respeita_teto():
     call_with_rate_limit_retry(stub, "aliexpress.x", {}, sleep=sleeps.append)
     assert sleeps == [7.0]
 
-    capped = []
+
+def test_espera_original_maior_que_maximo_encerra_sem_truncar():
+    """retry_after=120 com teto 10: encerra com o aviso em vez de dormir 10
+    e repetir ainda sob o bloqueio."""
+    sleeps = []
     stub = _StubClient([_rate_exc(retry_after=120), {"ok": True}])
-    call_with_rate_limit_retry(
-        stub, "aliexpress.x", {}, max_delay=10.0, sleep=capped.append
+    with pytest.raises(BudgetExhaustedError) as excinfo:
+        call_with_rate_limit_retry(
+            stub, "aliexpress.x", {}, max_delay=10.0, sleep=sleeps.append
+        )
+    assert str(excinfo.value) == RATE_LIMIT_MESSAGE
+    assert stub.calls == 1
+    assert sleeps == []
+
+
+def test_retry_after_120_com_orcamento_40_uma_chamada_sem_espera():
+    """Cenário exigido: espera original (120s) verificada antes do teto;
+    excede o orçamento de 40s → erro tratado, sem nova chamada."""
+    now, sleeps, sleep = _clock_and_sleep()
+    budget = TimeBudget(40.0, clock=lambda: now[0])
+    stub = _TimedStubClient([_budgeted_rate_exc(retry_after=120)], now=now)
+    with pytest.raises(BudgetExhaustedError) as excinfo:
+        call_with_rate_limit_retry(
+            stub, "aliexpress.x", {}, sleep=sleep, budget=budget
+        )
+    assert str(excinfo.value) == RATE_LIMIT_MESSAGE
+    assert stub.calls == 1
+    assert sleeps == []
+    assert budget.remaining() == pytest.approx(38.0)
+
+
+def test_espera_dentro_do_teto_mas_acima_do_restante_encerra():
+    """supplier=9 cabe no teto (10) mas não no restante (7): encerra."""
+    now, sleeps, sleep = _clock_and_sleep()
+    budget = TimeBudget(12.0, clock=lambda: now[0])
+    stub = _TimedStubClient(
+        [_budgeted_rate_exc(retry_after=9)], now=now, call_cost=5.0
     )
-    assert capped == [10.0]
+    with pytest.raises(BudgetExhaustedError) as excinfo:
+        call_with_rate_limit_retry(
+            stub, "aliexpress.x", {}, sleep=sleep, budget=budget
+        )
+    assert str(excinfo.value) == RATE_LIMIT_MESSAGE
+    assert stub.calls == 1
+    assert sleeps == []
 
 
 def test_parametros_reconstruidos_a_cada_tentativa(monkeypatch):
