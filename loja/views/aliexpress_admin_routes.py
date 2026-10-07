@@ -74,7 +74,13 @@ from loja.integrations.aliexpress import admin_session
 from loja.integrations.aliexpress.errors import (
     AliExpressAPIError,
     AliExpressConfigError,
+    AliExpressRateLimitError,
     AliExpressTransportError,
+)
+from loja.integrations.aliexpress.rate_limit import (
+    RATE_LIMIT_MESSAGE,
+    BudgetExhaustedError,
+    TimeBudget,
 )
 from loja.integrations.aliexpress.importer import (
     FREIGHT_AVAILABLE,
@@ -134,6 +140,12 @@ SEARCH_LOCALE = "en_US"
 SEARCH_COUNTRY_CODE = "BR"
 SEARCH_CURRENCY = "BRL"
 SEARCH_PAGE_SIZE = 20
+
+#: Orçamento de tempo compartilhado pelas 2 consultas on/off de uma rodada
+#: de comparação. vercel.json: maxDuration 60s para api/app.py; 20s ficam
+#: reservados para renderizar a resposta e folga. Uma rodada = 1 acionamento
+#: (2 consultas); três rodadas = três acionamentos.
+COMPARAR_ROUND_BUDGET_SECONDS = 40.0
 
 #: Filtros administrativos de origem do catálogo importado (Etapa 2).
 ORIGIN_FILTERS = ("brazil", "foreign", "unknown", "mixed", "conflict")
@@ -265,6 +277,32 @@ def _active_supplier_product(product: Optional[Product]):
         if getattr(sp, "is_active", False):
             return sp
     return None
+
+
+#: Exceções tratadas nas rotas de leitura (e na fase de leitura do sync):
+#: erro de API, transporte, config ou orçamento de tempo esgotado.
+#: Escrita nunca depende deste tuplo.
+READ_ERRORS = (
+    AliExpressAPIError,
+    AliExpressTransportError,
+    AliExpressConfigError,
+    BudgetExhaustedError,
+)
+
+
+def _flash_read_error(exc: Exception) -> None:
+    """Flash para falha de consulta somente leitura.
+
+    Bloqueio temporário (Rate Limit, mesmo após as tentativas com espera, e
+    orçamento de tempo esgotado) vira aviso de nova tentativa — nunca o
+    texto técnico do provider. Demais erros seguem sanitizados como antes.
+    """
+    if isinstance(exc, AliExpressRateLimitError):
+        flash(RATE_LIMIT_MESSAGE, "warning")
+    elif isinstance(exc, BudgetExhaustedError):
+        flash(str(getattr(exc, "message", None) or RATE_LIMIT_MESSAGE), "warning")
+    else:
+        flash(_sanitized_api_error(exc), "danger")
 
 
 def _sanitized_api_error(exc: Exception) -> str:
@@ -959,8 +997,8 @@ def buscar():
             page_index=1,
             page_size=SEARCH_PAGE_SIZE,
         )
-    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
-        flash(_sanitized_api_error(exc), "danger")
+    except READ_ERRORS as exc:
+        _flash_read_error(exc)
         return render_template(
             "admin/aliexpress/catalogo.html",
             connected=True,
@@ -1013,8 +1051,8 @@ def buscar_id():
     try:
         client = _aliexpress_client()
         detail = client.get_product(product_id=product_id)
-    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
-        flash(_sanitized_api_error(exc), "danger")
+    except READ_ERRORS as exc:
+        _flash_read_error(exc)
         return redirect(url_for("aliexpress_admin.index"))
     if detail is None:
         flash("Produto não encontrado no catálogo do fornecedor.", "warning")
@@ -1102,8 +1140,8 @@ def detalhe(product_id: str):
     try:
         client = _aliexpress_client()
         detail = client.get_product(product_id=product_id)
-    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
-        flash(_sanitized_api_error(exc), "danger")
+    except READ_ERRORS as exc:
+        _flash_read_error(exc)
         return redirect(url_for("aliexpress_admin.index"))
 
     return _render_detalhe(product_id, detail)
@@ -1116,8 +1154,8 @@ def importar(product_id: str):
     try:
         client = _aliexpress_client()
         detail = client.get_product(product_id=product_id)
-    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
-        flash(_sanitized_api_error(exc), "danger")
+    except READ_ERRORS as exc:
+        _flash_read_error(exc)
         return redirect(url_for("aliexpress_admin.detalhe", product_id=product_id))
 
     try:
@@ -1228,11 +1266,12 @@ def comparar_preco(product_id: str):
     """Uma rodada da comparação on/off do parâmetro experimental (2 chamadas).
 
     Limites: cada acionamento faz exatamente 2 consultas sequenciais
-    (`ds.product.get`, timeout de 10s cada) — bem abaixo do teto de 60s da
-    função serverless. Três rodadas = três acionamentos, com ordem alternada
-    por paridade (ímpar começa ligado, par começa desligado). Somente
-    leitura: nenhum acesso ao banco, nenhuma persistência, sem importar,
-    publicar ou comprar.
+    (`ds.product.get`, timeout de 10s cada) compartilhando UM orçamento de
+    40s (ver COMPARAR_ROUND_BUDGET_SECONDS) — bem abaixo do teto de 60s da
+    função serverless, com reserva para renderizar. Três rodadas = três
+    acionamentos, com ordem alternada por paridade (ímpar começa ligado,
+    par começa desligado). Somente leitura: nenhum acesso ao banco, nenhuma
+    persistência, sem importar, publicar ou comprar.
     """
     try:
         rodada = int((request.form.get("rodada") or "1").strip())
@@ -1247,20 +1286,21 @@ def comparar_preco(product_id: str):
     first, second = (True, False) if rodada % 2 == 1 else (False, True)
     try:
         client = _aliexpress_client()
-    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
-        flash(_sanitized_api_error(exc), "danger")
+    except READ_ERRORS as exc:
+        _flash_read_error(exc)
         return redirect(
             url_for("aliexpress_admin.detalhe", product_id=product_id)
         )
 
     label = "comparar-preco-r%d" % rodada
+    budget = TimeBudget(COMPARAR_ROUND_BUDGET_SECONDS)
     rec_first = fetch_product_record(
         client, product_id=product_id, label=label,
-        remove_personal_benefit=first, round=rodada - 1,
+        remove_personal_benefit=first, round=rodada - 1, budget=budget,
     )
     rec_second = fetch_product_record(
         client, product_id=product_id, label=label,
-        remove_personal_benefit=second, round=rodada - 1,
+        remove_personal_benefit=second, round=rodada - 1, budget=budget,
     )
     comparisons = compare_benefit_records([rec_first, rec_second])
     verdict = comparisons[0]["overall"] if comparisons else VERDICT_UNVIABLE
@@ -1282,6 +1322,7 @@ def comparar_preco(product_id: str):
         verdict_diff=VERDICT_DIFF,
         verdict_unviable=VERDICT_UNVIABLE,
         parameter_note=PARAMETER_NOTE,
+        rate_limit_message=RATE_LIMIT_MESSAGE,
         rows=rows,
     )
 
@@ -1313,8 +1354,8 @@ def moeda_bruta(product_id: str):
     try:
         client = _aliexpress_client()
         detail = client.get_product(product_id=product_id)
-    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
-        flash(_sanitized_api_error(exc), "danger")
+    except READ_ERRORS as exc:
+        _flash_read_error(exc)
         return redirect(
             url_for("aliexpress_admin.detalhe", product_id=product_id)
         )
@@ -1580,7 +1621,7 @@ def publicado_sincronizar(product_id: str):
     try:
         client = _aliexpress_client()
         detail = client.get_product(product_id=product_id)
-    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+    except READ_ERRORS as exc:
         _persist_sync_attempt(
             product=product,
             supplier_product=supplier_product,

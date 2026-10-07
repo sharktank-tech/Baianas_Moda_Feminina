@@ -1,0 +1,16 @@
+{# Guarda contra duplo clique em consultas somente leitura: ao enviar,
+   desabilita os submits do formulário para não disparar chamadas
+   duplicadas ao fornecedor. Os formulários optam com `data-once`; sem JS
+   tudo funciona como antes (o recarregamento da página restaura o botão).
+   Só DOM, sem persistência e sem tocar na sessão. #}
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('form[data-once]').forEach(function (form) {
+    form.addEventListener('submit', function () {
+      form.querySelectorAll('button[type="submit"]').forEach(function (btn) {
+        btn.disabled = true;
+      });
+    });
+  });
+});
+</script>

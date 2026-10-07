@@ -15,6 +15,7 @@ Protocolo migrado (endpoint `/sync`):
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import replace
 from decimal import Decimal
@@ -29,6 +30,7 @@ from .errors import (
     AliExpressTransportError,
     redact,
 )
+from .rate_limit import call_with_rate_limit_retry
 from .sign import sign_sync
 from .transport import RequestsTransport, Transport, TransportError, TransportTimeout
 
@@ -39,6 +41,23 @@ DEFAULT_SESSION_PARAM = "session"
 
 _RATE_LIMIT_CODES = {"555"}
 _RATE_LIMIT_SUBSTRINGS = ("rate limit", "too many requests", "request limit")
+#: Token normalizado (caixa/pontuação removidas) que também indica teto de
+#: chamadas (ex.: "ApiCallLimit"). Em `code` exige igualdade exata; em
+#: `sub_code` basta conter (prefixos tipo "isv." são comuns).
+_RATE_LIMIT_TOKEN = "apicalllimit"
+
+
+def _norm_token(value: Any) -> str:
+    if value is None:
+        return ""
+    return re.sub(r"[^a-z0-9]", "", str(value).lower())
+
+
+def _is_rate_limit(code: Any, sub_code: Any) -> bool:
+    if _norm_token(code) in _RATE_LIMIT_CODES | {_RATE_LIMIT_TOKEN}:
+        return True
+    sub = _norm_token(sub_code)
+    return sub != "" and _RATE_LIMIT_TOKEN in sub
 
 
 class AliExpressClient:
@@ -200,13 +219,12 @@ class AliExpressClient:
 
     @staticmethod
     def _raise_for_error(msg: str, *, code: Any, sub_code: Any, raw: Any) -> Any:
-        code_str = str(code) if code is not None else ""
         text = f"{msg} (code={code}, sub_code={sub_code})"
-        if code_str in _RATE_LIMIT_CODES or any(
+        if _is_rate_limit(code, sub_code) or any(
             s in msg.lower() for s in _RATE_LIMIT_SUBSTRINGS
         ):
             raise AliExpressRateLimitError(text, code=code, sub_code=sub_code, raw=raw)
-        if code_str in ("401", "403", "40010", "27"):
+        if _norm_token(code) in ("401", "403", "40010", "27"):
             raise AliExpressAuthError(text, code=code, sub_code=sub_code, raw=raw)
         raise AliExpressAPIError(text, code=code, sub_code=sub_code, raw=raw)
 
@@ -237,6 +255,8 @@ class AliExpressClient:
         Não persiste nada. Em caso de erro TOP/API, levanta a hierarquia existente
         (AliExpressAuthError / AliExpressRateLimitError / AliExpressAPIError /
         AliExpressTransportError). Lista vazia significa "busca válida, 0 produtos".
+        Bloqueio temporário (Rate Limit) repete a chamada poucas vezes com espera
+        progressiva; outros erros propagam de imediato, sem nova tentativa.
         """
         from .search import build_search_params, normalize_search_response
 
@@ -252,7 +272,9 @@ class AliExpressClient:
             search_extend=search_extend,
             selection_name=selection_name,
         )
-        payload = self.call("aliexpress.ds.text.search", **business)
+        payload = call_with_rate_limit_retry(
+            self, "aliexpress.ds.text.search", business
+        )
         return normalize_search_response(payload, method="aliexpress.ds.text.search")
 
     # ----- detalhe do produto (Fase 3, read-only) ---------------------------
@@ -267,12 +289,16 @@ class AliExpressClient:
         biz_model: Optional[str] = None,
         province: Optional[str] = None,
         city: Optional[str] = None,
+        time_budget=None,
     ) -> "AliExpressProductDetail":
         """Busca read-only aliexpress.ds.product.get (retorna detalhe normalizado).
 
         Não persiste nada. Usa o mesmo gateway /sync, sign_method=sha256 e o
         access_token como `session`. Lista de SKUs/atributos vazia significa
         "produto válido, 0 SKUs/atributos". Toll/impostos preservados em `raw`.
+        Bloqueio temporário (Rate Limit) repete a chamada poucas vezes com
+        espera progressiva; outros erros propagam de imediato, sem nova tentativa.
+        `time_budget` opcional compartilha um `TimeBudget` entre chamadas.
         """
         from .product import build_product_detail_params, normalize_product_detail
 
@@ -286,7 +312,9 @@ class AliExpressClient:
             province=province,
             city=city,
         )
-        payload = self.call("aliexpress.ds.product.get", **business)
+        payload = call_with_rate_limit_retry(
+            self, "aliexpress.ds.product.get", business, budget=time_budget
+        )
         return normalize_product_detail(payload, method="aliexpress.ds.product.get")
 
     # ----- frete (Fase 4, read-only) ----------------------------------------

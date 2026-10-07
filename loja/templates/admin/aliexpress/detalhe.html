@@ -90,7 +90,7 @@
                     {{ detail.available_stock if detail.available_stock is not none else '—' }}
                 </p>
 
-                <form method="POST"
+                <form method="POST" data-once
                       action="{{ url_for('aliexpress_admin.importar', product_id=detail.product_id or '') }}"
                       class="mt-6">
                     {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
@@ -180,7 +180,7 @@
             base e da variante — para fechar a causa de moeda ausente sem
             expor o JSON completo. Somente leitura.
         </p>
-        <form method="POST"
+        <form method="POST" data-once
               action="{{ url_for('aliexpress_admin.moeda_bruta', product_id=detail.product_id or '') }}"
               class="flex gap-3">
             {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
@@ -209,7 +209,7 @@
         </p>
         <div class="flex gap-3">
             {% for r in [1, 2, 3] %}
-                <form method="POST"
+                <form method="POST" data-once
                       action="{{ url_for('aliexpress_admin.comparar_preco', product_id=detail.product_id or '') }}">
                     {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
                     <input type="hidden" name="rodada" value="{{ r }}">
@@ -223,5 +223,7 @@
     </div>
 
 </div>
+
+{% include "admin/aliexpress/_once_submit.html" %}
 
 {% endblock %}

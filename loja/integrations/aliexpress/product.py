@@ -25,8 +25,9 @@ from decimal import Decimal
 from typing import Any, Dict, List, Mapping, Optional
 from urllib.parse import urlparse
 
-from .errors import AliExpressAPIError
+from .errors import AliExpressAPIError, AliExpressRateLimitError
 from .models import AliExpressProductDetail, AliExpressProductSku
+from .rate_limit import BudgetExhaustedError
 from .search import _as_int, _as_str, _abs_url, parse_price
 
 
@@ -368,11 +369,15 @@ def fetch_product_record(
     remove_personal_benefit: bool = True,
     round: int = 0,
     market=None,
+    budget=None,
 ) -> Dict[str, Any]:
     """Uma consulta `ds.product.get` como registro sanitizado (read-only).
 
     `client` é injetável (testes usam fake, sem rede). Nunca levanta por
     erro de API: falha vira registro `ok: False` com erro sanitizado.
+    `rate_limited` indica bloqueio temporário (rate limit do fornecedor ou
+    orçamento esgotado) para exibição do aviso — nunca dado fabricado.
+    `budget` (opcional) é repassado às tentativas internas.
     """
     base = {
         "label": label,
@@ -388,13 +393,22 @@ def fetch_product_record(
             target_currency=base["market"]["target_currency"],
             target_language=base["market"]["target_language"],
             remove_personal_benefit=bool(remove_personal_benefit),
+            time_budget=budget,
         )
     except Exception as exc:  # noqa: BLE001 (registro sanitizado)
-        return {**base, "ok": False, "error": format_candidate_error(exc)}
+        return {
+            **base,
+            "ok": False,
+            "rate_limited": isinstance(
+                exc, (AliExpressRateLimitError, BudgetExhaustedError)
+            ),
+            "error": format_candidate_error(exc),
+        }
     if detail is None:
         return {
             **base,
             "ok": False,
+            "rate_limited": False,
             "error": {
                 "type": "NotFound",
                 "code": None,
@@ -402,7 +416,12 @@ def fetch_product_record(
                 "message": "produto não retornado",
             },
         }
-    return {**base, "ok": True, "detail": summarize_product_detail(detail)}
+    return {
+        **base,
+        "ok": True,
+        "rate_limited": False,
+        "detail": summarize_product_detail(detail),
+    }
 
 
 def compare_benefit_records(records) -> list:
