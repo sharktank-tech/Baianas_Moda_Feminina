@@ -20,6 +20,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+import re
+
 from loja.integrations.aliexpress.errors import AliExpressAPIError
 from loja.integrations.aliexpress.models import (
     AliExpressProductDetail,
@@ -38,8 +41,6 @@ from tests.test_aliexpress_admin_catalog import (  # noqa: F401  (fixtures)
     make_detail,
     reference_quote_table,  # noqa: F401
 )
-
-import pytest
 
 from loja.modules.models import (
     AliExpressSyncAttempt,
@@ -656,9 +657,6 @@ def test_sem_comparacao_chama_uma_vez_ligado():
 # 8) Classificação on/off (vocabulário exato, offline, sem rede)
 # --------------------------------------------------------------------------
 
-import pytest
-
-
 class _FlaggedQueryClient:
     """Fake por (produto, flag): detalhe distinto ou erro por chamada."""
 
@@ -1149,6 +1147,168 @@ def test_moeda_bruta_ausente_mostra_nao_fornecida(admin_catalog):
     ).get_data(as_text=True)
     # make_detail não define raw: base e variante sem moeda.
     assert body.count("Não fornecida") >= 2
+
+# --------------------------------------------------------------------------
+# 12) Comparação sem parear sem-ID; moedas por lado (sem cruzamento)
+# --------------------------------------------------------------------------
+
+def _no_id_detail(entries):
+    """Detalhe sintético com SKUs sem id: [(cor, tamanho, preço, estoque)]."""
+    skus = []
+    for color, size, price, stock in entries:
+        skus.append(
+            AliExpressProductSku(
+                sku_id=None,
+                sale_price=Decimal(price),
+                original_price=Decimal(price),
+                currency="BRL",
+                available_stock=stock,
+                attributes=[
+                    {"name": "Cor", "value": color},
+                    {"name": "Tamanho", "value": size},
+                ],
+            )
+        )
+    return AliExpressProductDetail(
+        product_id=PRODUCT_ID,
+        title="Sem ID",
+        description="",
+        images=[],
+        skus=skus,
+        available_stock=sum(s.available_stock or 0 for s in skus),
+        sale_price=Decimal("10.00"),
+        original_price=Decimal("10.00"),
+        currency="BRL",
+    )
+
+
+def _comparar_rows(body, marker):
+    import re
+
+    segs = [s.split("</tr>")[0] for s in body.split("<tr") if marker in s]
+    assert segs, marker
+    return segs
+
+
+def test_sem_id_duas_variantes_permanecem_visiveis(admin_catalog, monkeypatch):
+    calls = []
+    detail = _no_id_detail([("Azul", "Medio", "10.00", 5), ("Vermelho", "Grande", "20.00", 6)])
+    _flagged_get_product(
+        monkeypatch, calls, {(PRODUCT_ID, True): detail, (PRODUCT_ID, False): detail}
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    # 2 variantes × 2 lados = 4 linhas separadas, sem agrupar sob None.
+    assert body.count("Pareamento não comprovado") == 4
+    assert body.count("Não fornecido") >= 4
+    # Sem IDs não há de onde tirar combinação: nada inventado.
+    assert "10,00" in body and "20,00" in body
+
+
+def test_sem_id_ordem_invertida_nao_compara_m_com_g(admin_catalog, monkeypatch):
+    on = _no_id_detail([("Azul", "Medio", "10.00", 5), ("Vermelho", "Grande", "20.00", 6)])
+    off = _no_id_detail([("Vermelho", "Grande", "20.00", 6), ("Azul", "Medio", "10.00", 5)])
+    calls = []
+    _flagged_get_product(
+        monkeypatch, calls, {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off}
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    assert body.count("Pareamento não comprovado") == 4
+    # Nenhuma linha mistura as duas variantes.
+    for seg in _comparar_rows(body, "Pareamento não comprovado"):
+        assert not ("Azul" in seg and "Vermelho" in seg)
+        assert not ("Medio" in seg and "Grande" in seg)
+    # Sem comparação entre não identificadas: nenhum marcador de diferença.
+    assert "≠" not in body
+
+
+def test_variante_so_de_um_lado_nao_desaparece(admin_catalog, monkeypatch, db):
+    from copy import deepcopy
+
+    on, _off = _pilot_details()
+    off = deepcopy(on)
+    off.skus = [sku for sku in off.skus if sku.sku_id != "%s-G-VERMELHO" % PRODUCT_ID]
+    calls = []
+    _flagged_get_product(
+        monkeypatch, calls, {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off}
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    assert "%s-G-VERMELHO" % PRODUCT_ID in body
+    assert "%s-M-AZUL" % PRODUCT_ID in body
+
+
+def test_moedas_diferentes_mantidas_sem_comparacao_direta(admin_catalog, monkeypatch):
+    on = _detail_currency(PRODUCT_ID, "USD", "USD", price="10.00")
+    off = _detail_currency(PRODUCT_ID, "BRL", "BRL", price="10.00")
+    calls = []
+    _flagged_get_product(
+        monkeypatch, calls, {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off}
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    segs = _comparar_rows(body, "%s-M-AZUL" % PRODUCT_ID)
+    assert len(segs) == 1
+    assert "USD" in segs[0] and "BRL" in segs[0]
+    flat = re.sub(r"\s+", " ", body)
+    assert "não podem ser comparados diretamente" in flat
+    # Moedas diferentes: detalhe difere → diferença observada, sem atribuir.
+    assert "diferença observada, ainda não atribuída ao parâmetro" in body
+
+
+def test_moeda_ausente_num_lado_nao_preenchida_pelo_outro(admin_catalog, monkeypatch):
+    on = _detail_currency(PRODUCT_ID, "USD", "USD", price="10.00")
+    off = _detail_currency(PRODUCT_ID, None, None, price="10.00")
+    calls = []
+    _flagged_get_product(
+        monkeypatch, calls, {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off}
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    segs = _comparar_rows(body, "%s-M-AZUL" % PRODUCT_ID)
+    assert len(segs) == 1
+    assert "USD" in segs[0]
+    assert "Não fornecida" in segs[0]
+    assert segs[0].count("USD") == 1
+
+
+def test_moeda_fallback_variante_para_produto_na_mesma_resposta(admin_catalog, monkeypatch):
+    on = _detail_currency(PRODUCT_ID, None, "EUR", price="10.00")
+    off = _detail_currency(PRODUCT_ID, None, "EUR", price="10.00")
+    calls = []
+    _flagged_get_product(
+        monkeypatch, calls, {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off}
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    segs = _comparar_rows(body, "%s-M-AZUL" % PRODUCT_ID)
+    assert len(segs) == 1
+    assert "EUR" in segs[0]
+
+
+def test_moedas_ausentes_sem_brl_fabricado(admin_catalog, monkeypatch):
+    on = _detail_currency(PRODUCT_ID, None, None, price="10.00")
+    off = _detail_currency(PRODUCT_ID, None, None, price="10.00")
+    calls = []
+    _flagged_get_product(
+        monkeypatch, calls, {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off}
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    segs = _comparar_rows(body, "%s-M-AZUL" % PRODUCT_ID)
+    assert len(segs) == 1
+    assert "Não fornecida" in segs[0]
+    assert "BRL" not in segs[0]
+    flat = re.sub(r"\s+", " ", body)
+    assert "não podem ser comparados diretamente" in flat
 
 # --------------------------------------------------------------------------
 # 5) Candidato sintético com 2 variantes: importação, origem e confirmação

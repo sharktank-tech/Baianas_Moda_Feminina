@@ -59,17 +59,25 @@
             <h2 class="text-xl font-semibold text-gray-800 mb-4">
                 Variações · Produto {{ product_id }}
             </h2>
+            {% if rows|selectattr('prices_comparable', 'equalto', false)|list|length %}
+                <p class="text-xs text-gray-500 mb-4">
+                    Preços em moedas diferentes ou desconhecidas não podem ser
+                    comparados diretamente; nenhuma diferença monetária ou
+                    percentual é calculada.
+                </p>
+            {% endif %}
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-left text-gray-500 border-b">
                             <th class="py-2 pr-4">SKU (ID DS)</th>
+                            <th class="py-2 pr-4">Pareamento</th>
                             <th class="py-2 pr-4">Atributos</th>
                             <th class="py-2 pr-4">sku_attr (on)</th>
                             <th class="py-2 pr-4">sku_attr (off)</th>
                             <th class="py-2 pr-4">Preço (on)</th>
                             <th class="py-2 pr-4">Preço (off)</th>
-                            <th class="py-2 pr-4">Moeda</th>
+                            <th class="py-2 pr-4">Moeda (on/off)</th>
                             <th class="py-2 pr-4">Estoque (on/off)</th>
                         </tr>
                     </thead>
@@ -79,8 +87,13 @@
                                 <td class="py-2 pr-4 text-gray-700 font-mono text-xs">
                                     {{ row.sku_id or 'Não fornecido' }}
                                 </td>
+                                <td class="py-2 pr-4 text-gray-700 text-xs">
+                                    {% if row.paired %}por ID{% else %}Pareamento não comprovado{% endif %}
+                                </td>
                                 <td class="py-2 pr-4 text-gray-700">
-                                    {{ row.attributes or '—' }}
+                                    {{ row.currency_on or 'Não fornecida' }}
+                                    /
+                                    {{ row.currency_off or 'Não fornecida' }}
                                 </td>
                                 <td class="py-2 pr-4 text-gray-700 font-mono text-xs">
                                     {{ row.sku_attr_on or '—' }}

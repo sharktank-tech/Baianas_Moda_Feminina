@@ -134,7 +134,7 @@ com `product_id`, `ship_to_country="BR"`, `target_currency="BRL"`,
 | `1005010478234256` CÉU AZUL / M | sim [relato] | painel OK; vínculo checkout pendente | relato p/ M; P/G sem nada | registrado outra conta R$ 58; qtd/impostos/total pendentes | — | `unknown` |
 | `1005010478234256` P, G | sim [relato] | painel OK; vínculo checkout pendente | sem evidência | — | — | `unknown` |
 | `1005010502074833` CÉU AZUL / M | sim [relato] | painel OK; vínculo checkout pendente | relato ("Do Brasil" + frete grátis); qtd/impostos/total pendentes | registrado outra conta R$ 52; restante pendente | — | `unknown` |
-| `1005010660869000` A08White / 36 | sim [relato] | painel OK; vínculo checkout pendente | página "Compra internacional": **nada deduzido**; relato: Brasil, grátis, 13/10 | 76,99 coincide c/ subtotal [relato]; qtd p/ mapear 125,36 pendente | pendente (`currency_code` SKU+base) | `unknown` |
+| `1005010660869000` A08White / 36 | sim [relato] | painel OK; vínculo checkout pendente | página "Compra internacional": **nada deduzido**; sem relato de despacho para este anúncio (Brasil/grátis/13-10 pertencem aos vestidos) | 76,99 coincide c/ subtotal [relato]; qtd p/ mapear 125,36 pendente | pendente (`currency_code` SKU+base) | `unknown` |
 | `1005010660869000` demais variantes | não investigadas | — | — | — | — | `unknown` |
 | `1005013003211750`, `1005012926123897` (todas) | sim [relato] | painel OK; vínculo checkout pendente | sem evidência | — | — | `unknown` |
 | `1005009519310498` (controle) | sim [relato] | n/a | n/a (internacional) | n/a | n/a | `unknown` |
@@ -479,6 +479,11 @@ mais a honestidade na interface:
   exibe só `currency_code` da base e da variante exata (`sku_id`
   opcional; ausente lista todas), sem JSON completo e sem credenciais;
   admin+sessão+CSRF, só leitura, zero banco.
+- Correção de revisão: sem-ID nunca se agrupa (cada variante sem `sku_id`
+  vira linha própria por lado, "Pareamento não comprovado", sem diferença
+  calculada); moeda por lado (`currency_on`/`currency_off` com fallback
+  variante→produto na mesma resposta, nunca do outro lado nem BRL
+  solicitado; nota de não comparabilidade direta, sem diferença monetária).
 - Auditoria de fallback de identidade (sem alterar registros): importação
   pula SKU sem id e grava o `id` verbatim (igualdade de strings no sync e
   no enrichment; nenhum `int()` em IDs em todo o módulo); fulfillment exige
@@ -534,7 +539,7 @@ sugestivo.
 
 ## 6. Testes executados, resultados e skips
 
-Novo: `tests/test_aliexpress_lookup_by_id.py` — **52 passed**.
+Novo: `tests/test_aliexpress_lookup_by_id.py` — **59 passed**.
 Cobre: parser (IDs/URLs válidos e recusas, incl. host malicioso
 `aliexpress.com.evil.com`), rota (sucesso por ID e por URL, inválido sem
 chamar a API, ausente, erro sanitizado sem vazar `raw`, nota de limitação
@@ -556,7 +561,9 @@ chamada (erro isolado por flag) e classificação em vocabulário exato
 sanitizadas, rodada inválida e ausência total de escritas no banco,
 moeda por nível (variante, produto, ausente → "Não fornecida" sem
 fabricar o BRL do destino), ação `moeda-bruta` (auth/sessão/405,
-filtro por SKU exato, sanitização do raw, sem escritas).
+filtro por SKU exato, sanitização do raw, sem escritas), pareamento
+só por ID não nulo (sem-ID em linhas separadas, sem diferença
+calculada) e moedas on/off por lado com nota de não comparabilidade.
 
 Suítes pertinentes: `test_aliexpress_admin_catalog.py` +
 `test_aliexpress_client.py` + `test_aliexpress_product.py` +

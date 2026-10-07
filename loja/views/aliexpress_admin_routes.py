@@ -1145,21 +1145,31 @@ def _comparar_variant_rows(detail_on, detail_off):
     """Linhas por variante unindo os dois lados da rodada (só leitura).
 
     `detail_on`/`detail_off` são resumos sanitizados (`summarize`) ou None
-    (chamada falhou). Chave de união: `sku_id` bruto; ausente agrupa em
-    None e a célula mostra "Não fornecido". `sku_attr` de cada lado usa a
-    mesma função do envio de pedidos. Nenhuma chamada, nenhuma escrita.
+    (chamada falhou). Pareamento SOMENTE por `sku_id` idêntico e não nulo:
+    SKUs sem ID nunca se agrupam (agrupar sob None sobrescrevia variantes
+    e comparava M com G) — cada um vira linha própria, de um lado só, com
+    "Pareamento não comprovado" e sem cálculo de diferença. `sku_id`
+    ausente continua "Não fornecido" na tela, sem preencher com `sku_attr`
+    nem ID inventado. Nenhuma chamada, nenhuma escrita.
     """
-    by_id = {}
-    for side, detail in (("on", detail_on), ("off", detail_off)):
-        for sku in ((detail or {}).get("skus") or []):
-            if not isinstance(sku, dict):
-                continue
-            by_id.setdefault(sku.get("sku_id"), {})[side] = sku
+    def _skus(detail):
+        items = (detail or {}).get("skus") or []
+        return [s for s in items if isinstance(s, dict)]
 
-    rows = []
-    for sku_id in sorted(by_id, key=lambda value: (value is None, value)):
-        sides = by_id[sku_id]
-        on, off = sides.get("on"), sides.get("off")
+    on_skus = _skus(detail_on)
+    off_skus = _skus(detail_off)
+    base_on = (detail_on or {}).get("currency")
+    base_off = (detail_off or {}).get("currency")
+
+    identified = {}
+    for sku in on_skus:
+        if sku.get("sku_id") is not None:
+            identified.setdefault(sku["sku_id"], {"on": [], "off": []})["on"].append(sku)
+    for sku in off_skus:
+        if sku.get("sku_id") is not None:
+            identified.setdefault(sku["sku_id"], {"on": [], "off": []})["off"].append(sku)
+
+    def _row(sku_id, on, off, *, paired):
         ref = on or off or {}
         attrs = ref.get("attributes") or []
         labels = ", ".join(
@@ -1167,20 +1177,45 @@ def _comparar_variant_rows(detail_on, detail_off):
             for a in attrs
             if isinstance(a, dict) and a.get("value") not in (None, "")
         )
-        rows.append(
-            {
-                "sku_id": sku_id,
-                "attributes": labels or None,
-                "sku_attr_on": build_sku_attr((on or {}).get("attributes")),
-                "sku_attr_off": build_sku_attr((off or {}).get("attributes")),
-                "price_on": (on or {}).get("sale_price"),
-                "price_off": (off or {}).get("sale_price"),
-                "currency": (on or {}).get("currency") or (off or {}).get("currency"),
-                "stock_on": (on or {}).get("available_stock"),
-                "stock_off": (off or {}).get("available_stock"),
-                "diff": on != off,
-            }
-        )
+        # Moeda da variante, com fallback explícito para a moeda do produto
+        # DA MESMA resposta. Nunca copia do outro lado nem fabrica o BRL
+        # pedido na consulta; ausente nos dois níveis vira None ("Não
+        # fornecida" na tela).
+        currency_on = (on or {}).get("currency") or base_on
+        currency_off = (off or {}).get("currency") or base_off
+        return {
+            "sku_id": sku_id,
+            "paired": paired,
+            "attributes": labels or None,
+            "sku_attr_on": build_sku_attr((on or {}).get("attributes")),
+            "sku_attr_off": build_sku_attr((off or {}).get("attributes")),
+            "price_on": (on or {}).get("sale_price"),
+            "price_off": (off or {}).get("sale_price"),
+            "currency_on": currency_on,
+            "currency_off": currency_off,
+            "prices_comparable": bool(
+                currency_on and currency_off and currency_on == currency_off
+            ),
+            "stock_on": (on or {}).get("available_stock"),
+            "stock_off": (off or {}).get("available_stock"),
+            "diff": bool(paired) and on != off,
+        }
+
+    rows = []
+    for sku_id in sorted(identified, key=lambda v: (v is None, v)):
+        entry = identified[sku_id]
+        for on, off in zip(entry["on"], entry["off"]):
+            rows.append(_row(sku_id, on, off, paired=True))
+        for on in entry["on"][len(entry["off"]):]:
+            rows.append(_row(sku_id, on, None, paired=False))
+        for off in entry["off"][len(entry["on"]):]:
+            rows.append(_row(sku_id, None, off, paired=False))
+    for sku in on_skus:
+        if sku.get("sku_id") is None:
+            rows.append(_row(None, sku, None, paired=False))
+    for sku in off_skus:
+        if sku.get("sku_id") is None:
+            rows.append(_row(None, None, sku, paired=False))
     return rows
 
 
