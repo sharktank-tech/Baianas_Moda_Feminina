@@ -85,7 +85,7 @@
                     {% endif %}
                 </div>
                 <p class="text-gray-500">
-                    {% if priced_skus %}Moeda: {{ ns.currency }}{% endif %}
+                    {% if priced_skus %}Moeda: {{ ns.currency or 'Não fornecida' }}{% endif %}
                     &middot; Estoque disponível:
                     {{ detail.available_stock if detail.available_stock is not none else '—' }}
                 </p>
@@ -116,33 +116,52 @@
     {% if detail.skus %}
         <div class="bg-white rounded-2xl shadow p-6">
             <h2 class="text-xl font-semibold text-gray-800 mb-4">
-                Variações ({{ detail.skus|length }})
+                Variações ({{ detail.skus|length }}) · Produto {{ detail.product_id or '—' }}
             </h2>
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-left text-gray-500 border-b">
+                            <th class="py-2 pr-4">SKU (ID DS)</th>
+                            <th class="py-2 pr-4">Combinação (sku_attr)</th>
                             <th class="py-2 pr-4">Atributos</th>
+                            <th class="py-2 pr-4">Cor</th>
+                            <th class="py-2 pr-4">Tamanho</th>
+                            <th class="py-2 pr-4">IDs atributo/valor</th>
                             <th class="py-2 pr-4">Estoque</th>
-                            <th class="py-2 pr-4">Preço ({{ ns.currency }})</th>
+                            <th class="py-2 pr-4">Preço</th>
+                            <th class="py-2 pr-4">Moeda</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for sku in detail.skus %}
-                            {% set sp = sku.sale_price if sku.sale_price is not none else sku.original_price %}
+                        {% for row in sku_rows %}
                             <tr class="border-b">
-                                <td class="py-2 pr-4 text-gray-700">
-                                    {% if sku.attributes %}
-                                        {{ sku.attributes|map(attribute='value')|join(', ') }}
-                                    {% else %}
-                                        —
-                                    {% endif %}
+                                <td class="py-2 pr-4 text-gray-700 font-mono text-xs">
+                                    {{ row.sku_id or 'Não fornecido' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700 font-mono text-xs">
+                                    {{ row.sku_attr or '—' }}
                                 </td>
                                 <td class="py-2 pr-4 text-gray-700">
-                                    {{ sku.available_stock if sku.available_stock is not none else '—' }}
+                                    {{ row.attributes or '—' }}
                                 </td>
                                 <td class="py-2 pr-4 text-gray-700">
-                                    {{ ptx(sp) if sp else '—' }}
+                                    {{ row.color or '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ row.size or '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700 font-mono text-xs">
+                                    {{ row.property_ids or '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ row.stock if row.stock is not none else '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ ptx(row.price) if row.price else '—' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ row.currency or 'Não fornecida' }}
                                 </td>
                             </tr>
                         {% endfor %}
@@ -151,6 +170,57 @@
             </div>
         </div>
     {% endif %}
+
+    <div class="bg-white rounded-2xl shadow p-6 mt-8">
+        <h2 class="text-xl font-semibold text-gray-800 mb-2">
+            Moeda bruta da resposta
+        </h2>
+        <p class="text-xs text-gray-500 mb-4">
+            Exibe somente os <span class="font-mono">currency_code</span> da
+            base e da variante — para fechar a causa de moeda ausente sem
+            expor o JSON completo. Somente leitura.
+        </p>
+        <form method="POST"
+              action="{{ url_for('aliexpress_admin.moeda_bruta', product_id=detail.product_id or '') }}"
+              class="flex gap-3">
+            {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+            <input type="text"
+                   name="sku_id"
+                   placeholder="SKU específico (opcional — vazio lista todas)"
+                   class="flex-1 border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+            <button type="submit"
+                    class="bg-gray-800 hover:bg-gray-900 text-white font-semibold px-6 py-3 rounded-lg">
+                Ver moeda bruta
+            </button>
+        </form>
+    </div>
+
+</div>
+    <div class="bg-white rounded-2xl shadow p-6 mt-8">
+        <h2 class="text-xl font-semibold text-gray-800 mb-2">
+            Comparar preço com/sem parâmetro experimental
+        </h2>
+        <p class="text-xs text-gray-500 mb-4">
+            Executa 1 rodada (2 consultas com e sem
+            <span class="font-mono">remove_personal_benefit</span>, destino BR,
+            BRL, pt) e mostra preços por variante. Parâmetro experimental, sem
+            respaldo na documentação oficial — o resultado nunca é atribuído
+            ao parâmetro. Três rodadas em ordem alternada; somente leitura.
+        </p>
+        <div class="flex gap-3">
+            {% for r in [1, 2, 3] %}
+                <form method="POST"
+                      action="{{ url_for('aliexpress_admin.comparar_preco', product_id=detail.product_id or '') }}">
+                    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+                    <input type="hidden" name="rodada" value="{{ r }}">
+                    <button type="submit"
+                            class="bg-gray-800 hover:bg-gray-900 text-white font-semibold px-6 py-3 rounded-lg">
+                        Rodada {{ r }}
+                    </button>
+                </form>
+            {% endfor %}
+        </div>
+    </div>
 
 </div>
 

@@ -53,7 +53,7 @@ from __future__ import annotations
 import os
 from decimal import Decimal, InvalidOperation
 from functools import wraps
-from typing import Optional, Tuple
+from typing import Mapping, Optional, Tuple
 
 from flask import (
     Blueprint,
@@ -81,6 +81,15 @@ from loja.integrations.aliexpress.importer import (
     DraftImportError,
     import_product_draft,
 )
+from loja.integrations.aliexpress.product import (
+    PARAMETER_NOTE,
+    VERDICT_DIFF,
+    VERDICT_NO_DIFF,
+    VERDICT_UNVIABLE,
+    compare_benefit_records,
+    fetch_product_record,
+    parse_aliexpress_product_ref,
+)
 from loja.integrations.aliexpress.published_sync import (
     PublishedSyncConflict,
     PublishedSyncError,
@@ -102,6 +111,8 @@ from loja.services.pricing import (
 )
 from loja.services.publication import PublicationBlocked, publish_product
 from loja.services.sales_readiness import REASON_LABELS as READINESS_REASON_LABELS
+from loja.services.variant_attributes import variant_attribute_value
+from loja.integrations.aliexpress.sku_attr import build_sku_attr
 from loja.services.shipping_origin import (
     ShippingOriginError,
     clear_manual_confirmation,
@@ -978,6 +989,112 @@ def buscar():
     )
 
 
+@aliexpress_admin_blueprint.route("/buscar-id", methods=["POST"])
+@admin_required
+@ali_session_required
+def buscar_id():
+    """Consulta direta por ID ou URL de anúncio (sem passar pela busca).
+
+    A API oficial de busca (`aliexpress.ds.text.search`) não oferece filtro
+    por país de despacho: para avaliar um anúncio específico (ex.: com
+    envio do Brasil), o caminho comprovado é consultar o detalhe pelo ID
+    e conferir variante a variante. Aceita somente ID numérico ou URL
+    `/item/` da AliExpress — qualquer outra URL é recusada sem requisição.
+    """
+    ref = (request.form.get("ref") or "").strip()
+    product_id = parse_aliexpress_product_ref(ref)
+    if not product_id:
+        flash(
+            "Informe um ID numérico ou uma URL de anúncio AliExpress "
+            "(/item/<id>.html).",
+            "warning",
+        )
+        return redirect(url_for("aliexpress_admin.index"))
+    try:
+        client = _aliexpress_client()
+        detail = client.get_product(product_id=product_id)
+    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+        flash(_sanitized_api_error(exc), "danger")
+        return redirect(url_for("aliexpress_admin.index"))
+    if detail is None:
+        flash("Produto não encontrado no catálogo do fornecedor.", "warning")
+        return redirect(url_for("aliexpress_admin.index"))
+    return _render_detalhe(product_id, detail)
+
+
+def _detalhe_sku_rows(detail):
+    """Linhas da tabela de variações: IDs e dimensões por SKU.
+
+    Montado a partir da resposta JÁ consultada (nenhuma chamada adicional,
+    nenhuma persistência). Os três identificadores vão em colunas
+    SEPARADAS, exatamente como retornados — sem substituir um pelo outro:
+      * ``sku_id``: o campo `id` bruto (pode vir como combinação
+        `pid:vid;...` no live; ausente vira None e a tela mostra
+        "Não fornecido");
+      * ``sku_attr``: combinação canônica `pid:vid` construída pelos IDs
+        dos atributos (mesma função do envio de pedidos); None quando os
+        atributos não trazem identidade numérica completa;
+      * ``property_ids``: cada atributo com seu par de IDs
+        (`Nome (pid) = Valor (vid)`).
+    Cor/tamanho usam o classificador canônico (`variant_attributes`,
+    mesma regra da importação).
+    """
+    rows = []
+    for sku in detail.skus or []:
+        attributes = sku.attributes or []
+        pairs = []
+        for attr in attributes:
+            if not isinstance(attr, dict) or not attr.get("sku_property_id"):
+                continue
+            if attr.get("property_value_id"):
+                pairs.append(
+                    "%s (%s) = %s (%s)"
+                    % (
+                        attr.get("name"),
+                        attr.get("sku_property_id"),
+                        attr.get("value"),
+                        attr.get("property_value_id"),
+                    )
+                )
+            else:
+                pairs.append(
+                    "%s (%s) = %s"
+                    % (attr.get("name"), attr.get("sku_property_id"), attr.get("value"))
+                )
+        labels = ", ".join(
+            str(attr.get("value"))
+            for attr in attributes
+            if isinstance(attr, dict) and attr.get("value") not in (None, "")
+        )
+        price = (
+            sku.sale_price if sku.sale_price is not None else sku.original_price
+        )
+        rows.append(
+            {
+                "sku_id": sku.sku_id or None,
+                "sku_attr": build_sku_attr(attributes),
+                "attributes": labels or None,
+                "color": variant_attribute_value(attributes, "color"),
+                "size": variant_attribute_value(attributes, "size"),
+                "property_ids": "; ".join(pairs) or None,
+                "stock": sku.available_stock,
+                "price": price,
+                "currency": sku.currency or detail.currency,
+            }
+        )
+    return rows
+
+
+def _render_detalhe(product_id: str, detail):
+    return render_template(
+        "admin/aliexpress/detalhe.html",
+        detail=detail,
+        # Detalhe é anterior à importação: sem importação não há etiqueta.
+        origin_info=_origin_info_for_ids([product_id]),
+        sku_rows=_detalhe_sku_rows(detail) if detail is not None else [],
+    )
+
+
 @aliexpress_admin_blueprint.route("/<product_id>/detalhe", methods=["GET"])
 @admin_required
 @ali_session_required
@@ -989,12 +1106,7 @@ def detalhe(product_id: str):
         flash(_sanitized_api_error(exc), "danger")
         return redirect(url_for("aliexpress_admin.index"))
 
-    return render_template(
-        "admin/aliexpress/detalhe.html",
-        detail=detail,
-        # Detalhe é anterior à importação: sem importação não há etiqueta.
-        origin_info=_origin_info_for_ids([product_id]),
-    )
+    return _render_detalhe(product_id, detail)
 
 
 @aliexpress_admin_blueprint.route("/<product_id>/importar", methods=["POST"])
@@ -1027,6 +1139,213 @@ def importar(product_id: str):
     )
     flash("Produto importado como rascunho.", "success")
     return redirect(url_for("aliexpress_admin.rascunho", product_id=product_id))
+
+
+def _comparar_variant_rows(detail_on, detail_off):
+    """Linhas por variante unindo os dois lados da rodada (só leitura).
+
+    `detail_on`/`detail_off` são resumos sanitizados (`summarize`) ou None
+    (chamada falhou). Pareamento SOMENTE por `sku_id` idêntico e não nulo:
+    SKUs sem ID nunca se agrupam (agrupar sob None sobrescrevia variantes
+    e comparava M com G) — cada um vira linha própria, de um lado só, com
+    "Pareamento não comprovado" e sem cálculo de diferença. `sku_id`
+    ausente continua "Não fornecido" na tela, sem preencher com `sku_attr`
+    nem ID inventado. Nenhuma chamada, nenhuma escrita.
+    """
+    def _skus(detail):
+        items = (detail or {}).get("skus") or []
+        return [s for s in items if isinstance(s, dict)]
+
+    on_skus = _skus(detail_on)
+    off_skus = _skus(detail_off)
+    base_on = (detail_on or {}).get("currency")
+    base_off = (detail_off or {}).get("currency")
+
+    identified = {}
+    for sku in on_skus:
+        if sku.get("sku_id") is not None:
+            identified.setdefault(sku["sku_id"], {"on": [], "off": []})["on"].append(sku)
+    for sku in off_skus:
+        if sku.get("sku_id") is not None:
+            identified.setdefault(sku["sku_id"], {"on": [], "off": []})["off"].append(sku)
+
+    def _row(sku_id, on, off, *, paired):
+        ref = on or off or {}
+        attrs = ref.get("attributes") or []
+        labels = ", ".join(
+            str(a.get("value"))
+            for a in attrs
+            if isinstance(a, dict) and a.get("value") not in (None, "")
+        )
+        # Moeda da variante, com fallback explícito para a moeda do produto
+        # DA MESMA resposta. Nunca copia do outro lado nem fabrica o BRL
+        # pedido na consulta; ausente nos dois níveis vira None ("Não
+        # fornecida" na tela).
+        currency_on = (on or {}).get("currency") or base_on
+        currency_off = (off or {}).get("currency") or base_off
+        return {
+            "sku_id": sku_id,
+            "paired": paired,
+            "attributes": labels or None,
+            "sku_attr_on": build_sku_attr((on or {}).get("attributes")),
+            "sku_attr_off": build_sku_attr((off or {}).get("attributes")),
+            "price_on": (on or {}).get("sale_price"),
+            "price_off": (off or {}).get("sale_price"),
+            "currency_on": currency_on,
+            "currency_off": currency_off,
+            "prices_comparable": bool(
+                currency_on and currency_off and currency_on == currency_off
+            ),
+            "stock_on": (on or {}).get("available_stock"),
+            "stock_off": (off or {}).get("available_stock"),
+            "diff": bool(paired) and on != off,
+        }
+
+    rows = []
+    for sku_id in sorted(identified, key=lambda v: (v is None, v)):
+        entry = identified[sku_id]
+        for on, off in zip(entry["on"], entry["off"]):
+            rows.append(_row(sku_id, on, off, paired=True))
+        for on in entry["on"][len(entry["off"]):]:
+            rows.append(_row(sku_id, on, None, paired=False))
+        for off in entry["off"][len(entry["on"]):]:
+            rows.append(_row(sku_id, None, off, paired=False))
+    for sku in on_skus:
+        if sku.get("sku_id") is None:
+            rows.append(_row(None, sku, None, paired=False))
+    for sku in off_skus:
+        if sku.get("sku_id") is None:
+            rows.append(_row(None, None, sku, paired=False))
+    return rows
+
+
+@aliexpress_admin_blueprint.route(
+    "/<product_id>/comparar-preco", methods=["POST"]
+)
+@admin_required
+@ali_session_required
+def comparar_preco(product_id: str):
+    """Uma rodada da comparação on/off do parâmetro experimental (2 chamadas).
+
+    Limites: cada acionamento faz exatamente 2 consultas sequenciais
+    (`ds.product.get`, timeout de 10s cada) — bem abaixo do teto de 60s da
+    função serverless. Três rodadas = três acionamentos, com ordem alternada
+    por paridade (ímpar começa ligado, par começa desligado). Somente
+    leitura: nenhum acesso ao banco, nenhuma persistência, sem importar,
+    publicar ou comprar.
+    """
+    try:
+        rodada = int((request.form.get("rodada") or "1").strip())
+    except (TypeError, ValueError):
+        rodada = 0
+    if rodada not in (1, 2, 3):
+        flash("Rodada inválida: escolha 1, 2 ou 3.", "warning")
+        return redirect(
+            url_for("aliexpress_admin.detalhe", product_id=product_id)
+        )
+
+    first, second = (True, False) if rodada % 2 == 1 else (False, True)
+    try:
+        client = _aliexpress_client()
+    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+        flash(_sanitized_api_error(exc), "danger")
+        return redirect(
+            url_for("aliexpress_admin.detalhe", product_id=product_id)
+        )
+
+    label = "comparar-preco-r%d" % rodada
+    rec_first = fetch_product_record(
+        client, product_id=product_id, label=label,
+        remove_personal_benefit=first, round=rodada - 1,
+    )
+    rec_second = fetch_product_record(
+        client, product_id=product_id, label=label,
+        remove_personal_benefit=second, round=rodada - 1,
+    )
+    comparisons = compare_benefit_records([rec_first, rec_second])
+    verdict = comparisons[0]["overall"] if comparisons else VERDICT_UNVIABLE
+    # `detail_on`/`detail_off` referem-se às FLAGS (on=True), não à ordem.
+    on_rec = rec_first if first else rec_second
+    off_rec = rec_second if first else rec_first
+    rows = _comparar_variant_rows(on_rec.get("detail"), off_rec.get("detail"))
+
+    return render_template(
+        "admin/aliexpress/comparar.html",
+        product_id=product_id,
+        rodada=rodada,
+        first_flag=first,
+        second_flag=second,
+        rec_on=on_rec,
+        rec_off=off_rec,
+        verdict=verdict,
+        verdict_no_diff=VERDICT_NO_DIFF,
+        verdict_diff=VERDICT_DIFF,
+        verdict_unviable=VERDICT_UNVIABLE,
+        parameter_note=PARAMETER_NOTE,
+        rows=rows,
+    )
+
+
+def _raw_currency_code(mapping) -> Optional[str]:
+    """Extrai `currency_code` bruto sem vazar o resto do payload."""
+    if not isinstance(mapping, Mapping):
+        return None
+    value = mapping.get("currency_code")
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    return str(value).strip()
+
+
+@aliexpress_admin_blueprint.route(
+    "/<product_id>/moeda-bruta", methods=["POST"]
+)
+@admin_required
+@ali_session_required
+def moeda_bruta(product_id: str):
+    """Exibe SÓ os `currency_code` brutos da resposta (só leitura).
+
+    Para fechar a causa-raiz de moeda ausente sem expor o JSON completo
+    nem credenciais: base (`ae_item_base_info_dto`) + variante exata
+    (`sku_id` do formulário; vazio lista todas). Nenhum acesso ao banco,
+    nenhuma persistência, sem importar ou publicar.
+    """
+    sku_id = (request.form.get("sku_id") or "").strip() or None
+    try:
+        client = _aliexpress_client()
+        detail = client.get_product(product_id=product_id)
+    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+        flash(_sanitized_api_error(exc), "danger")
+        return redirect(
+            url_for("aliexpress_admin.detalhe", product_id=product_id)
+        )
+    if detail is None:
+        flash("Produto não encontrado no catálogo do fornecedor.", "warning")
+        return redirect(
+            url_for("aliexpress_admin.detalhe", product_id=product_id)
+        )
+
+    raw = detail.raw if isinstance(detail.raw, dict) else {}
+    base_currency = _raw_currency_code(raw.get("ae_item_base_info_dto"))
+    variants = []
+    for sku in detail.skus or []:
+        if sku_id is not None and str(sku.sku_id or "") != sku_id:
+            continue
+        sku_raw = sku.raw if isinstance(sku.raw, dict) else {}
+        variants.append(
+            {
+                "sku_id": sku.sku_id,
+                "currency": _raw_currency_code(sku_raw),
+            }
+        )
+
+    return render_template(
+        "admin/aliexpress/moeda.html",
+        product_id=product_id,
+        title=getattr(detail, "title", None),
+        sku_id=sku_id,
+        base_currency=base_currency,
+        variants=variants,
+    )
 
 
 @aliexpress_admin_blueprint.route("/rascunho/<product_id>", methods=["GET"])

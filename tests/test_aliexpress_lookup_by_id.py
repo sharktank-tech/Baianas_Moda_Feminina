@@ -1,0 +1,1665 @@
+"""Consulta direta por ID/URL e importação de candidato com despacho BR.
+
+Contexto: a API oficial de busca (`aliexpress.ds.text.search`) não oferece
+filtro por país de despacho, e o detalhe (`aliexpress.ds.product.get`) não
+devolve origem de despacho em nenhum campo documentado. Para avaliar um
+anúncio específico, o painel oferece a consulta direta por ID/URL
+(`POST /buscar-id`), que usa somente o caminho existente de detalhe por ID.
+
+Cobre, sem nenhuma chamada real de rede:
+- validação estrita de ID/URL (só hosts AliExpress e caminho `/item/`);
+- a rota de consulta direta (sucesso, inválido, ausente, erro sanitizado);
+- busca geral preservada e sem parâmetros de despacho;
+- importação idempotente de um candidato sintético com 2 variantes:
+  identidade/SKUs/estoque/preço/moeda/atributos preservados, origem
+  `unknown` até confirmação manual, e confirmação de UMA variante não
+  marca as demais como nacionais (`mixed`, nunca `brazil`).
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+import pytest
+import re
+
+from loja.integrations.aliexpress.errors import AliExpressAPIError
+from loja.integrations.aliexpress.models import (
+    AliExpressProductDetail,
+    AliExpressProductSku,
+)
+from loja.integrations.aliexpress.product import parse_aliexpress_product_ref
+from tests.test_aliexpress_admin_catalog import (  # noqa: F401  (fixtures)
+    PREFIX,
+    PRODUCT_ID,
+    TITLE,
+    FakeAliExpressClient,
+    admin_catalog,  # noqa: F401
+    ae_env,  # noqa: F401
+    catalog,  # noqa: F401
+    fake_client,  # noqa: F401
+    make_detail,
+    reference_quote_table,  # noqa: F401
+)
+
+from loja.modules.models import (
+    AliExpressSyncAttempt,
+    Product,
+    ProductSync,
+    ProductVariant,
+    Supplier,
+    SupplierProduct,
+    SupplierSkuShippingOrigin,
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_br_candidate_data(db):
+    """Isola os rascunhos/vínculos/evidências criados pelos testes deste módulo."""
+    product_ids = db.session.query(Product.id).filter_by(source="aliexpress")
+    supplier_ids = db.session.query(Supplier.id).filter_by(channel_type="aliexpress")
+    SupplierSkuShippingOrigin.query.delete(synchronize_session=False)
+    AliExpressSyncAttempt.query.delete(synchronize_session=False)
+    ProductSync.query.filter(ProductSync.product_id.in_(product_ids)).delete(
+        synchronize_session=False
+    )
+    ProductVariant.query.filter(ProductVariant.product_id.in_(product_ids)).delete(
+        synchronize_session=False
+    )
+    SupplierProduct.query.filter(SupplierProduct.supplier_id.in_(supplier_ids)).delete(
+        synchronize_session=False
+    )
+    Product.query.filter(Product.id.in_(product_ids)).delete(synchronize_session=False)
+    Supplier.query.filter(Supplier.id.in_(supplier_ids)).delete(synchronize_session=False)
+    db.session.commit()
+    yield
+    db.session.rollback()
+
+BR_ID = "1005013003211750"
+BR_URL = "https://pt.aliexpress.com/item/1005013003211750.html"
+
+
+# --------------------------------------------------------------------------
+# 1) Validação de ID/URL (função pura, sem rede)
+# --------------------------------------------------------------------------
+
+def test_aceita_id_numerico():
+    assert parse_aliexpress_product_ref(BR_ID) == BR_ID
+    assert parse_aliexpress_product_ref("  %s  " % BR_ID) == BR_ID
+    assert parse_aliexpress_product_ref("32982857990") == "32982857990"
+
+
+def test_aceita_url_de_anuncio_aliexpress():
+    assert parse_aliexpress_product_ref(BR_URL) == BR_ID
+    assert (
+        parse_aliexpress_product_ref(
+            "https://www.aliexpress.com/item/%s.html?src=ibdm&sk=abc" % BR_ID
+        )
+        == BR_ID
+    )
+    assert (
+        parse_aliexpress_product_ref(
+            "http://m.aliexpress.com/item/%s.htm" % BR_ID
+        )
+        == BR_ID
+    )
+    assert (
+        parse_aliexpress_product_ref(
+            "https://aliexpress.us/item/%s.html" % BR_ID
+        )
+        == BR_ID
+    )
+
+
+def test_recusa_nao_ids():
+    assert parse_aliexpress_product_ref(None) is None
+    assert parse_aliexpress_product_ref("") is None
+    assert parse_aliexpress_product_ref("   ") is None
+    assert parse_aliexpress_product_ref("vestido floral") is None
+    assert parse_aliexpress_product_ref("69.85") is None
+    assert parse_aliexpress_product_ref("R$ 69,85") is None
+    assert parse_aliexpress_product_ref("1234567") is None  # curto demais
+    assert parse_aliexpress_product_ref("1" * 21) is None  # longo demais
+
+
+def test_recusa_urls_fora_do_padrao():
+    # Host fora da AliExpress: nunca buscar nada a partir daqui.
+    assert (
+        parse_aliexpress_product_ref(
+            "https://evil-aliexpress.com/item/%s.html" % BR_ID
+        )
+        is None
+    )
+    assert (
+        parse_aliexpress_product_ref(
+            "https://pt.aliexpress.com.evil.com/item/%s.html" % BR_ID
+        )
+        is None
+    )
+    assert (
+        parse_aliexpress_product_ref(
+            "https://exemplo.com/loja/%s" % BR_ID
+        )
+        is None
+    )
+    # Caminhos que não são anúncio (busca, loja, categoria).
+    assert (
+        parse_aliexpress_product_ref(
+            "https://pt.aliexpress.com/w/wholesale-vestido.html"
+        )
+        is None
+    )
+    assert (
+        parse_aliexpress_product_ref(
+            "https://pt.aliexpress.com/store/12345.html"
+        )
+        is None
+    )
+    # ID não numérico no caminho e esquema inseguro.
+    assert (
+        parse_aliexpress_product_ref(
+            "https://pt.aliexpress.com/item/vestido-floral.html"
+        )
+        is None
+    )
+    assert (
+        parse_aliexpress_product_ref(
+            "ftp://pt.aliexpress.com/item/%s.html" % BR_ID
+        )
+        is None
+    )
+    assert (
+        parse_aliexpress_product_ref(
+            "javascript:alert(%s)" % BR_ID
+        )
+        is None
+    )
+    # Host sem esquema não é URL válida (use o ID avulso).
+    assert (
+        parse_aliexpress_product_ref(
+            "pt.aliexpress.com/item/%s.html" % BR_ID
+        )
+        is None
+    )
+
+
+# --------------------------------------------------------------------------
+# 2) Rota POST /buscar-id
+# --------------------------------------------------------------------------
+
+def test_buscar_id_por_numero_renderiza_detalhe(admin_catalog):
+    resp = admin_catalog.post(
+        f"{PREFIX}/buscar-id", data={"ref": PRODUCT_ID}
+    )
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert TITLE in body
+    assert PRODUCT_ID in body
+    assert "Importar como rascunho" in body
+    assert FakeAliExpressClient.calls[-1] == {
+        "op": "get_product",
+        "product_id": PRODUCT_ID,
+    }
+
+
+def test_buscar_id_por_url_extracao_e_detalhe(admin_catalog):
+    FakeAliExpressClient.details[BR_ID] = make_detail(product_id=BR_ID)
+    resp = admin_catalog.post(f"{PREFIX}/buscar-id", data={"ref": BR_URL})
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert BR_ID in body
+    assert FakeAliExpressClient.calls[-1] == {
+        "op": "get_product",
+        "product_id": BR_ID,
+    }
+
+
+def test_buscar_id_do_piloto_abre_detalhe_exato(admin_catalog):
+    """1005010478234256 (piloto): consulta por ID abre o detalhe com as
+    3 variações e seus IDs — o mesmo caminho do navegador, sem importar."""
+    FakeAliExpressClient.details[BR_ID] = _br_candidate_detail()
+    resp = admin_catalog.post(f"{PREFIX}/buscar-id", data={"ref": BR_ID})
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert BR_ID in body
+    assert "Variações (2)" in body
+    assert "%s-M-AZUL" % BR_ID in body
+    assert "%s-G-VERMELHO" % BR_ID in body
+    assert "Importar como rascunho" in body
+
+
+def test_buscar_id_invalido_volta_ao_catalogo_sem_chamar_api(admin_catalog):
+    before = list(FakeAliExpressClient.calls)
+    resp = admin_catalog.post(
+        f"{PREFIX}/buscar-id",
+        data={"ref": "loja física no centro"},
+        follow_redirects=True,
+    )
+    body = resp.get_data(as_text=True)
+    assert "ID numérico ou uma URL" in body
+    assert FakeAliExpressClient.calls == before
+
+
+def test_buscar_id_ausente_avisa_sem_chamar_importacao(admin_catalog):
+    resp = admin_catalog.post(
+        f"{PREFIX}/buscar-id",
+        data={"ref": "1005000000000000"},
+        follow_redirects=True,
+    )
+    assert "não encontrado no catálogo do fornecedor" in resp.get_data(
+        as_text=True
+    )
+
+
+def test_buscar_id_erro_da_api_e_sanitizado(admin_catalog):
+    FakeAliExpressClient.detail_error = AliExpressAPIError(
+        "falha simulada",
+        code="40001",
+        sub_code="isv.invalid",
+        raw={"app_secret": "SEGREDO", "sign": "ASSINATURA"},
+    )
+    resp = admin_catalog.post(
+        f"{PREFIX}/buscar-id",
+        data={"ref": PRODUCT_ID},
+        follow_redirects=True,
+    )
+    body = resp.get_data(as_text=True)
+    assert "falha simulada" in body
+    assert "SEGREDO" not in body
+    assert "ASSINATURA" not in body
+
+
+def test_catalogo_expoe_consulta_por_id_e_nota_de_limitacao(admin_catalog):
+    """A limitação (sem filtro de despacho) é comunicada na interface."""
+    resp = admin_catalog.get(f"{PREFIX}/")
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert 'name="ref"' in body
+    assert "não tem filtro por país de despacho" in body
+    assert "origem brasileira só vale com evidência por variante" in body
+    # Consulta por ID é a primeira ação do catálogo, antes da busca geral
+    # e da tabela de importados: facilmente acessível no topo.
+    assert body.index("/buscar-id") < body.index('/buscar"')
+    assert body.index("/buscar-id") < body.index("Produtos importados")
+
+
+def _form_segment(body, action_suffix):
+    """Segmento <form ...>...</form> da action indicada (único).
+
+    O sufixo casa até a aspa de fechamento: "/buscar" não confunde com
+    "/buscar-id".
+    """
+    import re
+
+    pattern = re.compile(
+        r'<form\b[^>]*action="[^"]*%s"[^>]*>(.*?)</form>' % action_suffix,
+        re.S,
+    )
+    matches = pattern.findall(body)
+    assert len(matches) == 1, action_suffix
+    return matches[0]
+
+
+def test_botao_consultar_anuncio_pertence_so_ao_form_buscar_id(admin_catalog):
+    """Botão visível e exclusivo: só o form /buscar-id o contém."""
+    body = admin_catalog.get(f"{PREFIX}/").get_data(as_text=True)
+    lookup = _form_segment(body, "/buscar-id")
+    assert 'type="submit"' in lookup
+    assert "Consultar anúncio" in lookup
+    search = _form_segment(body, '/buscar')
+    assert "Consultar anúncio" not in search
+
+
+def test_enter_no_campo_id_envia_o_proprio_formulario(admin_catalog):
+    """Cada campo está dentro do seu form com submit próprio (Enter envia o
+    form que contém o campo focado, sem JS e sem cruzar formulários)."""
+    body = admin_catalog.get(f"{PREFIX}/").get_data(as_text=True)
+    lookup = _form_segment(body, "/buscar-id")
+    assert 'name="ref"' in lookup
+    search = _form_segment(body, '/buscar')
+    assert 'name="q"' in search
+    assert 'name="ref"' not in search
+
+
+def test_botao_usa_so_classes_existentes_no_css_compilado(admin_catalog):
+    """Regressão do botão invisível: bg-gray-700 não existe no tailwind.css
+    compilado (purgado). O botão só pode usar classes presentes no build."""
+    import re
+    from pathlib import Path
+
+    body = admin_catalog.get(f"{PREFIX}/").get_data(as_text=True)
+    lookup = _form_segment(body, "/buscar-id")
+    btn = re.search(r"<button\b[^>]*class=\"([^\"]+)\"", lookup)
+    assert btn, "botão com class no form /buscar-id"
+    css = Path("public/static/styles/tailwind.css").read_text()
+    for cls in btn.group(1).split():
+        selector = cls.replace("hover:", r"hover\:") if ":" in cls else "." + cls
+        if ":" in cls:
+            assert selector in css, cls
+        else:
+            assert ("." + cls) in css, cls
+    assert "bg-gray-700" not in lookup
+
+
+# --------------------------------------------------------------------------
+# 3) Resumo sanitizado para o registro live (sem rede, detalhe sintético)
+# --------------------------------------------------------------------------
+
+def test_summarize_registra_produto_e_skus_sem_raw_ou_segredos():
+    from loja.integrations.aliexpress.product import summarize_product_detail
+
+    summary = summarize_product_detail(_br_candidate_detail())
+    assert summary["product_id"] == BR_ID
+    assert "Vestido" in (summary["title"] or "")
+    assert summary["currency"] == "BRL"
+    assert len(summary["skus"]) == 2
+    first = summary["skus"][0]
+    assert first["sku_id"] == "%s-M-AZUL" % BR_ID
+    assert first["available_stock"] == 7
+    assert first["sale_price"] == "69.85"
+    tamanho = next(a for a in first["attributes"] if a["name"] == "Tamanho")
+    assert tamanho["value"] == "M"
+    assert tamanho["sku_property_id"] == "14"
+    assert tamanho["property_value_id"] == "771"
+    assert "raw" not in summary
+    assert all("raw" not in sku for sku in summary["skus"])
+    dumped = str(summary)
+    assert "SEGREDO" not in dumped
+
+
+def test_format_candidate_error_nunca_inclui_raw():
+    from loja.integrations.aliexpress.product import format_candidate_error
+
+    formatted = format_candidate_error(
+        AliExpressAPIError(
+            "falha simulada",
+            code="40001",
+            sub_code="isv.invalid",
+            raw={"app_secret": "SEGREDO", "sign": "ASSINATURA"},
+        )
+    )
+    assert formatted == {
+        "type": "AliExpressAPIError",
+        "code": "40001",
+        "sub_code": "isv.invalid",
+        "message": "falha simulada",
+    }
+
+def test_catalogo_sem_config_explica_em_vez_de_ocultar_formularios(
+    client, admin_user, login, fake_client, monkeypatch
+):
+    """Preview sem env: sem sessão possível, a página explica (não some)."""
+    monkeypatch.delenv("ALIEXPRESS_ADMIN_SESSION_KEY", raising=False)
+    login(admin_user.email)
+    resp = client.get(f"{PREFIX}/")
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert "não configurada neste ambiente" in body
+    # Sem sessão não há formulários que funcionem — e a tabela de
+    # importados (dados existentes) continua visível.
+    assert "/buscar-id" not in body
+    assert "Produtos importados" in body
+
+
+# --------------------------------------------------------------------------
+# 4) Busca geral preservada, sem filtro de despacho
+# --------------------------------------------------------------------------
+
+def test_busca_geral_nao_envia_filtro_de_despacho():
+    from loja.integrations.aliexpress.search import build_search_params
+
+    params = build_search_params(
+        keyword="vestido floral",
+        locale="en_US",
+        country_code="BR",
+        currency="BRL",
+        category_id=None,
+        sort_by="orders,desc",
+        page_index=1,
+        page_size=20,
+        search_extend=None,
+        selection_name=None,
+    )
+    # countryCode é destino/moeda local (comprador BR), nunca prova de
+    # despacho; nenhum parâmetro de origem de envio existe aqui.
+    assert params["countryCode"] == "BR"
+    lowered = {str(k).lower() for k in params}
+    assert not {
+        k for k in lowered if "ship" in k or "dispatch" in k or "origin" in k
+    }
+    assert set(params) == {
+        "local",
+        "countryCode",
+        "currency",
+        "sortBy",
+        "pageIndex",
+        "pageSize",
+        "keyWord",
+    }
+
+
+# --------------------------------------------------------------------------
+# 6) Detalhe exibe IDs DS e dimensões por variante (mesma resposta)
+# --------------------------------------------------------------------------
+
+def test_detalhe_exibe_ids_e_dimensoes_por_variante(admin_catalog):
+    """Cada linha amarra sku_id, cor, tamanho e sku_property_ids."""
+    import re
+
+    FakeAliExpressClient.details[BR_ID] = _br_candidate_detail()
+    resp = admin_catalog.get(f"{PREFIX}/{BR_ID}/detalhe")
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert "IDs atributo/valor" in body
+
+    def row_for(sku_id):
+        segs = [s.split("</tr>")[0] for s in body.split("<tr") if sku_id in s]
+        assert len(segs) == 1, sku_id
+        return segs[0]
+
+    azul = row_for("%s-M-AZUL" % BR_ID)
+    assert "Azul" in azul
+    assert re.search(r">\s*M\s*<", azul)
+    assert "Tamanho (14) = M (771)" in azul
+    assert "Cor (10) = Azul (19)" in azul
+    assert "10:19;14:771" in azul
+    assert "69,85" in azul and "79,90" not in azul
+    assert "Vermelho" not in azul
+    assert "BRL" in azul
+
+    vermelho = row_for("%s-G-VERMELHO" % BR_ID)
+    assert "Vermelho" in vermelho
+    assert re.search(r">\s*G\s*<", vermelho)
+    assert "Tamanho (14) = G (772)" in vermelho
+    assert "Cor (10) = Vermelho (20)" in vermelho
+    assert "10:20;14:772" in vermelho
+    assert "10:19;14:771" not in vermelho
+    assert "79,90" in vermelho and "69,85" not in vermelho
+    assert "Azul" not in vermelho
+
+
+def test_sku_id_e_sku_attr_nunca_se_confunden_e_ausente_e_explicito(admin_catalog):
+    """sku_id, combinação e IDs vão em células separadas, sem substituição.
+
+    SKU X tem id numérico distinto da combinação; SKU Y não tem id — a
+    combinação aparece mesmo assim, e a célula do ID diz "Não fornecido"
+    em vez de repetir a combinação.
+    """
+    import re
+
+    def sku(color, size, pid_c, vid_c, pid_t, vid_t, sku_id):
+        def attr(name, value, pid, vid):
+            return {
+                "name": name,
+                "value": value,
+                "sku_property_id": pid,
+                "property_value_id": vid,
+            }
+
+        return AliExpressProductSku(
+            sku_id=sku_id,
+            sale_price=Decimal("69.85"),
+            original_price=Decimal("69.85"),
+            currency="BRL",
+            available_stock=7,
+            attributes=[
+                attr("Tamanho", size, pid_t, vid_t),
+                attr("Cor", color, pid_c, vid_c),
+            ],
+        )
+
+    detail = _br_candidate_detail()
+    detail.skus = [
+        sku("Azul", "M", "10", "20", "14", "772", "1005000000001"),
+        sku("Vermelho", "G", "10", "21", "14", "773", None),
+    ]
+    FakeAliExpressClient.details[BR_ID] = detail
+
+    body = admin_catalog.get(f"{PREFIX}/{BR_ID}/detalhe").get_data(as_text=True)
+
+    def cells_for(marker):
+        segs = [
+            s.split("</tr>")[0] for s in body.split("<tr") if marker in s
+        ]
+        assert len(segs) == 1, marker
+        return [
+            re.sub(r"\s+", " ", t).strip()
+            for t in re.findall(r"<td\b[^>]*>(.*?)</td>", segs[0], re.S)
+        ]
+
+    com_id = cells_for("1005000000001")
+    assert com_id[0] == "1005000000001"  # SKU (ID DS)
+    assert com_id[1] == "10:20;14:772"  # Combinação (sku_attr)
+    assert com_id[0] != com_id[1]
+
+    sem_id = cells_for("10:21;14:773")
+    assert sem_id[0] == "Não fornecido"
+    assert sem_id[1] == "10:21;14:773"
+
+    # ID do produto junto à tabela (identifica exportações).
+    assert ("Produto %s" % BR_ID) in body
+
+
+def test_detalhe_sem_ids_mostra_traco(admin_catalog):
+    FakeAliExpressClient.details[PRODUCT_ID] = make_detail()
+    body = admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/detalhe").get_data(
+        as_text=True
+    )
+    assert "%s-1" % PRODUCT_ID in body  # sku_id exibido mesmo sem IDs
+    assert "IDs atributo/valor" in body
+
+
+def test_detalhe_exige_login_admin(client):
+    resp = client.get(f"{PREFIX}/{PRODUCT_ID}/detalhe")
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/login")
+
+
+def test_detalhe_exige_sessao_aliexpress(client, admin_user, login, ae_env, fake_client):
+    login(admin_user.email)
+    resp = client.get(f"{PREFIX}/{PRODUCT_ID}/detalhe")
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith(PREFIX + "/")
+
+# --------------------------------------------------------------------------
+# 7) Runner de comparação on/off (offline, cliente fake, sem rede)
+# --------------------------------------------------------------------------
+
+from loja.integrations.aliexpress.product import (
+    VERDICT_DIFF,
+    VERDICT_NO_DIFF,
+    VERDICT_UNVIABLE,
+)
+
+
+def _load_query_module():
+    import sys
+    from pathlib import Path
+
+    scripts = str(Path("scripts").resolve())
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import query_aliexpress_candidates as qc
+    return qc
+
+
+class _FakeQueryClient:
+    """Fake mínimo: registra flags e devolve detalhe ou erro por (id, flag)."""
+
+    def __init__(self, detail, errors=()):
+        self.detail = detail
+        self.errors = set(errors)
+        self.calls = []
+
+    def get_product(self, *, product_id, remove_personal_benefit=True, **kwargs):
+        self.calls.append((product_id, remove_personal_benefit))
+        if (product_id, remove_personal_benefit) in self.errors:
+            raise AliExpressAPIError("falha simulada", code="40001")
+        return self.detail
+
+
+def test_compare_benefit_registra_flag_e_mercado_por_chamada():
+    qc = _load_query_module()
+    client = _FakeQueryClient(_br_candidate_detail())
+    records, failed = qc.query_candidates(client, compare_benefit=True)
+
+    assert failed == 0
+    by_flag = {}
+    for record in records:
+        assert record["ok"] is True
+        assert record["market"] == {
+            "ship_to_country": "BR",
+            "target_currency": "BRL",
+            "target_language": "pt",
+        }
+        by_flag.setdefault(record["product_id"], []).append(
+            record["remove_personal_benefit"]
+        )
+    # Comparação on/off só nos dois produtos; demais, uma vez ligada.
+    assert sorted(by_flag["1005010478234256"]) == [False, True]
+    assert sorted(by_flag["1005010502074833"]) == [False, True]
+    assert by_flag["1005013003211750"] == [True]
+    assert client.calls.count(("1005010478234256", True)) == 1
+    assert client.calls.count(("1005010478234256", False)) == 1
+
+
+def test_compare_benefit_isola_erro_por_flag():
+    """Erro numa flag não contamina a outra; cada registro carrega a flag
+    que o produziu, permitindo classificar sem atribuir causa. """
+    qc = _load_query_module()
+    client = _FakeQueryClient(
+        _br_candidate_detail(), errors={("1005010478234256", False)}
+    )
+    records, failed = qc.query_candidates(client, compare_benefit=True)
+
+    assert failed == 1
+    flagged = {
+        (r["product_id"], r["remove_personal_benefit"]): r for r in records
+    }
+    bad = flagged[("1005010478234256", False)]
+    assert bad["ok"] is False
+    assert bad["error"]["code"] == "40001"
+    good = flagged[("1005010478234256", True)]
+    assert good["ok"] is True
+    assert good["detail"]["product_id"] == BR_ID
+
+
+def test_sem_comparacao_chama_uma_vez_ligado():
+    qc = _load_query_module()
+    client = _FakeQueryClient(_br_candidate_detail())
+    records, failed = qc.query_candidates(client, compare_benefit=False)
+
+    assert failed == 0
+    assert len(records) == len(qc.CANDIDATES)
+    assert {r["remove_personal_benefit"] for r in records} == {True}
+
+# --------------------------------------------------------------------------
+# 8) Classificação on/off (vocabulário exato, offline, sem rede)
+# --------------------------------------------------------------------------
+
+class _FlaggedQueryClient:
+    """Fake por (produto, flag): detalhe distinto ou erro por chamada."""
+
+    def __init__(self, details, *, default_detail=None):
+        self.details = details
+        self.default_detail = default_detail
+        self.calls = []
+
+    def get_product(self, *, product_id, remove_personal_benefit=True, **kwargs):
+        self.calls.append((product_id, remove_personal_benefit))
+        value = self.details.get(
+            (product_id, remove_personal_benefit), self.default_detail
+        )
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
+def _detail_with_price(base, price):
+    import copy
+
+    detail = copy.deepcopy(base)
+    for sku in detail.skus:
+        sku.sale_price = Decimal(price)
+    return detail
+
+
+def test_classificacao_iguais_e_efeito_inconclusivo():
+    qc = _load_query_module()
+    detail = _br_candidate_detail()
+    client = _FlaggedQueryClient(
+        {
+            ("1005010478234256", True): detail,
+            ("1005010478234256", False): detail,
+            ("1005010502074833", True): detail,
+            ("1005010502074833", False): detail,
+        },
+        default_detail=detail,
+    )
+    records, failed = qc.query_candidates(client, compare_benefit=True)
+    assert failed == 0
+    comps = {c["product_id"]: c for c in qc.compare_benefit_records(records)}
+    for pid in ("1005010478234256", "1005010502074833"):
+        # Vocabulário exato da classificação (efeito inconclusivo).
+        assert comps[pid]["overall"] == (
+            "nenhuma diferença observada; efeito inconclusivo"
+        )
+        assert comps[pid]["experimental_parameter"] is True
+        assert "experimental" in comps[pid]["parameter_note"]
+        assert "não usado como garantia" in comps[pid]["parameter_note"]
+
+
+def test_classificacao_diferentes_nao_atribui_ao_parametro():
+    qc = _load_query_module()
+    client = _FlaggedQueryClient(
+        {
+            ("1005010478234256", True): _br_candidate_detail(),
+            ("1005010478234256", False): _detail_with_price(
+                _br_candidate_detail(), "35.90"
+            ),
+            ("1005010502074833", True): _br_candidate_detail(),
+            ("1005010502074833", False): _br_candidate_detail(),
+        },
+        default_detail=_br_candidate_detail(),
+    )
+    records, failed = qc.query_candidates(client, compare_benefit=True)
+    assert failed == 0
+    comps = {c["product_id"]: c for c in qc.compare_benefit_records(records)}
+    assert comps["1005010478234256"]["overall"] == VERDICT_DIFF
+    assert comps["1005010478234256"]["overall"] == (
+        "diferença observada, ainda não atribuída ao parâmetro"
+    )
+    assert comps["1005010502074833"]["overall"] == VERDICT_NO_DIFF
+
+
+def test_classificacao_erro_inviabiliza_sem_atribuir():
+    qc = _load_query_module()
+    client = _FlaggedQueryClient(
+        {
+            ("1005010478234256", True): _br_candidate_detail(),
+            ("1005010478234256", False): AliExpressAPIError(
+                "falha simulada", code="40001"
+            ),
+            ("1005010502074833", True): _br_candidate_detail(),
+            ("1005010502074833", False): _br_candidate_detail(),
+        },
+        default_detail=_br_candidate_detail(),
+    )
+    records, failed = qc.query_candidates(client, compare_benefit=True)
+    assert failed == 1
+    comps = {c["product_id"]: c for c in qc.compare_benefit_records(records)}
+    assert comps["1005010478234256"]["overall"] == VERDICT_UNVIABLE
+
+
+def test_repeticao_alterna_ordem_das_flags():
+    qc = _load_query_module()
+    detail = _br_candidate_detail()
+    client = _FlaggedQueryClient(
+        {
+            (pid, flag): detail
+            for pid in ("1005010478234256", "1005010502074833")
+            for flag in (True, False)
+        },
+        default_detail=detail,
+    )
+    records, failed = qc.query_candidates(
+        client, compare_benefit=True, repeat=2
+    )
+    assert failed == 0
+    # Ordem real registrada pelo fake: rodada 0 (on, off), rodada 1 (off, on).
+    seq = [(pid, flag) for pid, flag in client.calls if pid == "1005010478234256"]
+    assert seq == [
+        ("1005010478234256", True),
+        ("1005010478234256", False),
+        ("1005010478234256", False),
+        ("1005010478234256", True),
+    ]
+    rounds = [
+        r["round"]
+        for r in records
+        if r["product_id"] == "1005010478234256"
+    ]
+    assert rounds == [0, 0, 1, 1]
+
+
+def test_repeat_invalido_rejeitado_sem_rede():
+    qc = _load_query_module()
+    with pytest.raises(SystemExit):
+        qc.main(["--compare-benefit", "--repeat", "0"])
+
+# --------------------------------------------------------------------------
+# 9) Ação comparar-preco: uma rodada por acionamento, só leitura
+# --------------------------------------------------------------------------
+
+def _flagged_get_product(monkeypatch, calls, mapping):
+    """Troca o get_product do Fake por versão que varia por flag.
+
+    Chamadas fora do mapa caem no comportamento padrão do Fake
+    (details/error da classe), para não quebrar redirects que reconsultam.
+    """
+
+    def fake_get_product(self, product_id=None, remove_personal_benefit=True, **kwargs):
+        calls.append((product_id, remove_personal_benefit))
+        if (product_id, remove_personal_benefit) in mapping:
+            value = mapping[(product_id, remove_personal_benefit)]
+            if isinstance(value, Exception):
+                raise value
+            return value
+        if FakeAliExpressClient.detail_error is not None:
+            raise FakeAliExpressClient.detail_error
+        return FakeAliExpressClient.details.get(product_id)
+
+    monkeypatch.setattr(FakeAliExpressClient, "get_product", fake_get_product)
+
+
+def test_comparar_exige_login_admin(client):
+    resp = client.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    )
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/login")
+
+
+def test_comparar_exige_sessao_aliexpress(
+    client, admin_user, login, ae_env, fake_client
+):
+    login(admin_user.email)
+    resp = client.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    )
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith(PREFIX + "/")
+
+
+def test_comparar_get_nao_permitido(admin_catalog):
+    assert (
+        admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/comparar-preco").status_code
+        == 405
+    )
+
+
+def test_comparar_rodada_invalida_volta_ao_detalhe_sem_chamar_api(
+    admin_catalog, monkeypatch
+):
+    calls = []
+    _flagged_get_product(monkeypatch, calls, {})
+    resp = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco",
+        data={"rodada": "9"},
+        follow_redirects=True,
+    )
+    assert "Rodada inválida" in resp.get_data(as_text=True)
+    # A rota não chamou a API; a única chamada é do redirect (detalhe).
+    assert calls == [(PRODUCT_ID, True)]
+
+
+def _pilot_details():
+    from copy import deepcopy
+
+    on = _br_candidate_detail(product_id=PRODUCT_ID)
+    off = deepcopy(on)
+    return on, off
+
+
+def test_comparar_rodada1_ordem_veredito_e_sem_escritas(admin_catalog, db, monkeypatch):
+    on, off = _pilot_details()
+    calls = []
+    _flagged_get_product(
+        monkeypatch,
+        calls,
+        {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off},
+    )
+    before = {
+        "products": Product.query.count(),
+        "variants": ProductVariant.query.count(),
+        "links": SupplierProduct.query.count(),
+        "origins": SupplierSkuShippingOrigin.query.count(),
+    }
+    resp = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    )
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    # Ordem da rodada ímpar: ligado, depois desligado.
+    assert calls == [(PRODUCT_ID, True), (PRODUCT_ID, False)]
+    # Por variante: IDs, combinação dos dois lados, preços e veredito.
+    assert PRODUCT_ID in body
+    assert "10:19;14:771" in body
+    assert "69,85" in body
+    assert "nenhuma diferença observada; efeito inconclusivo" in body
+    assert "experimental" in body
+    # Somente leitura: nada criado no catálogo (contagens intactas).
+    assert Product.query.count() == before["products"]
+    assert ProductVariant.query.count() == before["variants"]
+    assert SupplierProduct.query.count() == before["links"]
+    assert SupplierSkuShippingOrigin.query.count() == before["origins"]
+
+
+def test_comparar_rodada2_inverte_ordem(admin_catalog, monkeypatch):
+    on, off = _pilot_details()
+    calls = []
+    _flagged_get_product(
+        monkeypatch,
+        calls,
+        {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off},
+    )
+    resp = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "2"}
+    )
+    assert resp.status_code == 200
+    assert calls == [(PRODUCT_ID, False), (PRODUCT_ID, True)]
+    assert "Rodada 2 de 3" in resp.get_data(as_text=True)
+
+
+def test_comparar_divergencia_nao_atribui_ao_parametro(admin_catalog, monkeypatch):
+    on, off = _pilot_details()
+    off.skus[0].sale_price = Decimal("35.90")
+    calls = []
+    _flagged_get_product(
+        monkeypatch,
+        calls,
+        {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off},
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    assert "diferença observada, ainda não atribuída ao parâmetro" in body
+    assert "69,85" in body and "35,90" in body
+
+
+def test_comparar_falha_parcial_sanitizada_e_inviavel(admin_catalog, monkeypatch):
+    on, _off = _pilot_details()
+    calls = []
+    _flagged_get_product(
+        monkeypatch,
+        calls,
+        {
+            (PRODUCT_ID, True): on,
+            (PRODUCT_ID, False): AliExpressAPIError(
+                "falha simulada",
+                code="40001",
+                raw={"app_secret": "SEGREDO"},
+            ),
+        },
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "3"}
+    ).get_data(as_text=True)
+    assert "comparação inviável" in body
+    assert "falha simulada" in body
+    assert "SEGREDO" not in body
+
+
+def test_comparar_produto_ausente_e_inviavel(admin_catalog, monkeypatch):
+    calls = []
+    _flagged_get_product(
+        monkeypatch,
+        calls,
+        {(PRODUCT_ID, True): None, (PRODUCT_ID, False): None},
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    assert "comparação inviável" in body
+    assert "produto não retornado" in body
+
+# --------------------------------------------------------------------------
+# 10) Moeda: resposta → normalização → linha (sem fallback silencioso)
+# --------------------------------------------------------------------------
+
+def _detail_currency(product_id, sku_currency, product_currency, price="69.85"):
+    sku = AliExpressProductSku(
+        sku_id="%s-M-AZUL" % product_id,
+        sale_price=Decimal(price),
+        original_price=Decimal(price),
+        currency=sku_currency,
+        available_stock=7,
+        attributes=[{"name": "Cor", "value": "Azul"}],
+    )
+    return AliExpressProductDetail(
+        product_id=product_id,
+        title="Moeda",
+        description="",
+        images=[],
+        skus=[sku],
+        available_stock=7,
+        sale_price=Decimal(price),
+        original_price=Decimal(price),
+        currency=product_currency,
+    )
+
+
+def test_moeda_explicita_da_variante_preservada(admin_catalog):
+    FakeAliExpressClient.details[PRODUCT_ID] = _detail_currency(
+        PRODUCT_ID, "USD", "BRL"
+    )
+    body = admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/detalhe").get_data(
+        as_text=True
+    )
+    segs = [
+        s.split("</tr>")[0]
+        for s in body.split("<tr")
+        if "%s-M-AZUL" % PRODUCT_ID in s
+    ]
+    assert len(segs) == 1
+    # A linha da variante mostra a moeda dela, não a do produto.
+    assert "USD" in segs[0]
+
+
+def test_moeda_so_no_produto_propagada_para_linha(admin_catalog):
+    FakeAliExpressClient.details[PRODUCT_ID] = _detail_currency(
+        PRODUCT_ID, None, "EUR"
+    )
+    body = admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/detalhe").get_data(
+        as_text=True
+    )
+    segs = [
+        s.split("</tr>")[0]
+        for s in body.split("<tr")
+        if "%s-M-AZUL" % PRODUCT_ID in s
+    ]
+    assert len(segs) == 1
+    assert "EUR" in segs[0]
+
+
+def test_moeda_ausente_mostra_nao_fornecida_sem_fabricar_brl(admin_catalog):
+    """Sem currency_code na resposta, a tela diz; o BRL do destino
+    (sempre pedido pela rota) nunca vira moeda da resposta."""
+    FakeAliExpressClient.details[PRODUCT_ID] = _detail_currency(
+        PRODUCT_ID, None, None
+    )
+    body = admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/detalhe").get_data(
+        as_text=True
+    )
+    assert "Moeda: Não fornecida" in body
+    segs = [
+        s.split("</tr>")[0]
+        for s in body.split("<tr")
+        if "%s-M-AZUL" % PRODUCT_ID in s
+    ]
+    assert len(segs) == 1
+    # A célula de moeda da variante não fabrica o BRL do destino.
+    assert "Não fornecida" in segs[0]
+    assert "BRL" not in segs[0]
+    # Preço e identificadores intactos apesar da moeda ausente.
+    assert "%s-M-AZUL" % PRODUCT_ID in body
+    assert "69,85" in body
+
+# --------------------------------------------------------------------------
+# 11) Moeda bruta da resposta (só currency_code, sem JSON completo)
+# --------------------------------------------------------------------------
+
+def _detail_with_raw(product_id=PRODUCT_ID):
+    sku = AliExpressProductSku(
+        sku_id="%s-M-AZUL" % product_id,
+        sale_price=Decimal("69.85"),
+        original_price=Decimal("69.85"),
+        currency="BRL",
+        available_stock=7,
+        attributes=[{"name": "Cor", "value": "Azul"}],
+    )
+    sku.raw = {
+        "id": "%s-M-AZUL" % product_id,
+        "currency_code": "BRL",
+        "app_secret": "SEGREDO",
+        "access_token": "TOKEN",
+    }
+    detail = AliExpressProductDetail(
+        product_id=product_id,
+        title="Moeda bruta",
+        description="",
+        images=[],
+        skus=[sku],
+        available_stock=7,
+        sale_price=Decimal("69.85"),
+        original_price=Decimal("69.85"),
+        currency="BRL",
+    )
+    detail.raw = {
+        "ae_item_base_info_dto": {"currency_code": "EUR", "subject": "x"},
+        "outro_bloco": {"app_secret": "SEGREDO"},
+    }
+    return detail
+
+
+def test_moeda_bruta_exige_login_admin(client):
+    resp = client.post(f"{PREFIX}/{PRODUCT_ID}/moeda-bruta", data={})
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/login")
+
+
+def test_moeda_bruta_exige_sessao_aliexpress(
+    client, admin_user, login, ae_env, fake_client
+):
+    login(admin_user.email)
+    resp = client.post(f"{PREFIX}/{PRODUCT_ID}/moeda-bruta", data={})
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith(PREFIX + "/")
+
+
+def test_moeda_bruta_get_nao_permitido(admin_catalog):
+    assert (
+        admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/moeda-bruta").status_code
+        == 405
+    )
+
+
+def test_moeda_bruta_mostra_so_currency_code_sem_vazar_resto(admin_catalog, db):
+    FakeAliExpressClient.details[PRODUCT_ID] = _detail_with_raw()
+    before = (Product.query.count(), SupplierSkuShippingOrigin.query.count())
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/moeda-bruta", data={}
+    ).get_data(as_text=True)
+    assert PRODUCT_ID in body
+    # Base e variante, só os currency_code.
+    assert "EUR" in body
+    assert "BRL" in body
+    # Nada do resto do raw, nenhum segredo (o nome do campo no título
+    # é intencional: diz de onde veio o valor, sem expor o payload).
+    assert "SEGREDO" not in body
+    assert "TOKEN" not in body
+    assert "outro_bloco" not in body
+    assert "ae_item_base_info_dto" in body
+    # Somente leitura: nada criado.
+    assert (Product.query.count(), SupplierSkuShippingOrigin.query.count()) == before
+
+
+def test_moeda_bruta_filtra_variante_exata(admin_catalog):
+    FakeAliExpressClient.details[PRODUCT_ID] = _detail_with_raw()
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/moeda-bruta",
+        data={"sku_id": "%s-M-AZUL" % PRODUCT_ID},
+    ).get_data(as_text=True)
+    assert "EUR" in body and "BRL" in body
+
+    missing = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/moeda-bruta",
+        data={"sku_id": "INEXISTENTE"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "não encontrada na resposta" in missing
+
+
+def test_moeda_bruta_ausente_mostra_nao_fornecida(admin_catalog):
+    FakeAliExpressClient.details[PRODUCT_ID] = make_detail()
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/moeda-bruta", data={}
+    ).get_data(as_text=True)
+    # make_detail não define raw: base e variante sem moeda.
+    assert body.count("Não fornecida") >= 2
+
+# --------------------------------------------------------------------------
+# 12) Comparação sem parear sem-ID; moedas por lado (sem cruzamento)
+# --------------------------------------------------------------------------
+
+def _no_id_detail(entries):
+    """Detalhe sintético com SKUs sem id: [(cor, tamanho, preço, estoque)]."""
+    skus = []
+    for color, size, price, stock in entries:
+        skus.append(
+            AliExpressProductSku(
+                sku_id=None,
+                sale_price=Decimal(price),
+                original_price=Decimal(price),
+                currency="BRL",
+                available_stock=stock,
+                attributes=[
+                    {"name": "Cor", "value": color},
+                    {"name": "Tamanho", "value": size},
+                ],
+            )
+        )
+    return AliExpressProductDetail(
+        product_id=PRODUCT_ID,
+        title="Sem ID",
+        description="",
+        images=[],
+        skus=skus,
+        available_stock=sum(s.available_stock or 0 for s in skus),
+        sale_price=Decimal("10.00"),
+        original_price=Decimal("10.00"),
+        currency="BRL",
+    )
+
+
+def _comparar_table(body):
+    table = _variations_table(body)
+    assert table["headers"] == EXPECTED_VARIATION_HEADERS
+    return table["rows"]
+
+
+def _flat(body):
+    return re.sub(r"\s+", " ", body)
+
+
+def test_sem_id_duas_variantes_permanecem_visiveis(admin_catalog, monkeypatch):
+    calls = []
+    detail = _no_id_detail([("Azul", "Medio", "10.00", 5), ("Vermelho", "Grande", "20.00", 6)])
+    _flagged_get_product(
+        monkeypatch, calls, {(PRODUCT_ID, True): detail, (PRODUCT_ID, False): detail}
+    )
+    rows = _comparar_table(
+        admin_catalog.post(
+            f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+        ).get_data(as_text=True)
+    )
+    # 2 variantes × 2 lados = 4 linhas separadas, sem agrupar sob None.
+    assert len(rows) == 4
+    got = sorted(
+        (r["Atributos"], r["Preço (on)"], r["Preço (off)"]) for r in rows
+    )
+    assert got == [
+        ("Azul, Medio", "10,00", "—"),
+        ("Azul, Medio", "—", "10,00"),
+        ("Vermelho, Grande", "20,00", "—"),
+        ("Vermelho, Grande", "—", "20,00"),
+    ]
+    for row in rows:
+        assert row["SKU (ID DS)"] == "Não fornecido"
+        assert row["Pareamento"] == "Pareamento não comprovado"
+
+
+def test_sem_id_ordem_invertida_nao_compara_m_com_g(admin_catalog, monkeypatch):
+    on = _no_id_detail([("Azul", "Medio", "10.00", 5), ("Vermelho", "Grande", "20.00", 6)])
+    off = _no_id_detail([("Vermelho", "Grande", "20.00", 6), ("Azul", "Medio", "10.00", 5)])
+    calls = []
+    _flagged_get_product(
+        monkeypatch, calls, {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off}
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    rows = _comparar_table(body)
+    # Mesmas 4 linhas da ordem direta: ordem não cria pareamento.
+    assert len(rows) == 4
+    got = sorted(
+        (r["Atributos"], r["Preço (on)"], r["Preço (off)"]) for r in rows
+    )
+    assert got == [
+        ("Azul, Medio", "10,00", "—"),
+        ("Azul, Medio", "—", "10,00"),
+        ("Vermelho, Grande", "20,00", "—"),
+        ("Vermelho, Grande", "—", "20,00"),
+    ]
+    for row in rows:
+        assert row["Pareamento"] == "Pareamento não comprovado"
+    # Sem comparação entre não identificadas: nenhum marcador de diferença.
+    assert "≠" not in body
+
+
+def test_variante_so_de_um_lado_nao_desaparece(admin_catalog, monkeypatch, db):
+    from copy import deepcopy
+
+    on, _off = _pilot_details()
+    off = deepcopy(on)
+    off.skus = [sku for sku in off.skus if sku.sku_id != "%s-G-VERMELHO" % PRODUCT_ID]
+    calls = []
+    _flagged_get_product(
+        monkeypatch, calls, {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off}
+    )
+    rows = _comparar_table(
+        admin_catalog.post(
+            f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+        ).get_data(as_text=True)
+    )
+    by_sku = {r["SKU (ID DS)"]: r for r in rows}
+    assert by_sku["%s-G-VERMELHO" % PRODUCT_ID]["Preço (off)"] == "—"
+    assert by_sku["%s-G-VERMELHO" % PRODUCT_ID]["Preço (on)"] == "79,90"
+    assert by_sku["%s-G-VERMELHO" % PRODUCT_ID]["Pareamento"] == (
+        "Pareamento não comprovado"
+    )
+    assert by_sku["%s-M-AZUL" % PRODUCT_ID]["Pareamento"] == "por ID"
+
+
+def test_moedas_diferentes_mantidas_sem_comparacao_direta(admin_catalog, monkeypatch):
+    on = _detail_currency(PRODUCT_ID, "USD", "USD", price="10.00")
+    off = _detail_currency(PRODUCT_ID, "BRL", "BRL", price="10.00")
+    calls = []
+    _flagged_get_product(
+        monkeypatch, calls, {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off}
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    rows = _comparar_table(body)
+    assert len(rows) == 1
+    assert rows[0]["Moeda (on/off)"] == "USD / BRL"
+    assert rows[0]["Atributos"] == "Azul"
+    assert "não podem ser comparados diretamente" in _flat(body)
+    # Moedas diferentes: detalhe difere → diferença observada, sem atribuir.
+    assert "diferença observada, ainda não atribuída ao parâmetro" in body
+
+
+def test_moeda_ausente_num_lado_nao_preenchida_pelo_outro(admin_catalog, monkeypatch):
+    on = _detail_currency(PRODUCT_ID, "USD", "USD", price="10.00")
+    off = _detail_currency(PRODUCT_ID, None, None, price="10.00")
+    calls = []
+    _flagged_get_product(
+        monkeypatch, calls, {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off}
+    )
+    rows = _comparar_table(
+        admin_catalog.post(
+            f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+        ).get_data(as_text=True)
+    )
+    assert len(rows) == 1
+    assert rows[0]["Moeda (on/off)"] == "USD / Não fornecida"
+    assert rows[0]["Atributos"] == "Azul"
+
+
+def test_moeda_fallback_variante_para_produto_na_mesma_resposta(admin_catalog, monkeypatch):
+    on = _detail_currency(PRODUCT_ID, None, "EUR", price="10.00")
+    off = _detail_currency(PRODUCT_ID, None, "EUR", price="10.00")
+    calls = []
+    _flagged_get_product(
+        monkeypatch, calls, {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off}
+    )
+    rows = _comparar_table(
+        admin_catalog.post(
+            f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+        ).get_data(as_text=True)
+    )
+    assert len(rows) == 1
+    assert rows[0]["Moeda (on/off)"] == "EUR / EUR"
+    assert rows[0]["Atributos"] == "Azul"
+
+
+def test_moedas_ausentes_sem_brl_fabricado(admin_catalog, monkeypatch):
+    on = _detail_currency(PRODUCT_ID, None, None, price="10.00")
+    off = _detail_currency(PRODUCT_ID, None, None, price="10.00")
+    calls = []
+    _flagged_get_product(
+        monkeypatch, calls, {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off}
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    rows = _comparar_table(body)
+    assert len(rows) == 1
+    assert rows[0]["Moeda (on/off)"] == "Não fornecida / Não fornecida"
+    assert "BRL" not in rows[0]["Moeda (on/off)"]
+    assert rows[0]["Atributos"] == "Azul"
+    assert "não podem ser comparados diretamente" in _flat(body)
+
+# --------------------------------------------------------------------------
+# 13) Helper de tabela renderizada (html.parser da stdlib, sem dependência)
+# --------------------------------------------------------------------------
+
+from html.parser import HTMLParser
+
+
+class _VariationsTableParser(HTMLParser):
+    """Extrai a tabela sob o h2 "Variações": cabeçalhos e células por linha."""
+
+    def __init__(self):
+        super().__init__()
+        self._in_h2 = False
+        self._saw_variations = False
+        self._in_table = False
+        self._in_thead = False
+        self._in_th = False
+        self._in_td = False
+        self._buf = []
+        self.headers = []
+        self.rows = []
+        self._current = None
+
+    @staticmethod
+    def _norm(text):
+        import re as _re
+
+        return _re.sub(r"\s+", " ", text).strip()
+
+    def _text(self):
+        return "".join(self._buf)
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "h2":
+            self._in_h2 = True
+            self._buf = []
+        elif tag == "table" and self._saw_variations and not self.headers:
+            self._in_table = True
+        elif tag == "thead" and self._in_table:
+            self._in_thead = True
+        elif tag == "th" and self._in_thead:
+            self._in_th = True
+            self._buf = []
+        elif tag == "tr" and self._in_table and not self._in_thead:
+            self._current = []
+        elif tag == "td" and self._current is not None:
+            self._in_td = True
+            self._buf = []
+
+    def handle_endtag(self, tag):
+        if tag == "h2":
+            if "Variações" in self._text():
+                self._saw_variations = True
+            self._in_h2 = False
+        elif tag == "table":
+            self._in_table = False
+        elif tag == "thead":
+            self._in_thead = False
+        elif tag == "th":
+            if self._in_th:
+                self.headers.append(self._norm(self._text()))
+            self._in_th = False
+        elif tag == "tr":
+            if self._current is not None:
+                self.rows.append(self._current)
+                self._current = None
+        elif tag == "td":
+            if self._in_td and self._current is not None:
+                self._current.append(self._norm(self._text()))
+            self._in_td = False
+
+    def handle_data(self, data):
+        if self._in_h2 or self._in_th or self._in_td:
+            self._buf.append(data)
+
+
+def _variations_table(body):
+    """Mapa {cabeçalho: célula} por linha da tabela de variações.
+
+    Falha se a tabela não for localizada, se houver cabeçalho duplicado
+    ou se alguma linha tiver contagem de células diferente.
+    """
+    parser = _VariationsTableParser()
+    parser.feed(body)
+    assert parser.headers, "tabela de variações não localizada"
+    assert len(set(parser.headers)) == len(parser.headers), parser.headers
+    assert parser.rows, "nenhuma linha na tabela de variações"
+    for row in parser.rows:
+        assert len(row) == len(parser.headers), (row, parser.headers)
+    return {
+        "headers": parser.headers,
+        "rows": [dict(zip(parser.headers, row)) for row in parser.rows],
+    }
+
+
+EXPECTED_VARIATION_HEADERS = [
+    "SKU (ID DS)",
+    "Pareamento",
+    "Atributos",
+    "sku_attr (on)",
+    "sku_attr (off)",
+    "Preço (on)",
+    "Preço (off)",
+    "Moeda (on/off)",
+    "Estoque (on/off)",
+]
+
+
+def _single_variant_detail(price, currency, sku_id="S-AZUL-M"):
+    """Um SKU (Azul/M com IDs) para asserções posicionais exatas."""
+    return AliExpressProductDetail(
+        product_id=PRODUCT_ID,
+        title="Comparar",
+        description="",
+        images=[],
+        skus=[
+            AliExpressProductSku(
+                sku_id=sku_id,
+                sale_price=Decimal(price),
+                original_price=Decimal(price),
+                currency=currency,
+                available_stock=7,
+                attributes=[
+                    {
+                        "name": "Cor",
+                        "value": "Azul",
+                        "sku_property_id": "10",
+                        "property_value_id": "19",
+                    },
+                    {
+                        "name": "Tamanho",
+                        "value": "M",
+                        "sku_property_id": "14",
+                        "property_value_id": "771",
+                    },
+                ],
+            )
+        ],
+        available_stock=7,
+        sale_price=Decimal(price),
+        original_price=Decimal(price),
+        currency=currency,
+    )
+
+
+def test_comparar_colunas_atributos_e_moedas_na_posicao(admin_catalog, monkeypatch):
+    """Mesma variante nos dois lados: cada dado na sua coluna."""
+    calls = []
+    _flagged_get_product(
+        monkeypatch,
+        calls,
+        {
+            (PRODUCT_ID, True): _single_variant_detail("10.00", "USD"),
+            (PRODUCT_ID, False): _single_variant_detail("50.00", "BRL"),
+        },
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    table = _variations_table(body)
+    assert table["headers"] == EXPECTED_VARIATION_HEADERS
+    assert len(table["rows"]) == 1
+    row = table["rows"][0]
+    assert row["SKU (ID DS)"] == "S-AZUL-M"
+    assert row["Atributos"] == "Azul, M"
+    assert row["Preço (on)"] == "10,00"
+    assert row["Preço (off)"] == "50,00"
+    assert row["Moeda (on/off)"] == "USD / BRL"
+    assert row["Pareamento"] == "por ID"
+    assert "não podem ser comparados diretamente" in re.sub(r"\s+", " ", body)
+
+def _br_candidate_detail(product_id=BR_ID):
+    """Rascunho sintético no formato do anúncio BR observado (2 variantes).
+
+    Os valores espelham o anúncio público listado na investigação
+    (vestido, ~R$ 69,85, 2 opções de tamanho/cor); a origem NÃO vem na
+    resposta — entra só por confirmação manual com evidência.
+    """
+    skus = [
+        AliExpressProductSku(
+            sku_id="%s-M-AZUL" % product_id,
+            sale_price=Decimal("69.85"),
+            original_price=Decimal("69.85"),
+            currency="BRL",
+            available_stock=7,
+            attributes=[
+                {
+                    "name": "Tamanho",
+                    "value": "M",
+                    "sku_property_id": "14",
+                    "property_value_id": "771",
+                },
+                {
+                    "name": "Cor",
+                    "value": "Azul",
+                    "sku_property_id": "10",
+                    "property_value_id": "19",
+                },
+            ],
+        ),
+        AliExpressProductSku(
+            sku_id="%s-G-VERMELHO" % product_id,
+            sale_price=Decimal("79.90"),
+            original_price=Decimal("79.90"),
+            currency="BRL",
+            available_stock=4,
+            attributes=[
+                {
+                    "name": "Tamanho",
+                    "value": "G",
+                    "sku_property_id": "14",
+                    "property_value_id": "772",
+                },
+                {
+                    "name": "Cor",
+                    "value": "Vermelho",
+                    "sku_property_id": "10",
+                    "property_value_id": "20",
+                },
+            ],
+        ),
+    ]
+    return AliExpressProductDetail(
+        product_id=product_id,
+        title="Vestido candidato BR (sintético)",
+        description="Detalhe sintético para o fluxo de origem.",
+        images=["https://ae.example/br1.jpg"],
+        skus=skus,
+        available_stock=11,
+        sale_price=Decimal("69.85"),
+        original_price=Decimal("79.90"),
+        currency="BRL",
+    )
+
+
+def _draft_from_db(product_id=BR_ID):
+    from loja.modules.models import Product
+
+    return Product.query.filter_by(
+        source="aliexpress", external_id=product_id, is_draft=True
+    ).first()
+
+
+def test_importacao_do_candidato_preserva_identidade_e_e_idempotente(
+    admin_catalog, db
+):
+    FakeAliExpressClient.details[BR_ID] = _br_candidate_detail()
+
+    first = admin_catalog.post(
+        f"{PREFIX}/{BR_ID}/importar", follow_redirects=True
+    )
+    assert "Produto importado como rascunho" in first.get_data(as_text=True)
+
+    product = _draft_from_db()
+    assert product is not None
+    variants = {v.supplier_sku_id: v for v in product.variants}
+    assert set(variants) == {"%s-M-AZUL" % BR_ID, "%s-G-VERMELHO" % BR_ID}
+    # Estoque, preços e moeda coerentes com o anúncio.
+    assert variants["%s-M-AZUL" % BR_ID].stock == 7
+    assert variants["%s-G-VERMELHO" % BR_ID].stock == 4
+    assert product.currency == "BRL"
+    assert product.price == Decimal("69.85")
+    # Atributos necessários ao pedido no fornecedor preservados por SKU.
+    attrs = {
+        a["name"]: a
+        for a in variants["%s-M-AZUL" % BR_ID].attributes or []
+    }
+    assert attrs["Tamanho"]["sku_property_id"] == "14"
+    assert attrs["Tamanho"]["property_value_id"] == "771"
+    assert attrs["Cor"]["property_value_id"] == "19"
+
+    # Reimportação idempotente: sem duplicatas.
+    second = admin_catalog.post(
+        f"{PREFIX}/{BR_ID}/importar", follow_redirects=True
+    )
+    assert "Produto importado como rascunho" in second.get_data(as_text=True)
+    db.session.expire_all()
+    assert len(_draft_from_db().variants) == 2
+
+
+def test_candidato_importado_nasce_com_origem_desconhecida(admin_catalog, db):
+    from loja.services.shipping_origin import resolve_product_summary
+
+    FakeAliExpressClient.details[BR_ID] = _br_candidate_detail()
+    admin_catalog.post(f"{PREFIX}/{BR_ID}/importar", follow_redirects=True)
+
+    db.session.expire_all()
+    summary = resolve_product_summary(_draft_from_db())
+    assert summary.label == "unknown"
+    assert summary.unknown == 2
+
+
+def test_confirmacao_de_uma_variante_nao_nacionaliza_as_demais(
+    admin_catalog, db
+):
+    from loja.modules.models import SupplierProduct
+    from loja.services.shipping_origin import (
+        record_manual_confirmation,
+        resolve_product_summary,
+    )
+
+    FakeAliExpressClient.details[BR_ID] = _br_candidate_detail()
+    admin_catalog.post(f"{PREFIX}/{BR_ID}/importar", follow_redirects=True)
+
+    db.session.expire_all()
+    supplier_product = SupplierProduct.query.filter_by(
+        product_id=_draft_from_db().id
+    ).first()
+    record_manual_confirmation(
+        supplier_product_id=supplier_product.id,
+        origin="brazil",
+        evidence_ref="https://pt.aliexpress.com/item/%s.html" % BR_ID,
+        sku_id="%s-M-AZUL" % BR_ID,
+    )
+    db.session.commit()
+
+    db.session.expire_all()
+    summary = resolve_product_summary(_draft_from_db())
+    # 1 BR + 1 desconhecida = mixed; jamais "brazil" para o produto todo.
+    assert summary.label == "mixed"
+    assert summary.brazil == 1
+    assert summary.unknown == 1

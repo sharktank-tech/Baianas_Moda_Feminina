@@ -42,6 +42,18 @@
                 Autorizar novamente
             </a>
         </div>
+    {% elif not connected %}
+        <div class="bg-gray-50 border border-gray-200 rounded-2xl p-6 mb-8">
+            <h2 class="text-xl font-semibold text-gray-800">
+                Integração AliExpress não configurada neste ambiente
+            </h2>
+            <p class="text-gray-600 mt-2">
+                A busca e a consulta de anúncios exigem a credencial
+                administrativa configurada no deployment
+                (ALIEXPRESS_ADMIN_SESSION_KEY e APP_KEY). Verifique as
+                variáveis de ambiente e faça login novamente em seguida.
+            </p>
+        </div>
     {% endif %}
 
     {% if connected %}
@@ -56,8 +68,22 @@
             </div>
 
             <form method="POST"
-                  action="{{ url_for('aliexpress_admin.buscar') }}"
+                  action="{{ url_for('aliexpress_admin.buscar_id') }}"
                   class="flex gap-3">
+                {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+                <input type="text"
+                       name="ref"
+                       required
+                       placeholder="Consultar anúncio direto por ID ou URL (ex: 1005013003211750)"
+                       class="flex-1 border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+                <button type="submit"
+                        class="bg-gray-800 hover:bg-gray-900 text-white font-semibold px-6 py-3 rounded-lg">
+                    Consultar anúncio
+                </button>
+            </form>
+            <form method="POST"
+                  action="{{ url_for('aliexpress_admin.buscar') }}"
+                  class="flex gap-3 mt-3">
                 {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
                 <input type="text"
                        name="q"
@@ -69,6 +95,12 @@
                     Buscar
                 </button>
             </form>
+            <p class="text-xs text-gray-500 mt-3">
+                A busca do fornecedor não tem filtro por país de despacho.
+                Para avaliar um anúncio específico, consulte pelo ID/URL e
+                confira a origem variante a variante antes de importar —
+                origem brasileira só vale com evidência por variante.
+            </p>
         </div>
 
         {% if results is not none %}

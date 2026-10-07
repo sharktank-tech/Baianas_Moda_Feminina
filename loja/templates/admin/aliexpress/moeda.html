@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Moeda bruta da resposta — {{ product_id }}{% endblock %}
+
+{% block content %}
+
+<div class="max-w-6xl mx-auto px-4 py-8">
+
+    <div class="mb-8">
+        <a href="{{ url_for('aliexpress_admin.detalhe', product_id=product_id) }}"
+           class="text-sm text-gray-500 hover:text-gray-800 underline">
+            &larr; Voltar ao detalhe
+        </a>
+        <h1 class="text-3xl font-bold text-gray-800 mt-2">
+            Moeda bruta da resposta
+        </h1>
+        <p class="text-gray-500 mt-2">
+            Anúncio {{ product_id }}{% if title %} · {{ title }}{% endif %}
+            {% if sku_id %}· variante {{ sku_id }}{% else %}· todas as variantes{% endif %}
+            — somente leitura, apenas <span class="font-mono">currency_code</span>.
+        </p>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow p-6 mb-8">
+        <h2 class="text-xl font-semibold text-gray-800 mb-4">
+            Base do produto (<span class="font-mono">ae_item_base_info_dto</span>)
+        </h2>
+        <p class="text-gray-700">
+            Moeda: <strong>{{ base_currency or 'Não fornecida' }}</strong>
+        </p>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow p-6">
+        <h2 class="text-xl font-semibold text-gray-800 mb-4">
+            Variantes ({{ variants|length }})
+        </h2>
+        {% if variants %}
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-gray-500 border-b">
+                            <th class="py-2 pr-4">SKU (ID DS)</th>
+                            <th class="py-2 pr-4">Moeda bruta</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in variants %}
+                            <tr class="border-b">
+                                <td class="py-2 pr-4 text-gray-700 font-mono text-xs">
+                                    {{ row.sku_id or 'Não fornecido' }}
+                                </td>
+                                <td class="py-2 pr-4 text-gray-700">
+                                    {{ row.currency or 'Não fornecida' }}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="text-gray-500">
+                {% if sku_id %}
+                    Variante não encontrada na resposta para este SKU.
+                {% else %}
+                    Nenhuma variante retornada.
+                {% endif %}
+            </p>
+        {% endif %}
+    </div>
+
+</div>
+
+{% endblock %}
