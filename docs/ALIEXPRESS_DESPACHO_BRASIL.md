@@ -539,7 +539,7 @@ sugestivo.
 
 ## 6. Testes executados, resultados e skips
 
-Novo: `tests/test_aliexpress_lookup_by_id.py` — **59 passed**.
+Novo: `tests/test_aliexpress_lookup_by_id.py` — **60 passed**.
 Cobre: parser (IDs/URLs válidos e recusas, incl. host malicioso
 `aliexpress.com.evil.com`), rota (sucesso por ID e por URL, inválido sem
 chamar a API, ausente, erro sanitizado sem vazar `raw`, nota de limitação
@@ -563,7 +563,9 @@ moeda por nível (variante, produto, ausente → "Não fornecida" sem
 fabricar o BRL do destino), ação `moeda-bruta` (auth/sessão/405,
 filtro por SKU exato, sanitização do raw, sem escritas), pareamento
 só por ID não nulo (sem-ID em linhas separadas, sem diferença
-calculada) e moedas on/off por lado com nota de não comparabilidade.
+calculada) e moedas on/off por lado com nota de não comparabilidade,
+tabela validada por parser posicional (célula↔cabeçalho, contraprova
+contra o template anterior).
 
 Suítes pertinentes: `test_aliexpress_admin_catalog.py` +
 `test_aliexpress_client.py` + `test_aliexpress_product.py` +

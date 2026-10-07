@@ -91,9 +91,7 @@
                                     {% if row.paired %}por ID{% else %}Pareamento não comprovado{% endif %}
                                 </td>
                                 <td class="py-2 pr-4 text-gray-700">
-                                    {{ row.currency_on or 'Não fornecida' }}
-                                    /
-                                    {{ row.currency_off or 'Não fornecida' }}
+                                    {{ row.attributes or '—' }}
                                 </td>
                                 <td class="py-2 pr-4 text-gray-700 font-mono text-xs">
                                     {{ row.sku_attr_on or '—' }}
@@ -108,7 +106,9 @@
                                     {{ ptx(row.price_off|float) if row.price_off is not none else '—' }}
                                 </td>
                                 <td class="py-2 pr-4 text-gray-700">
-                                    {{ row.currency or 'Não fornecida' }}
+                                    {{ row.currency_on or 'Não fornecida' }}
+                                    /
+                                    {{ row.currency_off or 'Não fornecida' }}
                                 </td>
                                 <td class="py-2 pr-4 text-gray-700">
                                     {{ row.stock_on if row.stock_on is not none else '—' }}

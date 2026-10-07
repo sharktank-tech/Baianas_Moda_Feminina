@@ -1182,12 +1182,14 @@ def _no_id_detail(entries):
     )
 
 
-def _comparar_rows(body, marker):
-    import re
+def _comparar_table(body):
+    table = _variations_table(body)
+    assert table["headers"] == EXPECTED_VARIATION_HEADERS
+    return table["rows"]
 
-    segs = [s.split("</tr>")[0] for s in body.split("<tr") if marker in s]
-    assert segs, marker
-    return segs
+
+def _flat(body):
+    return re.sub(r"\s+", " ", body)
 
 
 def test_sem_id_duas_variantes_permanecem_visiveis(admin_catalog, monkeypatch):
@@ -1196,14 +1198,25 @@ def test_sem_id_duas_variantes_permanecem_visiveis(admin_catalog, monkeypatch):
     _flagged_get_product(
         monkeypatch, calls, {(PRODUCT_ID, True): detail, (PRODUCT_ID, False): detail}
     )
-    body = admin_catalog.post(
-        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
-    ).get_data(as_text=True)
+    rows = _comparar_table(
+        admin_catalog.post(
+            f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+        ).get_data(as_text=True)
+    )
     # 2 variantes × 2 lados = 4 linhas separadas, sem agrupar sob None.
-    assert body.count("Pareamento não comprovado") == 4
-    assert body.count("Não fornecido") >= 4
-    # Sem IDs não há de onde tirar combinação: nada inventado.
-    assert "10,00" in body and "20,00" in body
+    assert len(rows) == 4
+    got = sorted(
+        (r["Atributos"], r["Preço (on)"], r["Preço (off)"]) for r in rows
+    )
+    assert got == [
+        ("Azul, Medio", "10,00", "—"),
+        ("Azul, Medio", "—", "10,00"),
+        ("Vermelho, Grande", "20,00", "—"),
+        ("Vermelho, Grande", "—", "20,00"),
+    ]
+    for row in rows:
+        assert row["SKU (ID DS)"] == "Não fornecido"
+        assert row["Pareamento"] == "Pareamento não comprovado"
 
 
 def test_sem_id_ordem_invertida_nao_compara_m_com_g(admin_catalog, monkeypatch):
@@ -1216,11 +1229,20 @@ def test_sem_id_ordem_invertida_nao_compara_m_com_g(admin_catalog, monkeypatch):
     body = admin_catalog.post(
         f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
     ).get_data(as_text=True)
-    assert body.count("Pareamento não comprovado") == 4
-    # Nenhuma linha mistura as duas variantes.
-    for seg in _comparar_rows(body, "Pareamento não comprovado"):
-        assert not ("Azul" in seg and "Vermelho" in seg)
-        assert not ("Medio" in seg and "Grande" in seg)
+    rows = _comparar_table(body)
+    # Mesmas 4 linhas da ordem direta: ordem não cria pareamento.
+    assert len(rows) == 4
+    got = sorted(
+        (r["Atributos"], r["Preço (on)"], r["Preço (off)"]) for r in rows
+    )
+    assert got == [
+        ("Azul, Medio", "10,00", "—"),
+        ("Azul, Medio", "—", "10,00"),
+        ("Vermelho, Grande", "20,00", "—"),
+        ("Vermelho, Grande", "—", "20,00"),
+    ]
+    for row in rows:
+        assert row["Pareamento"] == "Pareamento não comprovado"
     # Sem comparação entre não identificadas: nenhum marcador de diferença.
     assert "≠" not in body
 
@@ -1235,11 +1257,18 @@ def test_variante_so_de_um_lado_nao_desaparece(admin_catalog, monkeypatch, db):
     _flagged_get_product(
         monkeypatch, calls, {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off}
     )
-    body = admin_catalog.post(
-        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
-    ).get_data(as_text=True)
-    assert "%s-G-VERMELHO" % PRODUCT_ID in body
-    assert "%s-M-AZUL" % PRODUCT_ID in body
+    rows = _comparar_table(
+        admin_catalog.post(
+            f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+        ).get_data(as_text=True)
+    )
+    by_sku = {r["SKU (ID DS)"]: r for r in rows}
+    assert by_sku["%s-G-VERMELHO" % PRODUCT_ID]["Preço (off)"] == "—"
+    assert by_sku["%s-G-VERMELHO" % PRODUCT_ID]["Preço (on)"] == "79,90"
+    assert by_sku["%s-G-VERMELHO" % PRODUCT_ID]["Pareamento"] == (
+        "Pareamento não comprovado"
+    )
+    assert by_sku["%s-M-AZUL" % PRODUCT_ID]["Pareamento"] == "por ID"
 
 
 def test_moedas_diferentes_mantidas_sem_comparacao_direta(admin_catalog, monkeypatch):
@@ -1252,11 +1281,11 @@ def test_moedas_diferentes_mantidas_sem_comparacao_direta(admin_catalog, monkeyp
     body = admin_catalog.post(
         f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
     ).get_data(as_text=True)
-    segs = _comparar_rows(body, "%s-M-AZUL" % PRODUCT_ID)
-    assert len(segs) == 1
-    assert "USD" in segs[0] and "BRL" in segs[0]
-    flat = re.sub(r"\s+", " ", body)
-    assert "não podem ser comparados diretamente" in flat
+    rows = _comparar_table(body)
+    assert len(rows) == 1
+    assert rows[0]["Moeda (on/off)"] == "USD / BRL"
+    assert rows[0]["Atributos"] == "Azul"
+    assert "não podem ser comparados diretamente" in _flat(body)
     # Moedas diferentes: detalhe difere → diferença observada, sem atribuir.
     assert "diferença observada, ainda não atribuída ao parâmetro" in body
 
@@ -1268,14 +1297,14 @@ def test_moeda_ausente_num_lado_nao_preenchida_pelo_outro(admin_catalog, monkeyp
     _flagged_get_product(
         monkeypatch, calls, {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off}
     )
-    body = admin_catalog.post(
-        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
-    ).get_data(as_text=True)
-    segs = _comparar_rows(body, "%s-M-AZUL" % PRODUCT_ID)
-    assert len(segs) == 1
-    assert "USD" in segs[0]
-    assert "Não fornecida" in segs[0]
-    assert segs[0].count("USD") == 1
+    rows = _comparar_table(
+        admin_catalog.post(
+            f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+        ).get_data(as_text=True)
+    )
+    assert len(rows) == 1
+    assert rows[0]["Moeda (on/off)"] == "USD / Não fornecida"
+    assert rows[0]["Atributos"] == "Azul"
 
 
 def test_moeda_fallback_variante_para_produto_na_mesma_resposta(admin_catalog, monkeypatch):
@@ -1285,12 +1314,14 @@ def test_moeda_fallback_variante_para_produto_na_mesma_resposta(admin_catalog, m
     _flagged_get_product(
         monkeypatch, calls, {(PRODUCT_ID, True): on, (PRODUCT_ID, False): off}
     )
-    body = admin_catalog.post(
-        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
-    ).get_data(as_text=True)
-    segs = _comparar_rows(body, "%s-M-AZUL" % PRODUCT_ID)
-    assert len(segs) == 1
-    assert "EUR" in segs[0]
+    rows = _comparar_table(
+        admin_catalog.post(
+            f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+        ).get_data(as_text=True)
+    )
+    assert len(rows) == 1
+    assert rows[0]["Moeda (on/off)"] == "EUR / EUR"
+    assert rows[0]["Atributos"] == "Azul"
 
 
 def test_moedas_ausentes_sem_brl_fabricado(admin_catalog, monkeypatch):
@@ -1303,16 +1334,183 @@ def test_moedas_ausentes_sem_brl_fabricado(admin_catalog, monkeypatch):
     body = admin_catalog.post(
         f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
     ).get_data(as_text=True)
-    segs = _comparar_rows(body, "%s-M-AZUL" % PRODUCT_ID)
-    assert len(segs) == 1
-    assert "Não fornecida" in segs[0]
-    assert "BRL" not in segs[0]
-    flat = re.sub(r"\s+", " ", body)
-    assert "não podem ser comparados diretamente" in flat
+    rows = _comparar_table(body)
+    assert len(rows) == 1
+    assert rows[0]["Moeda (on/off)"] == "Não fornecida / Não fornecida"
+    assert "BRL" not in rows[0]["Moeda (on/off)"]
+    assert rows[0]["Atributos"] == "Azul"
+    assert "não podem ser comparados diretamente" in _flat(body)
 
 # --------------------------------------------------------------------------
-# 5) Candidato sintético com 2 variantes: importação, origem e confirmação
+# 13) Helper de tabela renderizada (html.parser da stdlib, sem dependência)
 # --------------------------------------------------------------------------
+
+from html.parser import HTMLParser
+
+
+class _VariationsTableParser(HTMLParser):
+    """Extrai a tabela sob o h2 "Variações": cabeçalhos e células por linha."""
+
+    def __init__(self):
+        super().__init__()
+        self._in_h2 = False
+        self._saw_variations = False
+        self._in_table = False
+        self._in_thead = False
+        self._in_th = False
+        self._in_td = False
+        self._buf = []
+        self.headers = []
+        self.rows = []
+        self._current = None
+
+    @staticmethod
+    def _norm(text):
+        import re as _re
+
+        return _re.sub(r"\s+", " ", text).strip()
+
+    def _text(self):
+        return "".join(self._buf)
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "h2":
+            self._in_h2 = True
+            self._buf = []
+        elif tag == "table" and self._saw_variations and not self.headers:
+            self._in_table = True
+        elif tag == "thead" and self._in_table:
+            self._in_thead = True
+        elif tag == "th" and self._in_thead:
+            self._in_th = True
+            self._buf = []
+        elif tag == "tr" and self._in_table and not self._in_thead:
+            self._current = []
+        elif tag == "td" and self._current is not None:
+            self._in_td = True
+            self._buf = []
+
+    def handle_endtag(self, tag):
+        if tag == "h2":
+            if "Variações" in self._text():
+                self._saw_variations = True
+            self._in_h2 = False
+        elif tag == "table":
+            self._in_table = False
+        elif tag == "thead":
+            self._in_thead = False
+        elif tag == "th":
+            if self._in_th:
+                self.headers.append(self._norm(self._text()))
+            self._in_th = False
+        elif tag == "tr":
+            if self._current is not None:
+                self.rows.append(self._current)
+                self._current = None
+        elif tag == "td":
+            if self._in_td and self._current is not None:
+                self._current.append(self._norm(self._text()))
+            self._in_td = False
+
+    def handle_data(self, data):
+        if self._in_h2 or self._in_th or self._in_td:
+            self._buf.append(data)
+
+
+def _variations_table(body):
+    """Mapa {cabeçalho: célula} por linha da tabela de variações.
+
+    Falha se a tabela não for localizada, se houver cabeçalho duplicado
+    ou se alguma linha tiver contagem de células diferente.
+    """
+    parser = _VariationsTableParser()
+    parser.feed(body)
+    assert parser.headers, "tabela de variações não localizada"
+    assert len(set(parser.headers)) == len(parser.headers), parser.headers
+    assert parser.rows, "nenhuma linha na tabela de variações"
+    for row in parser.rows:
+        assert len(row) == len(parser.headers), (row, parser.headers)
+    return {
+        "headers": parser.headers,
+        "rows": [dict(zip(parser.headers, row)) for row in parser.rows],
+    }
+
+
+EXPECTED_VARIATION_HEADERS = [
+    "SKU (ID DS)",
+    "Pareamento",
+    "Atributos",
+    "sku_attr (on)",
+    "sku_attr (off)",
+    "Preço (on)",
+    "Preço (off)",
+    "Moeda (on/off)",
+    "Estoque (on/off)",
+]
+
+
+def _single_variant_detail(price, currency, sku_id="S-AZUL-M"):
+    """Um SKU (Azul/M com IDs) para asserções posicionais exatas."""
+    return AliExpressProductDetail(
+        product_id=PRODUCT_ID,
+        title="Comparar",
+        description="",
+        images=[],
+        skus=[
+            AliExpressProductSku(
+                sku_id=sku_id,
+                sale_price=Decimal(price),
+                original_price=Decimal(price),
+                currency=currency,
+                available_stock=7,
+                attributes=[
+                    {
+                        "name": "Cor",
+                        "value": "Azul",
+                        "sku_property_id": "10",
+                        "property_value_id": "19",
+                    },
+                    {
+                        "name": "Tamanho",
+                        "value": "M",
+                        "sku_property_id": "14",
+                        "property_value_id": "771",
+                    },
+                ],
+            )
+        ],
+        available_stock=7,
+        sale_price=Decimal(price),
+        original_price=Decimal(price),
+        currency=currency,
+    )
+
+
+def test_comparar_colunas_atributos_e_moedas_na_posicao(admin_catalog, monkeypatch):
+    """Mesma variante nos dois lados: cada dado na sua coluna."""
+    calls = []
+    _flagged_get_product(
+        monkeypatch,
+        calls,
+        {
+            (PRODUCT_ID, True): _single_variant_detail("10.00", "USD"),
+            (PRODUCT_ID, False): _single_variant_detail("50.00", "BRL"),
+        },
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    table = _variations_table(body)
+    assert table["headers"] == EXPECTED_VARIATION_HEADERS
+    assert len(table["rows"]) == 1
+    row = table["rows"][0]
+    assert row["SKU (ID DS)"] == "S-AZUL-M"
+    assert row["Atributos"] == "Azul, M"
+    assert row["Preço (on)"] == "10,00"
+    assert row["Preço (off)"] == "50,00"
+    assert row["Moeda (on/off)"] == "USD / BRL"
+    assert row["Pareamento"] == "por ID"
+    assert "não podem ser comparados diretamente" in re.sub(r"\s+", " ", body)
 
 def _br_candidate_detail(product_id=BR_ID):
     """Rascunho sintético no formato do anúncio BR observado (2 variantes).
