@@ -67,7 +67,7 @@
                 </span>
             </div>
 
-            <form method="POST"
+            <form method="POST" data-once
                   action="{{ url_for('aliexpress_admin.buscar_id') }}"
                   class="flex gap-3">
                 {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
@@ -81,7 +81,7 @@
                     Consultar anúncio
                 </button>
             </form>
-            <form method="POST"
+            <form method="POST" data-once
                   action="{{ url_for('aliexpress_admin.buscar') }}"
                   class="flex gap-3 mt-3">
                 {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
@@ -237,5 +237,7 @@
     </div>
 
 </div>
+
+{% include "admin/aliexpress/_once_submit.html" %}
 
 {% endblock %}

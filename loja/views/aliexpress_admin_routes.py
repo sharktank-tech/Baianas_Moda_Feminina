@@ -74,8 +74,10 @@ from loja.integrations.aliexpress import admin_session
 from loja.integrations.aliexpress.errors import (
     AliExpressAPIError,
     AliExpressConfigError,
+    AliExpressRateLimitError,
     AliExpressTransportError,
 )
+from loja.integrations.aliexpress.rate_limit import RATE_LIMIT_MESSAGE
 from loja.integrations.aliexpress.importer import (
     FREIGHT_AVAILABLE,
     DraftImportError,
@@ -265,6 +267,19 @@ def _active_supplier_product(product: Optional[Product]):
         if getattr(sp, "is_active", False):
             return sp
     return None
+
+
+def _flash_read_error(exc: Exception) -> None:
+    """Flash para falha de consulta somente leitura.
+
+    Bloqueio temporário (Rate Limit, mesmo após as tentativas com espera)
+    vira o aviso claro de nova tentativa — nunca o texto técnico do
+    provider. Demais erros seguem sanitizados como antes.
+    """
+    if isinstance(exc, AliExpressRateLimitError):
+        flash(RATE_LIMIT_MESSAGE, "warning")
+    else:
+        flash(_sanitized_api_error(exc), "danger")
 
 
 def _sanitized_api_error(exc: Exception) -> str:
@@ -960,7 +975,7 @@ def buscar():
             page_size=SEARCH_PAGE_SIZE,
         )
     except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
-        flash(_sanitized_api_error(exc), "danger")
+        _flash_read_error(exc)
         return render_template(
             "admin/aliexpress/catalogo.html",
             connected=True,
@@ -1014,7 +1029,7 @@ def buscar_id():
         client = _aliexpress_client()
         detail = client.get_product(product_id=product_id)
     except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
-        flash(_sanitized_api_error(exc), "danger")
+        _flash_read_error(exc)
         return redirect(url_for("aliexpress_admin.index"))
     if detail is None:
         flash("Produto não encontrado no catálogo do fornecedor.", "warning")
@@ -1103,7 +1118,7 @@ def detalhe(product_id: str):
         client = _aliexpress_client()
         detail = client.get_product(product_id=product_id)
     except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
-        flash(_sanitized_api_error(exc), "danger")
+        _flash_read_error(exc)
         return redirect(url_for("aliexpress_admin.index"))
 
     return _render_detalhe(product_id, detail)
@@ -1117,7 +1132,7 @@ def importar(product_id: str):
         client = _aliexpress_client()
         detail = client.get_product(product_id=product_id)
     except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
-        flash(_sanitized_api_error(exc), "danger")
+        _flash_read_error(exc)
         return redirect(url_for("aliexpress_admin.detalhe", product_id=product_id))
 
     try:
@@ -1248,7 +1263,7 @@ def comparar_preco(product_id: str):
     try:
         client = _aliexpress_client()
     except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
-        flash(_sanitized_api_error(exc), "danger")
+        _flash_read_error(exc)
         return redirect(
             url_for("aliexpress_admin.detalhe", product_id=product_id)
         )
@@ -1314,7 +1329,7 @@ def moeda_bruta(product_id: str):
         client = _aliexpress_client()
         detail = client.get_product(product_id=product_id)
     except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
-        flash(_sanitized_api_error(exc), "danger")
+        _flash_read_error(exc)
         return redirect(
             url_for("aliexpress_admin.detalhe", product_id=product_id)
         )

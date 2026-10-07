@@ -136,7 +136,7 @@
         </p>
         <div class="flex gap-3">
             {% for r in [1, 2, 3] %}
-                <form method="POST"
+                <form method="POST" data-once
                       action="{{ url_for('aliexpress_admin.comparar_preco', product_id=product_id) }}">
                     {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
                     <input type="hidden" name="rodada" value="{{ r }}">
@@ -150,5 +150,7 @@
     </div>
 
 </div>
+
+{% include "admin/aliexpress/_once_submit.html" %}
 
 {% endblock %}
