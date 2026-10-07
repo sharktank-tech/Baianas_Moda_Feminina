@@ -173,6 +173,31 @@
 
     <div class="bg-white rounded-2xl shadow p-6 mt-8">
         <h2 class="text-xl font-semibold text-gray-800 mb-2">
+            Moeda bruta da resposta
+        </h2>
+        <p class="text-xs text-gray-500 mb-4">
+            Exibe somente os <span class="font-mono">currency_code</span> da
+            base e da variante — para fechar a causa de moeda ausente sem
+            expor o JSON completo. Somente leitura.
+        </p>
+        <form method="POST"
+              action="{{ url_for('aliexpress_admin.moeda_bruta', product_id=detail.product_id or '') }}"
+              class="flex gap-3">
+            {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+            <input type="text"
+                   name="sku_id"
+                   placeholder="SKU específico (opcional — vazio lista todas)"
+                   class="flex-1 border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500">
+            <button type="submit"
+                    class="bg-gray-800 hover:bg-gray-900 text-white font-semibold px-6 py-3 rounded-lg">
+                Ver moeda bruta
+            </button>
+        </form>
+    </div>
+
+</div>
+    <div class="bg-white rounded-2xl shadow p-6 mt-8">
+        <h2 class="text-xl font-semibold text-gray-800 mb-2">
             Comparar preço com/sem parâmetro experimental
         </h2>
         <p class="text-xs text-gray-500 mb-4">

@@ -53,7 +53,7 @@ from __future__ import annotations
 import os
 from decimal import Decimal, InvalidOperation
 from functools import wraps
-from typing import Optional, Tuple
+from typing import Mapping, Optional, Tuple
 
 from flask import (
     Blueprint,
@@ -1248,6 +1248,68 @@ def comparar_preco(product_id: str):
         verdict_unviable=VERDICT_UNVIABLE,
         parameter_note=PARAMETER_NOTE,
         rows=rows,
+    )
+
+
+def _raw_currency_code(mapping) -> Optional[str]:
+    """Extrai `currency_code` bruto sem vazar o resto do payload."""
+    if not isinstance(mapping, Mapping):
+        return None
+    value = mapping.get("currency_code")
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    return str(value).strip()
+
+
+@aliexpress_admin_blueprint.route(
+    "/<product_id>/moeda-bruta", methods=["POST"]
+)
+@admin_required
+@ali_session_required
+def moeda_bruta(product_id: str):
+    """Exibe SÓ os `currency_code` brutos da resposta (só leitura).
+
+    Para fechar a causa-raiz de moeda ausente sem expor o JSON completo
+    nem credenciais: base (`ae_item_base_info_dto`) + variante exata
+    (`sku_id` do formulário; vazio lista todas). Nenhum acesso ao banco,
+    nenhuma persistência, sem importar ou publicar.
+    """
+    sku_id = (request.form.get("sku_id") or "").strip() or None
+    try:
+        client = _aliexpress_client()
+        detail = client.get_product(product_id=product_id)
+    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+        flash(_sanitized_api_error(exc), "danger")
+        return redirect(
+            url_for("aliexpress_admin.detalhe", product_id=product_id)
+        )
+    if detail is None:
+        flash("Produto não encontrado no catálogo do fornecedor.", "warning")
+        return redirect(
+            url_for("aliexpress_admin.detalhe", product_id=product_id)
+        )
+
+    raw = detail.raw if isinstance(detail.raw, dict) else {}
+    base_currency = _raw_currency_code(raw.get("ae_item_base_info_dto"))
+    variants = []
+    for sku in detail.skus or []:
+        if sku_id is not None and str(sku.sku_id or "") != sku_id:
+            continue
+        sku_raw = sku.raw if isinstance(sku.raw, dict) else {}
+        variants.append(
+            {
+                "sku_id": sku.sku_id,
+                "currency": _raw_currency_code(sku_raw),
+            }
+        )
+
+    return render_template(
+        "admin/aliexpress/moeda.html",
+        product_id=product_id,
+        title=getattr(detail, "title", None),
+        sku_id=sku_id,
+        base_currency=base_currency,
+        variants=variants,
     )
 
 

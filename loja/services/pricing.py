@@ -141,9 +141,10 @@ def normalize_currency(value) -> Optional[str]:
 # --------------------------------------------------------------------------
 
 def calculate_landed_cost(supplier_product: SupplierProduct) -> Decimal:
-    """Calcula o landed cost REAL observado: cost + shipping_cost.
+    """Calcula o landed cost REAL observado: cost + shipping_cost + tributos.
 
-    Requisitos (todos):
+    Tributos = import_duty + icms via supplier_tax_total (fail-closed quando
+    ausentes ou inválidos). Requisitos (todos):
       cost != NULL e cost > 0
       freight_status == 'available'
       shipping_cost != NULL e >= 0   (0.00 é válido somente com frete real

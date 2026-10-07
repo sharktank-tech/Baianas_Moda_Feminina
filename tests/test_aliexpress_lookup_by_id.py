@@ -1048,6 +1048,109 @@ def test_moeda_ausente_mostra_nao_fornecida_sem_fabricar_brl(admin_catalog):
     assert "69,85" in body
 
 # --------------------------------------------------------------------------
+# 11) Moeda bruta da resposta (só currency_code, sem JSON completo)
+# --------------------------------------------------------------------------
+
+def _detail_with_raw(product_id=PRODUCT_ID):
+    sku = AliExpressProductSku(
+        sku_id="%s-M-AZUL" % product_id,
+        sale_price=Decimal("69.85"),
+        original_price=Decimal("69.85"),
+        currency="BRL",
+        available_stock=7,
+        attributes=[{"name": "Cor", "value": "Azul"}],
+    )
+    sku.raw = {
+        "id": "%s-M-AZUL" % product_id,
+        "currency_code": "BRL",
+        "app_secret": "SEGREDO",
+        "access_token": "TOKEN",
+    }
+    detail = AliExpressProductDetail(
+        product_id=product_id,
+        title="Moeda bruta",
+        description="",
+        images=[],
+        skus=[sku],
+        available_stock=7,
+        sale_price=Decimal("69.85"),
+        original_price=Decimal("69.85"),
+        currency="BRL",
+    )
+    detail.raw = {
+        "ae_item_base_info_dto": {"currency_code": "EUR", "subject": "x"},
+        "outro_bloco": {"app_secret": "SEGREDO"},
+    }
+    return detail
+
+
+def test_moeda_bruta_exige_login_admin(client):
+    resp = client.post(f"{PREFIX}/{PRODUCT_ID}/moeda-bruta", data={})
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/login")
+
+
+def test_moeda_bruta_exige_sessao_aliexpress(
+    client, admin_user, login, ae_env, fake_client
+):
+    login(admin_user.email)
+    resp = client.post(f"{PREFIX}/{PRODUCT_ID}/moeda-bruta", data={})
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith(PREFIX + "/")
+
+
+def test_moeda_bruta_get_nao_permitido(admin_catalog):
+    assert (
+        admin_catalog.get(f"{PREFIX}/{PRODUCT_ID}/moeda-bruta").status_code
+        == 405
+    )
+
+
+def test_moeda_bruta_mostra_so_currency_code_sem_vazar_resto(admin_catalog, db):
+    FakeAliExpressClient.details[PRODUCT_ID] = _detail_with_raw()
+    before = (Product.query.count(), SupplierSkuShippingOrigin.query.count())
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/moeda-bruta", data={}
+    ).get_data(as_text=True)
+    assert PRODUCT_ID in body
+    # Base e variante, só os currency_code.
+    assert "EUR" in body
+    assert "BRL" in body
+    # Nada do resto do raw, nenhum segredo (o nome do campo no título
+    # é intencional: diz de onde veio o valor, sem expor o payload).
+    assert "SEGREDO" not in body
+    assert "TOKEN" not in body
+    assert "outro_bloco" not in body
+    assert "ae_item_base_info_dto" in body
+    # Somente leitura: nada criado.
+    assert (Product.query.count(), SupplierSkuShippingOrigin.query.count()) == before
+
+
+def test_moeda_bruta_filtra_variante_exata(admin_catalog):
+    FakeAliExpressClient.details[PRODUCT_ID] = _detail_with_raw()
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/moeda-bruta",
+        data={"sku_id": "%s-M-AZUL" % PRODUCT_ID},
+    ).get_data(as_text=True)
+    assert "EUR" in body and "BRL" in body
+
+    missing = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/moeda-bruta",
+        data={"sku_id": "INEXISTENTE"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "não encontrada na resposta" in missing
+
+
+def test_moeda_bruta_ausente_mostra_nao_fornecida(admin_catalog):
+    FakeAliExpressClient.details[PRODUCT_ID] = make_detail()
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/moeda-bruta", data={}
+    ).get_data(as_text=True)
+    # make_detail não define raw: base e variante sem moeda.
+    assert body.count("Não fornecida") >= 2
+
+# --------------------------------------------------------------------------
 # 5) Candidato sintético com 2 variantes: importação, origem e confirmação
 # --------------------------------------------------------------------------
 

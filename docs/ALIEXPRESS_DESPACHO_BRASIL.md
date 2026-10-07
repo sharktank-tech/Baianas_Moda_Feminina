@@ -122,6 +122,18 @@ com `product_id`, `ship_to_country="BR"`, `target_currency="BRL"`,
   diferença observada; efeito inconclusivo"; diferentes → "diferença
   observada, ainda não atribuída ao parâmetro".
 
+### Pendências por anúncio e variante
+
+| Anúncio / variante | Detail OK | SKU exato (P5) | Despacho BR | Custo recorrente (P6) | Moeda raw | Origem no banco |
+| --- | --- | --- | --- | --- | --- | --- |
+| `1005010478234256` CÉU AZUL / M | sim [relato] | pendente | relato p/ M; P/G sem nada | pendente | — | `unknown` |
+| `1005010478234256` P, G | sim [relato] | pendente | sem evidência | — | — | `unknown` |
+| `1005010502074833` CÉU AZUL / M | sim [relato] | pendente | relato ("Do Brasil"); qtd/impostos s/ confirmação | pendente (R$ 52 não comprovado) | — | `unknown` |
+| `1005010660869000` A08White / 36 | sim [relato] | pendente | página "Compra internacional": **nada deduzido** | pendente (qtd p/ mapear 125,36) | pendente (`currency_code` SKU+base) | `unknown` |
+| `1005010660869000` demais variantes | não investigadas | — | — | — | — | `unknown` |
+| `1005013003211750`, `1005012926123897` (todas) | sim [relato] | pendente | sem evidência | — | — | `unknown` |
+| `1005009519310498` (controle) | sim [relato] | n/a | n/a (internacional) | n/a | n/a | `unknown` |
+
 ---
 
 ## 2. Candidatos com despacho brasileiro (vitrine pública, somente leitura)
@@ -342,16 +354,18 @@ auditoria de identidade.
 
 ### Moeda ausente — causa e correção
 
-Rastreio `ds.product.get` → normalização → `_detalhe_sku_rows` → template:
-a resposta oficial traz `currency_code` no SKU e na base, e o código
-preserva os dois (`sku.currency`, `detail.currency`); a linha usa o da
-variante com fallback para o do produto. **Nada se perde no caminho** — a
-ausência exibida reflete ausência na resposta. Correção aplicada: sem
-moeda retornada, a tela mostra **"Não fornecida"** (células e linha
-"Moeda:"), e o BRL do destino nunca é usado como fallback silencioso
-(coberto por teste). Para fechar a causa-raiz no caso concreto, falta a
-evidência: os campos `currency_code` brutos (SKU e base) da resposta live
-de `1005010660869000` — sem pedir tokens; basta o trecho sanitizado.
+Rastreio `ds.product.get` → normalização → `_detalhe_sku_rows` → template
+**[código, verificado por testes com fixtures]**: a resposta oficial traz
+`currency_code` no SKU e na base, e o código preserva os dois
+(`sku.currency`, `detail.currency`); a linha usa o da variante com
+fallback para o do produto. Nada é descartado nesse caminho.
+**[dedução, não fato observado]**: se a tela mostra ausência, a hipótese é
+ausência na resposta live — **pendente** dos `currency_code` brutos (SKU e
+base) de `1005010660869000` para fechar. Correção aplicada: sem moeda
+retornada, a tela mostra **"Não fornecida"** (células e linha "Moeda:"), e
+o BRL do destino nunca é usado como fallback silencioso (coberto por
+teste). Nova ação `POST /<id>/moeda-bruta` (admin+sessão+CSRF, só leitura,
+sem JSON completo) exibe exatamente esses dois campos para o caso concreto.
 
 ### Auditoria do custo completo de aquisição (sem gravar valores)
 
@@ -365,25 +379,25 @@ não é custo completo** (falta frete + tributos), e os tributos só entram
 uma vez (sem soma dupla no código). Moeda única exigida (sem camada FX).
 **Lacunas:** (a) mapeamento desses valores para os campos por unidade
 (`cost`, `shipping_cost`, `import_duty`, `icms`) exige quantidade 1
-confirmada — pendente; (b) docstring de `calculate_landed_cost` diz só
-"cost + shipping" (desatualizada ante os tributos) — correção proposta em
-separado, sem impacto funcional. **Nenhum valor do relato foi gravado como
-cotação ou custo validado de produção.**
+confirmada — pendente; (b) docstring de `calculate_landed_cost` dizia só
+"cost + shipping" — **corrigida nesta rodada** (inclui os quatro
+componentes; sem impacto funcional). **Nenhum valor do relato foi gravado
+como cotação ou custo validado de produção.**
 
-### Consolidação desta rodada (relatos do usuário + verificações)
+### Consolidação desta rodada (fontes marcadas)
 
-- `1005010478234256`, CÉU AZUL/M: API R$ 34,80; outra conta apresentou
-  R$ 58,00.
-- `1005010502074833`, CÉU AZUL/M: API R$ 31,20; outra conta apresentou
-  R$ 52,00.
-- "Do Brasil" e frete grátis relatados em ambos; quantidade e impostos sem
-  confirmação explícita.
-- Três rodadas on/off por anúncio sem diferenças: "nenhuma diferença
-  observada; efeito inconclusivo" (registrado como relato; sem reexecução
-  local por falta de sessão).
+- `1005010478234256`, CÉU AZUL/M **[relato]**: API R$ 34,80; outra conta
+  apresentou R$ 58,00.
+- `1005010502074833`, CÉU AZUL/M **[relato]**: API R$ 31,20; outra conta
+  apresentou R$ 52,00.
+- "Do Brasil" e frete grátis **[relato]** em ambos; quantidade e impostos
+  sem confirmação explícita.
+- Três rodadas on/off por anúncio sem diferenças **[relato do operador,
+  não reexecução local]** → "nenhuma diferença observada; efeito
+  inconclusivo".
 - A causa da divergência dos vestidos permanece desconhecida; o caso do
-  tênis não valida todos os preços da API. Rodadas não repetidas; padrão
-  de `remove_personal_benefit` inalterado.
+  tênis não valida todos os preços da API. Rodadas não repetidas por aqui;
+  padrão de `remove_personal_benefit` inalterado **[código]**.
 
 ### Caminhos validados para executar P3 (somente leitura, sem importar)
 
@@ -447,6 +461,10 @@ mais a honestidade na interface:
   CSRF; mostra por variante ID do anúncio, SKU bruto, `sku_attr` on/off,
   atributos, preços e estoques on/off, moeda, veredito da rodada e erros
   sanitizados; parâmetro marcado experimental; **zero acesso ao banco**.
+- `POST /<id>/moeda-bruta` (+ card no `detalhe.html` e página `moeda.html`):
+  exibe só `currency_code` da base e da variante exata (`sku_id`
+  opcional; ausente lista todas), sem JSON completo e sem credenciais;
+  admin+sessão+CSRF, só leitura, zero banco.
 - Auditoria de fallback de identidade (sem alterar registros): importação
   pula SKU sem id e grava o `id` verbatim (igualdade de strings no sync e
   no enrichment; nenhum `int()` em IDs em todo o módulo); fulfillment exige
@@ -502,7 +520,7 @@ sugestivo.
 
 ## 6. Testes executados, resultados e skips
 
-Novo: `tests/test_aliexpress_lookup_by_id.py` — **46 passed**.
+Novo: `tests/test_aliexpress_lookup_by_id.py` — **52 passed**.
 Cobre: parser (IDs/URLs válidos e recusas, incl. host malicioso
 `aliexpress.com.evil.com`), rota (sucesso por ID e por URL, inválido sem
 chamar a API, ausente, erro sanitizado sem vazar `raw`, nota de limitação
@@ -523,7 +541,8 @@ chamada (erro isolado por flag) e classificação em vocabulário exato
 `comparar-preco` com alternância por paridade, falhas parciais
 sanitizadas, rodada inválida e ausência total de escritas no banco,
 moeda por nível (variante, produto, ausente → "Não fornecida" sem
-fabricar o BRL do destino).
+fabricar o BRL do destino), ação `moeda-bruta` (auth/sessão/405,
+filtro por SKU exato, sanitização do raw, sem escritas).
 
 Suítes pertinentes: `test_aliexpress_admin_catalog.py` +
 `test_aliexpress_client.py` + `test_aliexpress_product.py` +
