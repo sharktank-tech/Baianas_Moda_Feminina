@@ -782,6 +782,60 @@ def test_comparar_csrf_exigido_quando_ativado(
         app.config["WTF_CSRF_ENABLED"] = False
 
 
+def test_buscar_bloqueio_120_uma_chamada_sem_espera(admin_catalog, monkeypatch, db):
+    """retry_after=120 pela rota: 1 chamada, 0 esperas, aviso amigável,
+    catálogo intacto."""
+    import loja.views.aliexpress_admin_routes as routes
+    from loja.modules.models import (
+        Product,
+        ProductVariant,
+        SupplierProduct,
+        SupplierSkuShippingOrigin,
+    )
+
+    transport = _SequencedTransport(
+        [
+            json.dumps(
+                {
+                    "error_response": {
+                        "code": "ApiCallLimit",
+                        "sub_code": None,
+                        "retry_after": 120,
+                        "msg": "Api access frequency exceeds the limit",
+                    }
+                }
+            )
+        ]
+    )
+
+    def factory(**kwargs):
+        return AliExpressClient(app_key="k", app_secret="s", transport=transport)
+
+    monkeypatch.setattr(routes, "AliExpressClient", factory)
+    before = (
+        Product.query.count(),
+        ProductVariant.query.count(),
+        SupplierProduct.query.count(),
+        SupplierSkuShippingOrigin.query.count(),
+    )
+    start = time.monotonic()
+    body = admin_catalog.post(f"{PREFIX}/buscar", data={"q": "vestido"}).get_data(
+        as_text=True
+    )
+    elapsed = time.monotonic() - start
+    assert transport.calls == 1
+    assert elapsed < 5.0
+    assert RATE_LIMIT_MESSAGE in body
+    assert "Api access frequency" not in body
+    assert "bg-yellow-500" in body
+    assert (
+        Product.query.count(),
+        ProductVariant.query.count(),
+        SupplierProduct.query.count(),
+        SupplierSkuShippingOrigin.query.count(),
+    ) == before
+
+
 def test_detalhe_e_comparar_tem_guarda(admin_catalog, monkeypatch):
     from tests.test_aliexpress_lookup_by_id import _br_candidate_detail
 

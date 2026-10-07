@@ -279,6 +279,17 @@ def _active_supplier_product(product: Optional[Product]):
     return None
 
 
+#: Exceções tratadas nas rotas de leitura (e na fase de leitura do sync):
+#: erro de API, transporte, config ou orçamento de tempo esgotado.
+#: Escrita nunca depende deste tuplo.
+READ_ERRORS = (
+    AliExpressAPIError,
+    AliExpressTransportError,
+    AliExpressConfigError,
+    BudgetExhaustedError,
+)
+
+
 def _flash_read_error(exc: Exception) -> None:
     """Flash para falha de consulta somente leitura.
 
@@ -986,7 +997,7 @@ def buscar():
             page_index=1,
             page_size=SEARCH_PAGE_SIZE,
         )
-    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+    except READ_ERRORS as exc:
         _flash_read_error(exc)
         return render_template(
             "admin/aliexpress/catalogo.html",
@@ -1040,7 +1051,7 @@ def buscar_id():
     try:
         client = _aliexpress_client()
         detail = client.get_product(product_id=product_id)
-    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+    except READ_ERRORS as exc:
         _flash_read_error(exc)
         return redirect(url_for("aliexpress_admin.index"))
     if detail is None:
@@ -1129,7 +1140,7 @@ def detalhe(product_id: str):
     try:
         client = _aliexpress_client()
         detail = client.get_product(product_id=product_id)
-    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+    except READ_ERRORS as exc:
         _flash_read_error(exc)
         return redirect(url_for("aliexpress_admin.index"))
 
@@ -1143,7 +1154,7 @@ def importar(product_id: str):
     try:
         client = _aliexpress_client()
         detail = client.get_product(product_id=product_id)
-    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+    except READ_ERRORS as exc:
         _flash_read_error(exc)
         return redirect(url_for("aliexpress_admin.detalhe", product_id=product_id))
 
@@ -1275,7 +1286,7 @@ def comparar_preco(product_id: str):
     first, second = (True, False) if rodada % 2 == 1 else (False, True)
     try:
         client = _aliexpress_client()
-    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+    except READ_ERRORS as exc:
         _flash_read_error(exc)
         return redirect(
             url_for("aliexpress_admin.detalhe", product_id=product_id)
@@ -1343,7 +1354,7 @@ def moeda_bruta(product_id: str):
     try:
         client = _aliexpress_client()
         detail = client.get_product(product_id=product_id)
-    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+    except READ_ERRORS as exc:
         _flash_read_error(exc)
         return redirect(
             url_for("aliexpress_admin.detalhe", product_id=product_id)
@@ -1610,7 +1621,7 @@ def publicado_sincronizar(product_id: str):
     try:
         client = _aliexpress_client()
         detail = client.get_product(product_id=product_id)
-    except (AliExpressAPIError, AliExpressTransportError, AliExpressConfigError) as exc:
+    except READ_ERRORS as exc:
         _persist_sync_attempt(
             product=product,
             supplier_product=supplier_product,

@@ -570,7 +570,7 @@ calculada) e moedas on/off por lado com nota de não comparabilidade,
 tabela validada por parser posicional (célula↔cabeçalho, contraprova
 contra o template anterior).
 
-Rate limit (`tests/test_aliexpress_rate_limit.py` — **45 passed**):
+Rate limit (`tests/test_aliexpress_rate_limit.py` — **46 passed**):
 `ApiCallLimit` em `code`/`sub_code` (payload exato e variações),
 duração "ban will last N seconds", recuperação com `get_product`,
 chamada única em `call()` puro, sem retry em auth/parâmetro/transporte/
@@ -578,8 +578,10 @@ timeout, orçamento compartilhado com relógio fake (redução, bloqueio
 prévio, espera maior que o restante, esgotamento inconclusivo, teto de
 3 chamadas), espera original verificada antes do teto (120s com 40s de
 orçamento: 1 chamada, 0 esperas), aviso amigável por lado na comparação
-(só on, só off, ambos), recuperação sem aviso ao final, CSRF exigido,
-anti-duplo-clique nos formulários.
+(só on, só off, ambos), `BudgetExhaustedError` coberto nas 7 rotas de
+leitura/sync via tuplo central `READ_ERRORS`, rota com espera 120s do
+fornecedor (1 chamada, aviso, catálogo intacto), recuperação sem aviso
+ao final, CSRF exigido, anti-duplo-clique nos formulários.
 
 Suítes pertinentes: `test_aliexpress_admin_catalog.py` +
 `test_aliexpress_client.py` + `test_aliexpress_product.py` +
