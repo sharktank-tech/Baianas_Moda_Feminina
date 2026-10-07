@@ -104,15 +104,20 @@ com `product_id`, `ship_to_country="BR"`, `target_currency="BRL"`,
 - P2. Confirmar na documentação oficial a lista de parâmetros de
   `ds.text.search` (cobrir H2).
 - P3. Consultar os candidatos por ID com sessão administrativa: **parcial**
-  — acessibilidade por ID confirmada para os 4 (§3). Resta a
-  correspondência dos `sku_id`s (**P5**, pendente de resposta estruturada
-  autenticada — sem deduzir por posição na lista ou só pelo título). O
-  runner `scripts/query_aliexpress_candidates.py` repete essas 4 consultas
-  read-only com saída sanitizada.
+  — acessibilidade por ID confirmada para os 4 (§3). Identificação da
+  variante no painel **concluída** (tabela exibe `sku_id`, `sku_attr` e IDs
+  por variante — verificado por teste). Resta **P5**: o vínculo com o
+  checkout — o checkout exibe rótulos e preço, não os identificadores, então
+  amarrar a variante do checkout (A08White/36, CÉU AZUL/M) ao `sku_id`/
+  `sku_attr` da resposta segue não comprovado. O runner
+  `scripts/query_aliexpress_candidates.py` repete essas consultas read-only
+  com saída sanitizada.
 - P4. Evidência de despacho por variante: **parcial** — relato do usuário
   para o piloto cobre só CÉU AZUL / M (§3); P e G seguem sem evidência.
-- P6. Custo recorrente de aquisição do piloto: **pendente** — exige
-  conferência no checkout da conta de compra (variante exata, 1 unidade,
+- P6. Custo recorrente de aquisição: **pendente** — registrados: R$ 58,00
+  e R$ 52,00 na outra conta, frete grátis e relato "Do Brasil" nos dois
+  vestidos; **pendentes**: quantidade, impostos e total explícito.
+  Conferência no checkout da conta de compra (variante exata, 1 unidade,
   CEP real), sem concluir a compra; ver checklist no §3.
 - P7. Comparação `remove_personal_benefit` on/off (testa H3): **pendente**
   de sessão — `scripts/query_aliexpress_candidates.py --compare-benefit
@@ -126,13 +131,18 @@ com `product_id`, `ship_to_country="BR"`, `target_currency="BRL"`,
 
 | Anúncio / variante | Detail OK | SKU exato (P5) | Despacho BR | Custo recorrente (P6) | Moeda raw | Origem no banco |
 | --- | --- | --- | --- | --- | --- | --- |
-| `1005010478234256` CÉU AZUL / M | sim [relato] | pendente | relato p/ M; P/G sem nada | pendente | — | `unknown` |
-| `1005010478234256` P, G | sim [relato] | pendente | sem evidência | — | — | `unknown` |
-| `1005010502074833` CÉU AZUL / M | sim [relato] | pendente | relato ("Do Brasil"); qtd/impostos s/ confirmação | pendente (R$ 52 não comprovado) | — | `unknown` |
-| `1005010660869000` A08White / 36 | sim [relato] | pendente | página "Compra internacional": **nada deduzido** | pendente (qtd p/ mapear 125,36) | pendente (`currency_code` SKU+base) | `unknown` |
+| `1005010478234256` CÉU AZUL / M | sim [relato] | painel OK; vínculo checkout pendente | relato p/ M; P/G sem nada | registrado outra conta R$ 58; qtd/impostos/total pendentes | — | `unknown` |
+| `1005010478234256` P, G | sim [relato] | painel OK; vínculo checkout pendente | sem evidência | — | — | `unknown` |
+| `1005010502074833` CÉU AZUL / M | sim [relato] | painel OK; vínculo checkout pendente | relato ("Do Brasil" + frete grátis); qtd/impostos/total pendentes | registrado outra conta R$ 52; restante pendente | — | `unknown` |
+| `1005010660869000` A08White / 36 | sim [relato] | painel OK; vínculo checkout pendente | página "Compra internacional": **nada deduzido**; relato: Brasil, grátis, 13/10 | 76,99 coincide c/ subtotal [relato]; qtd p/ mapear 125,36 pendente | pendente (`currency_code` SKU+base) | `unknown` |
 | `1005010660869000` demais variantes | não investigadas | — | — | — | — | `unknown` |
-| `1005013003211750`, `1005012926123897` (todas) | sim [relato] | pendente | sem evidência | — | — | `unknown` |
+| `1005013003211750`, `1005012926123897` (todas) | sim [relato] | painel OK; vínculo checkout pendente | sem evidência | — | — | `unknown` |
 | `1005009519310498` (controle) | sim [relato] | n/a | n/a (internacional) | n/a | n/a | `unknown` |
+
+Evidência documentada de despacho ≠ origem confirmada no banco: os
+relatos acima seguem registrados e válidos como evidência; o banco
+permanece `unknown` até confirmação explícita por variante — um não apaga
+o outro.
 
 ---
 
@@ -211,14 +221,18 @@ nada se estende a P ou G.
 | Quantidade | **pendente** — sem confirmação explícita no relato |
 | Impostos | **pendente** — sem confirmação explícita no relato |
 
-### Identificação do SKU exato (pendente — P5)
+### Identificação do SKU exato — painel concluído; vínculo com checkout pendente (P5)
 
-Sem sessão autenticada neste ambiente, a correspondência de CÉU AZUL / M
-ao `sku_id` externo, `sku_property_id`, atributos, preço/moeda/estoque e
-data/hora da consulta **não foi feita**. Não deduzir por posição na lista
-nem só pelo título; o `skuId` do cartão da vitrine é formato de storefront,
-não o `sku_id` da API DS. Enquanto houver ambiguidade, **nada de origem é
-confirmado no banco**.
+No painel, a identificação está concluída: a tabela do detalhe exibe por
+variante `sku_id`, `sku_attr` e pares `Nome (pid) = Valor (vid)`
+(verificado por teste anti-confusão). O que segue não comprovado é o
+**vínculo com o checkout**: o checkout exibe rótulos (A08White/36, CÉU
+AZUL/M), preço e totais, mas não os identificadores — amarrar esses
+rótulos ao `sku_id`/`sku_attr` da resposta exige a resposta estruturada
+autenticada lado a lado com a tela de compra. Não deduzir por posição na
+lista nem só pelo título; o `skuId` do cartão da vitrine é formato de
+storefront, não o `sku_id` da API DS. Enquanto houver ambiguidade,
+**nada de origem é confirmado no banco**.
 
 ### Custo recorrente (pendente — P6)
 
