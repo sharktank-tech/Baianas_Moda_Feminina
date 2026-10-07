@@ -103,12 +103,267 @@ def test_sub_code_comum_nao_vira_rate_limit():
     assert not isinstance(excinfo.value, AliExpressRateLimitError)
 
 
+def test_payload_real_apicalllimit_em_code_vira_rate_limit():
+    body = json.dumps(
+        {
+            "error_response": {
+                "code": "ApiCallLimit",
+                "sub_code": None,
+                "msg": (
+                    "Api access frequency exceeds the limit. "
+                    "this ban will last 1 seconds"
+                ),
+            }
+        }
+    )
+    client = _client([body])
+    with pytest.raises(AliExpressRateLimitError):
+        client.call("aliexpress.x")
+
+
+def test_code_apicalllimit_variacoes():
+    for code in ("apicalllimit", "APICALLLIMIT", "ApiCallLimit", "api-call-limit"):
+        client = _client(
+            [_error_body(code=code, sub_code=None, msg="Api access frequency exceeds the limit")]
+        )
+        with pytest.raises(AliExpressRateLimitError):
+            client.call("aliexpress.x")
+
+
+def test_codigo_parecido_nao_vira_rate_limit():
+    for code in ("1555", "5550", "apicalllimitz"):
+        client = _client(
+            [_error_body(code=code, sub_code=None, msg="algo falhou")]
+        )
+        with pytest.raises(AliExpressAPIError) as excinfo:
+            client.call("aliexpress.x")
+        assert not isinstance(excinfo.value, AliExpressRateLimitError)
+
+
+def test_mensagem_de_bloqueio_informa_1_segundo():
+    exc = _rate_exc(
+        code="ApiCallLimit",
+        sub_code=None,
+        msg="Api access frequency exceeds the limit. this ban will last 1 seconds",
+    )
+    assert supplier_wait_seconds(exc) == 1.0
+
+
+def test_get_product_recupera_apos_bloqueio_apicalllimit():
+    blocked = json.dumps(
+        {
+            "error_response": {
+                "code": "ApiCallLimit",
+                "sub_code": None,
+                "msg": "Api access frequency exceeds the limit. this ban will last 1 seconds",
+            }
+        }
+    )
+    detail_ok = json.dumps(
+        {"result": {"ae_item_base_info_dto": {"product_id": PRODUCT_ID}}}
+    )
+    transport = _SequencedTransport([blocked, detail_ok])
+    client = AliExpressClient(app_key="k", app_secret="s", transport=transport)
+    # 1s real de espera (uma tentativa após o bloqueio de 1s informado).
+    detail = client.get_product(product_id=PRODUCT_ID)
+    assert detail.product_id == PRODUCT_ID
+    assert transport.calls == 2
+
+
+def test_call_puro_com_apicalllimit_executa_uma_chamada():
+    body = json.dumps(
+        {
+            "error_response": {
+                "code": "ApiCallLimit",
+                "sub_code": None,
+                "msg": "Api access frequency exceeds the limit",
+            }
+        }
+    )
+    fake = _SequencedTransport([body])
+    client = AliExpressClient(app_key="k", app_secret="s", transport=fake)
+    with pytest.raises(AliExpressRateLimitError):
+        client.call("aliexpress.x")
+    assert fake.calls == 1
+
+
+def test_auth_parametro_transporte_timeout_sem_retry():
+    cases = [
+        ([json.dumps({"error_response": {"code": 401, "msg": "unauthorized"}})], "auth"),
+        ([json.dumps({"error_response": {"code": 50, "msg": "fail", "sub_code": "isv.invalid-parameter"}})], "param"),
+    ]
+    for bodies, _kind in cases:
+        fake = _SequencedTransport(bodies)
+        client = AliExpressClient(app_key="k", app_secret="s", transport=fake)
+        with pytest.raises(AliExpressAPIError):
+            client.search_products(keyword="vestido")
+        assert fake.calls == 1
+
+    from loja.integrations.aliexpress.transport import TransportTimeout
+
+    fake = _SequencedTransport([TransportTimeout("timeout")])
+    client = AliExpressClient(app_key="k", app_secret="s", transport=fake)
+    with pytest.raises(AliExpressTransportError):
+        client.search_products(keyword="vestido")
+    assert fake.calls == 1
+
+
 def test_call_puro_continua_sem_retry():
     fake = _SequencedTransport([_rate_limit_body()])
     client = AliExpressClient(app_key="k", app_secret="s", transport=fake)
     with pytest.raises(AliExpressRateLimitError):
         client.call("aliexpress.x")
     assert fake.calls == 1
+
+
+# --------------------------------------------------------------------------
+# Orçamento de tempo compartilhado (relógio e espera simulados)
+# --------------------------------------------------------------------------
+
+from loja.integrations.aliexpress.rate_limit import BudgetExhaustedError, TimeBudget
+
+
+def _clock_and_sleep():
+    now = [1000.0]
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    return now, sleeps, sleep
+
+
+class _TimedStubClient:
+    """Stub com custo de rede: cada chamada avança o relógio fake."""
+
+    def __init__(self, effects, *, now, call_cost=2.0, timeout=10.0):
+        self.effects = list(effects)
+        self.calls = 0
+        self._now = now
+        self._cost = call_cost
+        self.timeout = timeout
+
+    def call(self, method, **business):
+        self.calls += 1
+        self._now[0] += self._cost
+        effect = self.effects[min(self.calls - 1, len(self.effects) - 1)]
+        if isinstance(effect, Exception):
+            raise effect
+        return effect
+
+
+def _budgeted_rate_exc(**fields):
+    base = {"code": 555, "msg": "rate limit exceeded"}
+    base.update(fields)
+    return AliExpressRateLimitError(
+        "rate limit (code=555)", code=555, sub_code=None,
+        raw={"error_response": base},
+    )
+
+
+def test_orcamento_compartilhado_entre_consultas():
+    now, sleeps, sleep = _clock_and_sleep()
+    budget = TimeBudget(30.0, clock=lambda: now[0])
+    stub = _TimedStubClient(
+        [_budgeted_rate_exc(), {"ok": True}], now=now, call_cost=10.0
+    )
+    assert call_with_rate_limit_retry(
+        stub, "aliexpress.x", {}, sleep=sleep, budget=budget
+    ) == {"ok": True}
+    # 2 chamadas (10s cada) + 1 espera (1s), tudo do MESMO orçamento.
+    assert stub.calls == 2
+    assert sleeps == [1.0]
+    assert budget.remaining() == pytest.approx(9.0)
+
+
+def test_primeira_consulta_reduz_disponivel_da_segunda():
+    now, sleeps, sleep = _clock_and_sleep()
+    budget = TimeBudget(30.0, clock=lambda: now[0])
+    stub = _TimedStubClient(
+        [_budgeted_rate_exc(), {"ok": True}], now=now, call_cost=10.0
+    )
+    call_with_rate_limit_retry(stub, "aliexpress.x", {}, sleep=sleep, budget=budget)
+    assert budget.remaining() == pytest.approx(9.0)
+    # Restam 9s < timeout de 10s: a segunda consulta nem começa.
+    stub2 = _TimedStubClient([_budgeted_rate_exc(retry_after=100)], now=now)
+    with pytest.raises(BudgetExhaustedError) as excinfo:
+        call_with_rate_limit_retry(
+            stub2, "aliexpress.x", {}, sleep=sleep, budget=budget
+        )
+    assert "falta de tempo" in str(excinfo.value)
+    assert stub2.calls == 0
+    assert sleeps == [1.0]
+
+
+def test_nenhuma_espera_ou_tentativa_sem_orcamento():
+    now, sleeps, sleep = _clock_and_sleep()
+    budget = TimeBudget(0.5, clock=lambda: now[0])
+    stub = _TimedStubClient([_budgeted_rate_exc()], now=now)
+    with pytest.raises(BudgetExhaustedError) as excinfo:
+        call_with_rate_limit_retry(
+            stub, "aliexpress.x", {}, sleep=sleep, budget=budget
+        )
+    assert "falta de tempo" in str(excinfo.value)
+    assert stub.calls == 0
+    assert sleeps == []
+
+
+def test_espera_maior_que_disponivel_encerra_com_aviso():
+    now, sleeps, sleep = _clock_and_sleep()
+    budget = TimeBudget(10.0, clock=lambda: now[0])
+    stub = _TimedStubClient([_budgeted_rate_exc(retry_after=120)], now=now)
+    with pytest.raises(BudgetExhaustedError) as excinfo:
+        call_with_rate_limit_retry(
+            stub, "aliexpress.x", {}, sleep=sleep, budget=budget
+        )
+    # Não reduzida para repetir antes do prazo: encerra com o aviso.
+    assert str(excinfo.value) == RATE_LIMIT_MESSAGE
+    assert stub.calls == 1
+    assert sleeps == []
+
+
+def test_esgotamento_mantem_inconclusiva_sem_dados_fabricados():
+    from loja.integrations.aliexpress.product import compare_benefit_records
+
+    on_rec = {
+        "label": "r", "product_id": "1", "remove_personal_benefit": True,
+        "round": 0, "ok": False,
+        "error": {"type": "BudgetExhaustedError", "code": None,
+                  "sub_code": None, "message": "x"},
+    }
+    off_rec = {
+        "label": "r", "product_id": "1", "remove_personal_benefit": False,
+        "round": 0, "ok": True,
+        "detail": {"product_id": "1", "title": "T", "skus": []},
+    }
+    comps = compare_benefit_records([on_rec, off_rec])
+    assert len(comps) == 1
+    assert comps[0]["overall"] == (
+        "comparação inviável (erro em ao menos uma chamada); efeito inconclusivo"
+    )
+    assert "detail" not in on_rec
+
+
+def test_limite_tres_chamadas_respeitado_com_orcamento():
+    now, sleeps, sleep = _clock_and_sleep()
+    budget = TimeBudget(1000.0, clock=lambda: now[0])
+    stub = _TimedStubClient([_budgeted_rate_exc()] * 10, now=now, call_cost=0.0)
+    with pytest.raises(AliExpressRateLimitError):
+        call_with_rate_limit_retry(
+            stub, "aliexpress.x", {}, max_retries=2, sleep=sleep, budget=budget
+        )
+    assert stub.calls == 3
+    assert sleeps == [1.0, 2.0]
+
+
+def test_time_budget_nunca_negativo_e_teto_zero():
+    now = [1000.0]
+    budget = TimeBudget(10.0, clock=lambda: now[0])
+    assert budget.remaining() == 10.0
+    assert TimeBudget(0.0, clock=lambda: now[0]).remaining() == 0.0
+    now[0] = 2000.0
+    assert budget.remaining() == 0.0
 
 
 # --------------------------------------------------------------------------
@@ -363,6 +618,129 @@ def test_formularios_de_consulta_tem_guarda_anti_duplo_clique(admin_catalog):
     body = admin_catalog.get(f"{PREFIX}/").get_data(as_text=True)
     assert "form[data-once]" in body
     assert body.count("data-once") >= 3  # buscar, buscar-id (+ script)
+
+
+# --------------------------------------------------------------------------
+# Aviso na página de comparação (rota autenticada, sem rede real)
+# --------------------------------------------------------------------------
+
+def _route_flagged(monkeypatch, mapping):
+    calls = []
+
+    def fake_get_product(self, product_id=None, remove_personal_benefit=True, **kwargs):
+        calls.append((product_id, remove_personal_benefit))
+        value = mapping.get((product_id, remove_personal_benefit))
+        if isinstance(value, Exception):
+            raise value
+        if value is None:
+            return FakeAliExpressClient.details.get(product_id)
+        return value
+
+    monkeypatch.setattr(FakeAliExpressClient, "get_product", fake_get_product)
+    return calls
+
+
+def _rate_limit_tecnicese():
+    return AliExpressRateLimitError(
+        "Api access frequency exceeds the limit. this ban will last 1 seconds",
+        code="ApiCallLimit",
+        sub_code=None,
+    )
+
+
+def test_comparar_aviso_so_no_lado_on(admin_catalog, monkeypatch):
+    from tests.test_aliexpress_admin_catalog import make_detail
+
+    _route_flagged(
+        monkeypatch,
+        {(PRODUCT_ID, True): _rate_limit_tecnicese(), (PRODUCT_ID, False): make_detail()},
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    assert RATE_LIMIT_MESSAGE in body
+    assert "Api access frequency" not in body
+    assert "80,00" in body
+    assert "comparação inviável" in body
+
+
+def test_comparar_aviso_so_no_lado_off(admin_catalog, monkeypatch):
+    from tests.test_aliexpress_admin_catalog import make_detail
+
+    _route_flagged(
+        monkeypatch,
+        {(PRODUCT_ID, True): make_detail(), (PRODUCT_ID, False): _rate_limit_tecnicese()},
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    assert RATE_LIMIT_MESSAGE in body
+    assert "Api access frequency" not in body
+    assert "80,00" in body
+    assert "comparação inviável" in body
+
+
+def test_comparar_aviso_nos_dois_lados(admin_catalog, monkeypatch):
+    _route_flagged(
+        monkeypatch,
+        {
+            (PRODUCT_ID, True): _rate_limit_tecnicese(),
+            (PRODUCT_ID, False): _rate_limit_tecnicese(),
+        },
+    )
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    assert body.count(RATE_LIMIT_MESSAGE) == 2
+    assert "Api access frequency" not in body
+    assert "comparação inviável" in body
+
+
+def test_comparar_recuperacao_sem_aviso_ao_final(admin_catalog, monkeypatch):
+    import loja.views.aliexpress_admin_routes as routes
+
+    detail_ok = json.dumps(
+        {
+            "result": {
+                "ae_item_base_info_dto": {
+                    "product_id": PRODUCT_ID,
+                    "subject": TITLE,
+                }
+            }
+        }
+    )
+    transport = _SequencedTransport(
+        [_rate_limit_body(), detail_ok, detail_ok]
+    )
+
+    def factory(**kwargs):
+        return AliExpressClient(app_key="k", app_secret="s", transport=transport)
+
+    monkeypatch.setattr(routes, "AliExpressClient", factory)
+    body = admin_catalog.post(
+        f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+    ).get_data(as_text=True)
+    assert transport.calls == 3
+    assert "nenhuma diferença observada; efeito inconclusivo" in body
+    assert RATE_LIMIT_MESSAGE not in body
+    assert "Api access frequency" not in body
+
+
+def test_comparar_csrf_exigido_quando_ativado(
+    app, client, admin_user, login, ae_env, fake_client, catalog
+):
+    from tests.test_aliexpress_admin_catalog import _set_admin_session
+
+    app.config["WTF_CSRF_ENABLED"] = True
+    try:
+        login(admin_user.email)
+        _set_admin_session(client)
+        resp = client.post(
+            f"{PREFIX}/{PRODUCT_ID}/comparar-preco", data={"rodada": "1"}
+        )
+        assert resp.status_code == 400
+    finally:
+        app.config["WTF_CSRF_ENABLED"] = False
 
 
 def test_detalhe_e_comparar_tem_guarda(admin_catalog, monkeypatch):

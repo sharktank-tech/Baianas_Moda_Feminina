@@ -469,12 +469,15 @@ mais a honestidade na interface:
   `@ali_session_required`; ID do produto junto ao título da tabela.
 - `POST /<id>/comparar-preco` (+ card "Rodada 1/2/3" no `detalhe.html` e
   página `comparar.html`): **uma rodada por acionamento** (2 consultas
-  sequenciais, ≤20s no pior caso — abaixo do teto de 60s da função;
-  6 chamadas de uma vez arriscariam timeout). Reutiliza cliente e sessão
-  da rota de detalhe (sem credential-store); exige admin, sessão válida e
-  CSRF; mostra por variante ID do anúncio, SKU bruto, `sku_attr` on/off,
-  atributos, preços e estoques on/off, moeda, veredito da rodada e erros
-  sanitizados; parâmetro marcado experimental; **zero acesso ao banco**.
+  sequenciais compartilhando um orçamento de 40s — ver
+  `COMPARAR_ROUND_BUDGET_SECONDS`; vercel.json dá maxDuration 60s para
+  `api/app.py`, 20s reservados para renderizar; 6 chamadas de uma vez
+  arriscariam timeout). Reutiliza cliente e sessão da rota de detalhe
+  (sem credential-store); exige admin, sessão válida e CSRF; mostra por
+  variante ID do anúncio, SKU bruto, `sku_attr` on/off, atributos, preços
+  e estoques on/off, moedas on/off com nota de não comparabilidade,
+  veredito da rodada e erros sanitizados (aviso amigável em rate limit);
+  parâmetro marcado experimental; **zero acesso ao banco**.
 - `POST /<id>/moeda-bruta` (+ card no `detalhe.html` e página `moeda.html`):
   exibe só `currency_code` da base e da variante exata (`sku_id`
   opcional; ausente lista todas), sem JSON completo e sem credenciais;
@@ -567,11 +570,22 @@ calculada) e moedas on/off por lado com nota de não comparabilidade,
 tabela validada por parser posicional (célula↔cabeçalho, contraprova
 contra o template anterior).
 
+Rate limit (`tests/test_aliexpress_rate_limit.py` — **42 passed**):
+`ApiCallLimit` em `code`/`sub_code` (payload exato e variações),
+duração "ban will last N seconds", recuperação com `get_product`,
+chamada única em `call()` puro, sem retry em auth/parâmetro/transporte/
+timeout, orçamento compartilhado com relógio fake (redução, bloqueio
+prévio, espera maior que o restante, esgotamento inconclusivo, teto de
+3 chamadas), aviso amigável por lado na comparação (só on, só off,
+ambos), recuperação sem aviso ao final, CSRF exigido, anti-duplo-clique
+nos formulários.
+
 Suítes pertinentes: `test_aliexpress_admin_catalog.py` +
 `test_aliexpress_client.py` + `test_aliexpress_product.py` +
-`test_aliexpress_lookup_by_id.py` = **156 passed**;
+`test_aliexpress_lookup_by_id.py` + `test_aliexpress_rate_limit.py` =
+**242 passed**;
 `test_aliexpress_search.py` + `test_draft_import.py` +
 `test_published_sync_resilience.py` = **80 passed**.
-Suíte completa: **2233 passed, 107 skipped**.
+Suíte completa: **2289 passed, 107 skipped**.
 Sem skips novos; nenhum teste PG (sem alteração de persistência, consultas
 ou migrações). `git diff --check` limpo.

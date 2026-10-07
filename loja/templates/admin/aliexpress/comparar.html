@@ -37,18 +37,30 @@
         {% if not rec_on.ok or not rec_off.ok %}
             <div class="mt-4 space-y-2">
                 {% if not rec_on.ok %}
-                    <p class="text-sm text-red-700">
-                        Erro (flag ligada): {{ rec_on.error.type }}
-                        {% if rec_on.error.code %}(code={{ rec_on.error.code }}{% if rec_on.error.sub_code %}, sub_code={{ rec_on.error.sub_code }}{% endif %}){% endif %}:
-                        {{ rec_on.error.message }}
-                    </p>
+                    {% if rec_on.rate_limited %}
+                        <p class="text-sm font-medium px-2 py-1 rounded-full border inline-block text-yellow-800 bg-yellow-50 border-yellow-200">
+                            {{ rate_limit_message }} (flag ligada)
+                        </p>
+                    {% else %}
+                        <p class="text-sm text-red-700">
+                            Erro (flag ligada): {{ rec_on.error.type }}
+                            {% if rec_on.error.code %}(code={{ rec_on.error.code }}{% if rec_on.error.sub_code %}, sub_code={{ rec_on.error.sub_code }}{% endif %}){% endif %}:
+                            {{ rec_on.error.message }}
+                        </p>
+                    {% endif %}
                 {% endif %}
                 {% if not rec_off.ok %}
-                    <p class="text-sm text-red-700">
-                        Erro (flag desligada): {{ rec_off.error.type }}
-                        {% if rec_off.error.code %}(code={{ rec_off.error.code }}{% if rec_off.error.sub_code %}, sub_code={{ rec_off.error.sub_code }}{% endif %}){% endif %}:
-                        {{ rec_off.error.message }}
-                    </p>
+                    {% if rec_off.rate_limited %}
+                        <p class="text-sm font-medium px-2 py-1 rounded-full border inline-block text-yellow-800 bg-yellow-50 border-yellow-200">
+                            {{ rate_limit_message }} (flag desligada)
+                        </p>
+                    {% else %}
+                        <p class="text-sm text-red-700">
+                            Erro (flag desligada): {{ rec_off.error.type }}
+                            {% if rec_off.error.code %}(code={{ rec_off.error.code }}{% if rec_off.error.sub_code %}, sub_code={{ rec_off.error.sub_code }}{% endif %}){% endif %}:
+                            {{ rec_off.error.message }}
+                        </p>
+                    {% endif %}
                 {% endif %}
             </div>
         {% endif %}

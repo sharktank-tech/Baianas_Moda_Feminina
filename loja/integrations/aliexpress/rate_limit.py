@@ -20,13 +20,24 @@ import re
 import time
 from typing import Any, Mapping, Optional
 
-from .errors import AliExpressRateLimitError
+from .errors import AliExpressError, AliExpressRateLimitError
 
 #: Aviso exibido quando o bloqueio temporário persiste após as tentativas.
 RATE_LIMIT_MESSAGE = (
     "Limite temporário do AliExpress. "
     "Aguarde alguns segundos e tente novamente."
 )
+
+
+class BudgetExhaustedError(AliExpressError):
+    """Orçamento de tempo esgotado antes de concluir a rodada.
+
+    NÃO é rate limit do fornecedor: indica que esperar ou chamar de novo
+    estouraria o teto da operação. Carrega mensagem pronta para exibição
+    (aviso temporário ou falta de tempo) e nunca dados fabricados. Classe
+    separada de `AliExpressRateLimitError` de propósito: o helper a
+    propaga de imediato, sem dormir nem repetir.
+    """
 
 MAX_RETRIES = 2
 BASE_DELAY_SECONDS = 1.0
@@ -45,12 +56,14 @@ _WAIT_FIELDS = (
 )
 
 #: A menção de espera na mensagem só vale com intenção de nova tentativa.
+#: "ban" cobre o formato do provider ("this ban will last N seconds").
 _RETRY_INTENT = (
     "retry",
     "retries",
     "wait",
     "sleep",
     "later",
+    "ban",
     "try again",
     "tente novamente",
     "aguarde",
@@ -112,6 +125,24 @@ def supplier_wait_seconds(exc: BaseException) -> Optional[float]:
     return _as_seconds(match.group(1) or match.group(2))
 
 
+class TimeBudget:
+    """Orçamento de tempo (relógio monotônico) compartilhado por chamadas.
+
+    `clock` injetável para testes (padrão `time.monotonic`). `remaining()`
+    nunca é negativo. O orçamento cobre chamadas de rede E esperas: quem
+    consome (chamada ou sleep real) avança o relógio e reduz o restante
+    para os demais — inclusive entre as duas consultas on/off da rodada.
+    """
+
+    def __init__(self, budget_seconds: float, *, clock=time.monotonic):
+        self._clock = clock
+        self._deadline = clock() + max(float(budget_seconds), 0.0)
+
+    def remaining(self) -> float:
+        """Segundos restantes (0.0 quando esgotado)."""
+        return max(self._deadline - self._clock(), 0.0)
+
+
 def call_with_rate_limit_retry(
     client,
     method: str,
@@ -121,6 +152,7 @@ def call_with_rate_limit_retry(
     base_delay: float = BASE_DELAY_SECONDS,
     max_delay: float = MAX_DELAY_SECONDS,
     sleep=time.sleep,
+    budget: Optional["TimeBudget"] = None,
 ):
     """Executa `client.call` com retry limitado SÓ em Rate Limit.
 
@@ -128,9 +160,24 @@ def call_with_rate_limit_retry(
     Qualquer outro erro (API, auth, transporte, config) propaga de imediato,
     sem nova tentativa. Esgotadas as tentativas, o último
     `AliExpressRateLimitError` é relançado para o aviso ao usuário.
+
+    Com `budget`, nenhuma chamada começa se seu timeout (`client.timeout`)
+    ultrapassar o restante, e nenhuma espera começa se não couber: nesses
+    casos levanta `BudgetExhaustedError` de imediato, sem dormir nem chamar.
+    Espera do fornecedor maior que o restante encerra com o aviso temporário
+    (nunca reduzida para repetir antes do prazo).
     """
+    call_timeout = getattr(client, "timeout", None)
     attempts = 0
     while True:
+        if (
+            budget is not None
+            and call_timeout is not None
+            and budget.remaining() < float(call_timeout)
+        ):
+            raise BudgetExhaustedError(
+                "Consulta não iniciada por falta de tempo no orçamento."
+            )
         try:
             return client.call(method, **dict(business))
         except AliExpressRateLimitError as exc:
@@ -139,6 +186,8 @@ def call_with_rate_limit_retry(
             supplier = supplier_wait_seconds(exc)
             progressive = float(base_delay) * (2**attempts)
             delay = min(max(supplier or 0.0, progressive), float(max_delay))
+            if budget is not None and delay > budget.remaining():
+                raise BudgetExhaustedError(RATE_LIMIT_MESSAGE) from None
             sleep(max(delay, 0.0))
             attempts += 1
 
@@ -148,6 +197,8 @@ __all__ = [
     "MAX_DELAY_SECONDS",
     "MAX_RETRIES",
     "RATE_LIMIT_MESSAGE",
+    "BudgetExhaustedError",
+    "TimeBudget",
     "call_with_rate_limit_retry",
     "supplier_wait_seconds",
 ]

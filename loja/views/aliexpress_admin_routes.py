@@ -77,7 +77,11 @@ from loja.integrations.aliexpress.errors import (
     AliExpressRateLimitError,
     AliExpressTransportError,
 )
-from loja.integrations.aliexpress.rate_limit import RATE_LIMIT_MESSAGE
+from loja.integrations.aliexpress.rate_limit import (
+    RATE_LIMIT_MESSAGE,
+    BudgetExhaustedError,
+    TimeBudget,
+)
 from loja.integrations.aliexpress.importer import (
     FREIGHT_AVAILABLE,
     DraftImportError,
@@ -136,6 +140,12 @@ SEARCH_LOCALE = "en_US"
 SEARCH_COUNTRY_CODE = "BR"
 SEARCH_CURRENCY = "BRL"
 SEARCH_PAGE_SIZE = 20
+
+#: Orçamento de tempo compartilhado pelas 2 consultas on/off de uma rodada
+#: de comparação. vercel.json: maxDuration 60s para api/app.py; 20s ficam
+#: reservados para renderizar a resposta e folga. Uma rodada = 1 acionamento
+#: (2 consultas); três rodadas = três acionamentos.
+COMPARAR_ROUND_BUDGET_SECONDS = 40.0
 
 #: Filtros administrativos de origem do catálogo importado (Etapa 2).
 ORIGIN_FILTERS = ("brazil", "foreign", "unknown", "mixed", "conflict")
@@ -272,12 +282,14 @@ def _active_supplier_product(product: Optional[Product]):
 def _flash_read_error(exc: Exception) -> None:
     """Flash para falha de consulta somente leitura.
 
-    Bloqueio temporário (Rate Limit, mesmo após as tentativas com espera)
-    vira o aviso claro de nova tentativa — nunca o texto técnico do
-    provider. Demais erros seguem sanitizados como antes.
+    Bloqueio temporário (Rate Limit, mesmo após as tentativas com espera, e
+    orçamento de tempo esgotado) vira aviso de nova tentativa — nunca o
+    texto técnico do provider. Demais erros seguem sanitizados como antes.
     """
     if isinstance(exc, AliExpressRateLimitError):
         flash(RATE_LIMIT_MESSAGE, "warning")
+    elif isinstance(exc, BudgetExhaustedError):
+        flash(str(getattr(exc, "message", None) or RATE_LIMIT_MESSAGE), "warning")
     else:
         flash(_sanitized_api_error(exc), "danger")
 
@@ -1243,11 +1255,12 @@ def comparar_preco(product_id: str):
     """Uma rodada da comparação on/off do parâmetro experimental (2 chamadas).
 
     Limites: cada acionamento faz exatamente 2 consultas sequenciais
-    (`ds.product.get`, timeout de 10s cada) — bem abaixo do teto de 60s da
-    função serverless. Três rodadas = três acionamentos, com ordem alternada
-    por paridade (ímpar começa ligado, par começa desligado). Somente
-    leitura: nenhum acesso ao banco, nenhuma persistência, sem importar,
-    publicar ou comprar.
+    (`ds.product.get`, timeout de 10s cada) compartilhando UM orçamento de
+    40s (ver COMPARAR_ROUND_BUDGET_SECONDS) — bem abaixo do teto de 60s da
+    função serverless, com reserva para renderizar. Três rodadas = três
+    acionamentos, com ordem alternada por paridade (ímpar começa ligado,
+    par começa desligado). Somente leitura: nenhum acesso ao banco, nenhuma
+    persistência, sem importar, publicar ou comprar.
     """
     try:
         rodada = int((request.form.get("rodada") or "1").strip())
@@ -1269,13 +1282,14 @@ def comparar_preco(product_id: str):
         )
 
     label = "comparar-preco-r%d" % rodada
+    budget = TimeBudget(COMPARAR_ROUND_BUDGET_SECONDS)
     rec_first = fetch_product_record(
         client, product_id=product_id, label=label,
-        remove_personal_benefit=first, round=rodada - 1,
+        remove_personal_benefit=first, round=rodada - 1, budget=budget,
     )
     rec_second = fetch_product_record(
         client, product_id=product_id, label=label,
-        remove_personal_benefit=second, round=rodada - 1,
+        remove_personal_benefit=second, round=rodada - 1, budget=budget,
     )
     comparisons = compare_benefit_records([rec_first, rec_second])
     verdict = comparisons[0]["overall"] if comparisons else VERDICT_UNVIABLE
@@ -1297,6 +1311,7 @@ def comparar_preco(product_id: str):
         verdict_diff=VERDICT_DIFF,
         verdict_unviable=VERDICT_UNVIABLE,
         parameter_note=PARAMETER_NOTE,
+        rate_limit_message=RATE_LIMIT_MESSAGE,
         rows=rows,
     )
 

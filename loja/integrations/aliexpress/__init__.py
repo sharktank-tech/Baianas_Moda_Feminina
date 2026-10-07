@@ -55,6 +55,8 @@ from .search import (
 )
 from .rate_limit import (
     RATE_LIMIT_MESSAGE,
+    BudgetExhaustedError,
+    TimeBudget,
     call_with_rate_limit_retry,
     supplier_wait_seconds,
 )
@@ -285,6 +287,8 @@ __all__: Iterable[str] = [
     "normalize_search_response",
     "parse_price",
     "RATE_LIMIT_MESSAGE",
+    "BudgetExhaustedError",
+    "TimeBudget",
     "call_with_rate_limit_retry",
     "supplier_wait_seconds",
     "build_product_detail_params",
