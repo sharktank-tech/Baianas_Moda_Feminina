@@ -70,7 +70,9 @@ def pg_app(monkeypatch):
             "pool_pre_ping": True,
             "pool_recycle": 300,
             "connect_args": {
-                "options": "-csearch_path=%s -cstatement_timeout=20000" % schema
+                # 60s: a prova de sobreposição segura o lock de Product de
+                # propósito (pausa sob lock); o join limita tudo em 60s.
+                "options": "-csearch_path=%s -cstatement_timeout=60000" % schema
             },
         },
     )
@@ -333,11 +335,23 @@ def test_restituicao_compartilhada_respeita_atividade(pg_app):
     assert _state(pg_app, ids) == (3, (5, False), (3, True))
 
 
-def test_corrida_disponibilidade_release_checkout_sem_deadlock(pg_app):
-    """Alternância x liberação x checkout: sem deadlock, invariante intacto."""
+def test_corrida_disponibilidade_release_checkout_sem_deadlock(pg_app, monkeypatch):
+    """Alternância x liberação x checkout com sobreposição GARANTIDA.
+
+    O releaser entra sozinho e pausa DENTRO da seção crítica — com os locks
+    Order -> Product -> ProductVariant já adquiridos (o hook é a
+    contabilidade de reservas, chamada sob lock nos dois caminhos de
+    restituição; o checkout nunca a chama). Com o lock de Product segurado,
+    toggler e buyer largam juntos de uma barreira e NÃO conseguem terminar:
+    evidência de espera real pelo lock, não de execução serial. Liberado o
+    lock, todos concluem sem deadlock (mesma ordem de locks nos três
+    caminhos) e o invariante canônico vale.
+    """
     from loja import db
     from loja.modules.getway_mercado_pago.payment_models import Order
-    from loja.modules.models import Product
+    from loja.modules.models import Product, ProductVariant
+    from loja.services import stock_reservations as sr
+    from loja.services.purchase_controls import purchase_block_codes
     from loja.services.stock_reservations import (
         release_expired_stock_reservations,
     )
@@ -345,11 +359,41 @@ def test_corrida_disponibilidade_release_checkout_sem_deadlock(pg_app):
     from loja.views.payments_routes import _reserve_stock
 
     ids = _materialize(pg_app)
+    with pg_app.app_context():
+        product = db.session.get(Product, ids["product_id"])
+        variant2 = db.session.get(ProductVariant, ids["variant2_id"])
+        assert purchase_block_codes(product, variant2) == []
+
     errors = []
+    buyer_successes = []
+    buyer_failures = []
+
+    release_holding = threading.Event()
+    allow_release = threading.Event()
+    gate = threading.Barrier(3)
+    toggle_entered = threading.Event()
+    toggle_done = threading.Event()
+    buyer_entered = threading.Event()
+    buyer_done = threading.Event()
+    paused_once = threading.Event()
+    original_reserved = sr.reserved_quantities_by_variant
+
+    def pausing_reserved(variant_ids):
+        # Pausa uma única vez, com os locks adquiridos. Só a restituição
+        # chega aqui; o checkout nunca chama esta função.
+        if not paused_once.is_set():
+            paused_once.set()
+            release_holding.set()
+            assert allow_release.wait(60)
+        return original_reserved(variant_ids)
+
+    monkeypatch.setattr(sr, "reserved_quantities_by_variant", pausing_reserved)
 
     def toggler():
         with pg_app.app_context():
             try:
+                gate.wait(30)
+                toggle_entered.set()
                 for i in range(8):
                     product = db.session.get(Product, ids["product_id"])
                     set_variant_availability(
@@ -358,6 +402,7 @@ def test_corrida_disponibilidade_release_checkout_sem_deadlock(pg_app):
                         available=(i % 2 == 1),
                     )
                     db.session.commit()
+                toggle_done.set()
             except Exception as exc:
                 errors.append(exc)
             finally:
@@ -376,6 +421,8 @@ def test_corrida_disponibilidade_release_checkout_sem_deadlock(pg_app):
     def buyer():
         with pg_app.app_context():
             try:
+                gate.wait(30)
+                buyer_entered.set()
                 product = db.session.get(Product, ids["product_id"])
                 for _ in range(8):
                     try:
@@ -391,24 +438,51 @@ def test_corrida_disponibilidade_release_checkout_sem_deadlock(pg_app):
                             ]
                         )
                         db.session.commit()
-                    except ValueError:
+                        buyer_successes.append(1)
+                    except ValueError as exc:
                         db.session.rollback()
+                        buyer_failures.append(str(exc))
             except Exception as exc:
                 errors.append(exc)
             finally:
                 db.session.remove()
+                buyer_done.set()
 
     threads = [
-        threading.Thread(target=toggler),
-        threading.Thread(target=releaser),
-        threading.Thread(target=buyer),
+        threading.Thread(target=toggler, daemon=True),
+        threading.Thread(target=releaser, daemon=True),
+        threading.Thread(target=buyer, daemon=True),
     ]
-    for thread in threads:
-        thread.start()
+    threads[1].start()
+    # O releaser travou DENTRO da seção crítica (locks adquiridos).
+    assert release_holding.wait(30)
+
+    threads[0].start()
+    threads[2].start()
+    gate.wait(30)  # toggler + buyer + main largam juntos, lock segurado.
+    assert toggle_entered.wait(15)
+    assert buyer_entered.wait(15)
+
+    # Evidência de espera real pelo lock: vivos e simultâneos, nenhum termina
+    # enquanto o releaser segura Product (concluir é impossível — o primeiro
+    # lock de cada iteração bloqueia).
+    assert toggle_done.wait(3) is False
+    assert buyer_done.wait(3) is False
+
+    allow_release.set()
     for thread in threads:
         thread.join(60)
     assert not any(t.is_alive() for t in threads)
     assert errors == []
+
+    # Checkout executou de verdade: o estoque total da variante 2 é 2 + 1
+    # (liberação de O2) = 3 para 8 intentos — ao menos os 2 iniciais debitam,
+    # e TODA recusa é falta de estoque (nada engolido em silêncio).
+    assert len(buyer_successes) >= 2
+    assert len(buyer_successes) + len(buyer_failures) == 8
+    assert buyer_failures
+    for message in buyer_failures:
+        assert "insuficiente" in message.lower(), message
 
     with pg_app.app_context():
         assert not (
