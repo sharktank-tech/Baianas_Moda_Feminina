@@ -58,6 +58,9 @@
     {% set nacional_endpoint = 'aliexpress_admin.publicado_nacional' %}
     {% include "admin/aliexpress/_origin_fields.html" %}
 
+    {% set disponibilidade_endpoint = 'aliexpress_admin.publicado_disponibilidade' %}
+    {% include "admin/aliexpress/_variant_availability.html" %}
+
     {# Etapa 3: sincronização técnica — só estoque/dados técnicos. #}
     <div class="bg-white rounded-2xl shadow p-6">
         <h2 class="text-lg font-semibold text-gray-800 mb-1">

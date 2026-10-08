@@ -130,6 +130,10 @@ from loja.services.shipping_origin import (
     set_national_operation,
     summary_label,
 )
+from loja.services.variant_availability import (
+    parse_availability_flag,
+    set_variant_availability,
+)
 from loja.utils.decorators import admin_required
 
 aliexpress_admin_blueprint = Blueprint(
@@ -1550,6 +1554,80 @@ def publicado_nacional(product_id: str):
         flash("Produto publicado não encontrado.", "warning")
         return redirect(url_for("aliexpress_admin.index"))
     return _apply_national_update(
+        product,
+        back_endpoint="aliexpress_admin.publicado_frete_form",
+        product_id=product_id,
+    )
+
+
+def _apply_availability_update(product, *, back_endpoint, product_id):
+    """Habilita/desabilita UMA variante para venda (decisão comercial).
+
+    Espera `variant_id` (UUID da variante) e `disponivel` ("1"/"0") no
+    formulário. Valida pertencimento ao produto, trava na ordem do
+    checkout e recalcula o agregado pela regra canônica.     Pedidos, reservas
+    e estoque da variante permanecem intactos — só `is_active` muda (mais
+    o agregado decorrente).
+    """
+    available = parse_availability_flag(request.form.get("disponivel"))
+    if available is None:
+        flash("Informe se a variante fica disponível (1) ou não (0).", "warning")
+        return _back_to(back_endpoint, product_id)
+    try:
+        result = set_variant_availability(
+            product=product,
+            variant_id=request.form.get("variant_id"),
+            available=available,
+        )
+        db.session.commit()
+    except ValueError as exc:
+        db.session.rollback()
+        current_app.logger.warning("disponibilidade admin: %s", exc)
+        flash("Variação inválida para este produto.", "danger")
+        return _back_to(back_endpoint, product_id)
+    except Exception:
+        db.session.rollback()
+        current_app.logger.warning("disponibilidade admin: falha", exc_info=True)
+        flash("Erro ao salvar a disponibilidade da variante.", "danger")
+        return _back_to(back_endpoint, product_id)
+    state = "disponível para venda" if result.is_active else "fora de venda"
+    flash(
+        "Variação %s (%d → %d em estoque no produto)." % (state, result.stock_before, result.stock_after),
+        "success",
+    )
+    return _back_to(back_endpoint, product_id)
+
+
+@aliexpress_admin_blueprint.route(
+    "/rascunho/<product_id>/disponibilidade", methods=["POST"]
+)
+@admin_required
+@ali_session_required
+def rascunho_disponibilidade(product_id: str):
+    """Disponibilidade comercial de variante de um RASCUNHO."""
+    product = _load_draft(product_id)
+    if product is None:
+        flash("Rascunho não encontrado.", "warning")
+        return redirect(url_for("aliexpress_admin.index"))
+    return _apply_availability_update(
+        product,
+        back_endpoint="aliexpress_admin.rascunho",
+        product_id=product_id,
+    )
+
+
+@aliexpress_admin_blueprint.route(
+    "/publicado/<product_id>/disponibilidade", methods=["POST"]
+)
+@admin_required
+@ali_session_required
+def publicado_disponibilidade(product_id: str):
+    """Disponibilidade comercial de variante de um PUBLICADO."""
+    product = _load_published(product_id)
+    if product is None:
+        flash("Produto publicado não encontrado.", "warning")
+        return redirect(url_for("aliexpress_admin.index"))
+    return _apply_availability_update(
         product,
         back_endpoint="aliexpress_admin.publicado_frete_form",
         product_id=product_id,
