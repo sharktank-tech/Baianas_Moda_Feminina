@@ -378,10 +378,22 @@ def test_liberacao_nunca_devolve_acima_do_estoque_do_fornecedor(
     db.session.expire_all()
     product = _draft_from_db()
     variant = product.variants[0]
-    # Teto = fornecedor(1) − outras reservas(0) = 1: nunca 2.
+    # Teto = fornecedor(1) − outras reservas(0) = 1: nunca 2. A variante foi
+    # desativada pelo sync (zerada no fornecedor), então a devolução restaura
+    # o estoque DELA sem entrar no agregado (soma das ATIVAS = 0).
+    assert variant.is_active is False
     assert variant.stock == 1
     assert variant.supplier_stock == 1
-    assert product.stock == 1
+    assert product.stock == 0
+
+    # Reativação explícita incorpora o devolvido.
+    from loja.services.variant_availability import set_variant_availability
+
+    set_variant_availability(
+        product=product, variant_id=str(variant.id), available=True
+    )
+    db.session.commit()
+    assert _draft_from_db().stock == 1
 
 
 def test_liberacao_com_fornecedor_estavel_devolve_integral(

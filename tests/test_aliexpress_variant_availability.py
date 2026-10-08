@@ -13,14 +13,21 @@ Garantias:
 - agregado usa a soma canônica de variantes ATIVAS (inclui reservas).
 """
 from decimal import Decimal
+from datetime import timedelta
 
 import pytest
 
-from loja.services.stock_reservations import reserved_quantities_by_variant
+from loja.services.stock_reservations import (
+    release_reserved_stock,
+    release_single_expired_stock_reservation,
+    reserved_quantities_by_variant,
+)
 from loja.services.variant_availability import (
     parse_availability_flag,
     set_variant_availability,
 )
+from loja.utils import utcnow
+from loja.views.payments_routes import _reserve_stock
 from tests.test_aliexpress_admin_catalog import (  # noqa: F401  (fixtures)
     MULTI_ID,
     PREFIX,
@@ -223,8 +230,6 @@ def test_rota_publicado_alterna(admin_catalog, db):
 def test_nova_compra_bloqueada_mas_reserva_ativa_sobrevive(
     admin_catalog, db, admin_user
 ):
-    from loja.views.payments_routes import _reserve_stock
-
     product = _publish_multi(admin_catalog)
     first = product.variants[0]
     order = _reserved_order(db, admin_user, product, first, quantity=2)
@@ -283,3 +288,202 @@ def test_reimportar_nao_reativa_variante_desabilitada(admin_catalog, db):
     variants = _variants_by_sku(_draft_from_db(MULTI_ID))
     assert variants[first.supplier_sku_id].is_active is False
     assert _draft_from_db(MULTI_ID).stock == 3
+
+
+# --------------------------------------------------------------------------
+# 4) Restituição x disponibilidade: devolve à variante, nunca ao agregado
+# --------------------------------------------------------------------------
+
+def _debit(admin_user, product, variant, quantity):
+    """Abate real via checkout (variante ativa, com estoque)."""
+    _reserve_stock([{
+        "product_id": product.id,
+        "product_name": product.name,
+        "variant_id": variant.id,
+        "quantity": quantity,
+        "unit_price": Decimal("71.43"),
+    }])
+
+
+def _reserve_and_disable(admin_catalog, db, admin_user, *, quantity=2):
+    """Publica, reserva pela via real, espelha o fornecedor e desabilita."""
+    product = _publish_multi(admin_catalog)
+    variants = _variants_by_sku(product)
+    first = variants[f"{MULTI_ID}-1"]
+    _debit(admin_user, product, first, quantity)
+    # Espelho que a sincronização técnica gravaria (teto da restituição).
+    first.supplier_stock = 5
+    variants[f"{MULTI_ID}-2"].supplier_stock = 3
+    db.session.commit()
+    order = _reserved_order(db, admin_user, product, first, quantity=quantity)
+    set_variant_availability(product=product, variant_id=str(first.id), available=False)
+    db.session.commit()
+    return product, first, order
+
+
+def test_restituicao_compartilhada_nao_infla_agregado(admin_catalog, db, admin_user):
+    product, first, order = _reserve_and_disable(
+        admin_catalog, db, admin_user, quantity=2
+    )
+    assert (first.stock, product.stock) == (3, 3)
+
+    release_reserved_stock(order)
+    db.session.commit()
+
+    assert first.stock == 5  # devolvida à variante (teto 5 − 0 outros)
+    assert product.stock == 3  # agregado intacto (soma das ATIVAS)
+    assert order.stock_reserved is False
+    assert order.status == "pending_payment"  # via compartilhada não transiciona
+
+    # Segunda restituição: idempotente, nada muda.
+    release_reserved_stock(order)
+    db.session.commit()
+    assert (first.stock, product.stock) == (5, 3)
+
+    # Reabilitar recalcula do zero e incorpora o que foi devolvido.
+    set_variant_availability(product=product, variant_id=str(first.id), available=True)
+    db.session.commit()
+    assert product.stock == 8
+
+
+def test_liberacao_por_expiracao_nao_infla_agregado(admin_catalog, db, admin_user):
+    product, first, order = _reserve_and_disable(
+        admin_catalog, db, admin_user, quantity=2
+    )
+    order.mp_preference_expires_at = utcnow() - timedelta(hours=1)
+    db.session.commit()
+
+    assert release_single_expired_stock_reservation(order.id) is True
+
+    db.session.expire_all()
+    variants = _variants_by_sku(_draft_from_db(MULTI_ID))
+    assert variants[f"{MULTI_ID}-1"].stock == 5
+    assert _draft_from_db(MULTI_ID).stock == 3
+    closed = db.session.get(type(order), order.id)
+    assert closed.stock_reserved is False and closed.status == "expired"
+
+    # Repetir: inelegível (reserva encerrada), sem mudança.
+    assert release_single_expired_stock_reservation(order.id) is False
+    db.session.expire_all()
+    assert _variants_by_sku(_draft_from_db(MULTI_ID))[f"{MULTI_ID}-1"].stock == 5
+    assert _draft_from_db(MULTI_ID).stock == 3
+
+    # Reabilitar incorpora a devolução.
+    set_variant_availability(
+        product=_draft_from_db(MULTI_ID),
+        variant_id=str(variants[f"{MULTI_ID}-1"].id),
+        available=True,
+    )
+    db.session.commit()
+    assert _draft_from_db(MULTI_ID).stock == 8
+
+
+def test_restituicao_respeita_teto_e_outras_reservas(admin_catalog, db, admin_user):
+    product = _publish_multi(admin_catalog)
+    variants = _variants_by_sku(product)
+    first = variants[f"{MULTI_ID}-1"]
+    _debit(admin_user, product, first, 2)
+    order_a = _reserved_order(db, admin_user, product, first, quantity=2)
+    _debit(admin_user, product, first, 1)
+    order_b = _reserved_order(db, admin_user, product, first, quantity=1)
+    assert first.stock == 2  # 5 − 2 − 1
+
+    # Fornecedor reduziu o estoque depois da reserva.
+    first.supplier_stock = 2
+    db.session.commit()
+    set_variant_availability(product=product, variant_id=str(first.id), available=False)
+    db.session.commit()
+    assert product.stock == 3
+
+    # Libera A: outras = 3 − 2 = 1 → teto 2 − 1 = 1 (não infla acima).
+    release_reserved_stock(order_a)
+    db.session.commit()
+    assert first.stock == 1
+    assert product.stock == 3
+    assert order_a.stock_reserved is False
+    assert order_b.stock_reserved is True
+
+    # Libera B: outras = 0 → teto 2 → 1 + 1 = 2.
+    release_reserved_stock(order_b)
+    db.session.commit()
+    assert first.stock == 2
+    assert product.stock == 3
+
+    set_variant_availability(product=product, variant_id=str(first.id), available=True)
+    db.session.commit()
+    assert product.stock == 5  # 2 (variante) + 3, dentro do espelho
+
+
+# --------------------------------------------------------------------------
+# 5) Rotas: permissão, sessão, CSRF e método
+# --------------------------------------------------------------------------
+
+def _availability_post(client, product_id, variant_id, flag, *, follow=True):
+    return client.post(
+        f"{PREFIX}/rascunho/{product_id}/disponibilidade",
+        data={"variant_id": str(variant_id), "disponivel": flag},
+        follow_redirects=follow,
+    )
+
+
+def test_rota_exige_admin(admin_catalog, db, login, make_user):
+    product = _import_multi(admin_catalog)
+    first = product.variants[0]
+    login(make_user(is_admin=False).email)
+
+    resp = _availability_post(admin_catalog, MULTI_ID, first.id, "0")
+
+    assert resp.status_code == 200
+    assert "não possui permissão" in resp.get_data(as_text=True)
+    db.session.expire_all()
+    assert _variants_by_sku(_draft_from_db(MULTI_ID))[first.supplier_sku_id].is_active is True
+    assert _draft_from_db(MULTI_ID).stock == 8
+
+
+def test_rota_exige_login(client):
+    # Sem nenhum login neste teste (o `g` do app context reaproveita o
+    # usuário da primeira autenticação — mesma convenção de
+    # `test_other_routes_require_admin`): o guard dispara antes de
+    # qualquer acesso ao banco, sem precisar de rascunho criado.
+    for route in (
+        f"{PREFIX}/rascunho/{MULTI_ID}/disponibilidade",
+        f"{PREFIX}/publicado/{MULTI_ID}/disponibilidade",
+    ):
+        resp = client.post(route, data={"variant_id": "x", "disponivel": "0"})
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/login")
+
+
+def test_rota_exige_sessao_aliexpress(admin_catalog, db, monkeypatch):
+    import loja.views.aliexpress_admin_routes as routes
+
+    _import_multi(admin_catalog)
+    monkeypatch.setattr(routes, "_resolve_ali_session", lambda: (None, None))
+    first = _draft_from_db(MULTI_ID).variants[0]
+
+    resp = _availability_post(admin_catalog, MULTI_ID, first.id, "0")
+
+    assert resp.status_code == 200
+    db.session.expire_all()
+    assert _variants_by_sku(_draft_from_db(MULTI_ID))[first.supplier_sku_id].is_active is True
+
+
+def test_rota_csrf_invalido_bloqueia(admin_catalog, app, db, monkeypatch):
+    _import_multi(admin_catalog)
+    monkeypatch.setitem(app.config, "WTF_CSRF_ENABLED", True)
+    first = _draft_from_db(MULTI_ID).variants[0]
+
+    resp = _availability_post(admin_catalog, MULTI_ID, first.id, "0", follow=False)
+
+    assert resp.status_code == 400
+    db.session.expire_all()
+    assert _variants_by_sku(_draft_from_db(MULTI_ID))[first.supplier_sku_id].is_active is True
+
+
+def test_rota_get_retorna_405(admin_catalog):
+    _import_multi(admin_catalog)
+    for route in (
+        f"{PREFIX}/rascunho/{MULTI_ID}/disponibilidade",
+        f"{PREFIX}/publicado/{MULTI_ID}/disponibilidade",
+    ):
+        assert admin_catalog.get(route).status_code == 405
