@@ -8,6 +8,7 @@ tarifa temporária ``SHIPPING_TEMPORARY_FLAT_RATE`` (validada, arredondada),
 não estimativa; com flag ligada, pré-CEP é só rótulo.
 """
 
+import re
 import uuid
 from datetime import timedelta
 from decimal import Decimal
@@ -1004,7 +1005,26 @@ def test_carrinho_sem_cep_flag_on_mostra_estimativa(client, db, make_user, make_
     assert "Frete calculado após informar o CEP" in html
     assert "10,00" not in html
     assert "18,90" not in html
-    assert "249" not in html
+    assert_frete_sem_tarifa_legada(html)
+
+
+def assert_frete_sem_tarifa_legada(html):
+    """O elemento de frete do resumo não exibe a tarifa legada (ex.: 249).
+
+    Verifica o valor DENTRO do elemento específico de frete, em vez de
+    buscar a substring no HTML inteiro — o token CSRF (aleatório, hexadecimal)
+    pode conter "249" e tornar a busca global flaky. A proteção é preservada:
+    qualquer tarifa concreta vazada no elemento de frete falha aqui.
+    """
+    frete_row = re.search(
+        r"<span>\s*Frete\s*</span>\s*<span>(.*?)</span>",
+        html,
+        re.DOTALL,
+    )
+    assert frete_row is not None, "elemento de frete do resumo não encontrado"
+    frete_value = frete_row.group(1)
+    assert "Frete calculado após informar o CEP" in frete_value
+    assert "249" not in frete_value
 
 
 def test_checkout_sem_cep_mostra_frete_padrao_temporario(client, db, make_user, make_product):
