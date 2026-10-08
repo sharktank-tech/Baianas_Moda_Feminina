@@ -614,7 +614,12 @@ def _apply_variants_and_images(
             variant.stock = stock
             variant.price = price
             variant.sale_price = None
-            variant.is_active = stock > 0
+            # Decisão comercial preservada: reimportação NUNCA reativa
+            # variante desativada pelo administrador — só desativa a que
+            # zerou no fornecedor (mesma regra da sincronização: desativar
+            # é automático, reativar é explícito).
+            if stock == 0 and variant.is_active:
+                variant.is_active = False
             variant.updated_at = now
             variant_counts.updated += 1
 

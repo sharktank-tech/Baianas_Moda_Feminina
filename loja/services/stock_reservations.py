@@ -11,6 +11,12 @@ técnica) é conhecido, o teto é `supplier_stock - outras reservas` — se o
 fornecedor reduziu o estoque depois da sync, o pedido vencido devolve só o
 que cabe nesse teto. Sem espelho (variante nunca sincronizada) mantém-se o
 comportamento histórico de devolver a quantidade integral.
+
+A devolução à variante DESABILITADA comercialmente restaura o estoque DELA
+(com o teto acima), mas NÃO entra no agregado `Product.stock`: o agregado é
+a soma canônica das variantes ATIVAS, e somar a restituição de uma variante
+fora de venda o inflaria e divergiria da soma. A reativação explícita no
+admin recalcula o agregado do zero, incorporando o que foi devolvido.
 """
 
 from dataclasses import dataclass
@@ -242,6 +248,21 @@ def _others_reserved_for(variant, own_quantity):
     return max(total - own_quantity, 0)
 
 
+def _apply_release_delta(product, variant, delta):
+    """Reflete a restituição no agregado sem inflar a vitrine.
+
+    `Product.stock` é a soma canônica das variantes ATIVAS: quando a
+    variante está desabilitada comercialmente, a devolução restaura o
+    estoque DELA mas não entra no agregado. Itens sem variante (legado,
+    sem conceito de disponibilidade) mantêm o comportamento histórico.
+    """
+    if product.stock is None:
+        return
+    if variant is not None and not variant.is_active:
+        return
+    product.stock += delta
+
+
 def count_unproven_stock_reservations():
     """Contagem fail-closed de reservas sem expiração comprovada.
 
@@ -316,7 +337,10 @@ def release_reserved_stock(order):
     apenas o agregado (Product.stock) e deixa a soma das variantes
     divergente. A devolução é limitada ao estoque informado pelo
     fornecedor (``supplier_stock``): se ele reduziu o estoque, o pedido
-    vencido não devolve acima do que o fornecedor ainda tem.
+    vencido não devolve acima do que o fornecedor ainda tem. Quando a
+    variante está desabilitada comercialmente, a devolução restaura o
+    estoque DELA mas não entra no agregado (soma das ATIVAS) — veja
+    ``_apply_release_delta``.
     """
     if not order.stock_reserved:
         return
@@ -365,8 +389,7 @@ def release_reserved_stock(order):
             delta = _restock_variant(
                 variant, item.quantity, others_reserved=others
             )
-            if product.stock is not None:
-                product.stock += delta
+            _apply_release_delta(product, variant, delta)
         else:
             if item.product_id is None:
                 continue
@@ -390,6 +413,9 @@ def _release_stock_locked(order):
     Requer o Order já travado. Só é chamado pelos caminhos de liberação por
     expiração, que garantem pending_payment; o pagamento aprovado tardio
     é reconstruído em _sync_payment (re-debita o estoque e vira "paid").
+    A restituição à variante desabilitada restaura o estoque DELA sem
+    entrar no agregado (``_apply_release_delta``); o encerramento
+    (`stock_reserved = False` + status) é idempotente via guard.
     """
     if not order.stock_reserved or order.status != "pending_payment":
         return False
@@ -428,8 +454,7 @@ def _release_stock_locked(order):
             delta = _restock_variant(
                 variant, item.quantity, others_reserved=others
             )
-            if product.stock is not None:
-                product.stock += delta
+            _apply_release_delta(product, variant, delta)
         else:
             if item.product_id is None:
                 continue

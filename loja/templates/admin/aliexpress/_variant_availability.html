@@ -1,0 +1,65 @@
+{# Disponibilidade comercial por variante (decisão do admin).
+   Espera `product` e `disponibilidade_endpoint` definidos no template que
+   inclui. Desabilitar impede NOVAS compras sem apagar histórico
+   (pedidos/reservas/estoque intactos); reativação é explícita aqui —
+   importação e sincronização nunca reativam. #}
+<div class="bg-white rounded-2xl shadow p-6 mb-8">
+    <h2 class="text-lg font-semibold text-gray-800 mb-2">
+        Variações à venda
+    </h2>
+    <p class="text-xs text-gray-500 mb-4">
+        Desabilitar uma variante impede novas compras dela sem apagar
+        pedidos, reservas ou estoque. A reativação é manual, nesta mesma
+        tela.
+    </p>
+    {% if product.variants %}
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-left text-gray-500 border-b">
+                        <th class="py-2 pr-4">SKU</th>
+                        <th class="py-2 pr-4">Cor / Tamanho</th>
+                        <th class="py-2 pr-4">Estoque</th>
+                        <th class="py-2 pr-4">Venda</th>
+                        <th class="py-2"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for variant in product.variants %}
+                        <tr class="border-b">
+                            <td class="py-2 pr-4 text-gray-700 font-mono text-xs">
+                                {{ variant.supplier_sku_id or '—' }}
+                            </td>
+                            <td class="py-2 pr-4 text-gray-700">
+                                {{ variant.color or '—' }} / {{ variant.size or '—' }}
+                            </td>
+                            <td class="py-2 pr-4 text-gray-700">
+                                {{ variant.stock if variant.stock is not none else '—' }}
+                            </td>
+                            <td class="py-2 pr-4">
+                                <span class="text-xs font-medium px-2 py-1 rounded-full border
+                                             {% if variant.is_active %}text-green-700 bg-green-50 border-green-200{% else %}text-gray-500 bg-gray-50 border-gray-200{% endif %}">
+                                    {{ 'À venda' if variant.is_active else 'Fora de venda' }}
+                                </span>
+                            </td>
+                            <td class="py-2 text-right">
+                                <form method="POST" data-once
+                                      action="{{ url_for(disponibilidade_endpoint, product_id=product.external_id or '') }}">
+                                    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+                                    <input type="hidden" name="variant_id" value="{{ variant.id }}">
+                                    <input type="hidden" name="disponivel" value="{{ '0' if variant.is_active else '1' }}">
+                                    <button type="submit"
+                                            class="text-sm font-medium px-4 py-2 rounded-lg {% if variant.is_active %}bg-gray-100 hover:bg-gray-200 text-gray-700{% else %}bg-gray-800 hover:bg-gray-900 text-white{% endif %}">
+                                        {{ 'Desabilitar venda' if variant.is_active else 'Disponibilizar' }}
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="text-gray-500">Nenhuma variante cadastrada.</p>
+    {% endif %}
+</div>

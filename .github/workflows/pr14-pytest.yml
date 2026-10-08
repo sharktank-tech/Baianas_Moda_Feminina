@@ -126,6 +126,14 @@ jobs:
           tests/test_variant_supplier_stock_pg.py
           tests/test_aliexpress_sync_attempts_pg.py
           tests/test_published_sync_concurrency_pg.py
+          tests/test_variant_availability_release_pg.py
+
+      - name: Prova disponibilidade x restituição (3 testes, sem skips)
+        run: |
+          set -o pipefail
+          python -m pytest -v tests/test_variant_availability_release_pg.py 2>&1 | tee /tmp/avail_pg.log
+          grep -E " 3 passed in " /tmp/avail_pg.log
+          ! grep -E " skipped| SKIPPED" /tmp/avail_pg.log
 
       - name: Prova observável do bloqueio (2o INSERT aguardando unicidade)
         run: >
