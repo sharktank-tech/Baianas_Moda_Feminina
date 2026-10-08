@@ -132,8 +132,8 @@ jobs:
         run: |
           set -o pipefail
           python -m pytest -v tests/test_variant_availability_release_pg.py 2>&1 | tee /tmp/avail_pg.log
-          grep -E "^3 passed" /tmp/avail_pg.log
-          ! grep -E "skipped" /tmp/avail_pg.log
+          grep -E " 3 passed in " /tmp/avail_pg.log
+          ! grep -E " skipped| SKIPPED" /tmp/avail_pg.log
 
       - name: Prova observável do bloqueio (2o INSERT aguardando unicidade)
         run: >
