@@ -983,7 +983,7 @@ def test_carrinho_sem_cep_flag_off_mostra_frete_padrao_temporario(client, db, ma
     assert "Frete padrão temporário" in html
     assert "10,00" not in html
     assert "18,90" not in html
-    assert "249" not in html
+    assert_frete_sem_tarifa_legada(html, "Frete padrão temporário")
 
 
 def test_carrinho_sem_cep_flag_on_mostra_estimativa(client, db, make_user, make_product, monkeypatch):
@@ -1005,26 +1005,98 @@ def test_carrinho_sem_cep_flag_on_mostra_estimativa(client, db, make_user, make_
     assert "Frete calculado após informar o CEP" in html
     assert "10,00" not in html
     assert "18,90" not in html
-    assert_frete_sem_tarifa_legada(html)
+    assert_frete_sem_tarifa_legada(html, "Frete calculado após informar o CEP")
 
 
-def assert_frete_sem_tarifa_legada(html):
+def test_tarifa_fora_do_resumo_nao_interfere_na_verificacao(
+    client, db, make_user, make_product, monkeypatch
+):
+    """`"249"` fora do resumo (ex.: nome do produto) não afeta a verificação.
+
+    O elemento de frete continua limpo mesmo com a substring presente em
+    outro ponto da página — a checagem é escopada, não global.
+    """
+    from loja.modules.models import Cart, CartItem
+
+    user = make_user()
+    product = make_product(name="Vestido 249", stock=5)
+    _login(client, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True)
+    cart = Cart(id=uuid.uuid4(), user_id=user.id)
+    db.session.add(cart)
+    db.session.flush()
+    db.session.add(CartItem(
+        id=uuid.uuid4(), cart_id=cart.id, product_id=product.id,
+        selected_size="M", quantity=1, unit_price=product.price,
+    ))
+    db.session.commit()
+    html = client.get("/cart").get_data(as_text=True)
+    assert "249" in html  # presente fora do resumo (item do carrinho)
+    assert_frete_sem_tarifa_legada(html, "Frete calculado após informar o CEP")
+
+
+def test_tarifa_indevida_dentro_da_celula_e_detectada(
+    client, db, make_user, make_product, monkeypatch
+):
+    """Tarifa concreta vazada na célula de frete falha na verificação.
+
+    Força `_calculate_display_totals` a devolver frete 249,00 pela stack
+    real: a página renderiza `R$ 249,00` no elemento e o helper reprova.
+    """
+    from loja.modules.getway_mercado_pago.payment_service import money
+    from loja.modules.models import Cart, CartItem
+    import loja.views.routes as routes
+
+    user = make_user()
+    product = make_product(stock=5)
+    _login(client, user)
+    monkeypatch.setitem(client.application.config, "SHIPPING_GROUPED_QUOTE_ENABLED", True)
+    cart = Cart(id=uuid.uuid4(), user_id=user.id)
+    db.session.add(cart)
+    db.session.flush()
+    db.session.add(CartItem(
+        id=uuid.uuid4(), cart_id=cart.id, product_id=product.id,
+        selected_size="M", quantity=1, unit_price=product.price,
+    ))
+    db.session.commit()
+
+    def _vazando(subtotal, discount=Decimal("0.00")):
+        return money(Decimal("249.00")), money(subtotal)
+
+    monkeypatch.setattr(routes, "_calculate_display_totals", _vazando)
+    html = client.get("/cart").get_data(as_text=True)
+    assert "R$ 249,00" in html  # sanidade: a tarifa vazou no elemento
+    with pytest.raises(AssertionError):
+        assert_frete_sem_tarifa_legada(html, "Frete calculado após informar o CEP")
+
+
+def assert_frete_sem_tarifa_legada(html, expected_label):
     """O elemento de frete do resumo não exibe a tarifa legada (ex.: 249).
 
     Verifica o valor DENTRO do elemento específico de frete, em vez de
     buscar a substring no HTML inteiro — o token CSRF (aleatório, hexadecimal)
     pode conter "249" e tornar a busca global flaky. A proteção é preservada:
     qualquer tarifa concreta vazada no elemento de frete falha aqui.
+
+    A extração falha claramente se o elemento estiver ausente ou ambíguo:
+    exige exatamente UMA ocorrência do par rótulo/valor no resumo.
     """
-    frete_row = re.search(
+    matches = re.findall(
         r"<span>\s*Frete\s*</span>\s*<span>(.*?)</span>",
         html,
         re.DOTALL,
     )
-    assert frete_row is not None, "elemento de frete do resumo não encontrado"
-    frete_value = frete_row.group(1)
-    assert "Frete calculado após informar o CEP" in frete_value
-    assert "249" not in frete_value
+    assert len(matches) == 1, (
+        "elemento de frete do resumo ausente ou ambíguo "
+        f"(ocorrências encontradas: {len(matches)})"
+    )
+    frete_value = matches[0]
+    assert expected_label in frete_value, (
+        f"rótulo esperado ausente no elemento de frete: {frete_value.strip()!r}"
+    )
+    assert "249" not in frete_value, (
+        f"tarifa legada vazada no elemento de frete: {frete_value.strip()!r}"
+    )
 
 
 def test_checkout_sem_cep_mostra_frete_padrao_temporario(client, db, make_user, make_product):
