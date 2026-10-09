@@ -2,71 +2,83 @@
    POSTs de aprovar/rejeitar submetem normalmente; o servidor redireciona
    de volta para a aba. Sem <script>. #}
 <div data-partial-root="manual-review">
-  <p class="adm-stat-sub">
-    Pedidos travados em <span class="font-mono">manual_review</span>. Aprovar
-    revalida estoque/variante/cupom sob lock e promove o pedido a
-    <span class="font-mono">paid</span>; rejeitar devolve a reserva e marca
-    <span class="font-mono">cancelled</span>. Toda decisão fica auditada no
-    próprio pedido (quando, quem e por quê).
-  </p>
-  <div class="bg-white rounded-2xl shadow overflow-hidden mt-4">
-    <div class="p-5 border-b border-gray-200">
-      <h2 class="font-semibold text-gray-800">Fila de revisão</h2>
-      <p class="text-xs text-gray-500 mt-1">
-        Aprovação exige confirmação; rejeição exige motivo. Nenhuma ação
-        consulta provedores externos.
+  <div class="adm-ops-head">
+    <div>
+      <h2 class="adm-ops-title">Revisão manual</h2>
+      <p class="adm-stat-sub">
+        Pedidos travados em <span class="font-mono">manual_review</span>. Aprovar
+        revalida estoque/variante/cupom sob lock e promove o pedido a
+        <span class="font-mono">paid</span>; rejeitar devolve a reserva e marca
+        <span class="font-mono">cancelled</span>. Toda decisão fica auditada no
+        próprio pedido (quando, quem e por quê).
       </p>
     </div>
-    <div class="overflow-x-auto">
-      <table class="w-full">
-        <thead class="bg-gray-50">
+  </div>
+
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Fila de revisão</span>
+      <span class="adm-stat-sub">Aprovação exige confirmação; rejeição exige motivo. Nenhuma ação consulta provedores externos.</span>
+    </div>
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead>
           <tr>
-            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Pedido</th>
-            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Cliente</th>
-            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Total</th>
-            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Criado em</th>
-            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Reserva</th>
-            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Motivo da revisão</th>
-            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Ações</th>
+            <th>Pedido</th>
+            <th>Cliente</th>
+            <th class="adm-num">Total</th>
+            <th>Criado em</th>
+            <th>Reserva</th>
+            <th>Motivo da revisão</th>
+            <th>Ações</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody>
           {% for order in orders %}
           <tr>
-            <td class="px-4 py-3 text-sm font-mono">{{ order.order_number }}</td>
-            <td class="px-4 py-3 text-sm">
-              {{ order.customer_name or "—" }}
-              <div class="text-xs text-gray-400">{{ order.customer_email }}</div>
+            <td>
+              <strong>{{ order.order_number }}</strong>
+              <div class="adm-stat-sub">{{ order.created_at.strftime('%d/%m/%Y %H:%M') if order.created_at else "—" }} UTC</div>
             </td>
-            <td class="px-4 py-3 text-sm">R$ {{ '%.2f'|format(order.total)|replace('.', ',') }}</td>
-            <td class="px-4 py-3 text-sm">{{ order.created_at.strftime('%d/%m/%Y %H:%M') if order.created_at else "—" }}</td>
-            <td class="px-4 py-3 text-sm">{{ "sim" if order.stock_reserved else "não" }}</td>
-            <td class="px-4 py-3 text-sm text-gray-600">{{ order.manual_review_reason or "—" }}</td>
-            <td class="px-4 py-3 text-sm">
-              <div class="flex flex-col gap-2 items-start">
-                <form method="POST"
+            <td>
+              <span class="adm-name" title="{{ order.customer_name or '—' }}">{{ order.customer_name or "—" }}</span>
+              <div class="adm-stat-sub">{{ order.customer_email }}</div>
+            </td>
+            <td class="adm-num"><strong>R$ {{ '%.2f'|format(order.total)|replace('.', ',') }}</strong></td>
+            <td>{{ order.created_at.strftime('%d/%m/%Y %H:%M') if order.created_at else "—" }}</td>
+            <td>
+              {% if order.stock_reserved %}
+              <span class="adm-badge adm-badge-green">sim</span>
+              {% else %}
+              <span class="adm-badge adm-badge-gray">não</span>
+              {% endif %}
+            </td>
+            <td><strong>{{ order.manual_review_reason or "—" }}</strong></td>
+            <td>
+              <div class="adm-actions">
+                <form method="POST" class="adm-form-col"
                       action="{{ url_for('admin.manual_review_approve', order_id=order.id) }}"
                       data-confirm="Aprovar este pedido? O estoque será revalidado e o pedido virará paid.">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="confirm_approve" value="1">
-                  <input type="text" name="note" maxlength="500"
+                  <label class="adm-stat-sub" for="note-{{ order.id }}">Nota da aprovação (opcional)</label>
+                  <input type="text" id="note-{{ order.id }}" name="note" maxlength="500"
                          placeholder="Nota da aprovação (opcional)"
-                         class="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 mb-1">
-                  <button type="submit"
-                          class="px-3 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 text-xs">
+                         class="adm-input" autocomplete="off">
+                  <button type="submit" class="adm-btn adm-btn-primary adm-btn-sm">
                     Aprovar
                   </button>
                 </form>
-                <form method="POST"
+                <form method="POST" class="adm-form-col"
                       action="{{ url_for('admin.manual_review_reject', order_id=order.id) }}"
                       data-confirm="Rejeitar este pedido? O status ficará cancelled e a reserva será devolvida.">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="confirm_reject" value="1">
-                  <input type="text" name="reason" maxlength="500" required
+                  <label class="adm-stat-sub" for="reason-{{ order.id }}">Motivo da rejeição</label>
+                  <input type="text" id="reason-{{ order.id }}" name="reason" maxlength="500" required
                          placeholder="Motivo da rejeição"
-                         class="border border-gray-300 rounded-lg px-2 py-1 text-xs w-56 mb-1">
-                  <button type="submit"
-                          class="px-3 py-2 rounded-lg bg-red-700 text-white hover:bg-red-800 text-xs">
+                         class="adm-input" autocomplete="off">
+                  <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">
                     Rejeitar
                   </button>
                 </form>
@@ -74,7 +86,7 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">Nenhum pedido aguardando revisão manual.</td></tr>
+          <tr><td colspan="7" class="adm-empty">Nenhum pedido aguardando revisão manual.</td></tr>
           {% endfor %}
         </tbody>
       </table>

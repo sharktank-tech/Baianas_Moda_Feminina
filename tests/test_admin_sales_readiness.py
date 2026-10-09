@@ -866,7 +866,7 @@ def _row_state(html, name):
     main = html.split("Avaliação por produto", 1)[1]
     match = re.search(
         re.escape(name)
-        + r"</td>(?:\s*<td[^>]*>.*?</td>){8}\s*<td[^>]*>(PRONTO|REVISÃO|BLOQUEADO)",
+        + r"(?:</span>)?</td>(?:\s*<td[^>]*>.*?</td>){8}\s*<td[^>]*>\s*(?:<span[^>]*>\s*)?(PRONTO|REVISÃO|BLOQUEADO)",
         main,
         re.DOTALL,
     )

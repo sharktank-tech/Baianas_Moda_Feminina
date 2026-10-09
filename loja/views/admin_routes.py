@@ -107,9 +107,7 @@ def _orders_context(*, status="", search="", page=1):
     from loja.services.order_payment_evidence import payment_is_confirmed
 
     _validate_order_status(status)
-    query = Order.query.options(selectinload(Order.payments))
-    if status:
-        query = query.filter(Order.status == status)
+    search_filter = None
     if search:
         # Exact references prevent accidental wildcard searches across clients.
         predicates = [Order.order_number == search, Order.mp_payment_id == search]
@@ -117,7 +115,16 @@ def _orders_context(*, status="", search="", page=1):
             predicates.append(Order.id == PythonUUID(search))
         except ValueError:
             pass
-        query = query.filter(db.or_(*predicates))
+        search_filter = db.or_(*predicates)
+    count_query = db.session.query(Order.status, db.func.count())
+    if search_filter is not None:
+        count_query = count_query.filter(search_filter)
+    counts = dict(count_query.group_by(Order.status).all())
+    query = Order.query.options(selectinload(Order.payments))
+    if search_filter is not None:
+        query = query.filter(search_filter)
+    if status:
+        query = query.filter(Order.status == status)
     page_obj = query.order_by(Order.created_at.desc(), Order.id.desc()).paginate(
         page=max(1, int(page or 1)), per_page=25,
         error_out=False,
@@ -125,6 +132,7 @@ def _orders_context(*, status="", search="", page=1):
     return {
         "page": page_obj, "status": status, "search": search,
         "status_labels": ORDER_STATUS_LABELS,
+        "status_counts": counts,
         "payment_is_confirmed": payment_is_confirmed,
     }
 

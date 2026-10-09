@@ -1,126 +1,159 @@
 {# Fragmento da aba Prontidão para vendas (sob demanda em /admin#sales-readiness).
    Somente leitura, sem formulários de mutação e sem <script>. #}
 <div data-partial-root="sales-readiness">
-  <p class="adm-stat-sub">
-    Verificação exclusivamente de leitura: identifica produtos que podem
-    receber divulgação sem risco conhecido de fornecedor, frete, preço ou
-    margem. Não habilita fulfillment, não compra no fornecedor e não altera
-    preços. A ausência de informação nunca gera PRONTO.
-  </p>
-  <p class="mt-3 inline-block px-3 py-2 rounded-lg bg-amber-100 text-amber-900 text-sm font-semibold">
-    Fulfillment automático desligado — Tratamento manual obrigatório após pagamento.
-    PRONTO significa pronto para receber venda, não autorização para compra automática.
-  </p>
-  <p class="mt-2 text-sm text-gray-600">
-    {% if summary.reference_configured %}Destino de referência configurado (prefixo {{ summary.reference_masked }}){% else %}Destino de referência pendente{% endif %} —
-    PRONTO vale apenas para o cenário logístico de referência, não para qualquer endereço do Brasil.
-  </p>
+  <div class="adm-ops-head">
+    <div>
+      <h2 class="adm-ops-title">Prontidão para vendas</h2>
+      <p class="adm-stat-sub">
+        Verificação exclusivamente de leitura: identifica produtos que podem
+        receber divulgação sem risco conhecido de fornecedor, frete, preço ou
+        margem. Não habilita fulfillment, não compra no fornecedor e não altera
+        preços. A ausência de informação nunca gera PRONTO.
+      </p>
+    </div>
+  </div>
 
-  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 my-6">
-    <div class="bg-white rounded-2xl shadow p-5">
-      <div class="text-sm text-gray-500">Produtos PRONTOS</div>
-      <div class="text-2xl font-bold mt-1 text-green-700">{{ summary.pronto }}</div>
+  <div class="adm-card">
+    <div class="adm-card-body">
+      <p class="adm-stat-sub">
+        <span class="adm-badge adm-badge-yellow">Fulfillment automático desligado</span>
+        Tratamento manual obrigatório após pagamento. PRONTO significa pronto
+        para receber venda, não autorização para compra automática.
+      </p>
+      <p class="adm-stat-sub">
+        {% if summary.reference_configured %}Destino de referência configurado (prefixo {{ summary.reference_masked }}){% else %}Destino de referência pendente{% endif %} —
+        PRONTO vale apenas para o cenário logístico de referência, não para qualquer endereço do Brasil.
+      </p>
     </div>
-    <div class="bg-white rounded-2xl shadow p-5">
-      <div class="text-sm text-gray-500">Em REVISÃO</div>
-      <div class="text-2xl font-bold mt-1 text-amber-700">{{ summary.revisao }}</div>
+  </div>
+
+  <div class="adm-stats" aria-label="Resumo de prontidão">
+    <div class="adm-stat-card">
+      <div class="adm-stat-label">Produtos PRONTOS</div>
+      <div class="adm-stat-value">{{ summary.pronto }}</div>
     </div>
-    <div class="bg-white rounded-2xl shadow p-5">
-      <div class="text-sm text-gray-500">BLOQUEADOS</div>
-      <div class="text-2xl font-bold mt-1 text-red-700">{{ summary.bloqueado }}</div>
+    <div class="adm-stat-card">
+      <div class="adm-stat-label">Em REVISÃO</div>
+      <div class="adm-stat-value">{{ summary.revisao }}</div>
     </div>
-    <div class="bg-white rounded-2xl shadow p-5">
-      <div class="text-sm text-gray-500">Produtos avaliados</div>
-      <div class="text-2xl font-bold mt-1">{{ summary.evaluated }}</div>
+    <div class="adm-stat-card">
+      <div class="adm-stat-label">BLOQUEADOS</div>
+      <div class="adm-stat-value">{{ summary.bloqueado }}</div>
+    </div>
+    <div class="adm-stat-card">
+      <div class="adm-stat-label">Produtos avaliados</div>
+      <div class="adm-stat-value">{{ summary.evaluated }}</div>
     </div>
   </div>
 
   {% if summary.pronto == 0 %}
-  <div class="mb-6 bg-white rounded-2xl shadow p-5">
-    <p class="font-semibold text-gray-800">Nenhum produto está comprovadamente pronto para divulgação.</p>
+  <div class="adm-card">
+    <div class="adm-card-body">
+      <p class="font-semibold text-gray-800">Nenhum produto está comprovadamente pronto para divulgação.</p>
+    </div>
   </div>
   {% endif %}
 
-  <div class="mb-6 bg-white rounded-2xl shadow p-5">
-    <h2 class="font-semibold text-gray-800">Candidatos para primeira campanha</h2>
-    <p class="text-sm text-gray-500 mt-2">
-      Somente informativa: até cinco produtos PRONTOS, por maior margem
-      entre os dois cenários, depois maior estoque, depois identificador. Não cria
-      campanha, anúncio ou publicação automática.
-    </p>
-    <div class="overflow-x-auto mt-4">
-      <table class="w-full">
-        <thead class="bg-gray-50">
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Candidatos para primeira campanha</span>
+    </div>
+    <div class="adm-card-body">
+      <p class="adm-stat-sub">
+        Somente informativa: até cinco produtos PRONTOS, por maior margem
+        entre os dois cenários, depois maior estoque, depois identificador. Não cria
+        campanha, anúncio ou publicação automática.
+      </p>
+    </div>
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead>
           <tr>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Produto</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Menor margem</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Estoque</th>
+            <th>Produto</th>
+            <th>Menor margem</th>
+            <th class="adm-num">Estoque</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody>
           {% for row in summary.candidates %}
           <tr>
-            <td class="px-3 py-2 text-sm">{{ row.name }}</td>
-            <td class="px-3 py-2 text-sm">{{ row.margin_display }}</td>
-            <td class="px-3 py-2 text-sm">{{ row.stock }}</td>
+            <td><span class="adm-name" title="{{ row.name }}">{{ row.name }}</span></td>
+            <td>{{ row.margin_display }}</td>
+            <td class="adm-num">{{ row.stock }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="3" class="px-3 py-4 text-center text-gray-500">Sem candidatos: nenhum produto PRONTO.</td></tr>
+          <tr><td colspan="3" class="adm-empty">Sem candidatos: nenhum produto PRONTO.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </div>
 
-  <div class="bg-white rounded-2xl shadow overflow-hidden">
-    <div class="p-5 border-b border-gray-200">
-      <h2 class="font-semibold text-gray-800">Avaliação por produto</h2>
-      <p class="text-xs text-gray-500 mt-1">
-        Tarifa cobrada do cliente é receita temporária configurada, não
-        prova do custo logístico. Custo logístico comprovado exige cotação
-        fresca do vínculo. As margens à vista e parcelada usam taxas alternativas
-        sobre o preço do produto, sem somá-las. O frete cobrado do cliente não
-        entra nesta simulação. PRONTO exige margem não negativa nos dois cenários.
-      </p>
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Avaliação por produto</span>
     </div>
-    <div class="overflow-x-auto">
-      <table class="w-full">
-        <thead class="bg-gray-50">
+    <div class="adm-card-body">
+      <details class="adm-details">
+        <summary>Como ler esta tabela</summary>
+        <p class="adm-stat-sub">
+          Tarifa cobrada do cliente é receita temporária configurada, não
+          prova do custo logístico. Custo logístico comprovado exige cotação
+          fresca do vínculo. As margens à vista e parcelada usam taxas alternativas
+          sobre o preço do produto, sem somá-las. O frete cobrado do cliente não
+          entra nesta simulação. PRONTO exige margem não negativa nos dois cenários.
+        </p>
+      </details>
+    </div>
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead>
           <tr>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Produto</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Origem</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Fornecedor</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Preço</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Custo comprovado</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Frete cobrado do cliente</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Custo logístico comprovado</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Margem à vista</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Margem parcelada</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Menor margem</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Estoque</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Estado</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Motivos</th>
+            <th>Produto</th>
+            <th>Origem</th>
+            <th>Fornecedor</th>
+            <th class="adm-num">Preço</th>
+            <th class="adm-num">Custo comprovado</th>
+            <th class="adm-num">Frete cobrado do cliente</th>
+            <th class="adm-num">Custo logístico comprovado</th>
+            <th>Margem à vista</th>
+            <th>Margem parcelada</th>
+            <th>Menor margem</th>
+            <th class="adm-num">Estoque</th>
+            <th>Estado</th>
+            <th>Motivos</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody>
           {% for row in summary.rows %}
           <tr>
-            <td class="px-3 py-2 text-sm">{{ row.name }}</td>
-            <td class="px-3 py-2 text-sm">{{ row.origin }}</td>
-            <td class="px-3 py-2 text-sm">{{ row.supplier_name }}</td>
-            <td class="px-3 py-2 text-sm">{{ row.price_display }}</td>
-            <td class="px-3 py-2 text-sm">{{ row.proven_cost_display }}</td>
-            <td class="px-3 py-2 text-sm">{{ row.charged_freight_display }}</td>
-            <td class="px-3 py-2 text-sm">{{ row.proven_logistic_display }}</td>
-            <td class="px-3 py-2 text-sm">{{ row.cash_margin_display }}</td>
-            <td class="px-3 py-2 text-sm">{{ row.installment_margin_display }}</td>
-            <td class="px-3 py-2 text-sm">{{ row.margin_display }}</td>
-            <td class="px-3 py-2 text-sm">{{ row.stock }}</td>
-            <td class="px-3 py-2 text-sm font-semibold">{{ row.state }}</td>
-            <td class="px-3 py-2 text-sm">{% for code in row.reasons %}{{ reason_labels.get(code, code) }}{% if not loop.last %}; {% endif %}{% endfor %}</td>
+            <td><span class="adm-name" title="{{ row.name }}">{{ row.name }}</span></td>
+            <td>{{ row.origin }}</td>
+            <td>{{ row.supplier_name }}</td>
+            <td class="adm-num">{{ row.price_display }}</td>
+            <td class="adm-num">{{ row.proven_cost_display }}</td>
+            <td class="adm-num">{{ row.charged_freight_display }}</td>
+            <td class="adm-num">{{ row.proven_logistic_display }}</td>
+            <td>{{ row.cash_margin_display }}</td>
+            <td>{{ row.installment_margin_display }}</td>
+            <td>{{ row.margin_display }}</td>
+            <td class="adm-num">{{ row.stock }}</td>
+            <td>
+              <span class="adm-badge {{
+                'adm-badge-green' if row.state == 'PRONTO'
+                else ('adm-badge-red' if row.state == 'BLOQUEADO'
+                else 'adm-badge-yellow') }}">
+                {{ row.state }}
+              </span>
+            </td>
+            <td>
+              <ul class="adm-reasons">
+                {% for code in row.reasons %}<li>{{ reason_labels.get(code, code) }}</li>{% else %}<li>—</li>{% endfor %}
+              </ul>
+            </td>
           </tr>
           {% else %}
-          <tr><td colspan="13" class="px-3 py-4 text-center text-gray-500">Nenhum produto avaliado.</td></tr>
+          <tr><td colspan="13" class="adm-empty">Nenhum produto avaliado.</td></tr>
           {% endfor %}
         </tbody>
       </table>

@@ -3074,23 +3074,12 @@
         id="panel-orders"
       >
 
-        <div class="adm-card">
-
-          <div class="adm-card-header">
-
-            <span class="adm-card-title">
-              Pedidos
-            </span>
-
-          </div>
-
-          <div
-            data-partial-container="orders"
-            data-partial-src="{{ url_for('admin.ops_partial_orders') }}"
-          >
-            <p class="adm-empty">Carregando pedidos…</p>
-          </div>
-
+        <div
+          class="adm-lazy"
+          data-partial-container="orders"
+          data-partial-src="{{ url_for('admin.ops_partial_orders') }}"
+        >
+          <p class="adm-empty">Carregando pedidos…</p>
         </div>
 
       </section>
@@ -3101,23 +3090,12 @@
         id="panel-manual-review"
       >
 
-        <div class="adm-card">
-
-          <div class="adm-card-header">
-
-            <span class="adm-card-title">
-              Revisão manual
-            </span>
-
-          </div>
-
-          <div
-            data-partial-container="manual-review"
-            data-partial-src="{{ url_for('admin.ops_partial_manual_review') }}"
-          >
-            <p class="adm-empty">Carregando revisão manual…</p>
-          </div>
-
+        <div
+          class="adm-lazy"
+          data-partial-container="manual-review"
+          data-partial-src="{{ url_for('admin.ops_partial_manual_review') }}"
+        >
+          <p class="adm-empty">Carregando revisão manual…</p>
         </div>
 
       </section>
@@ -3128,23 +3106,12 @@
         id="panel-sales-readiness"
       >
 
-        <div class="adm-card">
-
-          <div class="adm-card-header">
-
-            <span class="adm-card-title">
-              Prontidão para vendas
-            </span>
-
-          </div>
-
-          <div
-            data-partial-container="sales-readiness"
-            data-partial-src="{{ url_for('admin.ops_partial_sales_readiness') }}"
-          >
-            <p class="adm-empty">Carregando prontidão…</p>
-          </div>
-
+        <div
+          class="adm-lazy"
+          data-partial-container="sales-readiness"
+          data-partial-src="{{ url_for('admin.ops_partial_sales_readiness') }}"
+        >
+          <p class="adm-empty">Carregando prontidão…</p>
         </div>
 
       </section>
@@ -3155,23 +3122,12 @@
         id="panel-checkout-recovery"
       >
 
-        <div class="adm-card">
-
-          <div class="adm-card-header">
-
-            <span class="adm-card-title">
-              Recuperação de checkout
-            </span>
-
-          </div>
-
-          <div
-            data-partial-container="checkout-recovery"
-            data-partial-src="{{ url_for('admin.ops_partial_checkout_recovery') }}"
-          >
-            <p class="adm-empty">Carregando recuperação…</p>
-          </div>
-
+        <div
+          class="adm-lazy"
+          data-partial-container="checkout-recovery"
+          data-partial-src="{{ url_for('admin.ops_partial_checkout_recovery') }}"
+        >
+          <p class="adm-empty">Carregando recuperação…</p>
         </div>
 
       </section>

@@ -2,262 +2,275 @@
    POSTs (lote, enviar, ignorar, liberar) submetem normalmente; o servidor
    redireciona de volta para a aba. Sem <script>. #}
 <div data-partial-root="checkout-recovery">
-  <p class="adm-stat-sub">
-    Fila de pedidos <span class="font-mono">pending_payment</span> com
-    reserva de estoque ainda ativa. Não inicia tráfego pago e não consulta
-    provedores.
-  </p>
+  <div class="adm-ops-head">
+    <div>
+      <h2 class="adm-ops-title">Recuperação de checkout</h2>
+      <p class="adm-stat-sub">
+        Fila de pedidos <span class="font-mono">pending_payment</span> com
+        reserva de estoque ainda ativa. Não inicia tráfego pago e não consulta
+        provedores.
+      </p>
+    </div>
+  </div>
 
-  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 my-6">
-    <div class="bg-white rounded-2xl shadow p-5">
-      <div class="text-sm text-gray-500">Envio individual</div>
-      <div class="text-2xl font-bold mt-1 {% if enabled %}text-green-700{% else %}text-red-700{% endif %}">
-        {{ "SIM" if enabled else "NÃO (gated)" }}
-      </div>
-      <div class="text-xs text-gray-400 mt-1">
+  <div class="adm-stats" aria-label="Estado da recuperação">
+    <div class="adm-stat-card">
+      <div class="adm-stat-label">Envio individual</div>
+      <div class="adm-stat-value">{{ "SIM" if enabled else "NÃO" }}</div>
+      <div class="adm-stat-sub">
         {% if enabled %}
-          CHECKOUT_RECOVERY_ENABLED=1 — cada envio exige uma ação individual.
+          Cada envio exige uma ação individual.
         {% else %}
-          Fail-closed: nenhuma ação envia e-mail enquanto o gate estiver desligado.
+          Fail-closed: nenhum envio com gate desligado.
         {% endif %}
       </div>
     </div>
-    <div class="bg-white rounded-2xl shadow p-5">
-      <div class="text-sm text-gray-500">Idade mínima de espera</div>
-      <div class="text-2xl font-bold mt-1">{% if after_hours is not none %}{{ after_hours }}h{% else %}—{% endif %}</div>
-      <div class="text-xs text-gray-400 mt-1">CHECKOUT_RECOVERY_AFTER_HOURS</div>
+    <div class="adm-stat-card">
+      <div class="adm-stat-label">Idade mínima de espera</div>
+      <div class="adm-stat-value">{% if after_hours is not none %}{{ after_hours }}h{% else %}—{% endif %}</div>
+      <div class="adm-stat-sub">CHECKOUT_RECOVERY_AFTER_HOURS</div>
     </div>
-    <div class="bg-white rounded-2xl shadow p-5">
-      <div class="text-sm text-gray-500">Entrega SMTP</div>
-      <div class="text-2xl font-bold mt-1 {% if email_ready %}text-green-700{% else %}text-red-700{% endif %}">
-        {{ "PRONTA" if email_ready else "INDISPONÍVEL" }}
-      </div>
-      <div class="text-xs text-gray-400 mt-1">Verificação agregada; valores nunca são exibidos.</div>
+    <div class="adm-stat-card">
+      <div class="adm-stat-label">Entrega SMTP</div>
+      <div class="adm-stat-value">{{ "PRONTA" if email_ready else "INDISPONÍVEL" }}</div>
+      <div class="adm-stat-sub">Valores nunca exibidos.</div>
     </div>
-    <div class="bg-white rounded-2xl shadow p-5">
-      <div class="text-sm text-gray-500">Candidatos pendentes</div>
-      <div class="text-2xl font-bold mt-1">{{ candidates|length }}</div>
-      <div class="text-xs text-gray-400 mt-1">Fila read-only atual</div>
+    <div class="adm-stat-card">
+      <div class="adm-stat-label">Candidatos pendentes</div>
+      <div class="adm-stat-value">{{ candidates|length }}</div>
+      <div class="adm-stat-sub">Fila read-only atual</div>
     </div>
   </div>
 
   {% if result %}
-  <div class="mb-6 bg-white rounded-2xl shadow p-5">
-    <h2 class="font-semibold text-gray-800">Resultado da última execução</h2>
-    <table class="w-full mt-2">
-      <tbody class="divide-y divide-gray-100">
-        <tr>
-          <td class="py-2 text-sm text-gray-600">Habilitado</td>
-          <td class="py-2 text-sm font-medium">{{ "sim" if result.enabled else "não" }}</td>
-        </tr>
-        <tr>
-          <td class="py-2 text-sm text-gray-600">Candidatos</td>
-          <td class="py-2 text-sm font-medium">{{ result.candidates }}</td>
-        </tr>
-        <tr>
-          <td class="py-2 text-sm text-gray-600">E-mails enviados</td>
-          <td class="py-2 text-sm font-medium text-green-700">{{ result.sent }}</td>
-        </tr>
-        <tr>
-          <td class="py-2 text-sm text-gray-600">Sem e-mail no pedido</td>
-          <td class="py-2 text-sm font-medium">{{ result.skipped_empty_email }}</td>
-        </tr>
-        <tr>
-          <td class="py-2 text-sm text-gray-600">Falhas (não marcam envio)</td>
-          <td class="py-2 text-sm font-medium text-red-700">{{ result.failed }}</td>
-        </tr>
-      </tbody>
-    </table>
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Resultado da última execução</span>
+    </div>
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <tbody>
+          <tr>
+            <td>Habilitado</td>
+            <td><strong>{{ "sim" if result.enabled else "não" }}</strong></td>
+          </tr>
+          <tr>
+            <td>Candidatos</td>
+            <td><strong>{{ result.candidates }}</strong></td>
+          </tr>
+          <tr>
+            <td>E-mails enviados</td>
+            <td><strong>{{ result.sent }}</strong></td>
+          </tr>
+          <tr>
+            <td>Sem e-mail no pedido</td>
+            <td><strong>{{ result.skipped_empty_email }}</strong></td>
+          </tr>
+          <tr>
+            <td>Falhas (não marcam envio)</td>
+            <td><strong>{{ result.failed }}</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
   {% endif %}
 
-  <div class="mb-6 bg-white rounded-2xl shadow p-5">
-    <h2 class="font-semibold text-gray-800">Reservas de estoque ativas</h2>
-    <p class="text-sm text-gray-500 mt-2">
-      Pedidos ainda em <span class="font-mono">pending_payment</span> com reserva
-      ativa e expiração da preferência comprovada e futura (horário de
-      America/Sao_Paulo). Seção somente leitura: reservas ativas não possuem
-      botão de liberação.
-    </p>
-    <div class="overflow-x-auto mt-4">
-      <table class="w-full">
-        <thead class="bg-gray-50">
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Reservas de estoque ativas</span>
+    </div>
+    <div class="adm-card-body">
+      <p class="adm-stat-sub">
+        Pedidos ainda em <span class="font-mono">pending_payment</span> com reserva
+        ativa e expiração da preferência comprovada e futura (horário de
+        America/Sao_Paulo). Seção somente leitura: reservas ativas não possuem
+        botão de liberação.
+      </p>
+    </div>
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead>
           <tr>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Pedido</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Criado em</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Reserva expira em</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Estado</th>
+            <th>Pedido</th>
+            <th>Criado em</th>
+            <th>Reserva expira em</th>
+            <th>Estado</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody>
           {% for reservation in active_reservations %}
           <tr>
-            <td class="px-3 py-2 text-sm">{{ reservation.order_number }}</td>
-            <td class="px-3 py-2 text-sm">{{ reservation.created_sp }}</td>
-            <td class="px-3 py-2 text-sm">{{ reservation.expires_sp }}</td>
-            <td class="px-3 py-2 text-sm font-semibold text-green-700">ATIVA</td>
+            <td><strong>{{ reservation.order_number }}</strong></td>
+            <td>{{ reservation.created_sp }}</td>
+            <td>{{ reservation.expires_sp }}</td>
+            <td><span class="adm-badge adm-badge-green">ATIVA</span></td>
           </tr>
           {% else %}
-          <tr><td colspan="4" class="px-3 py-4 text-center text-gray-500">Nenhuma reserva ativa com expiração comprovada.</td></tr>
+          <tr><td colspan="4" class="adm-empty">Nenhuma reserva ativa com expiração comprovada.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
-    <div class="mt-4 border-t border-gray-100 pt-4">
-      <div class="text-sm text-gray-500">Reservas sem expiração comprovada</div>
-      <div class="text-2xl font-bold mt-1">{{ unproven_reservations_count }}</div>
-      <p class="text-xs text-gray-500 mt-1">
+    <div class="adm-card-body">
+      <div class="adm-stat-label">Reservas sem expiração comprovada</div>
+      <div class="adm-stat-value">{{ unproven_reservations_count }}</div>
+      <p class="adm-stat-sub">
         Pedidos legados com reserva ativa mas sem prazo persistido: não são
         classificados como ativos nem como vencidos, e nenhuma ação é oferecida.
       </p>
     </div>
   </div>
 
-  <div class="mb-6 bg-white rounded-2xl shadow p-5">
-    <h2 class="font-semibold text-gray-800">Reservas de estoque vencidas</h2>
-    <p class="text-sm text-gray-500 mt-2">
-      Pedidos ainda em <span class="font-mono">pending_payment</span> com
-      expiração persistida já vencida. A limpeza restitui somente o estoque;
-      não cancela o pedido, a preferência ou o pagamento no Mercado Pago.
-      Política padrão configurada: {{ reservation_hours if reservation_hours is not none else "—" }}
-      hora(s) (referência; a data persistida é a fonte canônica).
-    </p>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-      <div>
-        <div class="text-sm text-gray-500">Candidatos atuais</div>
-        <div class="text-2xl font-bold">{{ expired_reservations|length }}</div>
-      </div>
-      <div>
-        <div class="text-sm text-gray-500">Cron automático</div>
-        <div class="text-lg font-bold {% if reservation_release_enabled %}text-green-700{% else %}text-red-700{% endif %}">
-          {{ "HABILITADO" if reservation_release_enabled else "DESLIGADO (fail-closed)" }}
-        </div>
-      </div>
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Reservas de estoque vencidas</span>
     </div>
-    {% if reservation_batch_release_enabled %}
-    <form method="POST"
-          action="{{ url_for('admin.release_expired_reservations') }}"
-          class="mt-4"
-          data-confirm="Liberar todas as reservas comprovadamente vencidas e sem pagamento aprovado?">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit"
-              class="px-4 py-2 rounded-lg bg-red-700 text-white hover:bg-red-800 text-sm">
-        Liberar lote explicitamente habilitado
-      </button>
-    </form>
-    {% else %}
-    <p class="text-xs text-gray-500 mt-4">
-      Lote administrativo desligado (fail-closed). Use apenas a ação individual
-      após conferir o pedido.
-    </p>
-    {% endif %}
-
-    <div class="overflow-x-auto mt-4">
-      <table class="w-full">
-        <thead class="bg-gray-50">
+    <div class="adm-card-body">
+      <p class="adm-stat-sub">
+        Pedidos ainda em <span class="font-mono">pending_payment</span> com
+        expiração persistida já vencida. A limpeza restitui somente o estoque;
+        não cancela o pedido, a preferência ou o pagamento no Mercado Pago.
+        Política padrão configurada: {{ reservation_hours if reservation_hours is not none else "—" }}
+        hora(s) (referência; a data persistida é a fonte canônica).
+      </p>
+      <p class="adm-stat-sub">
+        Candidatos atuais: <strong>{{ expired_reservations|length }}</strong>
+        · Cron automático:
+        {% if reservation_release_enabled %}<span class="adm-badge adm-badge-green">HABILITADO</span>{% else %}<span class="adm-badge adm-badge-gray">DESLIGADO (fail-closed)</span>{% endif %}
+      </p>
+      {% if reservation_batch_release_enabled %}
+      <form method="POST"
+            action="{{ url_for('admin.release_expired_reservations') }}"
+            data-confirm="Liberar todas as reservas comprovadamente vencidas e sem pagamento aprovado?">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">
+          Liberar lote explicitamente habilitado
+        </button>
+      </form>
+      {% else %}
+      <p class="adm-stat-sub">
+        Lote administrativo desligado (fail-closed). Use apenas a ação individual
+        após conferir o pedido.
+      </p>
+      {% endif %}
+    </div>
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead>
           <tr>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Pedido</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Expirou em</th>
-            <th class="px-3 py-2 text-left text-xs text-gray-500 uppercase">Ação</th>
+            <th>Pedido</th>
+            <th>Expirou em</th>
+            <th>Ação</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody>
           {% for order in expired_reservations %}
           <tr>
-            <td class="px-3 py-2 text-sm">{{ order.order_number }}</td>
-            <td class="px-3 py-2 text-sm">{{ order.mp_preference_expires_at.strftime('%d/%m/%Y %H:%M') }}</td>
-            <td class="px-3 py-2 text-sm">
+            <td><strong>{{ order.order_number }}</strong></td>
+            <td>{{ order.mp_preference_expires_at.strftime('%d/%m/%Y %H:%M') }}</td>
+            <td>
               <form method="POST"
                     action="{{ url_for('admin.release_single_expired_reservation', order_id=order.id) }}"
                     data-confirm="Liberar somente esta reserva? A operação será recusada se houver pagamento aprovado.">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="confirm_release" value="1">
-                <button type="submit"
-                        class="px-3 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700 text-xs">
+                <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">
                   Liberar reserva
                 </button>
               </form>
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="3" class="px-3 py-4 text-center text-gray-500">Nenhuma reserva com expiração comprovada.</td></tr>
+          <tr><td colspan="3" class="adm-empty">Nenhuma reserva com expiração comprovada.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
-    <p class="text-xs text-gray-500 mt-2">
-      Operações idempotentes e auditadas apenas por contagens; nenhuma identidade
-      de cliente é escrita em log.
-    </p>
+    <div class="adm-card-body">
+      <p class="adm-stat-sub">
+        Operações idempotentes e auditadas apenas por contagens; nenhuma identidade
+        de cliente é escrita em log.
+      </p>
+    </div>
   </div>
 
-  <div class="mb-6 bg-white rounded-2xl shadow p-5">
-    <h2 class="font-semibold text-gray-800">Envio em lote</h2>
-    {% if batch_enabled %}
-    <form method="POST" action="{{ url_for('admin.checkout_recovery') }}" class="mt-3">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit"
-              class="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-sm">
-        Enviar lote explicitamente habilitado
-      </button>
-    </form>
-    {% else %}
-    <p class="text-sm text-gray-500 mt-2">
-      DESLIGADO (fail-closed). Exige CHECKOUT_RECOVERY_BATCH_ENABLED=1 além do gate individual.
-    </p>
-    {% endif %}
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Envio em lote</span>
+    </div>
+    <div class="adm-card-body">
+      {% if batch_enabled %}
+      <form method="POST" action="{{ url_for('admin.checkout_recovery') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="adm-btn adm-btn-primary adm-btn-sm">
+          Enviar lote explicitamente habilitado
+        </button>
+      </form>
+      {% else %}
+      <p class="adm-stat-sub">
+        DESLIGADO (fail-closed). Exige CHECKOUT_RECOVERY_BATCH_ENABLED=1 além do gate individual.
+      </p>
+      {% endif %}
+    </div>
   </div>
 
-  <div class="bg-white rounded-2xl shadow overflow-hidden">
-    <div class="p-5 border-b border-gray-200">
-      <h2 class="font-semibold text-gray-800">Fila de recuperação</h2>
-      <p class="text-xs text-gray-500 mt-1">
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Fila de recuperação</span>
+    </div>
+    <div class="adm-card-body">
+      <p class="adm-stat-sub">
         Pedidos ainda com reserva de estoque + pending_payment + sem lembrete
         enviado. E-mail e número do pedido aparecem para identificação no admin.
       </p>
     </div>
-    <div class="overflow-x-auto">
-      <table class="w-full">
-        <thead class="bg-gray-50">
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead>
           <tr>
-            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Pedido</th>
-            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Cliente</th>
-            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">E-mail</th>
-            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Total</th>
-            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Criado em</th>
-            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Reserva ativa</th>
-            <th class="px-4 py-3 text-left text-xs text-gray-500 uppercase">Ação</th>
+            <th>Pedido</th>
+            <th>Cliente</th>
+            <th>E-mail</th>
+            <th class="adm-num">Total</th>
+            <th>Criado em</th>
+            <th>Reserva ativa</th>
+            <th>Ação</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody>
           {% for order in candidates %}
           <tr>
-            <td class="px-4 py-3 text-sm">{{ order.order_number }}</td>
-            <td class="px-4 py-3 text-sm">{{ order.customer_name or "—" }}</td>
-            <td class="px-4 py-3 text-sm">{{ order.customer_email }}</td>
-            <td class="px-4 py-3 text-sm">R$ {{ order.total }}</td>
-            <td class="px-4 py-3 text-sm">{{ order.created_at.strftime('%d/%m/%Y %H:%M') if order.created_at else "—" }}</td>
-            <td class="px-4 py-3 text-sm text-green-700">{{ "sim" if order.stock_reserved else "não" }}</td>
-            <td class="px-4 py-3 text-sm">
-              <div class="flex flex-col gap-2 items-start">
+            <td><strong>{{ order.order_number }}</strong></td>
+            <td><span class="adm-name" title="{{ order.customer_name or '—' }}">{{ order.customer_name or "—" }}</span></td>
+            <td><span class="adm-name" title="{{ order.customer_email }}">{{ order.customer_email }}</span></td>
+            <td class="adm-num"><strong>R$ {{ order.total }}</strong></td>
+            <td>{{ order.created_at.strftime('%d/%m/%Y %H:%M') if order.created_at else "—" }}</td>
+            <td>
+              {% if order.stock_reserved %}
+              <span class="adm-badge adm-badge-green">sim</span>
+              {% else %}
+              <span class="adm-badge adm-badge-gray">não</span>
+              {% endif %}
+            </td>
+            <td>
+              <div class="adm-actions">
                 {% if enabled and email_ready %}
                 <form method="POST" action="{{ url_for('admin.send_checkout_recovery', order_id=order.id) }}">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <button type="submit"
-                          class="px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-xs">
+                  <button type="submit" class="adm-btn adm-btn-primary adm-btn-sm">
                     Enviar lembrete
                   </button>
                 </form>
                 {% else %}
-                <span class="text-gray-400">Envio indisponível</span>
+                <span class="adm-stat-sub">Envio indisponível</span>
                 {% endif %}
                 <form method="POST"
                       action="{{ url_for('admin.skip_checkout_recovery', order_id=order.id) }}"
                       data-confirm="Ignorar este lembrete? O pedido, o pagamento e a reserva não serão alterados.">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="confirm_skip" value="1">
-                  <button type="submit"
-                          class="px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 text-xs">
+                  <button type="submit" class="adm-btn adm-btn-outline adm-btn-sm">
                     Ignorar lembrete
                   </button>
                 </form>
@@ -265,7 +278,7 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">Nenhum pedido aguardando lembrete.</td></tr>
+          <tr><td colspan="7" class="adm-empty">Nenhum pedido aguardando lembrete.</td></tr>
           {% endfor %}
         </tbody>
       </table>
