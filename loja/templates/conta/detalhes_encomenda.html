@@ -18,7 +18,19 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
 
 {% block content %}
 
-{% set pedido_status = pedido.status|default('processando', true) %}
+{# Mesma projeção logística da lista; o estado persistido não é alterado. #}
+{% set pedido_status = {
+    'aguardando_pagamento': 'aguardando_pagamento',
+    'aguardando_envio': 'preparando',
+    'enviado': 'enviado',
+    'aguardando_avaliacao': 'entregue',
+    'expirado': 'expired'
+}.get(pedido.customer_status, {
+    'cancelled': 'cancelado',
+    'refunded': 'reembolsado',
+    'charged_back': 'contestacao',
+    'manual_review': 'revisao'
+}.get(pedido.status, pedido.status|default('processando', true))) %}
 
 <section class="order-page">
     <div class="order-container">
@@ -441,10 +453,10 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
 
                                                 <div class="order-product-options">
 
-                                                    {% if item.size is defined and item.size %}
+                                                    {% if item.selected_size %}
                                                         <span>
                                                             Tamanho:
-                                                            <strong>{{ item.size }}</strong>
+                                                            <strong>{{ item.selected_size }}</strong>
                                                         </span>
                                                     {% endif %}
 
@@ -468,38 +480,11 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
                                             </div>
 
 
-                                            {% if item.total_price is defined
-                                                and item.total_price is not none %}
+                                            {% if item.line_total is not none %}
 
                                                 <strong class="order-product-price">
                                                     R$
-                                                    {{ "%.2f"|format(item.total_price)|replace('.', ',') }}
-                                                </strong>
-
-                                            {% elif item.price is defined
-                                                and item.price is not none %}
-
-                                                <strong class="order-product-price">
-                                                    R$
-                                                    {{
-                                                        "%.2f"|format(
-                                                            item.price *
-                                                            (item.quantity|default(1))
-                                                        )|replace('.', ',')
-                                                    }}
-                                                </strong>
-
-                                            {% elif item.unit_price is defined
-                                                and item.unit_price is not none %}
-
-                                                <strong class="order-product-price">
-                                                    R$
-                                                    {{
-                                                        "%.2f"|format(
-                                                            item.unit_price *
-                                                            (item.quantity|default(1))
-                                                        )|replace('.', ',')
-                                                    }}
+                                                    {{ "%.2f"|format(item.line_total)|replace('.', ',') }}
                                                 </strong>
 
                                             {% endif %}
@@ -1026,7 +1011,7 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
                                 Frete
                             </span>
 
-                            {% if pedido.shipping_amount|default(0, true) == 0 %}
+                            {% if pedido.shipping == 0 %}
 
                                 <strong class="order-free">
                                     Grátis
@@ -1038,7 +1023,7 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
                                     R$
                                     {{
                                         "%.2f"|format(
-                                            pedido.shipping_amount
+                                            pedido.shipping
                                         )|replace('.', ',')
                                     }}
                                 </strong>
@@ -1048,7 +1033,7 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
                         </div>
 
 
-                        {% if pedido.discount_amount|default(0, true) > 0 %}
+                        {% if pedido.discount > 0 %}
 
                             <div class="order-discount">
 
@@ -1060,7 +1045,7 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
                                     − R$
                                     {{
                                         "%.2f"|format(
-                                            pedido.discount_amount
+                                            pedido.discount
                                         )|replace('.', ',')
                                     }}
                                 </strong>
@@ -1080,7 +1065,7 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
                                 R$
                                 {{
                                     "%.2f"|format(
-                                        pedido.total_amount|default(0, true)
+                                        pedido.total
                                     )|replace('.', ',')
                                 }}
                             </strong>
@@ -1089,8 +1074,6 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
 
                     </div>
 
-
-                    {% if pedido.payment_status %}
 
                         <div class="order-payment-status">
 
@@ -1103,18 +1086,12 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
                                 </small>
 
                                 <strong>
-                                    {{
-                                        pedido.payment_status
-                                        |replace('_', ' ')
-                                        |title
-                                    }}
+                                    {{ 'Pagamento confirmado' if payment_confirmed else 'Pagamento não confirmado' }}
                                 </strong>
 
                             </div>
 
                         </div>
-
-                    {% endif %}
 
                 </section>
 
@@ -1203,9 +1180,9 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
                                     {% endif %}
 
 
-                                    {% if pedido.shipping_address.postal_code %}
+                                    {% if pedido.shipping_address.zip_code %}
                                         <span>
-                                            CEP {{ pedido.shipping_address.postal_code }}
+                                            CEP {{ pedido.shipping_address.zip_code }}
                                         </span>
                                     {% endif %}
 

@@ -62,6 +62,7 @@ from loja.modules.tracking_status import (
     get_tracking_status,
 )
 from loja.services.customer_tracking import build_customer_tracking
+from loja.services.order_payment_evidence import payment_is_confirmed
 
 from loja.modules.getway_mercado_pago.payment_service import money
 from loja.services.shipping_quote import estimate_label, temporary_flat_rate
@@ -2203,6 +2204,7 @@ def detalhes_encomenda(order_id):
         .options(
             selectinload(Order.items),
             selectinload(Order.shipments),
+            selectinload(Order.payments),
         )
         .filter(
             Order.id == order_id,
@@ -2216,6 +2218,7 @@ def detalhes_encomenda(order_id):
     return render_template(
         "conta/detalhes_encomenda.html",
         pedido=pedido,
+        payment_confirmed=payment_is_confirmed(pedido),
     )
 
 

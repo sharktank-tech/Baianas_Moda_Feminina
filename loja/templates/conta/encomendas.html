@@ -150,7 +150,7 @@
 
     {% for pedido in pedidos %}
 
-    {% set pedido_codigo = pedido.id|string %}
+    {% set pedido_codigo = pedido.order_number or pedido.id|string %}
 
 
     <article class="order-card">
@@ -172,7 +172,7 @@
             </span>
 
             <strong class="order-number">
-              #{{ pedido_codigo[:8]|upper }}
+              #{{ pedido_codigo }}
             </strong>
 
           </div>
