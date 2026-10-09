@@ -171,8 +171,22 @@ def test_admin_status_filter_and_dashboard_link(db, client, login, admin_user):
     html = client.get("/admin/pedidos?status=pending_payment").get_data(as_text=True)
     assert pending.order_number in html
     assert paid.order_number not in html
-    html = client.get("/admin").get_data(as_text=True)
-    assert html.count('href="/admin/pedidos"') >= 2
+    # First dashboard access bootstraps singletons. Restore the prior state:
+    # later integration tests also exercise the first-access setup flow.
+    from loja.modules.models import SiteConfig, FooterConfig, ContactInfo
+    models = (SiteConfig, FooterConfig, ContactInfo)
+    existing = {model: {row.id for row in model.query.all()} for model in models}
+    try:
+        response = client.get("/admin")
+        assert response.status_code == 200
+        assert response.get_data(as_text=True).count('href="/admin/pedidos"') >= 2
+    finally:
+        db.session.rollback()
+        for model in models:
+            for row in model.query.all():
+                if row.id not in existing[model]:
+                    db.session.delete(row)
+        db.session.commit()
 
 
 def test_admin_list_paginates_without_duplicate_orders(db, client, login, admin_user):
