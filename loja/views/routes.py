@@ -2213,9 +2213,34 @@ def detalhes_encomenda(order_id):
 
     _prepare_orders_for_customer([pedido])
 
+    # Itens ainda sem cobertura total de remessa (somente contagens,
+    # sem dados operacionais): entrega parcial deixa pendência explícita.
+    from loja.modules.models import ShipmentItem
+
+    covered = {}
+    if pedido.shipments:
+        rows = (
+            db.session.query(
+                ShipmentItem.order_item_id,
+                db.func.coalesce(db.func.sum(ShipmentItem.quantity), 0),
+            )
+            .filter(
+                ShipmentItem.shipment_id.in_([s.id for s in pedido.shipments])
+            )
+            .group_by(ShipmentItem.order_item_id)
+            .all()
+        )
+        covered = {item_id: int(total or 0) for item_id, total in rows}
+    pending_lines = [
+        {"name": item.product_name, "quantity": int(item.quantity or 0) - covered.get(item.id, 0)}
+        for item in (pedido.items or [])
+        if int(item.quantity or 0) - covered.get(item.id, 0) > 0
+    ]
+
     return render_template(
         "conta/detalhes_encomenda.html",
         pedido=pedido,
+        pending_lines=pending_lines,
     )
 
 

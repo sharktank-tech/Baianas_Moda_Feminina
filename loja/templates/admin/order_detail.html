@@ -24,6 +24,78 @@
   <p>{{ order.street }}, {{ order.number }} {{ order.complement or '' }} · {{ order.neighborhood }} · {{ order.city }}/{{ order.state }} · CEP {{ order.zip_code }}</p>
   <h2 class="text-xl font-bold mt-6">Rastreio registrado</h2>
   {% for shipment in order.shipments %}<p>{{ shipment.carrier or 'Transportadora não informada' }} · {{ shipment.tracking_code }} · {{ shipment.status }}</p>{% else %}<p>Nenhum rastreio registrado.</p>{% endfor %}
+  <h2 class="text-xl font-bold mt-6">Compra no fornecedor (registro manual)</h2>
+  <p class="text-sm text-gray-600">Pagamento: <strong>{{ 'Confirmado' if payment_confirmed else 'Não confirmado' }}</strong> · Registrar compra não compra no AliExpress nem altera pagamento, preço, estoque ou reservas.</p>
+  {% for purchase in manual_purchases %}
+  <div class="border rounded-lg p-4 mt-3">
+    <p><strong>Pedido AliExpress:</strong> {{ purchase.external_order_id }}</p>
+    <p class="text-sm text-gray-600">Comprado em {{ purchase.purchased_at.strftime('%d/%m/%Y %H:%M') if purchase.purchased_at else '—' }} ({{ purchase.purchased_tz }}) · Evidência: {{ purchase.evidence_ref }}</p>
+    {% if purchase.note %}<p class="text-sm text-gray-600">Obs.: {{ purchase.note }}</p>{% endif %}
+    <ul class="text-sm mt-1">
+      {% for link in purchase.items %}<li>{{ link.quantity }}× item {{ link.order_item_id }}</li>{% endfor %}
+    </ul>
+    <form method="POST" action="{{ url_for('admin.correct_manual_purchase', purchase_id=purchase.id) }}" class="mt-2 flex flex-wrap gap-2 items-end">
+      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+      <input type="hidden" name="expected_updated_at" value="{{ purchase.updated_at.strftime('%Y-%m-%dT%H:%M:%S') if purchase.updated_at else '' }}">
+      <label class="text-sm">Novo número <input class="border p-1" type="text" name="external_order_id" maxlength="64" value="{{ purchase.external_order_id }}" required></label>
+      <label class="text-sm">Justificativa <input class="border p-1" type="text" name="reason" maxlength="500" required placeholder="Motivo da correção"></label>
+      <button class="border p-1" type="submit">Corrigir número</button>
+    </form>
+  </div>
+  {% else %}<p>Nenhuma compra registrada no fornecedor.</p>{% endfor %}
+  {% if payment_confirmed and order.status == 'paid' %}
+  <form method="POST" action="{{ url_for('admin.register_manual_purchase', order_id=order.id) }}" class="border rounded-lg p-4 mt-3">
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+    <h3 class="font-bold">Registrar compra no AliExpress</h3>
+    <label class="block text-sm mt-2">Número do pedido no AliExpress <input class="border p-1 block" type="text" name="external_order_id" maxlength="64" required></label>
+    {% for item in order.items %}
+    <label class="block text-sm mt-1">{{ item.product_name }} ({{ item.selected_size or '—' }}) — vendido: {{ item.quantity }} <input class="border p-1" type="number" name="item_{{ item.id }}" min="0" max="{{ item.quantity }}" value="0"></label>
+    {% endfor %}
+    <label class="block text-sm mt-2">Data/hora da compra <input class="border p-1" type="datetime-local" name="purchased_at" required></label>
+    <label class="block text-sm mt-1">Fuso <input class="border p-1" type="text" name="purchased_tz" value="America/Sao_Paulo" required></label>
+    <label class="block text-sm mt-1">Referência da evidência <input class="border p-1 block" type="text" name="evidence_ref" maxlength="255" required></label>
+    <label class="block text-sm mt-1">Observação (opcional) <input class="border p-1 block" type="text" name="note" maxlength="2000"></label>
+    <button class="border p-2 mt-2" type="submit">Registrar compra (não compra no fornecedor)</button>
+  </form>
+  {% else %}<p class="text-sm text-gray-600 mt-2">Registro disponível após pagamento comprovado em pedido pago.</p>{% endif %}
+  <h2 class="text-xl font-bold mt-6">Despacho e rastreio</h2>
+  {% for purchase in manual_purchases %}
+  <div class="border rounded-lg p-4 mt-3">
+    <p><strong>Compra {{ purchase.external_order_id }}</strong></p>
+    <form method="POST" action="{{ url_for('admin.register_manual_shipment', purchase_id=purchase.id) }}" class="mt-2">
+      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+      <h3 class="font-bold text-sm">Registrar rastreio</h3>
+      <label class="block text-sm mt-1">Código <input class="border p-1 block" type="text" name="tracking_code" maxlength="64" required></label>
+      <label class="block text-sm mt-1">Transportadora <input class="border p-1 block" type="text" name="carrier" maxlength="60" required></label>
+      <label class="block text-sm mt-1">Data de postagem (opcional) <input class="border p-1" type="datetime-local" name="posted_at"></label>
+      <label class="block text-sm mt-1">Previsão de entrega (opcional) <input class="border p-1" type="date" name="estimated_delivery"></label>
+      <label class="block text-sm mt-1">Referência da evidência <input class="border p-1 block" type="text" name="evidence_ref" maxlength="255" required></label>
+      {% for link in purchase.items %}
+      <label class="block text-sm mt-1">Item {{ link.order_item_id }} — vinculado: {{ link.quantity }} <input class="border p-1" type="number" name="item_{{ link.order_item_id }}" min="0" max="{{ link.quantity }}" value="0"></label>
+      {% endfor %}
+      <button class="border p-2 mt-2" type="submit">Registrar rastreio (aguardando postagem)</button>
+    </form>
+  </div>
+  {% endfor %}
+  {% for shipment in order.shipments %}
+  {% if shipment.manual_purchase_id %}
+  <div class="border rounded-lg p-4 mt-3">
+    <p><strong>{{ shipment.tracking_code }}</strong> · {{ shipment.carrier or '—' }} · {{ shipment.status }}</p>
+    <form method="POST" action="{{ url_for('admin.correct_manual_shipment', shipment_id=shipment.id) }}" class="mt-2 flex flex-wrap gap-2 items-end">
+      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+      <input type="hidden" name="expected_updated_at" value="{{ shipment.updated_at.strftime('%Y-%m-%dT%H:%M:%S') if shipment.updated_at else '' }}">
+      <label class="text-sm">Transportadora <input class="border p-1" type="text" name="carrier" maxlength="60" value="{{ shipment.carrier or '' }}"></label>
+      <label class="text-sm">Código <input class="border p-1" type="text" name="tracking_code" maxlength="64" value="{{ shipment.tracking_code }}"></label>
+      <label class="text-sm">Justificativa <input class="border p-1" type="text" name="reason" maxlength="500" required placeholder="Motivo da correção"></label>
+      <button class="border p-1" type="submit">Corrigir</button>
+    </form>
+  </div>
+  {% endif %}
+  {% endfor %}
+  <h2 class="text-xl font-bold mt-6">Histórico operacional</h2>
+  <table class="w-full text-left text-sm"><thead><tr><th>Quando</th><th>Entidade</th><th>Campo</th><th>Antes → depois</th><th>Motivo</th></tr></thead>
+    <tbody>{% for entry in operational_audit %}<tr><td>{{ entry.created_at.strftime('%d/%m/%Y %H:%M') if entry.created_at else '—' }}</td><td>{{ entry.entity }}</td><td>{{ entry.field }}</td><td>{{ entry.old_value or '—' }} → {{ entry.new_value or '—' }}</td><td>{{ entry.reason }}</td></tr>{% else %}<tr><td colspan="5">Sem correções registradas.</td></tr>{% endfor %}</tbody>
+  </table>
   <p class="mt-6">Criado em {{ order.created_at.strftime('%d/%m/%Y %H:%M') }} UTC. Esta tela é somente de consulta.</p>
 </main>
 {% endblock %}

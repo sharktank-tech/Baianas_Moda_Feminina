@@ -102,10 +102,271 @@ def order_detail(order_id):
         selectinload(Order.items), selectinload(Order.payments),
         selectinload(Order.shipments),
     ).filter_by(id=order_id).first_or_404()
+    from loja.modules.models import (
+        ManualOperationalAudit, ManualSupplierPurchase, ShipmentItem,
+    )
+    purchases = (
+        ManualSupplierPurchase.query
+        .filter_by(order_id=order.id)
+        .order_by(ManualSupplierPurchase.created_at.asc()).all()
+    )
+    purchase_ids = [p.id for p in purchases]
+    coverage = {}
+    if purchase_ids:
+        from loja.modules.models import Shipment as ShipmentModel
+
+        rows = (
+            db.session.query(
+                ShipmentItem.order_item_id,
+                db.func.coalesce(db.func.sum(ShipmentItem.quantity), 0),
+            )
+            .join(ShipmentModel, ShipmentModel.id == ShipmentItem.shipment_id)
+            .filter(ShipmentModel.manual_purchase_id.in_(purchase_ids))
+            .group_by(ShipmentItem.order_item_id)
+            .all()
+        )
+        coverage = {item_id: int(total or 0) for item_id, total in rows}
+    known_ids = {str(p.id) for p in purchases} | {
+        str(s.id) for s in order.shipments
+    }
+    audit = [
+        a for a in (
+            ManualOperationalAudit.query
+            .order_by(ManualOperationalAudit.created_at.desc()).limit(100).all()
+        )
+        if str(a.entity_id) in known_ids
+    ]
     return render_template(
         "admin/order_detail.html", order=order, status_labels=ORDER_STATUS_LABELS,
         payment_confirmed=payment_is_confirmed(order),
+        manual_purchases=purchases, shipment_coverage=coverage,
+        operational_audit=audit,
     )
+
+
+def _manual_items_from_form():
+    """Itens `item_<uuid>=qtd` do formulário (ids persistidos, nunca nomes)."""
+    items = {}
+    for key, raw in request.form.items():
+        if not key.startswith("item_"):
+            continue
+        try:
+            item_id = PythonUUID(key[5:])
+        except ValueError:
+            raise ValueError("order_item_invalid")
+        items[item_id] = raw
+    return items
+
+
+def _manual_back(order_id):
+    return redirect(url_for("admin.order_detail", order_id=order_id))
+
+
+_MANUAL_ERROR_MESSAGES = {
+    "order_invalid": "Pedido inválido.",
+    "order_not_found": "Pedido não encontrado.",
+    "order_status_not_eligible": "Pedido inelegível: exige pagamento comprovado e estado pago.",
+    "payment_not_confirmed": "Pagamento não comprovado para este pedido.",
+    "order_without_items": "Pedido sem itens para vincular.",
+    "order_item_invalid": "Item inválido.",
+    "order_item_not_in_order": "Item não pertence a este pedido.",
+    "order_item_not_in_purchase": "Item não vinculado a esta compra.",
+    "items_required": "Informe ao menos um item com quantidade.",
+    "quantity_invalid": "Quantidade inválida (inteiro maior que zero).",
+    "quantity_exceeds_sold": "Quantidade registrada ultrapassa a vendida.",
+    "quantity_exceeds_purchase": "Quantidade excede a vinculada à compra.",
+    "external_order_id_invalid": "Número do pedido no AliExpress inválido.",
+    "external_order_id_in_use": "Número externo já registrado em outro pedido.",
+    "tracking_code_invalid": "Código de rastreio inválido.",
+    "tracking_code_in_use": "Código de rastreio já ligado a outro pedido.",
+    "carrier_invalid": "Transportadora inválida.",
+    "evidence_ref_invalid": "Referência da evidência inválida.",
+    "purchased_at_invalid": "Data/hora da compra inválida.",
+    "purchased_tz_invalid": "Fuso horário inválido.",
+    "posted_at_invalid": "Data de postagem inválida.",
+    "estimated_delivery_invalid": "Previsão de entrega inválida.",
+    "expected_updated_at_invalid": "Marcador de versão inválido.",
+    "purchase_invalid": "Compra inválida.",
+    "purchase_not_found": "Compra não encontrada.",
+    "purchase_not_in_order": "Compra não pertence a este pedido.",
+    "shipment_invalid": "Remessa inválida.",
+    "shipment_not_found": "Remessa não encontrada.",
+    "reason_invalid": "Justificativa obrigatória.",
+    "stale_state_reload": "Registro alterado por outro operador — recarregue e confira antes de corrigir.",
+}
+
+
+def _manual_error_message(exc):
+    return _MANUAL_ERROR_MESSAGES.get(
+        str(exc),
+        "Dados inválidos; nada foi alterado.",
+    )
+
+
+@admin_blueprint.route(
+    "/admin/pedidos/<uuid:order_id>/compra-manual", methods=["POST"]
+)
+@admin_required
+def register_manual_purchase(order_id):
+    """Registra compra externa já realizada (nunca compra no fornecedor)."""
+    from sqlalchemy.exc import IntegrityError
+
+    from loja.services import manual_dispatch as dispatch
+
+    try:
+        result = dispatch.register_manual_purchase(
+            order_id=order_id,
+            external_order_id=request.form.get("external_order_id"),
+            items=_manual_items_from_form(),
+            purchased_at=request.form.get("purchased_at"),
+            purchased_tz=request.form.get("purchased_tz"),
+            evidence_ref=request.form.get("evidence_ref"),
+            note=request.form.get("note"),
+            admin_user_id=current_user.id,
+        )
+        db.session.commit()
+    except IntegrityError:
+        # Corrida: outro registro venceu; retorna o existente sem duplicar.
+        db.session.rollback()
+        from loja.modules.models import ManualSupplierPurchase
+
+        code = str(request.form.get("external_order_id") or "").strip().upper()
+        existing = ManualSupplierPurchase.query.filter_by(
+            external_order_id=code
+        ).first()
+        if existing is not None and str(existing.order_id) == str(order_id):
+            flash("Compra já registrada anteriormente.", "warning")
+            return _manual_back(order_id)
+        current_app.logger.warning("compra manual: conflito de número externo")
+        flash("Número externo já registrado em outro pedido.", "danger")
+        return _manual_back(order_id)
+    except ValueError as exc:
+        db.session.rollback()
+        current_app.logger.warning("compra manual: %s", exc)
+        flash(_manual_error_message(exc), "danger")
+        return _manual_back(order_id)
+    flash(
+        "Compra registrada com sucesso."
+        if result.created else "Compra já registrada anteriormente.",
+        "success" if result.created else "warning",
+    )
+    return _manual_back(order_id)
+
+
+@admin_blueprint.route(
+    "/admin/pedidos/compras/<uuid:purchase_id>/corrigir", methods=["POST"]
+)
+@admin_required
+def correct_manual_purchase(purchase_id):
+    """Corrige o número externo (auditoria, sem efeitos operacionais)."""
+    from loja.modules.models import ManualSupplierPurchase
+    from loja.services import manual_dispatch as dispatch
+
+    purchase = ManualSupplierPurchase.query.filter_by(id=purchase_id).first()
+    if purchase is None:
+        flash("Compra não encontrada.", "danger")
+        return redirect(url_for("admin.dashboard"))
+    try:
+        purchase = dispatch.correct_manual_purchase(
+            purchase_id=purchase_id,
+            external_order_id=request.form.get("external_order_id"),
+            reason=request.form.get("reason"),
+            admin_user_id=current_user.id,
+            expected_updated_at=request.form.get("expected_updated_at"),
+        )
+        db.session.commit()
+    except ValueError as exc:
+        db.session.rollback()
+        current_app.logger.warning("correção de compra: %s", exc)
+        flash(_manual_error_message(exc), "danger")
+        return _manual_back(purchase.order_id)
+    flash("Número externo corrigido com auditoria.", "success")
+    return _manual_back(purchase.order_id)
+
+
+@admin_blueprint.route(
+    "/admin/pedidos/compras/<uuid:purchase_id>/rastreio", methods=["POST"]
+)
+@admin_required
+def register_manual_shipment(purchase_id):
+    """Registra remessa vinculada à compra (nunca posta/entrega)."""
+    from sqlalchemy.exc import IntegrityError
+
+    from loja.modules.models import ManualSupplierPurchase
+    from loja.services import manual_dispatch as dispatch
+
+    purchase = ManualSupplierPurchase.query.filter_by(id=purchase_id).first()
+    if purchase is None:
+        flash("Compra não encontrada.", "danger")
+        return redirect(url_for("admin.dashboard"))
+    try:
+        result = dispatch.register_manual_shipment(
+            order_id=purchase.order_id,
+            purchase_id=purchase.id,
+            tracking_code=request.form.get("tracking_code"),
+            carrier=request.form.get("carrier"),
+            posted_at=request.form.get("posted_at") or None,
+            estimated_delivery=request.form.get("estimated_delivery") or None,
+            evidence_ref=request.form.get("evidence_ref"),
+            items=_manual_items_from_form(),
+            admin_user_id=current_user.id,
+        )
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        from loja.modules.models import Shipment
+
+        code = str(request.form.get("tracking_code") or "").strip().upper()
+        existing = Shipment.query.filter_by(tracking_code=code).first()
+        if existing is not None and str(existing.order_id) == str(purchase.order_id):
+            flash("Rastreio já registrado anteriormente.", "warning")
+            return _manual_back(purchase.order_id)
+        current_app.logger.warning("rastreio manual: código em outro pedido")
+        flash("Código de rastreio já ligado a outro pedido.", "danger")
+        return _manual_back(purchase.order_id)
+    except ValueError as exc:
+        db.session.rollback()
+        current_app.logger.warning("rastreio manual: %s", exc)
+        flash(_manual_error_message(exc), "danger")
+        return _manual_back(purchase.order_id)
+    flash(
+        "Rastreio registrado (aguardando postagem)."
+        if result.created else "Rastreio já registrado anteriormente.",
+        "success" if result.created else "warning",
+    )
+    return _manual_back(purchase.order_id)
+
+
+@admin_blueprint.route(
+    "/admin/pedidos/remessas/<int:shipment_id>/corrigir", methods=["POST"]
+)
+@admin_required
+def correct_manual_shipment(shipment_id):
+    """Corrige transportadora/rastreio (auditoria, sem efeitos)."""
+    from loja.modules.models import Shipment
+    from loja.services import manual_dispatch as dispatch
+
+    shipment = Shipment.query.filter_by(id=shipment_id).first()
+    if shipment is None:
+        flash("Remessa não encontrada.", "danger")
+        return redirect(url_for("admin.dashboard"))
+    try:
+        dispatch.correct_manual_shipment(
+            shipment_id=shipment.id,
+            carrier=request.form.get("carrier"),
+            tracking_code=request.form.get("tracking_code") or None,
+            reason=request.form.get("reason"),
+            admin_user_id=current_user.id,
+            expected_updated_at=request.form.get("expected_updated_at"),
+        )
+        db.session.commit()
+    except ValueError as exc:
+        db.session.rollback()
+        current_app.logger.warning("correção de rastreio: %s", exc)
+        flash(_manual_error_message(exc), "danger")
+        return _manual_back(shipment.order_id)
+    flash("Remessa corrigida com auditoria.", "success")
+    return _manual_back(shipment.order_id)
 
 # ── Variáveis de contexto globais ────────────────────────────────────────────────────────
 

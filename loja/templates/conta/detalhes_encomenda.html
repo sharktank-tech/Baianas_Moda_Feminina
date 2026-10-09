@@ -593,6 +593,19 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
                     </header>
 
 
+                    {% if pedido.shipments and pending_lines %}
+
+                        <p>
+                            Ainda existem itens pendentes neste pedido:
+
+                            {% for line in pending_lines %}
+                                {{ line.quantity }}× {{ line.name }}{% if not loop.last %}; {% endif %}
+                            {% endfor %}
+                        </p>
+
+                    {% endif %}
+
+
                     {% if pedido.shipments %}
 
                         <div class="order-shipments">
