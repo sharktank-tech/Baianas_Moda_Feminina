@@ -30,6 +30,23 @@ def frozen_now(monkeypatch):
     )
     return FROZEN_NOW
 
+
+@pytest.fixture(autouse=True)
+def _clean_dashboard_singletons(db):
+    """Ações redirecionam ao dashboard, que cria singletons no 1º acesso."""
+    from loja.modules.models import ContactInfo, FooterConfig, SiteConfig
+
+    known = {
+        model: {row[0] for row in db.session.query(model.id).all()}
+        for model in (SiteConfig, FooterConfig, ContactInfo)
+    }
+    yield
+    for model, ids in known.items():
+        for row in model.query.all():
+            if row.id not in ids:
+                db.session.delete(row)
+    db.session.commit()
+
 SECRET_CPF = "52998224725"
 SECRET_PHONE = "+5563987654321"
 SECRET_STREET = "Rua Secreta 999"
@@ -162,7 +179,7 @@ def test_active_future_shows_correct_sp_time(
     )
     login(user.email, "senha123")
 
-    response = client.get("/admin/recuperacao-checkout")
+    response = client.get("/admin/painel/checkout-recovery")
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
@@ -181,7 +198,7 @@ def test_active_section_has_no_release_controls(
     _reservation_order(db, user, product, expires_at=FROZEN_NOW + timedelta(hours=5))
     login(user.email, "senha123")
 
-    html = client.get("/admin/recuperacao-checkout").get_data(as_text=True)
+    html = client.get("/admin/painel/checkout-recovery").get_data(as_text=True)
     section = _active_section(html)
 
     assert "<form" not in section
@@ -200,7 +217,7 @@ def test_expired_only_in_expired_table(
     )
     login(user.email, "senha123")
 
-    html = client.get("/admin/recuperacao-checkout").get_data(as_text=True)
+    html = client.get("/admin/painel/checkout-recovery").get_data(as_text=True)
 
     assert order.order_number not in _active_section(html)
     assert order.order_number in _expired_section(html)
@@ -216,7 +233,7 @@ def test_null_expiry_only_in_failclosed_count(
     order = _reservation_order(db, user, product, expires_at=None)
     login(user.email, "senha123")
 
-    html = client.get("/admin/recuperacao-checkout").get_data(as_text=True)
+    html = client.get("/admin/painel/checkout-recovery").get_data(as_text=True)
 
     assert order.order_number not in html
     assert "Reservas sem expiração comprovada" in html
@@ -247,7 +264,7 @@ def test_paid_and_released_absent_everywhere(
     )
     login(user.email, "senha123")
 
-    html = client.get("/admin/recuperacao-checkout").get_data(as_text=True)
+    html = client.get("/admin/painel/checkout-recovery").get_data(as_text=True)
 
     assert paid.order_number not in html
     assert released.order_number not in html
@@ -267,7 +284,7 @@ def test_approved_payment_absent_from_active(
     )
     login(user.email, "senha123")
 
-    html = client.get("/admin/recuperacao-checkout").get_data(as_text=True)
+    html = client.get("/admin/painel/checkout-recovery").get_data(as_text=True)
 
     assert order.order_number not in _active_section(html)
 
@@ -295,7 +312,7 @@ def test_get_performs_no_mutations(
         Product.query.count(),
     )
 
-    response = client.get("/admin/recuperacao-checkout")
+    response = client.get("/admin/painel/checkout-recovery")
 
     assert response.status_code == 200
     db.session.expire_all()
@@ -351,7 +368,7 @@ def test_get_calls_no_external_boundaries(
 
     calls = _arm_boundary_sentinels(monkeypatch)
 
-    response = client.get("/admin/recuperacao-checkout")
+    response = client.get("/admin/painel/checkout-recovery")
 
     assert response.status_code == 200
     assert calls == []
@@ -372,7 +389,7 @@ def test_no_sensitive_data_in_html_or_logs(
     login(user.email, "senha123")
 
     with caplog.at_level("WARNING"):
-        html = client.get("/admin/recuperacao-checkout").get_data(as_text=True)
+        html = client.get("/admin/painel/checkout-recovery").get_data(as_text=True)
 
     assert order.order_number in html  # número público pode aparecer
     for secret in order._secret_values.values():
@@ -513,7 +530,7 @@ def test_expiry_equal_now_is_active_not_releasable(
             o.id for o in find_expired_stock_reservations(hours=24)
         ]
 
-    html = client.get("/admin/recuperacao-checkout").get_data(as_text=True)
+    html = client.get("/admin/painel/checkout-recovery").get_data(as_text=True)
     assert order.order_number in _active_section(html)
 
     assert (

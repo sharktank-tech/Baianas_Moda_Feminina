@@ -1,0 +1,293 @@
+{# Fragmento da aba Recuperação de checkout (sob demanda em /admin#checkout-recovery).
+   POSTs (lote, enviar, ignorar, liberar) submetem normalmente; o servidor
+   redireciona de volta para a aba. Sem <script>. #}
+<div data-partial-root="checkout-recovery">
+  <div class="adm-ops-head">
+    <div>
+      <h2 class="adm-ops-title">Recuperação de checkout</h2>
+      <p class="adm-stat-sub">
+        Fila de pedidos <span class="font-mono">pending_payment</span> com
+        reserva de estoque ainda ativa. Não inicia tráfego pago e não consulta
+        provedores.
+      </p>
+    </div>
+  </div>
+
+  <div class="adm-stats" aria-label="Estado da recuperação">
+    <div class="adm-stat-card">
+      <div class="adm-stat-label">Envio individual</div>
+      <div class="adm-stat-value adm-stat-value-text">{{ "SIM" if enabled else "NÃO" }}</div>
+      <div class="adm-stat-sub">
+        {% if enabled %}
+          Cada envio exige uma ação individual.
+        {% else %}
+          Fail-closed: nenhum envio com gate desligado.
+        {% endif %}
+      </div>
+    </div>
+    <div class="adm-stat-card">
+      <div class="adm-stat-label">Idade mínima de espera</div>
+      <div class="adm-stat-value">{% if after_hours is not none %}{{ after_hours }}h{% else %}—{% endif %}</div>
+      <div class="adm-stat-sub">CHECKOUT_RECOVERY_AFTER_HOURS</div>
+    </div>
+    <div class="adm-stat-card">
+      <div class="adm-stat-label">Entrega SMTP</div>
+      <div class="adm-stat-value adm-stat-value-text">{{ "PRONTA" if email_ready else "INDISPONÍVEL" }}</div>
+      <div class="adm-stat-sub">Valores nunca exibidos.</div>
+    </div>
+    <div class="adm-stat-card">
+      <div class="adm-stat-label">Candidatos pendentes</div>
+      <div class="adm-stat-value">{{ candidates|length }}</div>
+      <div class="adm-stat-sub">Fila read-only atual</div>
+    </div>
+  </div>
+
+  {% if result %}
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Resultado da última execução</span>
+    </div>
+    <div class="adm-table-wrap" role="region" aria-label="Tabela: Recuperação de checkout" tabindex="0">
+      <table class="adm-table">
+        <tbody>
+          <tr>
+            <td>Habilitado</td>
+            <td><strong>{{ "sim" if result.enabled else "não" }}</strong></td>
+          </tr>
+          <tr>
+            <td>Candidatos</td>
+            <td><strong>{{ result.candidates }}</strong></td>
+          </tr>
+          <tr>
+            <td>E-mails enviados</td>
+            <td><strong>{{ result.sent }}</strong></td>
+          </tr>
+          <tr>
+            <td>Sem e-mail no pedido</td>
+            <td><strong>{{ result.skipped_empty_email }}</strong></td>
+          </tr>
+          <tr>
+            <td>Falhas (não marcam envio)</td>
+            <td><strong>{{ result.failed }}</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Reservas de estoque ativas</span>
+    </div>
+    <div class="adm-card-body">
+      <p class="adm-stat-sub">
+        Pedidos ainda em <span class="font-mono">pending_payment</span> com reserva
+        ativa e expiração da preferência comprovada e futura (horário de
+        America/Sao_Paulo). Seção somente leitura: reservas ativas não possuem
+        botão de liberação.
+      </p>
+    </div>
+    <div class="adm-table-wrap" role="region" aria-label="Tabela: Recuperação de checkout" tabindex="0">
+      <table class="adm-table">
+        <thead>
+          <tr>
+            <th>Pedido</th>
+            <th>Criado em (UTC−3)</th>
+            <th>Reserva expira em (UTC−3)</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for reservation in active_reservations %}
+          <tr>
+            <td><strong>{{ reservation.order_number }}</strong></td>
+            <td>{{ reservation.created_sp }}</td>
+            <td>{{ reservation.expires_sp }}</td>
+            <td><span class="adm-badge adm-badge-green">ATIVA</span></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="adm-empty">Nenhuma reserva ativa com expiração comprovada.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="adm-card-body">
+      <div class="adm-stat-label">Reservas sem expiração comprovada</div>
+      <div class="adm-stat-value">{{ unproven_reservations_count }}</div>
+      <p class="adm-stat-sub">
+        Pedidos legados com reserva ativa mas sem prazo persistido: não são
+        classificados como ativos nem como vencidos, e nenhuma ação é oferecida.
+      </p>
+    </div>
+  </div>
+
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Reservas de estoque vencidas</span>
+    </div>
+    <div class="adm-card-body">
+      <p class="adm-stat-sub">
+        Pedidos ainda em <span class="font-mono">pending_payment</span> com
+        expiração persistida já vencida. A limpeza restitui somente o estoque;
+        não cancela o pedido, a preferência ou o pagamento no Mercado Pago.
+        Política padrão configurada: {{ reservation_hours if reservation_hours is not none else "—" }}
+        hora(s) (referência; a data persistida é a fonte canônica).
+      </p>
+      <p class="adm-stat-sub">
+        Candidatos atuais: <strong>{{ expired_reservations|length }}</strong>
+        · Cron automático:
+        {% if reservation_release_enabled %}<span class="adm-badge adm-badge-green">HABILITADO</span>{% else %}<span class="adm-badge adm-badge-gray">DESLIGADO (fail-closed)</span>{% endif %}
+      </p>
+      {% if reservation_batch_release_enabled %}
+      <form method="POST"
+            action="{{ url_for('admin.release_expired_reservations') }}"
+            data-confirm="Liberar todas as reservas comprovadamente vencidas e sem pagamento aprovado?">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">
+          Liberar lote explicitamente habilitado
+        </button>
+      </form>
+      {% else %}
+      <p class="adm-stat-sub">
+        Lote administrativo desligado (fail-closed). Use apenas a ação individual
+        após conferir o pedido.
+      </p>
+      {% endif %}
+    </div>
+    <div class="adm-table-wrap" role="region" aria-label="Tabela: Recuperação de checkout" tabindex="0">
+      <table class="adm-table">
+        <thead>
+          <tr>
+            <th>Pedido</th>
+            <th>Expirou em</th>
+            <th>Ação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in expired_reservations %}
+          <tr>
+            <td><strong>{{ order.order_number }}</strong></td>
+            <td>{{ order.mp_preference_expires_at.strftime('%d/%m/%Y %H:%M') }} UTC</td>
+            <td>
+              <form method="POST"
+                    action="{{ url_for('admin.release_single_expired_reservation', order_id=order.id) }}"
+                    data-confirm="Liberar somente esta reserva? A operação será recusada se houver pagamento aprovado.">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="confirm_release" value="1">
+                <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">
+                  Liberar reserva
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="adm-empty">Nenhuma reserva com expiração comprovada.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="adm-card-body">
+      <p class="adm-stat-sub">
+        Operações idempotentes e auditadas apenas por contagens; nenhuma identidade
+        de cliente é escrita em log.
+      </p>
+    </div>
+  </div>
+
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Envio em lote</span>
+    </div>
+    <div class="adm-card-body">
+      {% if batch_enabled %}
+      <form method="POST" action="{{ url_for('admin.checkout_recovery') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="adm-btn adm-btn-primary adm-btn-sm">
+          Enviar lote explicitamente habilitado
+        </button>
+      </form>
+      {% else %}
+      <p class="adm-stat-sub">
+        DESLIGADO (fail-closed). Exige CHECKOUT_RECOVERY_BATCH_ENABLED=1 além do gate individual.
+      </p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Fila de recuperação</span>
+    </div>
+    <div class="adm-card-body">
+      <p class="adm-stat-sub">
+        Pedidos ainda com reserva de estoque + pending_payment + sem lembrete
+        enviado. E-mail e número do pedido aparecem para identificação no admin.
+      </p>
+    </div>
+    <div class="adm-table-wrap" role="region" aria-label="Tabela: Recuperação de checkout" tabindex="0">
+      <table class="adm-table">
+        <thead>
+          <tr>
+            <th>Pedido</th>
+            <th>Cliente</th>
+            <th>E-mail</th>
+            <th class="adm-num">Total</th>
+            <th>Criado em</th>
+            <th>Reserva ativa</th>
+            <th>Estado do pedido</th>
+            <th>Elegibilidade</th>
+            <th>Histórico de contato</th>
+            <th>Ação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in candidates %}
+          <tr>
+            <td><strong>{{ order.order_number }}</strong></td>
+            <td><span class="adm-name" title="{{ order.customer_name or '—' }}">{{ order.customer_name or "—" }}</span></td>
+            <td><span class="adm-name" title="{{ order.customer_email }}">{{ order.customer_email }}</span></td>
+            <td class="adm-num"><strong>R$ {{ '%.2f'|format(order.total)|replace('.', ',') }}</strong></td>
+            <td>{{ order.created_at.strftime('%d/%m/%Y %H:%M') if order.created_at else "—" }} UTC</td>
+            <td>
+              {% if order.stock_reserved %}
+              <span class="adm-badge adm-badge-green">sim</span>
+              {% else %}
+              <span class="adm-badge adm-badge-gray">não</span>
+              {% endif %}
+            </td>
+            <td><span class="adm-badge adm-badge-yellow">Aguardando pagamento</span></td>
+            <td><span class="adm-badge adm-badge-green">Candidato à recuperação</span></td>
+            <td><span class="adm-stat-sub">Nenhum lembrete enviado ou ignorado</span></td>
+            <td>
+              <div class="adm-actions">
+                {% if enabled and email_ready %}
+                <form method="POST" action="{{ url_for('admin.send_checkout_recovery', order_id=order.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="adm-btn adm-btn-primary adm-btn-sm">
+                    Enviar lembrete
+                  </button>
+                </form>
+                {% else %}
+                <span class="adm-stat-sub">Envio indisponível</span>
+                {% endif %}
+                <form method="POST"
+                      action="{{ url_for('admin.skip_checkout_recovery', order_id=order.id) }}"
+                      data-confirm="Ignorar este lembrete? O pedido, o pagamento e a reserva não serão alterados.">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="confirm_skip" value="1">
+                  <button type="submit" class="adm-btn adm-btn-outline adm-btn-sm">
+                    Ignorar lembrete
+                  </button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="10" class="adm-empty">Nenhum pedido aguardando lembrete.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

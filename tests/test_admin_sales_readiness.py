@@ -521,7 +521,7 @@ def test_route_requires_admin(client, regular_user, login, db, make_product):
     make_product()
     login(regular_user.email, "senha123")
 
-    response = client.get("/admin/prontidao-vendas")
+    response = client.get("/admin/painel/sales-readiness")
 
     assert response.status_code in (302, 303, 403)
 
@@ -529,7 +529,7 @@ def test_route_requires_admin(client, regular_user, login, db, make_product):
 def test_route_anonymous_redirect(client, db, make_product):
     make_product()
 
-    response = client.get("/admin/prontidao-vendas")
+    response = client.get("/admin/painel/sales-readiness")
 
     assert response.status_code in (302, 303)
 
@@ -543,12 +543,12 @@ def test_route_get_no_commit_no_mutation(
     login(admin_user.email, "senha123")
     before = _snapshot(db)
 
-    response = client.get("/admin/prontidao-vendas")
+    response = client.get("/admin/painel/sales-readiness")
 
     assert response.status_code == 200
     db.session.expire_all()
     assert _snapshot(db) == before
-    assert b"Prontid\xc3\xa3o para vendas" in response.data
+    assert b"Avalia\xc3\xa7\xc3\xa3o por produto" in response.data
 
 
 def test_route_get_no_external_boundaries(
@@ -579,7 +579,7 @@ def test_route_get_no_external_boundaries(
         smtplib, "SMTP", lambda *a, **k: calls.append("smtp.SMTP")
     )
 
-    response = client.get("/admin/prontidao-vendas")
+    response = client.get("/admin/painel/sales-readiness")
 
     assert response.status_code == 200
     assert calls == []
@@ -602,7 +602,7 @@ def test_route_no_mutation_forms_and_no_sensitive_data(
     login(admin_user.email, "senha123")
 
     with caplog.at_level("WARNING"):
-        html = client.get("/admin/prontidao-vendas").get_data(as_text=True)
+        html = client.get("/admin/painel/sales-readiness").get_data(as_text=True)
 
     assert "method=\"post\"" not in html.lower()
     assert product.name in html
@@ -636,7 +636,7 @@ def test_route_counts_match_rows(client, db, admin_user, login, full_policy):  #
         == sr.REVIEW
     )
     login(admin_user.email, "senha123")
-    html = client.get("/admin/prontidao-vendas").get_data(as_text=True)
+    html = client.get("/admin/painel/sales-readiness").get_data(as_text=True)
 
     def _card(label):
         match = re.search(
@@ -687,7 +687,7 @@ def test_route_empty_message_when_nothing_ready(
     monkeypatch.setattr(sr, "evaluate_sales_readiness", _only_blocked)
     login(admin_user.email, "senha123")
 
-    html = client.get("/admin/prontidao-vendas").get_data(as_text=True)
+    html = client.get("/admin/painel/sales-readiness").get_data(as_text=True)
 
     assert calls["n"] == 1
     assert "Nenhum produto está comprovadamente pronto para divulgação." in html
@@ -696,7 +696,7 @@ def test_route_empty_message_when_nothing_ready(
 def test_recovery_expired_text_fixed(client, admin_user, login, db):
     login(admin_user.email, "senha123")
 
-    html = client.get("/admin/recuperacao-checkout").get_data(as_text=True)
+    html = client.get("/admin/painel/checkout-recovery").get_data(as_text=True)
 
     assert "reserva ativa há mais de" not in html
     assert "expiração persistida já vencida" in html
@@ -866,7 +866,7 @@ def _row_state(html, name):
     main = html.split("Avaliação por produto", 1)[1]
     match = re.search(
         re.escape(name)
-        + r"</td>(?:\s*<td[^>]*>.*?</td>){8}\s*<td[^>]*>(PRONTO|REVISÃO|BLOQUEADO)",
+        + r"(?:</span>)?</td>(?:\s*<td[^>]*>.*?</td>){8}\s*<td[^>]*>\s*(?:<span[^>]*>\s*)?(PRONTO|REVISÃO|BLOQUEADO)",
         main,
         re.DOTALL,
     )
@@ -903,13 +903,13 @@ def test_route_fresh_config_drives_pronto_then_regresses(
     monkeypatch.setattr(smtplib, "SMTP", lambda *a, **k: calls.append(True))
     login(admin_user.email, "senha123")
 
-    html = client.get("/admin/prontidao-vendas").get_data(as_text=True)
+    html = client.get("/admin/painel/sales-readiness").get_data(as_text=True)
     assert _row_state(html, "Rota Fresh Zeta") == "PRONTO"
 
     monkeypatch.delitem(
         client.application.config, "SHIPPING_ALIEXPRESS_FRESH_QUOTES", raising=False
     )
-    html = client.get("/admin/prontidao-vendas").get_data(as_text=True)
+    html = client.get("/admin/painel/sales-readiness").get_data(as_text=True)
     assert _row_state(html, "Rota Fresh Zeta") == "REVISÃO"
 
     assert calls == []
@@ -1058,7 +1058,7 @@ def test_reference_status_labels(client, db, admin_user, login, monkeypatch):
     monkeypatch.setitem(
         client.application.config, "SALES_READINESS_DESTINATION_CEP", REF_CEP
     )
-    html = client.get("/admin/prontidao-vendas").get_data(as_text=True)
+    html = client.get("/admin/painel/sales-readiness").get_data(as_text=True)
     assert "Destino de referência configurado" in html
     assert "013•••••" in html
     assert "01310100" not in html  # CEP completo nunca exibido
@@ -1066,7 +1066,7 @@ def test_reference_status_labels(client, db, admin_user, login, monkeypatch):
     monkeypatch.delitem(
         client.application.config, "SALES_READINESS_DESTINATION_CEP", raising=False
     )
-    html = client.get("/admin/prontidao-vendas").get_data(as_text=True)
+    html = client.get("/admin/painel/sales-readiness").get_data(as_text=True)
     assert "Destino de referência pendente" in html
 
 

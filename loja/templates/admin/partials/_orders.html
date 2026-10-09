@@ -1,0 +1,109 @@
+{# Fragmento da aba Pedidos (carregado sob demanda em /admin#orders).
+   Sem <script>: filtros/paginação via data-partial-form/link; o detalhe
+   abre página própria. Somente apresentação sobre o mesmo contexto. #}
+<div data-partial-root="orders">
+  <div class="adm-ops-head">
+    <div>
+      <h2 class="adm-ops-title">Pedidos</h2>
+      <p class="adm-stat-sub">Estado registrado na loja. Esta consulta não confirma pagamentos no provedor nem realiza compras.</p>
+    </div>
+  </div>
+
+  <div class="adm-stats" aria-label="Pedidos por estado">
+    {% for code, label in status_labels.items() %}
+    <div class="adm-stat-card">
+      <div class="adm-stat-label">{{ label }}</div>
+      <div class="adm-stat-value">{{ status_counts.get(code, 0) }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Filtros</span>
+    </div>
+    <div class="adm-card-body">
+      <form method="GET" action="{{ url_for('admin.ops_partial_orders') }}" data-partial-form>
+        <div class="adm-filters">
+          <label class="adm-field" for="orders-q">Referência exata
+            <input class="adm-input" id="orders-q" name="q" maxlength="100" value="{{ search }}" placeholder="Número, UUID ou ID do pagamento" autocomplete="off">
+          </label>
+          <label class="adm-field" for="orders-status">Estado
+            <select class="adm-input" id="orders-status" name="status">
+              <option value="">Todos</option>
+              {% for code, label in status_labels.items() %}<option value="{{ code }}" {{ 'selected' if status == code }}>{{ label }}</option>{% endfor %}
+            </select>
+          </label>
+          <input type="hidden" name="page" value="1">
+          <button class="adm-btn adm-btn-primary adm-btn-sm" type="submit">Filtrar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Resultados</span>
+      <span class="adm-stat-sub">{{ page.total }} pedido(s) encontrado(s)</span>
+    </div>
+    <div class="adm-table-wrap" role="region" aria-label="Tabela: Pedidos" tabindex="0">
+      <table class="adm-table">
+        <thead>
+          <tr>
+            <th>Pedido</th>
+            <th>Cliente</th>
+            <th class="adm-num">Total</th>
+            <th>Estado do pedido</th>
+            <th>Pagamento confirmado</th>
+            <th><span class="adm-stat-sub">Ações</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in page.items %}
+          <tr>
+            <td>
+              <strong>{{ order.order_number }}</strong>
+              <div class="adm-stat-sub">{{ order.created_at.strftime('%d/%m/%Y %H:%M') }} UTC</div>
+            </td>
+            <td>
+              <span class="adm-name" title="{{ order.customer_name or '—' }}">{{ order.customer_name or '—' }}</span>
+            </td>
+            <td class="adm-num"><strong>R$ {{ '%.2f'|format(order.total)|replace('.', ',') }}</strong></td>
+            <td>
+              <span class="adm-badge {{
+                'adm-badge-green' if order.status == 'paid'
+                else ('adm-badge-yellow' if order.status == 'pending_payment'
+                else ('adm-badge-accent' if order.status == 'manual_review'
+                else ('adm-badge-red' if order.status in ('payment_failed', 'charged_back')
+                else 'adm-badge-gray'))) }}">
+                {{ status_labels.get(order.status, order.status) }}
+              </span>
+            </td>
+            <td>
+              {% if payment_is_confirmed(order) %}
+              <span class="adm-badge adm-badge-green">Sim</span>
+              {% else %}
+              <span class="adm-badge adm-badge-gray">Não confirmado</span>
+              {% endif %}
+            </td>
+            <td><a class="adm-btn adm-btn-outline adm-btn-sm" href="{{ url_for('admin.order_detail', order_id=order.id) }}">Ver pedido</a></td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="6" class="adm-empty">
+              {% if search or status %}Nenhum pedido para os filtros aplicados.{% else %}Nenhum pedido encontrado.{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="adm-card-body">
+      <nav class="adm-actions" aria-label="Paginação">
+        {% if page.has_prev %}<a data-partial-link class="adm-btn adm-btn-outline adm-btn-sm" href="{{ url_for('admin.ops_partial_orders', page=page.prev_num, q=search, status=status) }}">Anterior</a>{% endif %}
+        <span class="adm-stat-sub">Página {{ page.page }}</span>
+        {% if page.has_next %}<a data-partial-link class="adm-btn adm-btn-outline adm-btn-sm" href="{{ url_for('admin.ops_partial_orders', page=page.next_num, q=search, status=status) }}">Próxima</a>{% endif %}
+      </nav>
+    </div>
+  </div>
+</div>

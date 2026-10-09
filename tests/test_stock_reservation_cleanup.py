@@ -249,6 +249,6 @@ def test_admin_dashboard_links_checkout_recovery_on_desktop_and_mobile(
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert html.count('href="/admin/recuperacao-checkout"') == 2
+    assert html.count('data-panel="checkout-recovery"') == 2
     assert "Recuperação de checkout" in html
     assert ">\n        Recuperação\n" in html

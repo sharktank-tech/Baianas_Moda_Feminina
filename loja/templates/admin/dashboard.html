@@ -58,7 +58,6 @@
           <span class="adm-icon">◈</span>
           Dashboard
         </button>
-        <a class="adm-nav-link" href="{{ url_for('admin.orders_list') }}">Pedidos</a>
 
       </div>
 
@@ -185,29 +184,41 @@
           Operação
         </div>
 
-        <a
+        <button
+          type="button"
           class="adm-nav-link"
-          href="{{ url_for('admin.checkout_recovery') }}"
+          data-panel="orders"
         >
-          <span class="adm-icon">↻</span>
-          Recuperação de checkout
-        </a>
+          <span class="adm-icon">▤</span>
+          Pedidos
+        </button>
 
-        <a
+        <button
+          type="button"
           class="adm-nav-link"
-          href="{{ url_for('admin.manual_review_list') }}"
+          data-panel="manual-review"
         >
           <span class="adm-icon">⚑</span>
           Revisão manual
-        </a>
+        </button>
 
-        <a
+        <button
+          type="button"
           class="adm-nav-link"
-          href="{{ url_for('admin.sales_readiness') }}"
+          data-panel="sales-readiness"
         >
           <span class="adm-icon">✓</span>
           Prontidão para vendas
-        </a>
+        </button>
+
+        <button
+          type="button"
+          class="adm-nav-link"
+          data-panel="checkout-recovery"
+        >
+          <span class="adm-icon">↻</span>
+          Recuperação de checkout
+        </button>
 
       </div>
 
@@ -257,7 +268,6 @@
       >
         Dashboard
       </button>
-      <a class="adm-nav-link" href="{{ url_for('admin.orders_list') }}">Pedidos</a>
 
       <button
         type="button"
@@ -331,26 +341,37 @@
         Rodapé
       </button>
 
-      <a
+      <button
+        type="button"
         class="adm-nav-link"
-        href="{{ url_for('admin.checkout_recovery') }}"
+        data-panel="orders"
       >
-        Recuperação
-      </a>
+        Pedidos
+      </button>
 
-      <a
+      <button
+        type="button"
         class="adm-nav-link"
-        href="{{ url_for('admin.manual_review_list') }}"
+        data-panel="manual-review"
       >
         Revisão manual
-      </a>
+      </button>
 
-      <a
+      <button
+        type="button"
         class="adm-nav-link"
-        href="{{ url_for('admin.sales_readiness') }}"
+        data-panel="sales-readiness"
       >
         Prontidão
-      </a>
+      </button>
+
+      <button
+        type="button"
+        class="adm-nav-link"
+        data-panel="checkout-recovery"
+      >
+        Recuperação
+      </button>
 
     </nav>
 
@@ -3039,6 +3060,74 @@
 
           </div>
 
+        </div>
+
+      </section>
+
+
+      <!-- ===================================================
+           OPERAÇÃO (carregamento sob demanda via /admin/painel/*)
+      ==================================================== -->
+
+      <section
+        class="adm-panel"
+        id="panel-orders"
+      >
+
+        <div
+          class="adm-lazy"
+          data-partial-container="orders"
+          data-partial-src="{{ url_for('admin.ops_partial_orders') }}"
+        >
+          <p class="adm-empty">Carregando pedidos…</p>
+        </div>
+
+      </section>
+
+
+      <section
+        class="adm-panel"
+        id="panel-manual-review"
+      >
+
+        <div
+          class="adm-lazy"
+          data-partial-container="manual-review"
+          data-partial-src="{{ url_for('admin.ops_partial_manual_review') }}"
+        >
+          <p class="adm-empty">Carregando revisão manual…</p>
+        </div>
+
+      </section>
+
+
+      <section
+        class="adm-panel"
+        id="panel-sales-readiness"
+      >
+
+        <div
+          class="adm-lazy"
+          data-partial-container="sales-readiness"
+          data-partial-src="{{ url_for('admin.ops_partial_sales_readiness') }}"
+        >
+          <p class="adm-empty">Carregando prontidão…</p>
+        </div>
+
+      </section>
+
+
+      <section
+        class="adm-panel"
+        id="panel-checkout-recovery"
+      >
+
+        <div
+          class="adm-lazy"
+          data-partial-container="checkout-recovery"
+          data-partial-src="{{ url_for('admin.ops_partial_checkout_recovery') }}"
+        >
+          <p class="adm-empty">Carregando recuperação…</p>
         </div>
 
       </section>

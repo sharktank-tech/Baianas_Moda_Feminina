@@ -2,12 +2,12 @@
 {% block title %}Pedido {{ order.order_number }} — Pollo Modas{% endblock %}
 {% block content %}
 <main class="max-w-6xl mx-auto px-4 py-8">
-  <a href="{{ url_for('admin.orders_list') }}">← Pedidos</a>
+  <a href="{{ url_for('admin.dashboard') }}#orders">← Pedidos</a>
   <h1 class="text-3xl font-bold my-4">Pedido {{ order.order_number }}</h1>
   <p>Estado do pedido: <strong>{{ status_labels.get(order.status, order.status) }}</strong></p>
   <p>Pagamento: <strong>{{ 'Confirmado' if payment_confirmed else 'Não confirmado' }}</strong></p>
   <p>Estado informado pelo Mercado Pago: {{ order.mp_status or 'Não informado' }}</p>
-  {% if order.status == 'manual_review' %}<a class="underline" href="{{ url_for('admin.manual_review_list') }}">Abrir fila de revisão manual</a>{% endif %}
+  {% if order.status == 'manual_review' %}<a class="underline" href="{{ url_for('admin.dashboard') }}#manual-review">Abrir fila de revisão manual</a>{% endif %}
   <h2 class="text-xl font-bold mt-6">Itens</h2>
   <table class="w-full text-left"><thead><tr><th>Produto</th><th>Variação</th><th>Quantidade</th><th>Total</th></tr></thead>
     <tbody>{% for item in order.items %}<tr><td>{{ item.product_name }}</td><td>{{ item.selected_size or '—' }}</td><td>{{ item.quantity }}</td><td>R$ {{ '%.2f'|format(item.line_total)|replace('.', ',') }}</td></tr>{% else %}<tr><td colspan="4">Nenhum item registrado.</td></tr>{% endfor %}</tbody>

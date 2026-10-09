@@ -1,14 +1,24 @@
-/* ── Navegação entre painéis ──────────────────────────── */
+/* ── Navegação entre painéis ────────────────────────────
+   Abas com estado no fragmento da URL (#painel ou #painel?params):
+   - clique usa pushState: voltar/avançar do navegador funcionam;
+   - recarregar ou abrir direto ativa a aba do fragmento;
+   - painéis de operação carregam sob demanda (fetch da parcial).
+*/
 const PANEL_TITLES = {
-  overview:     'Dashboard',
-  products:     'Produtos',
-  promotions:   'Promoções',
-  suppliers:    'Fornecedores',
-  users:        'Usuários',
-  testimonials: 'Depoimentos',
-  hero:         'Hero slides',
-  siteconfig:   'Configurações do site',
-  footer:       'Rodapé & Links',
+  overview:           'Dashboard',
+  products:           'Produtos',
+  promotions:         'Promoções',
+  coupons:            'Cupons',
+  suppliers:          'Fornecedores',
+  users:              'Usuários',
+  testimonials:       'Depoimentos',
+  hero:               'Hero slides',
+  siteconfig:         'Configurações do site',
+  footer:             'Rodapé & Links',
+  orders:             'Pedidos',
+  'manual-review':    'Revisão manual',
+  'sales-readiness':  'Prontidão para vendas',
+  'checkout-recovery':'Recuperação de checkout',
 };
 
 const PANEL_ACTIONS = {
@@ -20,7 +30,105 @@ const PANEL_ACTIONS = {
   hero:         `<a href="/admin/add_hero_slide"  class="adm-btn adm-btn-primary adm-btn-sm">+ Slide</a>`,
 };
 
-function activatePanel(id) {
+/* Painéis com conteúdo carregado sob demanda (container vazio no HTML). */
+const LAZY_PANELS = new Set([
+  'orders', 'manual-review', 'sales-readiness', 'checkout-recovery',
+]);
+
+/* Buscas livres nunca viajam no fragmento (podem conter dados pessoais);
+   estado e página, sim. */
+const HASH_PARAMS_ALLOW = new Set(['status', 'page']);
+
+function parseHash() {
+  const raw = (location.hash || '').replace(/^#/, '');
+  if (!raw) return { panel: 'overview', query: '' };
+  const cut = raw.indexOf('?');
+  const panel = cut === -1 ? raw : raw.slice(0, cut);
+  const query = cut === -1 ? '' : raw.slice(cut + 1);
+  if (!document.getElementById('panel-' + panel)) {
+    return { panel: 'overview', query: '' };
+  }
+  return { panel, query };
+}
+
+function hashFor(panel, query) {
+  return '#' + panel + (query ? '?' + query : '');
+}
+
+/* fetch em voo por container (evita duplicar a mesma carga). */
+const inflight = new Map();
+
+/* Um AbortController por container: clique rápido entre abas/filtros
+   cancela a requisição anterior, e a resposta atrasada nunca substitui
+   o conteúdo atual (abort é silencioso, sem caixa de erro). */
+const controllers = new Map();
+
+function containerOf(panel) {
+  return document.querySelector('[data-partial-container="' + panel + '"]');
+}
+
+function showPartialError(container, url) {
+  container.innerHTML =
+    '<div class="adm-card" role="alert"><p class="adm-empty">' +
+    'Falha ao carregar este painel. ' +
+    '<button type="button" class="adm-btn adm-btn-outline adm-btn-sm" ' +
+    'data-partial-retry> Tentar novamente</button></p></div>';
+  container.dataset.partialLoaded = '';
+  container.dataset.partialUrl = url;
+}
+
+function fetchInto(container, url) {
+  const key = container.dataset.partialContainer;
+  const previous = controllers.get(key);
+  if (previous) previous.abort();
+  const ctrl = new AbortController();
+  controllers.set(key, ctrl);
+  container.dataset.partialLoaded = '';
+  container.style.minHeight = Math.max(container.getBoundingClientRect().height, 240) + 'px';
+  container.setAttribute('aria-busy', 'true');
+  container.innerHTML = '<div class="adm-loading" role="status" aria-live="polite"><span class="adm-loading-mark" aria-hidden="true"></span><p>Carregando…</p></div>';
+  return fetch(url, {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    signal: ctrl.signal,
+  })
+    .then(resp => {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.text();
+    })
+    .then(html => {
+      if (controllers.get(key) !== ctrl) return;
+      container.innerHTML = html;
+      container.dataset.partialLoaded = url;
+    })
+    .catch(err => {
+      if (err && err.name === 'AbortError') return;
+      if (controllers.get(key) !== ctrl) return;
+      showPartialError(container, url);
+    })
+    .finally(() => {
+      if (controllers.get(key) === ctrl) {
+        controllers.delete(key);
+        container.setAttribute('aria-busy', 'false');
+        container.style.removeProperty('min-height');
+      }
+    });
+}
+
+function loadPartial(panel, query) {
+  const container = containerOf(panel);
+  if (!container) return Promise.resolve();
+  let url = container.dataset.partialSrc;
+  if (query) url += (url.indexOf('?') === -1 ? '?' : '&') + query;
+  if (container.dataset.partialLoaded === url || inflight.has(url)) {
+    return inflight.get(url) || Promise.resolve();
+  }
+  const done = fetchInto(container, url).finally(() => inflight.delete(url));
+  inflight.set(url, done);
+  return done;
+}
+
+function activatePanel(id, opts) {
+  const options = opts || {};
   /* painéis */
   document.querySelectorAll('.adm-panel').forEach(p => p.classList.remove('active'));
   const target = document.getElementById('panel-' + id);
@@ -29,29 +137,110 @@ function activatePanel(id) {
   /* links nav (sidebar + mobile) */
   document.querySelectorAll('[data-panel]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.panel === id);
+    if (LAZY_PANELS.has(btn.dataset.panel)) {
+      if (btn.dataset.panel === id) btn.setAttribute('aria-current', 'page');
+      else btn.removeAttribute('aria-current');
+    }
   });
 
+  /* Mantém a aba de Operações selecionada visível, sem rolar a página. */
+  if (LAZY_PANELS.has(id)) {
+    const mobileNav = document.querySelector('.adm-mobile-nav');
+    const selected = mobileNav && mobileNav.querySelector('[data-panel="' + id + '"]');
+    if (selected && mobileNav.clientWidth) {
+      const navRect = mobileNav.getBoundingClientRect();
+      const linkRect = selected.getBoundingClientRect();
+      if (linkRect.left < navRect.left || linkRect.right > navRect.right) {
+        mobileNav.scrollLeft += linkRect.left - navRect.left - 12;
+      }
+    }
+  }
+
   /* topbar */
-  document.getElementById('adm-current-title').textContent = PANEL_TITLES[id] || id;
+  document.getElementById('adm-current-title').textContent = LAZY_PANELS.has(id) ? 'Operações' : (PANEL_TITLES[id] || id);
   document.getElementById('adm-topbar-actions').innerHTML  =
     PANEL_ACTIONS[id] ||
     '<a href="/" class="adm-btn adm-btn-outline adm-btn-sm">Ver loja</a>';
 
-  /* URL hash para manter estado ao recarregar */
-  history.replaceState(null, '', '#' + id);
+  /* conteúdo sob demanda + URL */
+  const query = options.query || '';
+  if (LAZY_PANELS.has(id) && options.load !== false) {
+    loadPartial(id, query);
+  }
+  const next = hashFor(id, query);
+  if (location.hash !== next) {
+    if (options.push === false) {
+      history.replaceState(null, '', next);
+    } else {
+      history.pushState({ admPanel: id }, '', next);
+    }
+  }
+}
+
+function activateFromHash(push) {
+  const parsed = parseHash();
+  activatePanel(parsed.panel, { push: push, query: parsed.query });
 }
 
 document.querySelectorAll('[data-panel]').forEach(btn => {
   btn.addEventListener('click', () => activatePanel(btn.dataset.panel));
 });
 
-/* Restaura painel do hash */
-const hash = location.hash.replace('#', '');
-if (hash && document.getElementById('panel-' + hash)) {
-  activatePanel(hash);
-} else {
-  activatePanel('overview');
-}
+/* Voltar/avançar e edição manual do fragmento. */
+window.addEventListener('popstate', () => activateFromHash(false));
+window.addEventListener('hashchange', () => activateFromHash(false));
+
+/* Navegação interna das parciais (filtros/paginação) sem sair do dashboard. */
+document.addEventListener('click', e => {
+  const retry = e.target.closest('[data-partial-retry]');
+  if (retry) {
+    const container = retry.closest('[data-partial-container]');
+    if (container) {
+      /* Refaz a última URL (com filtros/busca/página), não a visão padrão. */
+      fetchInto(container, container.dataset.partialUrl || container.dataset.partialSrc);
+    }
+    return;
+  }
+  const link = e.target.closest('a[data-partial-link]');
+  if (!link) return;
+  e.preventDefault();
+  const container = link.closest('[data-partial-container]');
+  if (!container) return;
+  /* Fetch usa a URL completa do link (inclusive busca livre q); o hash
+     guarda só parâmetros não pessoais. */
+  const url = new URL(link.getAttribute('href'), location.origin);
+  const panel = container.dataset.partialContainer;
+  const kept = new URLSearchParams();
+  url.searchParams.forEach((value, key) => {
+    if (HASH_PARAMS_ALLOW.has(key) && value) kept.set(key, value);
+  });
+  fetchInto(container, url.toString());
+  activatePanel(panel, { query: kept.toString(), load: false });
+});
+
+/* Formulários GET das parciais (filtros) sem sair do dashboard. */
+document.addEventListener('submit', e => {
+  const form = e.target.closest ? e.target.closest('form[data-partial-form]') : null;
+  if (!form || (form.getAttribute('method') || 'get').toLowerCase() !== 'get') return;
+  e.preventDefault();
+  const container = form.closest('[data-partial-container]');
+  if (!container) return;
+  const panel = container.dataset.partialContainer;
+  const data = new URLSearchParams(new FormData(form));
+  data.set('page', '1');
+  const kept = new URLSearchParams();
+  data.forEach((value, key) => {
+    if (HASH_PARAMS_ALLOW.has(key) && value) kept.set(key, value);
+  });
+  /* Busca livre (q) aplica no fetch sem viajar no fragmento. */
+  let url = container.dataset.partialSrc;
+  url += (url.indexOf('?') === -1 ? '?' : '&') + data.toString();
+  fetchInto(container, url);
+  activatePanel(panel, { query: kept.toString(), load: false });
+});
+
+/* Restaura painel do fragmento (abertura direta ou recarregar). */
+activateFromHash(false);
 
 /* ── Busca rápida de produtos ─────────────────────────── */
 const searchInput = document.getElementById('searchProducts');
