@@ -1423,6 +1423,14 @@ class Shipment(db.Model):
     ali_order_id = db.Column(db.String(64), index=True)
     external_shipment_id = db.Column(db.String(64))
 
+    # Vínculo opcional à compra manual que esta remessa cobre.
+    manual_purchase_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("manual_supplier_purchases.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     order = db.relationship(
         "Order",
         back_populates="shipments",
@@ -1434,6 +1442,12 @@ class Shipment(db.Model):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by=lambda: TrackingEvent.event_at.desc(),
+    )
+
+    coverage = db.relationship(
+        "ShipmentItem",
+        cascade="all, delete-orphan",
+        lazy=True,
     )
 
     def __repr__(self):
@@ -2319,5 +2333,144 @@ class AliExpressSyncAttempt(db.Model):
             "ix_aliexpress_sync_attempts_product_created",
             "product_id",
             "created_at",
+        ),
+    )
+
+
+# ==========================================================
+# Compra manual no fornecedor (registro, sem automação)
+# ==========================================================
+# Uma linha por pedido externo já realizado pelo operador (compras
+# divididas = várias linhas). NÃO usa `aliexpress_orders`: aquela tabela é
+# a máquina do fulfillment automático e seus estados não serão preenchidos
+# só para caber o registro manual.
+class ManualSupplierPurchase(db.Model):
+    __tablename__ = "manual_supplier_purchases"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    order_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("orders.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    external_order_id = db.Column(db.String(64), nullable=False, unique=True)
+    purchased_at = db.Column(db.DateTime, nullable=False)
+    purchased_tz = db.Column(
+        db.String(64), nullable=False, default="America/Sao_Paulo"
+    )
+    evidence_ref = db.Column(db.String(255), nullable=False)
+    note = db.Column(db.Text)
+    created_by = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("users.id", ondelete="SET NULL"),
+    )
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    items = db.relationship(
+        "ManualSupplierPurchaseItem",
+        backref="purchase",
+        cascade="all, delete-orphan",
+        lazy=True,
+    )
+
+
+class ManualSupplierPurchaseItem(db.Model):
+    __tablename__ = "manual_supplier_purchase_items"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    purchase_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("manual_supplier_purchases.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    order_item_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("order_items.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    quantity = db.Column(db.Integer, nullable=False)
+
+    __table_args__ = (
+        db.CheckConstraint("quantity > 0", name="ck_manual_purchase_item_qty"),
+        db.UniqueConstraint(
+            "purchase_id", "order_item_id",
+            name="uq_manual_purchase_item",
+        ),
+    )
+
+
+# ==========================================================
+# Cobertura item/quantidade por remessa (despacho parcial)
+# ==========================================================
+class ShipmentItem(db.Model):
+    __tablename__ = "shipment_items"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    shipment_id = db.Column(
+        db.BigInteger,
+        db.ForeignKey("shipments.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    order_item_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("order_items.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    quantity = db.Column(db.Integer, nullable=False)
+
+    __table_args__ = (
+        db.CheckConstraint("quantity > 0", name="ck_shipment_item_qty"),
+        db.UniqueConstraint(
+            "shipment_id", "order_item_id",
+            name="uq_shipment_item",
+        ),
+    )
+
+
+# ==========================================================
+# Auditoria operacional manual (correções, sem exclusão física)
+# ==========================================================
+class ManualOperationalAudit(db.Model):
+    __tablename__ = "manual_operational_audit"
+
+    id = db.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    entity = db.Column(db.String(16), nullable=False)
+    entity_id = db.Column(db.Text, nullable=False, index=True)
+    field = db.Column(db.String(64), nullable=False)
+    old_value = db.Column(db.Text)
+    new_value = db.Column(db.Text)
+    admin_user_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("users.id", ondelete="SET NULL"),
+    )
+    reason = db.Column(db.String(500), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "entity IN ('purchase', 'shipment')",
+            name="ck_manual_audit_entity",
         ),
     )
