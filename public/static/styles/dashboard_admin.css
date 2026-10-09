@@ -1287,3 +1287,6 @@ details.adm-details summary {
 .adm-nav-link[data-panel="checkout-recovery"]:focus-visible {
   outline: 2px solid #fff; outline-offset: -3px;
 }
+
+/* Token escuro da própria marca garante contraste nos botões pequenos. */
+[data-partial-root] .adm-btn-primary { background: var(--accent-hover); }

@@ -10,6 +10,7 @@ from datetime import datetime
 from decimal import Decimal
 from urllib.parse import urlparse, parse_qs, urlencode
 import json
+import re
 import os
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from playwright.sync_api import sync_playwright
@@ -96,6 +97,15 @@ with sync_playwright() as p:
                 assert page.locator('input[name=reason]').first.get_attribute('required') is not None
                 page.locator('.adm-panel.active .adm-table-wrap').first.evaluate('(e)=>e.scrollLeft=e.scrollWidth')
                 page.screenshot(path=str(OUT/f'{tab}-actions-{mode}.png'),full_page=True)
+            # AA contrast for the small primary action labels.
+            for button in page.locator('[data-partial-root] .adm-btn-primary').all():
+                colors=button.evaluate('(e)=>[getComputedStyle(e).color,getComputedStyle(e).backgroundColor]')
+                def luminance(color):
+                    channels=[int(v)/255 for v in re.findall(r'\d+',color)[:3]]
+                    values=[v/12.92 if v<=.04045 else ((v+.055)/1.055)**2.4 for v in channels]
+                    return sum(v*w for v,w in zip(values,[.2126,.7152,.0722]))
+                light,dark=sorted(map(luminance,colors),reverse=True)
+                assert (light+.05)/(dark+.05)>=4.5
             wrappers=page.locator('[data-partial-root] .adm-table-wrap')
             assert wrappers.count()>0
             assert wrappers.first.get_attribute('tabindex')=='0'
@@ -137,9 +147,11 @@ with sync_playwright() as p:
         page.go_forward();page.locator('.adm-panel.active [data-partial-root="manual-review"]').wait_for()
         # An aborted, late filter cannot overwrite the latest result.
         page.goto('http://fixture.invalid/admin#orders');page.locator('#orders-q').wait_for()
+        previous_height=page.locator('[data-partial-container=orders]').bounding_box()['height']
         flags['hold']=True;page.locator('#orders-q').fill('antiga')
         page.get_by_role('button',name='Filtrar',exact=True).click()
         page.get_by_role('status').wait_for()
+        assert page.locator('[data-partial-container=orders]').bounding_box()['height']>=previous_height
         page.wait_for_timeout(50)
         flags['hold']=False
         page.evaluate("fetchInto(document.querySelector('[data-partial-container=orders]'), '/admin/painel/orders?q=atual&page=2')")

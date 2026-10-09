@@ -84,6 +84,7 @@ function fetchInto(container, url) {
   const ctrl = new AbortController();
   controllers.set(key, ctrl);
   container.dataset.partialLoaded = '';
+  container.style.minHeight = Math.max(container.getBoundingClientRect().height, 240) + 'px';
   container.setAttribute('aria-busy', 'true');
   container.innerHTML = '<div class="adm-loading" role="status" aria-live="polite"><span class="adm-loading-mark" aria-hidden="true"></span><p>Carregando…</p></div>';
   return fetch(url, {
@@ -108,6 +109,7 @@ function fetchInto(container, url) {
       if (controllers.get(key) === ctrl) {
         controllers.delete(key);
         container.setAttribute('aria-busy', 'false');
+        container.style.removeProperty('min-height');
       }
     });
 }
