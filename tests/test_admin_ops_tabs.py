@@ -353,4 +353,3 @@ def test_revisao_mantem_justificativa_confirmacao_e_motivo_destacado(
     assert 'name="confirm_approve" value="1"' in html
     assert 'name="confirm_reject" value="1"' in html
     assert "Pedidos na fila" in html
-
