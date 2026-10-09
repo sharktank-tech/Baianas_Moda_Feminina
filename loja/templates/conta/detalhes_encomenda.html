@@ -90,6 +90,8 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
 
                 {% if pedido_status == 'expired' %}
                     Expirado
+                {% elif pedido_status == 'paid' %}
+                    Pago
                 {% else %}
                     {{ pedido_status|replace('_', ' ')|title }}
                 {% endif %}
@@ -1039,7 +1041,7 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
                                 Frete
                             </span>
 
-                            {% if pedido.shipping_amount|default(0, true) == 0 %}
+                            {% if pedido.shipping|default(0, true) == 0 %}
 
                                 <strong class="order-free">
                                     Grátis
@@ -1051,7 +1053,7 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
                                     R$
                                     {{
                                         "%.2f"|format(
-                                            pedido.shipping_amount
+                                            pedido.shipping
                                         )|replace('.', ',')
                                     }}
                                 </strong>
@@ -1061,26 +1063,22 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
                         </div>
 
 
-                        {% if pedido.discount_amount|default(0, true) > 0 %}
+                        <div class="order-discount">
 
-                            <div class="order-discount">
+                            <span>
+                                Desconto
+                            </span>
 
-                                <span>
-                                    Desconto
-                                </span>
+                            <strong>
+                                − R$
+                                {{
+                                    "%.2f"|format(
+                                        pedido.discount|default(0, true)
+                                    )|replace('.', ',')
+                                }}
+                            </strong>
 
-                                <strong>
-                                    − R$
-                                    {{
-                                        "%.2f"|format(
-                                            pedido.discount_amount
-                                        )|replace('.', ',')
-                                    }}
-                                </strong>
-
-                            </div>
-
-                        {% endif %}
+                        </div>
 
 
                         <div class="order-total">
@@ -1093,7 +1091,7 @@ Confira os detalhes da sua encomenda, pagamento e acompanhamento da entrega.
                                 R$
                                 {{
                                     "%.2f"|format(
-                                        pedido.total_amount|default(0, true)
+                                        pedido.total|default(0, true)
                                     )|replace('.', ',')
                                 }}
                             </strong>
