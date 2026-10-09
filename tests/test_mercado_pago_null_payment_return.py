@@ -37,7 +37,7 @@ def test_payment_return_ignores_non_payment_sentinels(
     monkeypatch.setattr(
         payments_routes,
         "_sync_payment",
-        lambda value: sync_calls.append(value),
+        lambda value, *, expected_user_id: sync_calls.append(value),
     )
 
     query = {}
@@ -68,7 +68,7 @@ def test_payment_return_falls_back_to_valid_collection_id_after_null_payment_id(
     monkeypatch.setattr(
         payments_routes,
         "_sync_payment",
-        lambda value: sync_calls.append(value),
+        lambda value, *, expected_user_id: sync_calls.append(value),
     )
 
     response = client.get(
@@ -96,7 +96,7 @@ def test_payment_return_syncs_real_payment_id(
     monkeypatch.setattr(
         payments_routes,
         "_sync_payment",
-        lambda value: sync_calls.append(value),
+        lambda value, *, expected_user_id: sync_calls.append(value),
     )
 
     response = client.get(
@@ -106,3 +106,4 @@ def test_payment_return_syncs_real_payment_id(
 
     assert response.status_code == 200
     assert sync_calls == ["123456789"]
+

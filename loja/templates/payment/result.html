@@ -54,20 +54,23 @@
 {% block content %}
 <main class="payment-result">
     <section class="payment-result-card">
-        {% if order and order.status == "paid" %}
+        {% if order and order.status == "paid" and payment_confirmed %}
             <h1>Pagamento aprovado</h1>
             <p>Recebemos seu pagamento e o pedido já está confirmado.</p>
-        {% elif order and order.status == "manual_review" %}
+        {% elif order and order.status == "manual_review" and payment_confirmed %}
             <h1>Pagamento recebido</h1>
             <p>
                 O pagamento foi recebido, mas o pedido precisa de uma
                 conferência da loja antes da preparação.
             </p>
+        {% elif order and order.status in ["manual_review", "paid"] %}
+            <h1>Pagamento em conferência</h1>
+            <p>A loja ainda não confirmou este pagamento. Consulte seu pedido ou entre em contato antes de pagar novamente.</p>
         {% elif order and order.status in ["pending_payment"] %}
             <h1>Pagamento pendente</h1>
             <p>
                 O pagamento ainda está sendo processado. A página será
-                atualizada quando o Mercado Pago confirmar a operação.
+                atualizada ao consultar novamente após a confirmação.
             </p>
         {% elif order and order.status == "payment_failed" %}
             <h1>Pagamento não aprovado</h1>
@@ -82,7 +85,7 @@
             <h1>Status do pagamento</h1>
             <p>
                 Ainda não foi possível localizar a confirmação do pedido.
-                O webhook continuará sendo a fonte oficial do status.
+                Consulte seus pedidos ou entre em contato com a loja antes de pagar novamente.
             </p>
         {% endif %}
 
@@ -90,7 +93,7 @@
         <div class="payment-order-data">
             <div>
                 <span>Pedido</span>
-                <strong>{{ order.id }}</strong>
+                <strong>{{ order.order_number }}</strong>
             </div>
             <div>
                 <span>Status</span>
@@ -105,9 +108,16 @@
         </div>
         {% endif %}
 
+        {% if order %}
+        <a class="payment-result-link" href="{{ url_for('main.detalhes_encomenda', order_id=order.id) }}">Acompanhar pedido</a>
+        {% else %}
+        <a class="payment-result-link" href="{{ url_for('main.encomendas') }}">Consultar meus pedidos</a>
+        {% endif %}
+
         <a class="payment-result-link" href="{{ url_for('main.home') }}">
             Voltar para a loja
         </a>
     </section>
 </main>
 {% endblock %}
+

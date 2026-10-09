@@ -1093,7 +1093,7 @@ def create_mercado_pago_payment():
     return redirect(url_for("main.home"))
 
 
-def _sync_payment(payment_id):
+def _sync_payment(payment_id, *, expected_user_id=None):
     mp_payment = get_payment(payment_id)
     external_reference = str(
         mp_payment.get("external_reference") or ""
@@ -1129,6 +1129,12 @@ def _sync_payment(payment_id):
             external_reference=external_reference,
             payment_id=payment_id,
         )
+        return None
+
+    # No retorno do navegador, a referência confiável vem do provedor.
+    # Verifique o dono ANTES de atualizar pagamento, reserva ou fulfillment.
+    # O webhook assinado mantém o processamento normal, sem este argumento.
+    if expected_user_id is not None and order.user_id != expected_user_id:
         return None
 
     provider_payment_id = str(mp_payment["id"])
@@ -1356,9 +1362,12 @@ def payment_return(result):
         or _valid_payment_id(request.args.get("collection_id"))
     )
 
+    synced_order = None
     if payment_id:
         try:
-            _sync_payment(payment_id)
+            synced_order = _sync_payment(
+                payment_id, expected_user_id=current_user.id,
+            )
         except Exception:
             db.session.rollback()
             current_app.logger.exception(
@@ -1382,8 +1391,17 @@ def payment_return(result):
             user_id=current_user.id,
         ).first()
 
+    elif synced_order is not None:
+        # Alguns retornos não incluem order_id/external_reference. Nunca
+        # use a alegação de sucesso da URL; use o pedido resolvido pela API.
+        order = synced_order
+
+    from loja.services.order_payment_evidence import payment_is_confirmed
+
     return render_template(
         "payment/result.html",
         result=result,
         order=order,
+        payment_confirmed=payment_is_confirmed(order),
     )
+

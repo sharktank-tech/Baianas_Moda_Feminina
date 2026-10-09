@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Pedido {{ order.order_number }} — Pollo Modas{% endblock %}
+{% block content %}
+<main class="max-w-6xl mx-auto px-4 py-8">
+  <a href="{{ url_for('admin.orders_list') }}">← Pedidos</a>
+  <h1 class="text-3xl font-bold my-4">Pedido {{ order.order_number }}</h1>
+  <p>Estado do pedido: <strong>{{ status_labels.get(order.status, order.status) }}</strong></p>
+  <p>Pagamento: <strong>{{ 'Confirmado' if payment_confirmed else 'Não confirmado' }}</strong></p>
+  <p>Estado informado pelo Mercado Pago: {{ order.mp_status or 'Não informado' }}</p>
+  {% if order.status == 'manual_review' %}<a class="underline" href="{{ url_for('admin.manual_review_list') }}">Abrir fila de revisão manual</a>{% endif %}
+  <h2 class="text-xl font-bold mt-6">Itens</h2>
+  <table class="w-full text-left"><thead><tr><th>Produto</th><th>Variação</th><th>Quantidade</th><th>Total</th></tr></thead>
+    <tbody>{% for item in order.items %}<tr><td>{{ item.product_name }}</td><td>{{ item.selected_size or '—' }}</td><td>{{ item.quantity }}</td><td>R$ {{ '%.2f'|format(item.line_total)|replace('.', ',') }}</td></tr>{% else %}<tr><td colspan="4">Nenhum item registrado.</td></tr>{% endfor %}</tbody>
+  </table>
+  <h2 class="text-xl font-bold mt-6">Valores</h2>
+  <p>Subtotal: R$ {{ '%.2f'|format(order.subtotal)|replace('.', ',') }} · Frete: R$ {{ '%.2f'|format(order.shipping)|replace('.', ',') }} · Desconto: R$ {{ '%.2f'|format(order.discount)|replace('.', ',') }}</p>
+  <p>Total: <strong>R$ {{ '%.2f'|format(order.total)|replace('.', ',') }}</strong></p>
+  <h2 class="text-xl font-bold mt-6">Pagamentos registrados</h2>
+  <table class="w-full text-left"><thead><tr><th>Referência</th><th>Estado</th><th>Valor</th><th>Modalidade</th></tr></thead>
+    <tbody>{% for payment in order.payments %}<tr><td>{{ payment.provider_payment_id }}</td><td>{{ payment.status }}</td><td>{{ payment.currency }} {{ '%.2f'|format(payment.amount)|replace('.', ',') }}</td><td>{{ payment.payment_type_id or '—' }}</td></tr>{% else %}<tr><td colspan="4">Nenhum pagamento registrado.</td></tr>{% endfor %}</tbody>
+  </table>
+  <h2 class="text-xl font-bold mt-6">Cliente e entrega</h2>
+  <p>{{ order.customer_name }} · {{ order.customer_email }} · {{ order.customer_phone or '—' }}</p>
+  <p>{{ order.street }}, {{ order.number }} {{ order.complement or '' }} · {{ order.neighborhood }} · {{ order.city }}/{{ order.state }} · CEP {{ order.zip_code }}</p>
+  <h2 class="text-xl font-bold mt-6">Rastreio registrado</h2>
+  {% for shipment in order.shipments %}<p>{{ shipment.carrier or 'Transportadora não informada' }} · {{ shipment.tracking_code }} · {{ shipment.status }}</p>{% else %}<p>Nenhum rastreio registrado.</p>{% endfor %}
+  <p class="mt-6">Criado em {{ order.created_at.strftime('%d/%m/%Y %H:%M') }} UTC. Esta tela é somente de consulta.</p>
+</main>
+{% endblock %}

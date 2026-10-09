@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Pedidos — Pollo Modas{% endblock %}
+{% block content %}
+<main class="max-w-6xl mx-auto px-4 py-8">
+  <a href="{{ url_for('admin.dashboard') }}">← Painel administrativo</a>
+  <h1 class="text-3xl font-bold my-4">Pedidos</h1>
+  <p>Estado registrado na loja. Esta consulta não confirma pagamentos no provedor nem realiza compras.</p>
+  <form method="GET" class="flex flex-wrap gap-3 my-6">
+    <label>Referência exata <input class="border p-2" name="q" maxlength="100" value="{{ search }}" placeholder="Número, UUID ou ID do pagamento"></label>
+    <label>Estado <select class="border p-2" name="status">
+      <option value="">Todos</option>
+      {% for code, label in status_labels.items() %}<option value="{{ code }}" {{ 'selected' if status == code }}>{{ label }}</option>{% endfor %}
+    </select></label>
+    <button class="border p-2" type="submit">Filtrar</button>
+  </form>
+  <p>{{ page.total }} pedido(s) encontrado(s)</p>
+  <div class="overflow-x-auto"><table class="w-full text-left">
+    <thead><tr><th>Pedido</th><th>Cliente</th><th>Total</th><th>Estado do pedido</th><th>Pagamento confirmado</th><th></th></tr></thead>
+    <tbody>{% for order in page.items %}<tr class="border-b">
+      <td class="py-3">{{ order.order_number }}<br><small>{{ order.created_at.strftime('%d/%m/%Y %H:%M') }} UTC</small></td>
+      <td>{{ order.customer_name or '—' }}</td>
+      <td>R$ {{ '%.2f'|format(order.total)|replace('.', ',') }}</td>
+      <td>{{ status_labels.get(order.status, order.status) }}</td>
+      <td>{{ 'Sim' if payment_is_confirmed(order) else 'Não confirmado' }}</td>
+      <td><a class="underline" href="{{ url_for('admin.order_detail', order_id=order.id) }}">Ver pedido</a></td>
+    </tr>{% else %}<tr><td colspan="6" class="py-6">Nenhum pedido encontrado.</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <nav class="flex gap-4 my-6" aria-label="Paginação">
+    {% if page.has_prev %}<a href="{{ url_for('admin.orders_list', page=page.prev_num, q=search, status=status) }}">Anterior</a>{% endif %}
+    <span>Página {{ page.page }}</span>
+    {% if page.has_next %}<a href="{{ url_for('admin.orders_list', page=page.next_num, q=search, status=status) }}">Próxima</a>{% endif %}
+  </nav>
+</main>
+{% endblock %}
