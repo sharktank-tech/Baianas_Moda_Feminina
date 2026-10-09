@@ -2369,8 +2369,10 @@ class ManualSupplierPurchase(db.Model):
         UUID(as_uuid=True),
         db.ForeignKey("users.id", ondelete="SET NULL"),
     )
-    created_at = db.Column(db.DateTime, default=utcnow)
-    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
 
     items = db.relationship(
         "ManualSupplierPurchaseItem",
@@ -2464,7 +2466,7 @@ class ManualOperationalAudit(db.Model):
         db.ForeignKey("users.id", ondelete="SET NULL"),
     )
     reason = db.Column(db.String(500), nullable=False)
-    created_at = db.Column(db.DateTime, default=utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     __table_args__ = (
         db.CheckConstraint(
