@@ -252,12 +252,21 @@ def test_reenvio_retorna_existente_sem_duplicar(db, make_user, make_product):
         tracking_code="BR123456789XX", carrier="Correios",
         evidence_ref="EV", items={item.id: 1})
     db.session.commit()
+    # Repetição idêntica: retorna o existente.
     s2 = dispatch.register_manual_shipment(
         order_id=order.id, purchase_id=first.purchase_id,
-        tracking_code="br123456789xx", carrier="Outra",
+        tracking_code="br123456789xx", carrier="Correios",
         evidence_ref="EV", items={item.id: 1})
     db.session.commit()
     assert s2.created is False and s2.shipment_id == s1.shipment_id
+    # Mesma compra/código/quantidades, outra transportadora: divergência
+    # exige correção explícita (não ignora os novos dados).
+    with pytest.raises(ValueError, match="shipment_content_differs"):
+        dispatch.register_manual_shipment(
+            order_id=order.id, purchase_id=first.purchase_id,
+            tracking_code="BR123456789XX", carrier="Outra",
+            evidence_ref="EV", items={item.id: 1})
+    db.session.rollback()
     assert Shipment.query.count() == 1
 
 
@@ -669,3 +678,106 @@ def test_bucket_exige_entrega_total(client, db, make_user, make_product, login):
         db.session.get(Order, order.id)) == "aguardando_avaliacao"
     html = client.get(f"/encomendas/pedido/{order.id}").get_data(as_text=True)
     assert "itens pendentes" not in html
+
+
+# --------------------------------------------------------------------------
+# 11) Itens 1, 2 e 6 da revisão: conflitos, conteúdo e unicidade
+# --------------------------------------------------------------------------
+
+def test_compra_reenviada_com_conteudo_divergente(db, make_user, make_product):
+    user = make_user()
+    product = make_product(stock=10)
+    order, item = _paid_order(db, user, product)
+    dispatch.register_manual_purchase(**_purchase_args(order, item))
+    db.session.commit()
+    # Mesmos itens, outra evidência: divergência, sem duplicar.
+    with pytest.raises(ValueError, match="purchase_content_differs"):
+        dispatch.register_manual_purchase(
+            **_purchase_args(order, item, evidence_ref="EV-OUTRA"))
+    db.session.rollback()
+    assert ManualSupplierPurchase.query.count() == 1
+
+
+def test_correcao_integrity_error_sem_500(
+    client, db, admin_user, login, make_product, monkeypatch
+):
+    from sqlalchemy.exc import IntegrityError
+
+    from loja.services import manual_dispatch as dispatch_mod
+
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product)
+    res = dispatch_mod.register_manual_purchase(
+        **_purchase_args(order, item))
+    db.session.commit()
+    ship = dispatch_mod.register_manual_shipment(
+        order_id=order.id, purchase_id=res.purchase_id,
+        tracking_code="BR123456789XX", carrier="Correios",
+        evidence_ref="EV", items={item.id: 1})
+    db.session.commit()
+    login(admin_user.email)
+
+    def _boom(*args, **kwargs):
+        raise IntegrityError("UPDATE", {}, Exception("duplicate"))
+
+    purchase_id = res.purchase_id
+    shipment_id = db.session.get(Shipment, ship.shipment_id).id
+    for path, target, data in [
+        (f"/admin/pedidos/compras/{purchase_id}/corrigir",
+         "correct_manual_purchase",
+         {"external_order_id": "ALI-X", "reason": "motivo",
+          "expected_updated_at": "2026-10-08T10:00:00.000000"}),
+        (f"/admin/pedidos/remessas/{shipment_id}/corrigir",
+         "correct_manual_shipment",
+         {"carrier": "Jadlog", "reason": "motivo",
+          "expected_updated_at": "2026-10-08T10:00:00.000000"}),
+    ]:
+        monkeypatch.setattr(dispatch_mod, target, _boom)
+        resp = client.post(path, data=data, follow_redirects=False)
+        assert resp.status_code == 302, path  # nunca 500
+        monkeypatch.undo()
+    # Registro e auditoria intactos.
+    assert db.session.get(
+        ManualSupplierPurchase, purchase_id).external_order_id == "ALI-1001"
+    assert ManualOperationalAudit.query.count() == 2  # só criações
+
+
+def test_bucket_multiplos_itens_e_remessas(db, make_user, make_product):
+    from loja.views.routes import _order_purchase_bucket
+
+    user = make_user()
+    product = make_product(stock=10)
+    order, item1 = _paid_order(db, user, product, quantity=2)
+    item2 = OrderItem(
+        id=uuid.uuid4(), order_id=order.id, product_id=product.id,
+        product_name="Segundo item", quantity=1,
+        unit_price=product.price, line_total=product.price,
+    )
+    db.session.add(item2)
+    db.session.commit()
+    res = dispatch.register_manual_purchase(**_purchase_args(
+        order, item1, items={item1.id: 2, item2.id: 1}))
+    db.session.commit()
+    s1 = dispatch.register_manual_shipment(
+        order_id=order.id, purchase_id=res.purchase_id,
+        tracking_code="BR111111111XX", carrier="Correios",
+        evidence_ref="EV", items={item1.id: 2})
+    db.session.commit()
+    s2 = dispatch.register_manual_shipment(
+        order_id=order.id, purchase_id=res.purchase_id,
+        tracking_code="BR222222222XX", carrier="Correios",
+        evidence_ref="EV", items={item2.id: 1})
+    db.session.commit()
+    # Item1 entregue total, item2 ainda aguardando: NÃO conclui.
+    db.session.query(Shipment).filter_by(
+        id=s1.shipment_id).update({"status": "entregue"})
+    db.session.commit()
+    db.session.expire_all()
+    assert _order_purchase_bucket(db.session.get(Order, order.id)) == "enviado"
+    # Entregando o restante: conclui.
+    db.session.query(Shipment).filter_by(
+        id=s2.shipment_id).update({"status": "entregue"})
+    db.session.commit()
+    db.session.expire_all()
+    assert _order_purchase_bucket(
+        db.session.get(Order, order.id)) == "aguardando_avaliacao"

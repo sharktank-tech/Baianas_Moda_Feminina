@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS manual_supplier_purchase_items (
     order_item_id UUID NOT NULL REFERENCES order_items(id) ON DELETE RESTRICT,
     quantity INTEGER NOT NULL,
     CONSTRAINT ck_manual_purchase_item_qty CHECK (quantity > 0),
-    UNIQUE(purchase_id, order_item_id)
+    CONSTRAINT uq_manual_purchase_item UNIQUE (purchase_id, order_item_id)
 );
 
 CREATE INDEX IF NOT EXISTS ix_manual_purchase_items_purchase
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS shipment_items (
     order_item_id UUID NOT NULL REFERENCES order_items(id) ON DELETE RESTRICT,
     quantity INTEGER NOT NULL,
     CONSTRAINT ck_shipment_item_qty CHECK (quantity > 0),
-    UNIQUE(shipment_id, order_item_id)
+    CONSTRAINT uq_shipment_item UNIQUE (shipment_id, order_item_id)
 );
 
 CREATE INDEX IF NOT EXISTS ix_shipment_items_shipment

@@ -254,6 +254,7 @@ _MANUAL_ERROR_MESSAGES = {
     "quantity_exceeds_purchase": "Quantidade excede a vinculada à compra.",
     "external_order_id_invalid": "Número do pedido no AliExpress inválido.",
     "external_order_id_in_use": "Número externo já registrado em outro pedido.",
+    "purchase_content_differs": "Dados diferentes do registro existente; use a correção explícita.",
     "tracking_code_invalid": "Código de rastreio inválido.",
     "tracking_code_in_use": "Código de rastreio já ligado a outro pedido.",
     "tracking_code_other_purchase": "Código já vinculado a outra compra deste pedido.",
@@ -356,6 +357,15 @@ def correct_manual_purchase(purchase_id):
             expected_updated_at=request.form.get("expected_updated_at"),
         )
         db.session.commit()
+    except IntegrityError:
+        # Corrida de unicidade: rollback, registro e auditoria intactos.
+        db.session.rollback()
+        current_app.logger.warning("correção de compra: conflito de unicidade")
+        flash(
+            "Número externo já registrado em outro pedido; "
+            "nada foi alterado.", "warning",
+        )
+        return _manual_back(purchase.order_id)
     except ValueError as exc:
         db.session.rollback()
         current_app.logger.warning("correção de compra: %s", exc)
@@ -441,6 +451,13 @@ def correct_manual_shipment(shipment_id):
             expected_updated_at=request.form.get("expected_updated_at"),
         )
         db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        current_app.logger.warning("correção de rastreio: conflito de unicidade")
+        flash(
+            "Código já ligado a outro pedido; nada foi alterado.", "warning",
+        )
+        return _manual_back(shipment.order_id)
     except ValueError as exc:
         db.session.rollback()
         current_app.logger.warning("correção de rastreio: %s", exc)

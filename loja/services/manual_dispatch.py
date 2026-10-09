@@ -185,6 +185,25 @@ def _check_fresh(row, expected_updated_at) -> None:
         raise ValueError("stale_state_reload")
 
 
+def _same_purchase_content(existing, links, parsed_at, parsed_tz,
+                             parsed_ref, parsed_note) -> bool:
+    """Conteúdo idêntico ao registrado: itens, data, fuso, evidência, nota."""
+    have = {
+        link.order_item_id: int(link.quantity or 0)
+        for link in (existing.items or [])
+    }
+    want = {item_id: qty for item_id, qty in links.items()}
+    current_at = existing.purchased_at
+    current_at = current_at.replace(tzinfo=None) if current_at else None
+    return (
+        have == want
+        and current_at == parsed_at.replace(tzinfo=None)
+        and (existing.purchased_tz or "") == parsed_tz
+        and (existing.evidence_ref or "") == parsed_ref
+        and (existing.note or None) == parsed_note
+    )
+
+
 def register_manual_purchase(
     *,
     order_id,
@@ -196,23 +215,24 @@ def register_manual_purchase(
     note=None,
     admin_user_id=None,
 ) -> ManualDispatchResult:
-    """Registra compra externa já realizada (idempotente por número).
+    """Registra compra externa já realizada (idempotente por conteúdo).
 
-    Mesmo `external_order_id` no MESMO pedido → devolve o registro existente
-    sem duplicar. Mesmo número em OUTRO pedido → `ValueError`. Nunca altera
-    pagamento, preço, estoque ou reservas: só insere compra + itens.
+    Mesmo `external_order_id` no MESMO pedido com conteúdo idêntico →
+    devolve o registro existente sem duplicar. Mesmo número em OUTRO pedido,
+    ou mesmo número com conteúdo divergente → `ValueError` (correção
+    explícita). Nunca altera pagamento, preço, estoque ou reservas.
     """
     order = _locked_order(order_id)
     _require_eligible(order)
     code = _norm_code(external_order_id, field="external_order_id")
-
-    existing = ManualSupplierPurchase.query.filter_by(
-        external_order_id=code
-    ).first()
-    if existing is not None:
-        if existing.order_id != order.id:
-            raise ValueError("external_order_id_in_use")
-        return ManualDispatchResult(created=False, purchase_id=existing.id)
+    parsed_at = _parse_naive_dt(purchased_at, field="purchased_at")
+    parsed_tz = _require_tz(purchased_tz)
+    parsed_ref = _require_text(
+        evidence_ref, field="evidence_ref", maximum=EVIDENCE_REF_MAX
+    )
+    parsed_note = (
+        str(note).strip()[:NOTE_MAX] if note and str(note).strip() else None
+    )
 
     if not items:
         raise ValueError("items_required")
@@ -228,21 +248,35 @@ def register_manual_purchase(
         item = sold.get(item_id)
         if item is None:
             raise ValueError("order_item_not_in_order")
-        qty = _require_qty(raw_qty)
+        links[item_id] = _require_qty(raw_qty)
+
+    existing = ManualSupplierPurchase.query.filter_by(
+        external_order_id=code
+    ).first()
+    if existing is not None:
+        if existing.order_id != order.id:
+            raise ValueError("external_order_id_in_use")
+        if not _same_purchase_content(
+            existing, links, parsed_at, parsed_tz, parsed_ref, parsed_note
+        ):
+            # Mesmo número, conteúdo divergente: exige correção explícita
+            # em vez de ignorar silenciosamente os novos dados.
+            raise ValueError("purchase_content_differs")
+        return ManualDispatchResult(created=False, purchase_id=existing.id)
+
+    for item_id, qty in links.items():
+        item = sold[item_id]
         if _sum_registered(item_id) + qty > int(item.quantity or 0):
             raise ValueError("quantity_exceeds_sold")
-        links[item_id] = qty
 
     purchase = ManualSupplierPurchase(
         id=uuid.uuid4(),
         order_id=order.id,
         external_order_id=code,
-        purchased_at=_parse_naive_dt(purchased_at, field="purchased_at"),
-        purchased_tz=_require_tz(purchased_tz),
-        evidence_ref=_require_text(
-            evidence_ref, field="evidence_ref", maximum=EVIDENCE_REF_MAX
-        ),
-        note=(str(note).strip()[:NOTE_MAX] if note else None),
+        purchased_at=parsed_at,
+        purchased_tz=parsed_tz,
+        evidence_ref=parsed_ref,
+        note=parsed_note,
         created_by=admin_user_id,
     )
     db.session.add(purchase)
@@ -296,9 +330,11 @@ def register_manual_shipment(
     items: Mapping,
     admin_user_id=None,
 ) -> ManualDispatchResult:
-    """Registra remessa vinculada à compra (idempotente por código).
+    """Registra remessa vinculada à compra (idempotente por conteúdo).
 
-    Status inicial sempre `aguardando_postagem` + primeiro evento; postagem,
+    Repetição idêntica (mesma compra, itens, transportadora e previsão)
+    retorna o existente; divergência exige correção explícita. Status
+    inicial sempre `aguardando_postagem` + primeiro evento; postagem,
     trânsito e entrega exigem registros próprios (fora deste serviço).
     Mesmas regras de `TrackingService` sem seu `commit` interno.
     """
@@ -351,7 +387,16 @@ def register_manual_shipment(
             ).all()
         }
         wanted = {str(item_id): qty for item_id, qty in coverage.items()}
-        if covered_now != wanted:
+        current_eta = existing.estimated_delivery
+        wanted_eta = (
+            _parse_naive_dt(estimated_delivery, field="estimated_delivery").date()
+            if estimated_delivery else None
+        )
+        if (
+            covered_now != wanted
+            or (existing.carrier or "") != carrier_name
+            or current_eta != wanted_eta
+        ):
             raise ValueError("shipment_content_differs")
         return ManualDispatchResult(
             created=False, purchase_id=purchase.id, shipment_id=existing.id
