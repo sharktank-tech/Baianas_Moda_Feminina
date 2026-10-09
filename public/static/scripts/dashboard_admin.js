@@ -58,6 +58,11 @@ function hashFor(panel, query) {
 /* fetch em voo por container (evita duplicar a mesma carga). */
 const inflight = new Map();
 
+/* Um AbortController por container: clique rápido entre abas/filtros
+   cancela a requisição anterior, e a resposta atrasada nunca substitui
+   o conteúdo atual (abort é silencioso, sem caixa de erro). */
+const controllers = new Map();
+
 function containerOf(panel) {
   return document.querySelector('[data-partial-container="' + panel + '"]');
 }
@@ -73,18 +78,34 @@ function showPartialError(container, url) {
 }
 
 function fetchInto(container, url) {
+  const key = container.dataset.partialContainer;
+  const previous = controllers.get(key);
+  if (previous) previous.abort();
+  const ctrl = new AbortController();
+  controllers.set(key, ctrl);
   container.dataset.partialLoaded = '';
   container.innerHTML = '<p class="adm-empty">Carregando…</p>';
-  return fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+  return fetch(url, {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    signal: ctrl.signal,
+  })
     .then(resp => {
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       return resp.text();
     })
     .then(html => {
+      if (controllers.get(key) !== ctrl) return;
       container.innerHTML = html;
       container.dataset.partialLoaded = url;
     })
-    .catch(() => showPartialError(container, url));
+    .catch(err => {
+      if (err && err.name === 'AbortError') return;
+      if (controllers.get(key) !== ctrl) return;
+      showPartialError(container, url);
+    })
+    .finally(() => {
+      if (controllers.get(key) === ctrl) controllers.delete(key);
+    });
 }
 
 function loadPartial(panel, query) {
@@ -152,8 +173,8 @@ document.addEventListener('click', e => {
   if (retry) {
     const container = retry.closest('[data-partial-container]');
     if (container) {
-      container.dataset.partialLoaded = '';
-      loadPartial(container.dataset.partialContainer, '');
+      /* Refaz a última URL (com filtros/busca/página), não a visão padrão. */
+      fetchInto(container, container.dataset.partialUrl || container.dataset.partialSrc);
     }
     return;
   }

@@ -309,3 +309,9 @@ def test_js_preserva_selecao_via_historico():
     assert "Tentar novamente" in src
     # Cliques empurram histórico (replaceState só na carga/popstate).
     assert src.count("history.pushState") >= 1
+    # Anti-corrida: aborta a requisição anterior do container; resposta
+    # atrasada nunca substitui o conteúdo atual.
+    assert "AbortController" in src and "signal" in src
+    assert "AbortError" in src
+    # Retry refaz a última URL (filtros/busca/página), não a visão padrão.
+    assert "dataset.partialUrl" in src
