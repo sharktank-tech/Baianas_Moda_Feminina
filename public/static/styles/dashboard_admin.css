@@ -1221,3 +1221,69 @@ details.adm-details summary {
   }
 
 }
+
+/* Refinamento limitado às quatro abas de Operações. */
+[data-partial-root] { min-width: 0; }
+[data-partial-root] .adm-ops-head { margin-bottom: 1.5rem; }
+[data-partial-root] .adm-stat-sub { line-height: 1.55; overflow-wrap: anywhere; }
+[data-partial-root] .adm-table td { vertical-align: top; }
+[data-partial-root] .adm-table-wrap:focus-visible {
+  outline: 3px solid #2563eb; outline-offset: -3px;
+}
+[data-partial-root] .adm-name {
+  display: block; width: 230px; max-width: 230px;
+  white-space: normal; overflow-wrap: anywhere;
+}
+[data-partial-root] .adm-actions { flex-wrap: wrap; gap: .75rem; }
+[data-partial-root="manual-review"] .adm-actions {
+  display: grid; gap: 1rem; min-width: 220px;
+}
+[data-partial-root] .adm-form-col { align-items: stretch; }
+[data-partial-root] .adm-review-reason {
+  min-width: 170px; max-width: 300px; padding: .75rem;
+  border-left: 3px solid #b45309; background: #fffbeb;
+  color: #78350f; border-radius: 4px; line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+[data-partial-root] .adm-badge-yellow { background: #fef3c7; color: #78350f; }
+[data-partial-root] .adm-reasons { min-width: 220px; max-width: 340px; line-height: 1.5; }
+[data-partial-root] .adm-reasons li + li { margin-top: .4rem; }
+[data-partial-root] .adm-details summary { padding: .5rem 0; }
+.adm-lazy .adm-loading {
+  min-height: 240px; display: flex; flex-direction: column;
+  justify-content: center; align-items: center; gap: 1rem;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: #fff; color: #555;
+}
+.adm-lazy .adm-loading-mark {
+  width: 44px; height: 6px; border-radius: 3px; background: var(--accent);
+}
+@media (max-width: 600px) {
+  [data-partial-root] .adm-input, [data-partial-root] .adm-btn { min-height: 44px; }
+  [data-partial-root] .adm-input { font-size: 1rem; max-width: 100%; }
+  [data-partial-root] .adm-filters .adm-field { min-width: 0; }
+  [data-partial-root] .adm-name { width: 180px; max-width: 180px; }
+  [data-partial-root] .adm-card-header,
+  [data-partial-root] .adm-card-body { padding: 1rem; }
+}
+
+@media (max-width: 600px) {
+  [data-partial-root] .adm-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+  [data-partial-root] .adm-stat-card { min-width: 0; padding: 1rem; }
+  [data-partial-root] .adm-stat-label { overflow-wrap: anywhere; line-height: 1.4; }
+  [data-partial-root] .adm-stat-value { font-size: 1.65rem; overflow-wrap: anywhere; }
+  .adm-mobile-nav [data-panel="orders"],
+  .adm-mobile-nav [data-panel="manual-review"],
+  .adm-mobile-nav [data-panel="sales-readiness"],
+  .adm-mobile-nav [data-panel="checkout-recovery"] {
+    width: auto; flex: 0 0 auto; min-height: 44px; white-space: nowrap;
+  }
+}
+
+[data-partial-root] .adm-stat-value-text { font-size: 1.1rem; }
+.adm-nav-link[data-panel="orders"]:focus-visible,
+.adm-nav-link[data-panel="manual-review"]:focus-visible,
+.adm-nav-link[data-panel="sales-readiness"]:focus-visible,
+.adm-nav-link[data-panel="checkout-recovery"]:focus-visible {
+  outline: 2px solid #fff; outline-offset: -3px;
+}

@@ -69,7 +69,7 @@ function containerOf(panel) {
 
 function showPartialError(container, url) {
   container.innerHTML =
-    '<div class="adm-card"><p class="adm-empty">' +
+    '<div class="adm-card" role="alert"><p class="adm-empty">' +
     'Falha ao carregar este painel. ' +
     '<button type="button" class="adm-btn adm-btn-outline adm-btn-sm" ' +
     'data-partial-retry> Tentar novamente</button></p></div>';
@@ -84,7 +84,8 @@ function fetchInto(container, url) {
   const ctrl = new AbortController();
   controllers.set(key, ctrl);
   container.dataset.partialLoaded = '';
-  container.innerHTML = '<p class="adm-empty">Carregando…</p>';
+  container.setAttribute('aria-busy', 'true');
+  container.innerHTML = '<div class="adm-loading" role="status" aria-live="polite"><span class="adm-loading-mark" aria-hidden="true"></span><p>Carregando…</p></div>';
   return fetch(url, {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
     signal: ctrl.signal,
@@ -104,7 +105,10 @@ function fetchInto(container, url) {
       showPartialError(container, url);
     })
     .finally(() => {
-      if (controllers.get(key) === ctrl) controllers.delete(key);
+      if (controllers.get(key) === ctrl) {
+        controllers.delete(key);
+        container.setAttribute('aria-busy', 'false');
+      }
     });
 }
 
@@ -131,10 +135,27 @@ function activatePanel(id, opts) {
   /* links nav (sidebar + mobile) */
   document.querySelectorAll('[data-panel]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.panel === id);
+    if (LAZY_PANELS.has(btn.dataset.panel)) {
+      if (btn.dataset.panel === id) btn.setAttribute('aria-current', 'page');
+      else btn.removeAttribute('aria-current');
+    }
   });
 
+  /* Mantém a aba de Operações selecionada visível, sem rolar a página. */
+  if (LAZY_PANELS.has(id)) {
+    const mobileNav = document.querySelector('.adm-mobile-nav');
+    const selected = mobileNav && mobileNav.querySelector('[data-panel="' + id + '"]');
+    if (selected && mobileNav.clientWidth) {
+      const navRect = mobileNav.getBoundingClientRect();
+      const linkRect = selected.getBoundingClientRect();
+      if (linkRect.left < navRect.left || linkRect.right > navRect.right) {
+        mobileNav.scrollLeft += linkRect.left - navRect.left - 12;
+      }
+    }
+  }
+
   /* topbar */
-  document.getElementById('adm-current-title').textContent = PANEL_TITLES[id] || id;
+  document.getElementById('adm-current-title').textContent = LAZY_PANELS.has(id) ? 'Operações' : (PANEL_TITLES[id] || id);
   document.getElementById('adm-topbar-actions').innerHTML  =
     PANEL_ACTIONS[id] ||
     '<a href="/" class="adm-btn adm-btn-outline adm-btn-sm">Ver loja</a>';
@@ -229,3 +250,4 @@ if (searchInput) {
     });
   });
 }
+

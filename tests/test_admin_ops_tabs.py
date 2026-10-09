@@ -315,3 +315,42 @@ def test_js_preserva_selecao_via_historico():
     assert "AbortError" in src
     # Retry refaz a última URL (filtros/busca/página), não a visão padrão.
     assert "dataset.partialUrl" in src
+
+
+def test_tabelas_operacionais_possuem_regiao_focavel(admin_client):
+    for partial in TABS.values():
+        html = admin_client.get(partial).get_data(as_text=True)
+        assert 'role="region"' in html
+        assert 'tabindex="0"' in html
+        assert 'aria-label="Tabela:' in html
+
+
+def test_recuperacao_separa_estado_e_contato_sem_inferir_pagamento(
+    admin_client, db, admin_user, monkeypatch
+):
+    order = _order(db, admin_user, stock_reserved=True)
+    monkeypatch.setattr(
+        "loja.services.checkout_recovery.find_recoverable_orders",
+        lambda **kwargs: [order],
+    )
+    html = admin_client.get(TABS["checkout-recovery"]).get_data(as_text=True)
+    assert "R$ 68,00" in html and "R$ 68.00" not in html
+    assert "Estado do pedido" in html
+    assert "Elegibilidade" in html
+    assert "Histórico de contato" in html
+    assert "Nenhum lembrete enviado ou ignorado" in html
+    assert "Aguardando pagamento" in html
+    assert "UTC" in html
+
+
+def test_revisao_mantem_justificativa_confirmacao_e_motivo_destacado(
+    admin_client, db, admin_user
+):
+    _order(db, admin_user, status="manual_review", manual_review_reason="Variante indisponível")
+    html = admin_client.get(TABS["manual-review"]).get_data(as_text=True)
+    assert 'class="adm-review-reason">Variante indisponível' in html
+    assert 'name="reason" maxlength="500" required' in html
+    assert 'name="confirm_approve" value="1"' in html
+    assert 'name="confirm_reject" value="1"' in html
+    assert "Pedidos na fila" in html
+

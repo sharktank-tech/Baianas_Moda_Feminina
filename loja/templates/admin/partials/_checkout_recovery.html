@@ -16,7 +16,7 @@
   <div class="adm-stats" aria-label="Estado da recuperação">
     <div class="adm-stat-card">
       <div class="adm-stat-label">Envio individual</div>
-      <div class="adm-stat-value">{{ "SIM" if enabled else "NÃO" }}</div>
+      <div class="adm-stat-value adm-stat-value-text">{{ "SIM" if enabled else "NÃO" }}</div>
       <div class="adm-stat-sub">
         {% if enabled %}
           Cada envio exige uma ação individual.
@@ -32,7 +32,7 @@
     </div>
     <div class="adm-stat-card">
       <div class="adm-stat-label">Entrega SMTP</div>
-      <div class="adm-stat-value">{{ "PRONTA" if email_ready else "INDISPONÍVEL" }}</div>
+      <div class="adm-stat-value adm-stat-value-text">{{ "PRONTA" if email_ready else "INDISPONÍVEL" }}</div>
       <div class="adm-stat-sub">Valores nunca exibidos.</div>
     </div>
     <div class="adm-stat-card">
@@ -47,7 +47,7 @@
     <div class="adm-card-header">
       <span class="adm-card-title">Resultado da última execução</span>
     </div>
-    <div class="adm-table-wrap">
+    <div class="adm-table-wrap" role="region" aria-label="Tabela: Recuperação de checkout" tabindex="0">
       <table class="adm-table">
         <tbody>
           <tr>
@@ -88,13 +88,13 @@
         botão de liberação.
       </p>
     </div>
-    <div class="adm-table-wrap">
+    <div class="adm-table-wrap" role="region" aria-label="Tabela: Recuperação de checkout" tabindex="0">
       <table class="adm-table">
         <thead>
           <tr>
             <th>Pedido</th>
-            <th>Criado em</th>
-            <th>Reserva expira em</th>
+            <th>Criado em (UTC−3)</th>
+            <th>Reserva expira em (UTC−3)</th>
             <th>Estado</th>
           </tr>
         </thead>
@@ -155,7 +155,7 @@
       </p>
       {% endif %}
     </div>
-    <div class="adm-table-wrap">
+    <div class="adm-table-wrap" role="region" aria-label="Tabela: Recuperação de checkout" tabindex="0">
       <table class="adm-table">
         <thead>
           <tr>
@@ -168,7 +168,7 @@
           {% for order in expired_reservations %}
           <tr>
             <td><strong>{{ order.order_number }}</strong></td>
-            <td>{{ order.mp_preference_expires_at.strftime('%d/%m/%Y %H:%M') }}</td>
+            <td>{{ order.mp_preference_expires_at.strftime('%d/%m/%Y %H:%M') }} UTC</td>
             <td>
               <form method="POST"
                     action="{{ url_for('admin.release_single_expired_reservation', order_id=order.id) }}"
@@ -225,7 +225,7 @@
         enviado. E-mail e número do pedido aparecem para identificação no admin.
       </p>
     </div>
-    <div class="adm-table-wrap">
+    <div class="adm-table-wrap" role="region" aria-label="Tabela: Recuperação de checkout" tabindex="0">
       <table class="adm-table">
         <thead>
           <tr>
@@ -235,6 +235,9 @@
             <th class="adm-num">Total</th>
             <th>Criado em</th>
             <th>Reserva ativa</th>
+            <th>Estado do pedido</th>
+            <th>Elegibilidade</th>
+            <th>Histórico de contato</th>
             <th>Ação</th>
           </tr>
         </thead>
@@ -244,8 +247,8 @@
             <td><strong>{{ order.order_number }}</strong></td>
             <td><span class="adm-name" title="{{ order.customer_name or '—' }}">{{ order.customer_name or "—" }}</span></td>
             <td><span class="adm-name" title="{{ order.customer_email }}">{{ order.customer_email }}</span></td>
-            <td class="adm-num"><strong>R$ {{ order.total }}</strong></td>
-            <td>{{ order.created_at.strftime('%d/%m/%Y %H:%M') if order.created_at else "—" }}</td>
+            <td class="adm-num"><strong>R$ {{ '%.2f'|format(order.total)|replace('.', ',') }}</strong></td>
+            <td>{{ order.created_at.strftime('%d/%m/%Y %H:%M') if order.created_at else "—" }} UTC</td>
             <td>
               {% if order.stock_reserved %}
               <span class="adm-badge adm-badge-green">sim</span>
@@ -253,6 +256,9 @@
               <span class="adm-badge adm-badge-gray">não</span>
               {% endif %}
             </td>
+            <td><span class="adm-badge adm-badge-yellow">Aguardando pagamento</span></td>
+            <td><span class="adm-badge adm-badge-green">Candidato à recuperação</span></td>
+            <td><span class="adm-stat-sub">Nenhum lembrete enviado ou ignorado</span></td>
             <td>
               <div class="adm-actions">
                 {% if enabled and email_ready %}
@@ -278,10 +284,11 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="7" class="adm-empty">Nenhum pedido aguardando lembrete.</td></tr>
+          <tr><td colspan="10" class="adm-empty">Nenhum pedido aguardando lembrete.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </div>
 </div>
+

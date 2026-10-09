@@ -6,12 +6,17 @@
     <div>
       <h2 class="adm-ops-title">Revisão manual</h2>
       <p class="adm-stat-sub">
-        Pedidos travados em <span class="font-mono">manual_review</span>. Aprovar
-        revalida estoque/variante/cupom sob lock e promove o pedido a
-        <span class="font-mono">paid</span>; rejeitar devolve a reserva e marca
-        <span class="font-mono">cancelled</span>. Toda decisão fica auditada no
-        próprio pedido (quando, quem e por quê).
+        Confira o motivo e registre sua decisão. Aprovar revalida a compra;
+        rejeitar cancela o pedido e devolve a reserva. Toda decisão fica auditada.
       </p>
+    </div>
+  </div>
+
+  <div class="adm-stats" aria-label="Resumo da revisão manual">
+    <div class="adm-stat-card">
+      <div class="adm-stat-label">Pedidos na fila</div>
+      <div class="adm-stat-value">{{ orders|length }}</div>
+      <div class="adm-stat-sub">Aguardando decisão administrativa</div>
     </div>
   </div>
 
@@ -20,7 +25,7 @@
       <span class="adm-card-title">Fila de revisão</span>
       <span class="adm-stat-sub">Aprovação exige confirmação; rejeição exige motivo. Nenhuma ação consulta provedores externos.</span>
     </div>
-    <div class="adm-table-wrap">
+    <div class="adm-table-wrap" role="region" aria-label="Tabela: Revisão manual" tabindex="0">
       <table class="adm-table">
         <thead>
           <tr>
@@ -38,14 +43,14 @@
           <tr>
             <td>
               <strong>{{ order.order_number }}</strong>
-              <div class="adm-stat-sub">{{ order.created_at.strftime('%d/%m/%Y %H:%M') if order.created_at else "—" }} UTC</div>
+              
             </td>
             <td>
               <span class="adm-name" title="{{ order.customer_name or '—' }}">{{ order.customer_name or "—" }}</span>
               <div class="adm-stat-sub">{{ order.customer_email }}</div>
             </td>
             <td class="adm-num"><strong>R$ {{ '%.2f'|format(order.total)|replace('.', ',') }}</strong></td>
-            <td>{{ order.created_at.strftime('%d/%m/%Y %H:%M') if order.created_at else "—" }}</td>
+            <td>{{ order.created_at.strftime('%d/%m/%Y %H:%M') if order.created_at else "—" }} UTC</td>
             <td>
               {% if order.stock_reserved %}
               <span class="adm-badge adm-badge-green">sim</span>
@@ -53,7 +58,7 @@
               <span class="adm-badge adm-badge-gray">não</span>
               {% endif %}
             </td>
-            <td><strong>{{ order.manual_review_reason or "—" }}</strong></td>
+            <td><div class="adm-review-reason">{{ order.manual_review_reason or "—" }}</div></td>
             <td>
               <div class="adm-actions">
                 <form method="POST" class="adm-form-col"
@@ -93,3 +98,4 @@
     </div>
   </div>
 </div>
+
