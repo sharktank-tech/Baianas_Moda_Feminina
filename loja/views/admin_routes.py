@@ -170,20 +170,44 @@ def order_detail(order_id):
     )
     purchase_ids = [p.id for p in purchases]
     coverage = {}
+    coverage_by_purchase = {}
+    shipments_by_purchase = {}
     if purchase_ids:
         from loja.modules.models import Shipment as ShipmentModel
 
         rows = (
             db.session.query(
+                ShipmentModel.manual_purchase_id,
                 ShipmentItem.order_item_id,
                 db.func.coalesce(db.func.sum(ShipmentItem.quantity), 0),
             )
             .join(ShipmentModel, ShipmentModel.id == ShipmentItem.shipment_id)
             .filter(ShipmentModel.manual_purchase_id.in_(purchase_ids))
-            .group_by(ShipmentItem.order_item_id)
+            .group_by(ShipmentModel.manual_purchase_id,
+                      ShipmentItem.order_item_id)
             .all()
         )
-        coverage = {item_id: int(total or 0) for item_id, total in rows}
+        for purchase_id, item_id, total in rows:
+            total = int(total or 0)
+            coverage[item_id] = coverage.get(item_id, 0) + total
+            coverage_by_purchase.setdefault(purchase_id, {})[item_id] = total
+    for shipment in order.shipments:
+        if shipment.manual_purchase_id is not None:
+            shipments_by_purchase.setdefault(
+                shipment.manual_purchase_id, []).append(shipment)
+    # Restante por compra/item: vinculado − coberto. Sem restante, o
+    # cadastro de novo rastreio é desabilitado no template.
+    remaining_by_purchase = {}
+    for purchase in purchases:
+        remaining = {}
+        for link in (purchase.items or []):
+            covered = coverage_by_purchase.get(purchase.id, {}).get(
+                link.order_item_id, 0)
+            remaining[link.order_item_id] = (
+                int(link.quantity or 0) - covered
+            )
+        remaining_by_purchase[purchase.id] = remaining
+    items_by_id = {item.id: item for item in (order.items or [])}
     # Filtra no banco pelo pedido (entidade + ids vinculados): os últimos N
     # globais poderiam esconder o histórico deste pedido.
     entity_ids = (
@@ -203,6 +227,10 @@ def order_detail(order_id):
         "admin/order_detail.html", order=order, status_labels=ORDER_STATUS_LABELS,
         payment_confirmed=payment_is_confirmed(order),
         manual_purchases=purchases, shipment_coverage=coverage,
+        coverage_by_purchase=coverage_by_purchase,
+        shipments_by_purchase=shipments_by_purchase,
+        remaining_by_purchase=remaining_by_purchase,
+        items_by_id=items_by_id,
         operational_audit=audit,
     )
 

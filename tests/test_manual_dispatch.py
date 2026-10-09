@@ -892,3 +892,51 @@ def test_conflito_unicidade_com_conteudo_divergente(
     assert ManualSupplierPurchase.query.count() == 1
     assert Shipment.query.count() == 1
     assert ShipmentItem.query.count() == 1
+
+
+def test_rastreios_agrupados_e_form_desabilitado_sem_restante(
+    client, db, admin_user, login, make_product
+):
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product, quantity=2)
+    login(admin_user.email)
+    res = dispatch.register_manual_purchase(**_purchase_args(order, item))
+    db.session.commit()
+    dispatch.register_manual_shipment(
+        order_id=order.id, purchase_id=res.purchase_id,
+        tracking_code="BR123456789XX", carrier="Correios",
+        evidence_ref="EV", items={item.id: 2})
+    db.session.commit()
+    html = client.get(f"/admin/pedidos/{order.id}").get_data(as_text=True)
+    # Agrupado sob a compra, com vinculado/coberto/restante.
+    assert "Compra ALI-1001" in html
+    assert "vinculado: 2" in html and "coberto: 2" in html and "restante: 0" in html
+    assert "BR123456789XX" in html
+    # Sem restante: sem form de novo rastreio, com aviso.
+    assert "Registrar rastreio (aguardando postagem)" not in html
+    assert "Cobertura completa" in html
+    # Nome do produto em vez de UUID cru.
+    assert product.name in html
+    # Rodapé sem "somente de consulta".
+    assert "somente de consulta" not in html
+    assert "auditados no histórico" in html
+
+
+def test_form_presente_com_restante_parcial(
+    client, db, admin_user, login, make_product
+):
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product, quantity=3)
+    login(admin_user.email)
+    res = dispatch.register_manual_purchase(
+        **_purchase_args(order, item, items={item.id: 2}))
+    db.session.commit()
+    dispatch.register_manual_shipment(
+        order_id=order.id, purchase_id=res.purchase_id,
+        tracking_code="BR123456789XX", carrier="Correios",
+        evidence_ref="EV", items={item.id: 1})
+    db.session.commit()
+    html = client.get(f"/admin/pedidos/{order.id}").get_data(as_text=True)
+    assert "restante: 1" in html
+    assert "Registrar rastreio (aguardando postagem)" in html
+    assert 'max="1"' in html
