@@ -16,6 +16,7 @@ from loja.modules.models import (
     ManualSupplierPurchase,
     Shipment,
     ShipmentItem,
+    TrackingEvent,
 )
 from loja.services import manual_dispatch as dispatch
 
@@ -781,3 +782,113 @@ def test_bucket_multiplos_itens_e_remessas(db, make_user, make_product):
     db.session.expire_all()
     assert _order_purchase_bucket(
         db.session.get(Order, order.id)) == "aguardando_avaliacao"
+
+
+def test_postagem_ou_evidencia_divergente_conflita(db, make_user, make_product):
+    user = make_user()
+    product = make_product(stock=10)
+    order, item = _paid_order(db, user, product)
+    res = dispatch.register_manual_purchase(**_purchase_args(order, item))
+    db.session.commit()
+    dispatch.register_manual_shipment(
+        order_id=order.id, purchase_id=res.purchase_id,
+        tracking_code="BR123456789XX", carrier="Correios",
+        posted_at="2026-10-08T12:00:00", evidence_ref="EV-1",
+        items={item.id: 1})
+    db.session.commit()
+    # Mesma postagem+evidência: idêntico.
+    same = dispatch.register_manual_shipment(
+        order_id=order.id, purchase_id=res.purchase_id,
+        tracking_code="BR123456789XX", carrier="Correios",
+        posted_at="2026-10-08T12:00:00", evidence_ref="EV-1",
+        items={item.id: 1})
+    db.session.commit()
+    assert same.created is False
+    # Postagem diferente: conflito.
+    with pytest.raises(ValueError, match="shipment_content_differs"):
+        dispatch.register_manual_shipment(
+            order_id=order.id, purchase_id=res.purchase_id,
+            tracking_code="BR123456789XX", carrier="Correios",
+            posted_at="2026-10-09T12:00:00", evidence_ref="EV-1",
+            items={item.id: 1})
+    db.session.rollback()
+    # Evidência diferente: conflito.
+    with pytest.raises(ValueError, match="shipment_content_differs"):
+        dispatch.register_manual_shipment(
+            order_id=order.id, purchase_id=res.purchase_id,
+            tracking_code="BR123456789XX", carrier="Correios",
+            posted_at="2026-10-08T12:00:00", evidence_ref="EV-OUTRA",
+            items={item.id: 1})
+    db.session.rollback()
+    # Postagem antes ausente, agora informada: conflito (dado novo ignorado).
+    order_b, item_b = _paid_order(db, make_user(), product)
+    res2 = dispatch.register_manual_purchase(
+        **_purchase_args(order_b, item_b, external_order_id="ALI-2"))
+    db.session.commit()
+    dispatch.register_manual_shipment(
+        order_id=order_b.id, purchase_id=res2.purchase_id,
+        tracking_code="BR987654321XX", carrier="Correios",
+        evidence_ref="EV-1", items={item_b.id: 1})
+    db.session.commit()
+    with pytest.raises(ValueError, match="shipment_content_differs"):
+        dispatch.register_manual_shipment(
+            order_id=order_b.id, purchase_id=res2.purchase_id,
+            tracking_code="BR987654321XX", carrier="Correios",
+            posted_at="2026-10-08T12:00:00", evidence_ref="EV-1",
+            items={item_b.id: 1})
+    db.session.rollback()
+    assert Shipment.query.count() == 2
+    assert ShipmentItem.query.count() == 2
+    assert TrackingEvent.query.count() == 3  # 2 criações + 1 postagem
+
+
+def test_conflito_unicidade_com_conteudo_divergente(
+    client, db, admin_user, login, make_product, monkeypatch
+):
+    from sqlalchemy.exc import IntegrityError
+
+    from loja.services import manual_dispatch as dispatch_mod
+
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product)
+    res = dispatch_mod.register_manual_purchase(
+        **_purchase_args(order, item))
+    db.session.commit()
+    ship = dispatch_mod.register_manual_shipment(
+        order_id=order.id, purchase_id=res.purchase_id,
+        tracking_code="BR123456789XX", carrier="Correios",
+        evidence_ref="EV", items={item.id: 1})
+    db.session.commit()
+    login(admin_user.email)
+
+    def _boom(*args, **kwargs):
+        raise IntegrityError("INSERT", {}, Exception("duplicate"))
+
+    # Compra com conteúdo DIVERGENTE + conflito: "outro pedido", sem 500.
+    monkeypatch.setattr(
+        dispatch_mod, "register_manual_purchase", _boom)
+    resp = client.post(
+        f"/admin/pedidos/{order.id}/compra-manual",
+        data={"external_order_id": "ALI-1001", f"item_{item.id}": "99",
+              "purchased_at": "2026-10-08T10:00", "evidence_ref": "EV-X"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert "outro pedido" in resp.get_data(as_text=True)
+    monkeypatch.undo()
+    # Rastreio divergente + conflito: idem.
+    monkeypatch.setattr(
+        dispatch_mod, "register_manual_shipment", _boom)
+    resp = client.post(
+        f"/admin/pedidos/compras/{res.purchase_id}/rastreio",
+        data={"tracking_code": "BR123456789XX", "carrier": "Jadlog",
+              "evidence_ref": "EV-X", f"item_{item.id}": "1"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert "outro pedido" in resp.get_data(as_text=True)
+    monkeypatch.undo()
+    # Nada parcial: mesmos registros de antes.
+    assert ManualSupplierPurchase.query.count() == 1
+    assert Shipment.query.count() == 1
+    assert ShipmentItem.query.count() == 1

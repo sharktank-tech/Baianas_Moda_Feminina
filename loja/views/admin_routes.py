@@ -308,15 +308,42 @@ def register_manual_purchase(order_id):
         )
         db.session.commit()
     except IntegrityError:
-        # Corrida: outro registro venceu; retorna o existente sem duplicar.
+        # Corrida: outro registro venceu. Só afirma "já registrado" após
+        # comparar o conteúdo completo; divergência vira conflito claro.
         db.session.rollback()
         from loja.modules.models import ManualSupplierPurchase
+        from loja.services.manual_dispatch import (
+            _parse_naive_dt, _require_text, _require_tz, same_purchase_content,
+        )
 
         code = str(request.form.get("external_order_id") or "").strip().upper()
         existing = ManualSupplierPurchase.query.filter_by(
             external_order_id=code
         ).first()
-        if existing is not None and str(existing.order_id) == str(order_id):
+        try:
+            identical = (
+                existing is not None
+                and str(existing.order_id) == str(order_id)
+                and same_purchase_content(
+                    existing,
+                    _manual_items_from_form(),
+                    _parse_naive_dt(
+                        request.form.get("purchased_at"),
+                        field="purchased_at",
+                    ),
+                    _require_tz(request.form.get("purchased_tz")),
+                    _require_text(
+                        request.form.get("evidence_ref"),
+                        field="evidence_ref", maximum=255,
+                    ),
+                    (lambda n: n if n else None)(
+                        str(request.form.get("note") or "").strip()[:2000]
+                    ),
+                )
+            )
+        except (ValueError, TypeError, AttributeError):
+            identical = False
+        if identical:
             flash("Compra já registrada anteriormente.", "warning")
             return _manual_back(order_id)
         current_app.logger.warning("compra manual: conflito de número externo")
@@ -404,12 +431,32 @@ def register_manual_shipment(purchase_id):
         )
         db.session.commit()
     except IntegrityError:
+        # Mesma comparação completa do serviço: só afirma "já registrado"
+        # se pedido, compra e conteúdo coincidirem.
         db.session.rollback()
         from loja.modules.models import Shipment
+        from loja.services.manual_dispatch import same_shipment_content
 
         code = str(request.form.get("tracking_code") or "").strip().upper()
         existing = Shipment.query.filter_by(tracking_code=code).first()
-        if existing is not None and str(existing.order_id) == str(purchase.order_id):
+        try:
+            identical = (
+                existing is not None
+                and str(existing.order_id) == str(purchase.order_id)
+                and str(existing.manual_purchase_id or "") == str(purchase.id)
+                and same_shipment_content(
+                    existing,
+                    coverage=_manual_items_from_form(),
+                    carrier_name=str(
+                        request.form.get("carrier") or "").strip(),
+                    posted_at_raw=request.form.get("posted_at") or None,
+                    estimated_raw=request.form.get("estimated_delivery") or None,
+                    ref=str(request.form.get("evidence_ref") or "").strip(),
+                )
+            )
+        except (ValueError, TypeError, AttributeError):
+            identical = False
+        if identical:
             flash("Rastreio já registrado anteriormente.", "warning")
             return _manual_back(purchase.order_id)
         current_app.logger.warning("rastreio manual: código em outro pedido")

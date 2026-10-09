@@ -185,8 +185,8 @@ def _check_fresh(row, expected_updated_at) -> None:
         raise ValueError("stale_state_reload")
 
 
-def _same_purchase_content(existing, links, parsed_at, parsed_tz,
-                             parsed_ref, parsed_note) -> bool:
+def same_purchase_content(existing, links, parsed_at, parsed_tz,
+                            parsed_ref, parsed_note) -> bool:
     """Conteúdo idêntico ao registrado: itens, data, fuso, evidência, nota."""
     have = {
         link.order_item_id: int(link.quantity or 0)
@@ -202,6 +202,75 @@ def _same_purchase_content(existing, links, parsed_at, parsed_tz,
         and (existing.evidence_ref or "") == parsed_ref
         and (existing.note or None) == parsed_note
     )
+
+
+def _creation_evidence(shipment_id) -> Optional[str]:
+    """Evidência registrada na criação (auditoria privada, não pública)."""
+    row = (
+        ManualOperationalAudit.query
+        .filter_by(entity="shipment", entity_id=str(shipment_id),
+                   field="created")
+        .order_by(ManualOperationalAudit.created_at.asc())
+        .first()
+    )
+    if row is None or not row.new_value:
+        return None
+    marker = "evidencia: "
+    if marker not in row.new_value:
+        return None
+    return row.new_value.rsplit(marker, 1)[1].strip() or None
+
+
+def _posted_state(shipment_id):
+    """(tem_postagem, event_at) do primeiro evento de postagem."""
+    event = (
+        TrackingEvent.query
+        .filter_by(shipment_id=shipment_id, status="postado")
+        .order_by(TrackingEvent.event_at.asc())
+        .first()
+    )
+    if event is None or event.event_at is None:
+        return False, None
+    moment = event.event_at
+    return True, moment.replace(tzinfo=None)
+
+
+def same_shipment_content(existing, *, coverage, carrier_name,
+                           posted_at_raw, estimated_raw, ref) -> bool:
+    """Conteúdo idêntico ao registrado: itens, transportadora, postagem,
+    previsão e evidência privada. Qualquer divergência pede correção."""
+    covered_now = {
+        str(link.order_item_id): int(link.quantity or 0)
+        for link in ShipmentItem.query.filter_by(
+            shipment_id=existing.id
+        ).all()
+    }
+    wanted = {str(item_id): qty for item_id, qty in coverage.items()}
+    if covered_now != wanted:
+        return False
+    if (existing.carrier or "") != carrier_name:
+        return False
+    current_eta = existing.estimated_delivery
+    wanted_eta = (
+        _parse_naive_dt(estimated_raw, field="estimated_delivery").date()
+        if estimated_raw else None
+    )
+    if current_eta != wanted_eta:
+        return False
+    has_posted, posted_at = _posted_state(existing.id)
+    want_posted = bool(posted_at_raw)
+    if has_posted != want_posted:
+        return False
+    if want_posted and posted_at != _parse_naive_dt(
+        posted_at_raw, field="posted_at"
+    ):
+        return False
+    if _creation_evidence(existing.id) != ref:
+        return False
+    return True
+
+
+
 
 
 def register_manual_purchase(
@@ -256,7 +325,7 @@ def register_manual_purchase(
     if existing is not None:
         if existing.order_id != order.id:
             raise ValueError("external_order_id_in_use")
-        if not _same_purchase_content(
+        if not same_purchase_content(
             existing, links, parsed_at, parsed_tz, parsed_ref, parsed_note
         ):
             # Mesmo número, conteúdo divergente: exige correção explícita
@@ -380,22 +449,10 @@ def register_manual_shipment(
             # Mesmo código em OUTRA compra (ainda que do mesmo pedido):
             # vínculo diferente = conflito claro, sem escrita parcial.
             raise ValueError("tracking_code_other_purchase")
-        covered_now = {
-            str(link.order_item_id): int(link.quantity or 0)
-            for link in ShipmentItem.query.filter_by(
-                shipment_id=existing.id
-            ).all()
-        }
-        wanted = {str(item_id): qty for item_id, qty in coverage.items()}
-        current_eta = existing.estimated_delivery
-        wanted_eta = (
-            _parse_naive_dt(estimated_delivery, field="estimated_delivery").date()
-            if estimated_delivery else None
-        )
-        if (
-            covered_now != wanted
-            or (existing.carrier or "") != carrier_name
-            or current_eta != wanted_eta
+        if not same_shipment_content(
+            existing, coverage=coverage, carrier_name=carrier_name,
+            posted_at_raw=posted_at, estimated_raw=estimated_delivery,
+            ref=ref,
         ):
             raise ValueError("shipment_content_differs")
         return ManualDispatchResult(
@@ -554,4 +611,6 @@ __all__ = [
     "correct_manual_shipment",
     "register_manual_purchase",
     "register_manual_shipment",
+    "same_purchase_content",
+    "same_shipment_content",
 ]
