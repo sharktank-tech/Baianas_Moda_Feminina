@@ -1,21 +1,14 @@
-{% extends "base.html" %}
+{# Fragmento da aba Recuperação de checkout (sob demanda em /admin#checkout-recovery).
+   POSTs (lote, enviar, ignorar, liberar) submetem normalmente; o servidor
+   redireciona de volta para a aba. Sem <script>. #}
+<div data-partial-root="checkout-recovery">
+  <p class="adm-stat-sub">
+    Fila de pedidos <span class="font-mono">pending_payment</span> com
+    reserva de estoque ainda ativa. Não inicia tráfego pago e não consulta
+    provedores.
+  </p>
 
-{% block title %}Recuperação de Checkout — Pollo Modas{% endblock %}
-
-{% block content %}
-<div class="max-w-6xl mx-auto px-4 py-8">
-  <div class="mb-8">
-    <a href="{{ url_for('admin.dashboard') }}" class="text-sm text-gray-500 hover:underline">&larr; Painel administrativo</a>
-    <h1 class="text-3xl font-bold text-gray-800 mt-2">Recuperação de Checkout</h1>
-    <p class="text-gray-500 mt-2 max-w-3xl">
-      Fila somente leitura de pedidos <span class="font-mono">pending_payment</span> com
-      reserva de estoque ainda ativa, criados há mais de
-      {{ after_hours }} hora(s), cujo lembrete de retomada nunca foi enviado.
-      Não inicia tráfego pago e não consulta provedores.
-    </p>
-  </div>
-
-  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 my-6">
     <div class="bg-white rounded-2xl shadow p-5">
       <div class="text-sm text-gray-500">Envio individual</div>
       <div class="text-2xl font-bold mt-1 {% if enabled %}text-green-700{% else %}text-red-700{% endif %}">
@@ -78,7 +71,7 @@
   </div>
   {% endif %}
 
-  <div class="mb-8 bg-white rounded-2xl shadow p-5">
+  <div class="mb-6 bg-white rounded-2xl shadow p-5">
     <h2 class="font-semibold text-gray-800">Reservas de estoque ativas</h2>
     <p class="text-sm text-gray-500 mt-2">
       Pedidos ainda em <span class="font-mono">pending_payment</span> com reserva
@@ -120,7 +113,7 @@
     </div>
   </div>
 
-  <div class="mb-8 bg-white rounded-2xl shadow p-5">
+  <div class="mb-6 bg-white rounded-2xl shadow p-5">
     <h2 class="font-semibold text-gray-800">Reservas de estoque vencidas</h2>
     <p class="text-sm text-gray-500 mt-2">
       Pedidos ainda em <span class="font-mono">pending_payment</span> com
@@ -279,4 +272,3 @@
     </div>
   </div>
 </div>
-{% endblock %}

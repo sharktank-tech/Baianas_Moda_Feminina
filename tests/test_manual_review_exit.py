@@ -27,6 +27,23 @@ import loja.views.payments_routes as pr
 from loja.services import order_promotion
 
 
+@pytest.fixture(autouse=True)
+def _clean_dashboard_singletons(db):
+    """Ações redirecionam ao dashboard, que cria singletons no 1º acesso."""
+    from loja.modules.models import ContactInfo, FooterConfig, SiteConfig
+
+    known = {
+        model: {row[0] for row in db.session.query(model.id).all()}
+        for model in (SiteConfig, FooterConfig, ContactInfo)
+    }
+    yield
+    for model, ids in known.items():
+        for row in model.query.all():
+            if row.id not in ids:
+                db.session.delete(row)
+    db.session.commit()
+
+
 def _manual_order(
     db,
     user,
@@ -392,7 +409,7 @@ def test_item_1_3_route_list_requires_admin(
     order = _manual_order(db, user, product)
 
     login(user.email, "senha123")
-    response = client.get("/admin/pedidos/revisao")
+    response = client.get("/admin/painel/manual-review")
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/")

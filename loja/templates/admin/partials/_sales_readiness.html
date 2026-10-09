@@ -1,29 +1,22 @@
-{% extends "base.html" %}
+{# Fragmento da aba Prontidão para vendas (sob demanda em /admin#sales-readiness).
+   Somente leitura, sem formulários de mutação e sem <script>. #}
+<div data-partial-root="sales-readiness">
+  <p class="adm-stat-sub">
+    Verificação exclusivamente de leitura: identifica produtos que podem
+    receber divulgação sem risco conhecido de fornecedor, frete, preço ou
+    margem. Não habilita fulfillment, não compra no fornecedor e não altera
+    preços. A ausência de informação nunca gera PRONTO.
+  </p>
+  <p class="mt-3 inline-block px-3 py-2 rounded-lg bg-amber-100 text-amber-900 text-sm font-semibold">
+    Fulfillment automático desligado — Tratamento manual obrigatório após pagamento.
+    PRONTO significa pronto para receber venda, não autorização para compra automática.
+  </p>
+  <p class="mt-2 text-sm text-gray-600">
+    {% if summary.reference_configured %}Destino de referência configurado (prefixo {{ summary.reference_masked }}){% else %}Destino de referência pendente{% endif %} —
+    PRONTO vale apenas para o cenário logístico de referência, não para qualquer endereço do Brasil.
+  </p>
 
-{% block title %}Prontidão para vendas — Pollo Modas{% endblock %}
-
-{% block content %}
-<div class="max-w-6xl mx-auto px-4 py-8">
-  <div class="mb-8">
-    <a href="{{ url_for('admin.dashboard') }}" class="text-sm text-gray-500 hover:underline">&larr; Painel administrativo</a>
-    <h1 class="text-3xl font-bold text-gray-800 mt-2">Prontidão para vendas</h1>
-    <p class="text-gray-500 mt-2 max-w-3xl">
-      Verificação exclusivamente de leitura: identifica produtos que podem
-      receber divulgação sem risco conhecido de fornecedor, frete, preço ou
-      margem. Não habilita fulfillment, não compra no fornecedor e não altera
-      preços. A ausência de informação nunca gera PRONTO.
-    </p>
-    <p class="mt-3 inline-block px-3 py-2 rounded-lg bg-amber-100 text-amber-900 text-sm font-semibold">
-      Fulfillment automático desligado — Tratamento manual obrigatório após pagamento.
-      PRONTO significa pronto para receber venda, não autorização para compra automática.
-    </p>
-    <p class="mt-2 text-sm text-gray-600">
-      {% if summary.reference_configured %}Destino de referência configurado (prefixo {{ summary.reference_masked }}){% else %}Destino de referência pendente{% endif %} —
-      PRONTO vale apenas para o cenário logístico de referência, não para qualquer endereço do Brasil.
-    </p>
-  </div>
-
-  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 my-6">
     <div class="bg-white rounded-2xl shadow p-5">
       <div class="text-sm text-gray-500">Produtos PRONTOS</div>
       <div class="text-2xl font-bold mt-1 text-green-700">{{ summary.pronto }}</div>
@@ -43,12 +36,12 @@
   </div>
 
   {% if summary.pronto == 0 %}
-  <div class="mb-8 bg-white rounded-2xl shadow p-5">
+  <div class="mb-6 bg-white rounded-2xl shadow p-5">
     <p class="font-semibold text-gray-800">Nenhum produto está comprovadamente pronto para divulgação.</p>
   </div>
   {% endif %}
 
-  <div class="mb-8 bg-white rounded-2xl shadow p-5">
+  <div class="mb-6 bg-white rounded-2xl shadow p-5">
     <h2 class="font-semibold text-gray-800">Candidatos para primeira campanha</h2>
     <p class="text-sm text-gray-500 mt-2">
       Somente informativa: até cinco produtos PRONTOS, por maior margem
@@ -134,4 +127,3 @@
     </div>
   </div>
 </div>
-{% endblock %}

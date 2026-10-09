@@ -1,22 +1,15 @@
-{% extends "base.html" %}
-
-{% block title %}Revisão Manual de Pedidos — Pollo Modas{% endblock %}
-
-{% block content %}
-<div class="max-w-6xl mx-auto px-4 py-8">
-  <div class="mb-8">
-    <a href="{{ url_for('admin.dashboard') }}" class="text-sm text-gray-500 hover:underline">&larr; Painel administrativo</a>
-    <h1 class="text-3xl font-bold text-gray-800 mt-2">Revisão Manual de Pedidos</h1>
-    <p class="text-gray-500 mt-2 max-w-3xl">
-      Pedidos travados em <span class="font-mono">manual_review</span>. Aprovar
-      revalida estoque/variante/cupom sob lock e promove o pedido a
-      <span class="font-mono">paid</span>; rejeitar devolve a reserva e marca
-      <span class="font-mono">cancelled</span>. Toda decisão fica auditada no
-      próprio pedido (quando, quem e por quê).
-    </p>
-  </div>
-
-  <div class="bg-white rounded-2xl shadow overflow-hidden">
+{# Fragmento da aba Revisão manual (sob demanda em /admin#manual-review).
+   POSTs de aprovar/rejeitar submetem normalmente; o servidor redireciona
+   de volta para a aba. Sem <script>. #}
+<div data-partial-root="manual-review">
+  <p class="adm-stat-sub">
+    Pedidos travados em <span class="font-mono">manual_review</span>. Aprovar
+    revalida estoque/variante/cupom sob lock e promove o pedido a
+    <span class="font-mono">paid</span>; rejeitar devolve a reserva e marca
+    <span class="font-mono">cancelled</span>. Toda decisão fica auditada no
+    próprio pedido (quando, quem e por quê).
+  </p>
+  <div class="bg-white rounded-2xl shadow overflow-hidden mt-4">
     <div class="p-5 border-b border-gray-200">
       <h2 class="font-semibold text-gray-800">Fila de revisão</h2>
       <p class="text-xs text-gray-500 mt-1">
@@ -88,4 +81,3 @@
     </div>
   </div>
 </div>
-{% endblock %}

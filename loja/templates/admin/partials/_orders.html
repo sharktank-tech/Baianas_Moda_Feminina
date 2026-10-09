@@ -1,16 +1,16 @@
-{% extends "base.html" %}
-{% block title %}Pedidos — Pollo Modas{% endblock %}
-{% block content %}
-<main class="max-w-6xl mx-auto px-4 py-8">
-  <a href="{{ url_for('admin.dashboard') }}">← Painel administrativo</a>
-  <h1 class="text-3xl font-bold my-4">Pedidos</h1>
-  <p>Estado registrado na loja. Esta consulta não confirma pagamentos no provedor nem realiza compras.</p>
-  <form method="GET" class="flex flex-wrap gap-3 my-6">
+{# Fragmento da aba Pedidos (carregado sob demanda em /admin#orders).
+   Sem <script>: a navegação interna (filtros/paginação) é interceptada pelo
+   JS do dashboard via data-partial-form/link; POSTs submetem normalmente e
+   o servidor redireciona de volta para a aba. #}
+<div data-partial-root="orders">
+  <p class="adm-stat-sub">Estado registrado na loja. Esta consulta não confirma pagamentos no provedor nem realiza compras.</p>
+  <form method="GET" action="{{ url_for('admin.ops_partial_orders') }}" data-partial-form class="flex flex-wrap gap-3 my-6">
     <label>Referência exata <input class="border p-2" name="q" maxlength="100" value="{{ search }}" placeholder="Número, UUID ou ID do pagamento"></label>
     <label>Estado <select class="border p-2" name="status">
       <option value="">Todos</option>
       {% for code, label in status_labels.items() %}<option value="{{ code }}" {{ 'selected' if status == code }}>{{ label }}</option>{% endfor %}
     </select></label>
+    <input type="hidden" name="page" value="1">
     <button class="border p-2" type="submit">Filtrar</button>
   </form>
   <p>{{ page.total }} pedido(s) encontrado(s)</p>
@@ -26,9 +26,8 @@
     </tr>{% else %}<tr><td colspan="6" class="py-6">Nenhum pedido encontrado.</td></tr>{% endfor %}</tbody>
   </table></div>
   <nav class="flex gap-4 my-6" aria-label="Paginação">
-    {% if page.has_prev %}<a href="{{ url_for('admin.orders_list', page=page.prev_num, q=search, status=status) }}">Anterior</a>{% endif %}
+    {% if page.has_prev %}<a data-partial-link href="{{ url_for('admin.ops_partial_orders', page=page.prev_num, q=search, status=status) }}">Anterior</a>{% endif %}
     <span>Página {{ page.page }}</span>
-    {% if page.has_next %}<a href="{{ url_for('admin.orders_list', page=page.next_num, q=search, status=status) }}">Próxima</a>{% endif %}
+    {% if page.has_next %}<a data-partial-link href="{{ url_for('admin.ops_partial_orders', page=page.next_num, q=search, status=status) }}">Próxima</a>{% endif %}
   </nav>
-</main>
-{% endblock %}
+</div>

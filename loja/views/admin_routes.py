@@ -59,18 +59,54 @@ ORDER_STATUS_LABELS = {
     "refunded": "Reembolsado", "charged_back": "Contestação",
 }
 
+#: Abas de operações do Painel Admin (fragmentos de /admin#...).
+#: Pedidos, revisão manual, prontidão e recuperação vivem no dashboard;
+#: as URLs antigas de listagem redirecionam para a aba equivalente.
+OPS_TABS = ("orders", "manual-review", "sales-readiness", "checkout-recovery")
+
+
+def _ops_tab_url(tab, **params):
+    """URL do dashboard com a aba de operações selecionada.
+
+    Filtros não pessoais (estado, página) viajam DENTRO do fragmento
+    (`#orders?status=paid&page=2`); busca livre nunca entra no hash
+    (pode conter dados pessoais) e é aplicada só no fetch da parcial.
+    """
+    assert tab in OPS_TABS, tab
+    url = url_for("admin.dashboard", _anchor=tab)
+    clean = {k: v for k, v in params.items() if v not in (None, "", 1, "1") and v is not False}
+    if clean:
+        from urllib.parse import urlencode
+
+        url = f"{url}?{urlencode(clean)}"
+    return url
+
+
+def _validate_order_status(status):
+    if status and status not in ORDER_STATUS_LABELS:
+        abort(400)
+    return status
+
 
 @admin_blueprint.route("/admin/pedidos")
 @admin_required
 def orders_list():
-    """Consulta administrativa sem sincronizar ou alterar pagamentos."""
+    """Lista antiga: encaminha para a aba Pedidos do dashboard.
+
+    Preserva estado e página (não pessoais); a busca livre (q) nunca viaja
+    no fragmento e é reaplicada dentro da aba.
+    """
+    status = _validate_order_status(request.args.get("status", ""))
+    page = max(1, request.args.get("page", 1, type=int))
+    return redirect(_ops_tab_url("orders", status=status, page=page))
+
+
+def _orders_context(*, status="", search="", page=1):
+    """Contexto somente leitura da lista de pedidos (aba + parcial)."""
     from loja.modules.getway_mercado_pago.payment_models import Order
     from loja.services.order_payment_evidence import payment_is_confirmed
 
-    status = request.args.get("status", "")
-    if status and status not in ORDER_STATUS_LABELS:
-        abort(400)
-    search = request.args.get("q", "").strip()[:100]
+    _validate_order_status(status)
     query = Order.query.options(selectinload(Order.payments))
     if status:
         query = query.filter(Order.status == status)
@@ -82,13 +118,27 @@ def orders_list():
         except ValueError:
             pass
         query = query.filter(db.or_(*predicates))
-    page = query.order_by(Order.created_at.desc(), Order.id.desc()).paginate(
-        page=max(1, request.args.get("page", 1, type=int)), per_page=25,
+    page_obj = query.order_by(Order.created_at.desc(), Order.id.desc()).paginate(
+        page=max(1, int(page or 1)), per_page=25,
         error_out=False,
     )
+    return {
+        "page": page_obj, "status": status, "search": search,
+        "status_labels": ORDER_STATUS_LABELS,
+        "payment_is_confirmed": payment_is_confirmed,
+    }
+
+
+@admin_blueprint.route("/admin/painel/orders", methods=["GET"])
+@admin_required
+def ops_partial_orders():
+    """Fragmento da aba Pedidos (carregamento sob demanda, sem mutação)."""
+    status = request.args.get("status", "")
+    search = request.args.get("q", "").strip()[:100]
+    page = request.args.get("page", 1, type=int)
     return render_template(
-        "admin/orders.html", page=page, status=status, search=search,
-        status_labels=ORDER_STATUS_LABELS, payment_is_confirmed=payment_is_confirmed,
+        "admin/partials/_orders.html",
+        **_orders_context(status=status, search=search, page=page),
     )
 
 
@@ -451,22 +501,31 @@ def channel_metrics_dashboard():
 )
 @admin_required
 def sales_readiness():
-    """Painel somente leitura de prontidão para a primeira venda real.
+    """URL antiga: encaminha para a aba Prontidão do dashboard.
 
-    Apenas GET, sem commit, sem chamadas a provedores e sem formulários
-    de mutação. PRONTO significa pronto para receber venda — nunca
-    autorização para compra automática no fornecedor.
+    O conteúdo (somente leitura, sem commit nem chamadas a provedores)
+    é servido sob demanda pela parcial da aba.
     """
+    return redirect(_ops_tab_url("sales-readiness"))
+
+
+def _sales_readiness_context():
+    """Contexto somente leitura da prontidão para vendas."""
     from loja.services.sales_readiness import (
         REASON_LABELS,
         evaluate_sales_readiness,
     )
 
     summary = evaluate_sales_readiness()
+    return {"summary": summary, "reason_labels": REASON_LABELS}
+
+
+@admin_blueprint.route("/admin/painel/sales-readiness", methods=["GET"])
+@admin_required
+def ops_partial_sales_readiness():
+    """Fragmento da aba Prontidão (sob demanda, sem mutação)."""
     return render_template(
-        "admin/sales_readiness.html",
-        summary=summary,
-        reason_labels=REASON_LABELS,
+        "admin/partials/_sales_readiness.html", **_sales_readiness_context()
     )
 
 
@@ -483,7 +542,7 @@ def request_sales_readiness_quote(supplier_product_id):
     """
     if not current_app.config.get("ALIEXPRESS_REFERENCE_QUOTE_ENABLED", False):
         flash("Cotação de referência desabilitada.", "warning")
-        return redirect(url_for("admin.sales_readiness"))
+        return redirect(_ops_tab_url("sales-readiness"))
 
     from loja.services.sales_readiness import load_reference_scenario
     from loja.services.supplier_freight_quotes import (
@@ -508,13 +567,13 @@ def request_sales_readiness_quote(supplier_product_id):
         or not supplier.seller_id
     ):
         flash("Vínculo de fornecedor indisponível.", "warning")
-        return redirect(url_for("admin.sales_readiness"))
+        return redirect(_ops_tab_url("sales-readiness"))
 
     dest_cep, option = load_reference_scenario()
     provider = current_app.config.get("ALIEXPRESS_REFERENCE_QUOTE_PROVIDER")
     if not dest_cep or not callable(provider):
         flash("Cotação de referência indisponível.", "warning")
-        return redirect(url_for("admin.sales_readiness"))
+        return redirect(_ops_tab_url("sales-readiness"))
 
     try:
         request_reference_freight_quote(
@@ -528,7 +587,7 @@ def request_sales_readiness_quote(supplier_product_id):
         flash("Não foi possível comprovar o frete de referência.", "warning")
     else:
         flash("Cotação de referência atualizada.", "success")
-    return redirect(url_for("admin.sales_readiness"))
+    return redirect(_ops_tab_url("sales-readiness"))
 
 
 @admin_blueprint.route(
@@ -537,14 +596,50 @@ def request_sales_readiness_quote(supplier_product_id):
 )
 @admin_required
 def checkout_recovery():
-    """Fila read-only e lote opcional, protegido por gate próprio."""
+    """Lista antiga (GET) encaminha para a aba; lote (POST) volta para a aba.
+
+    O POST executa o lote quando habilitado e resume o resultado em flash
+    (o bloco de resultado passa a aparecer via mensagens, sem render direto).
+    """
+    from loja.services.checkout_recovery import (
+        is_batch_recovery_enabled,
+        is_recovery_enabled,
+        run_checkout_recovery,
+    )
+
+    if request.method == "GET":
+        return redirect(_ops_tab_url("checkout-recovery"))
+
+    try:
+        result = run_checkout_recovery()
+    except ValueError:
+        flash(
+            "Entrega de e-mail indisponível; nenhum lembrete foi enviado.",
+            "danger",
+        )
+        return redirect(_ops_tab_url("checkout-recovery"))
+    if result.enabled:
+        flash(
+            f"Lote executado: {result.sent} enviado(s) de "
+            f"{result.candidates} candidato(s), {result.failed} falha(s).",
+            "success" if not result.failed else "warning",
+        )
+    else:
+        flash("Lote desligado; nada foi enviado.", "warning")
+    return redirect(_ops_tab_url("checkout-recovery"))
+
+
+def _recovery_context():
+    """Contexto somente leitura da recuperação (aba + parcial).
+
+    Nunca executa lote nem envia e-mail: só consultas e gates.
+    """
     from loja.modules.enviar_email import email_delivery_ready
     from loja.services.checkout_recovery import (
         find_recoverable_orders,
         is_batch_recovery_enabled,
         is_recovery_enabled,
         load_after_hours,
-        run_checkout_recovery,
     )
     from loja.services.stock_reservations import (
         count_unproven_stock_reservations,
@@ -557,16 +652,6 @@ def checkout_recovery():
     enabled = is_recovery_enabled()
     batch_enabled = is_batch_recovery_enabled()
     email_ready = email_delivery_ready()
-    result = None
-
-    if request.method == "POST":
-        try:
-            result = run_checkout_recovery()
-        except ValueError:
-            flash(
-                "Entrega de e-mail indisponível; nenhum lembrete foi enviado.",
-                "danger",
-            )
 
     try:
         after_hours = load_after_hours()
@@ -599,25 +684,33 @@ def checkout_recovery():
         active_reservations = []
         unproven_reservations_count = 0
 
-    return render_template(
-        "admin/checkout_recovery.html",
-        enabled=enabled,
-        batch_enabled=batch_enabled,
-        email_ready=email_ready,
-        after_hours=after_hours,
-        candidates=candidates,
-        result=result,
-        reservation_release_enabled=is_scheduled_release_enabled(),
-        reservation_batch_release_enabled=bool(
+    return {
+        "enabled": enabled,
+        "batch_enabled": batch_enabled,
+        "email_ready": email_ready,
+        "after_hours": after_hours,
+        "candidates": candidates,
+        "result": None,
+        "reservation_release_enabled": is_scheduled_release_enabled(),
+        "reservation_batch_release_enabled": bool(
             current_app.config.get(
                 "STOCK_RESERVATION_BATCH_RELEASE_ENABLED",
                 False,
             )
         ),
-        reservation_hours=reservation_hours,
-        expired_reservations=expired_reservations,
-        active_reservations=active_reservations,
-        unproven_reservations_count=unproven_reservations_count,
+        "reservation_hours": reservation_hours,
+        "expired_reservations": expired_reservations,
+        "active_reservations": active_reservations,
+        "unproven_reservations_count": unproven_reservations_count,
+    }
+
+
+@admin_blueprint.route("/admin/painel/checkout-recovery", methods=["GET"])
+@admin_required
+def ops_partial_checkout_recovery():
+    """Fragmento da aba Recuperação (sob demanda, sem mutação)."""
+    return render_template(
+        "admin/partials/_checkout_recovery.html", **_recovery_context()
     )
 
 
@@ -648,7 +741,7 @@ def send_checkout_recovery(order_id):
             "Entrega de e-mail indisponível; nenhum lembrete foi enviado.",
             "danger",
         )
-        return redirect(url_for("admin.checkout_recovery"))
+        return redirect(_ops_tab_url("checkout-recovery"))
 
     if not result.enabled:
         flash("Envio individual está desligado.", "warning")
@@ -658,7 +751,7 @@ def send_checkout_recovery(order_id):
         flash("Falha sanitizada no envio; o pedido continua pendente.", "danger")
     else:
         flash("Pedido não elegível ou já processado; nada foi enviado.", "warning")
-    return redirect(url_for("admin.checkout_recovery"))
+    return redirect(_ops_tab_url("checkout-recovery"))
 
 
 @admin_blueprint.route(
@@ -670,7 +763,7 @@ def skip_checkout_recovery(order_id):
     """Descarta somente o lembrete escolhido; não toca pagamento ou estoque."""
     if request.form.get("confirm_skip") != "1":
         flash("Confirme o descarte do lembrete antes de continuar.", "warning")
-        return redirect(url_for("admin.checkout_recovery"))
+        return redirect(_ops_tab_url("checkout-recovery"))
 
     from loja.services.checkout_recovery import skip_single_checkout_recovery
 
@@ -686,7 +779,7 @@ def skip_checkout_recovery(order_id):
         )
     else:
         flash("Pedido não elegível ou já processado; nada foi alterado.", "warning")
-    return redirect(url_for("admin.checkout_recovery"))
+    return redirect(_ops_tab_url("checkout-recovery"))
 
 
 @admin_blueprint.route(
@@ -698,7 +791,7 @@ def release_single_expired_reservation(order_id):
     """Libera apenas a reserva escolhida, após confirmação e revalidação."""
     if request.form.get("confirm_release") != "1":
         flash("Confirme a liberação da reserva antes de continuar.", "warning")
-        return redirect(url_for("admin.checkout_recovery"))
+        return redirect(_ops_tab_url("checkout-recovery"))
 
     from loja.services.stock_reservations import (
         release_single_expired_stock_reservation,
@@ -716,7 +809,7 @@ def release_single_expired_reservation(order_id):
             "nenhum estoque foi alterado.",
             "warning",
         )
-    return redirect(url_for("admin.checkout_recovery"))
+    return redirect(_ops_tab_url("checkout-recovery"))
 
 
 @admin_blueprint.route(
@@ -731,7 +824,7 @@ def release_expired_reservations():
         False,
     ):
         flash("Liberação em lote está desligada.", "warning")
-        return redirect(url_for("admin.checkout_recovery"))
+        return redirect(_ops_tab_url("checkout-recovery"))
 
     from loja.services.stock_reservations import (
         release_expired_stock_reservations,
@@ -744,7 +837,7 @@ def release_expired_reservations():
             "Configuração da janela de reserva inválida; nenhuma reserva foi alterada.",
             "danger",
         )
-        return redirect(url_for("admin.checkout_recovery"))
+        return redirect(_ops_tab_url("checkout-recovery"))
 
     flash(
         (
@@ -753,7 +846,7 @@ def release_expired_reservations():
         ),
         "success",
     )
-    return redirect(url_for("admin.checkout_recovery"))
+    return redirect(_ops_tab_url("checkout-recovery"))
 
 
 # -------------------------------------------------------------------
@@ -788,7 +881,12 @@ def _flash_manual_review_result(result):
 @admin_blueprint.route("/admin/pedidos/revisao")
 @admin_required
 def manual_review_list():
-    """Fila dos pedidos travados em manual_review (item 1.3)."""
+    """Lista antiga: encaminha para a aba Revisão manual do dashboard."""
+    return redirect(_ops_tab_url("manual-review"))
+
+
+def _manual_review_context():
+    """Contexto somente leitura da fila de revisão manual."""
     from loja.modules.getway_mercado_pago.payment_models import Order
 
     orders = (
@@ -797,7 +895,16 @@ def manual_review_list():
         .order_by(Order.created_at.asc(), Order.id.asc())
         .all()
     )
-    return render_template("admin/manual_review.html", orders=orders)
+    return {"orders": orders}
+
+
+@admin_blueprint.route("/admin/painel/manual-review", methods=["GET"])
+@admin_required
+def ops_partial_manual_review():
+    """Fragmento da aba Revisão manual (sob demanda, sem mutação)."""
+    return render_template(
+        "admin/partials/_manual_review.html", **_manual_review_context()
+    )
 
 
 @admin_blueprint.route(
@@ -809,7 +916,7 @@ def manual_review_approve(order_id):
     """Aprovação: revalidação de estoque sob lock + promoção a paid."""
     if request.form.get("confirm_approve") != "1":
         flash("Confirme a aprovação do pedido antes de continuar.", "warning")
-        return redirect(url_for("admin.manual_review_list"))
+        return redirect(_ops_tab_url("manual-review"))
 
     from loja.services.order_promotion import approve_manual_review
 
@@ -819,7 +926,7 @@ def manual_review_approve(order_id):
         note=request.form.get("note"),
     )
     _flash_manual_review_result(result)
-    return redirect(url_for("admin.manual_review_list"))
+    return redirect(_ops_tab_url("manual-review"))
 
 
 @admin_blueprint.route(
@@ -832,10 +939,10 @@ def manual_review_reject(order_id):
     reason = str(request.form.get("reason") or "").strip()
     if not reason:
         flash("Informe o motivo da rejeição.", "warning")
-        return redirect(url_for("admin.manual_review_list"))
+        return redirect(_ops_tab_url("manual-review"))
     if request.form.get("confirm_reject") != "1":
         flash("Confirme a rejeição do pedido antes de continuar.", "warning")
-        return redirect(url_for("admin.manual_review_list"))
+        return redirect(_ops_tab_url("manual-review"))
 
     from loja.services.order_promotion import reject_manual_review
 
@@ -850,10 +957,10 @@ def manual_review_reject(order_id):
             "Falha de integridade ao devolver o estoque; nada foi alterado.",
             "danger",
         )
-        return redirect(url_for("admin.manual_review_list"))
+        return redirect(_ops_tab_url("manual-review"))
 
     _flash_manual_review_result(result)
-    return redirect(url_for("admin.manual_review_list"))
+    return redirect(_ops_tab_url("manual-review"))
 
 
 # -------------------------------------------------------------------
