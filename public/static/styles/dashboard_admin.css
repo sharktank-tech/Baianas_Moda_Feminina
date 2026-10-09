@@ -565,6 +565,11 @@
 }
 
 
+.adm-card-body {
+  padding: 1.25rem 1.5rem;
+}
+
+
 /* ════════════════════════════════════════════════════════════
    TABELAS
 ════════════════════════════════════════════════════════════ */
@@ -1042,3 +1047,246 @@
   }
 
 }
+
+
+/* ════════════════════════════════════════════════════════════
+   ABAS DE OPERAÇÃO (parciais /admin/painel/*)
+   Mesmo vocabulário do dashboard; sem novas dependências.
+════════════════════════════════════════════════════════════ */
+
+.adm-lazy {
+  min-height: 140px;
+}
+
+
+.adm-ops-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+
+  gap: 1rem;
+  flex-wrap: wrap;
+
+  margin-bottom: 1.25rem;
+}
+
+
+.adm-ops-title {
+  font-family: 'Poppins', sans-serif;
+
+  font-size: 1.15rem;
+  font-weight: 700;
+
+  color: #151515;
+
+  margin: 0 0 0.25rem;
+}
+
+
+.adm-filters {
+  display: flex;
+  flex-wrap: wrap;
+
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+
+.adm-field {
+  display: flex;
+  flex-direction: column;
+
+  gap: 0.3rem;
+
+  font-size: 0.78rem;
+  font-weight: 700;
+
+  color: #444;
+}
+
+
+.adm-input {
+  padding: 7px 12px;
+
+  min-height: 38px;
+
+  border: 1px solid #d4d4d0;
+
+  border-radius: var(--radius-md);
+
+  background: #fff;
+
+  font-family: 'DM Sans', sans-serif;
+
+  font-size: 0.82rem;
+
+  color: #222;
+}
+
+
+.adm-input:focus {
+  outline: none;
+
+  border-color: #aaa;
+
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.035);
+}
+
+
+.adm-num {
+  text-align: right !important;
+
+  font-variant-numeric: tabular-nums;
+
+  white-space: nowrap;
+}
+
+
+.adm-name {
+  max-width: 230px;
+
+  overflow: hidden;
+
+  text-overflow: ellipsis;
+
+  white-space: nowrap;
+}
+
+
+ul.adm-reasons {
+  margin: 0.1rem 0;
+
+  padding-left: 1.1rem;
+
+  font-size: 0.78rem;
+
+  color: #555;
+}
+
+
+.adm-form-col {
+  display: flex;
+  flex-direction: column;
+
+  gap: 0.4rem;
+
+  align-items: flex-start;
+}
+
+
+details.adm-details {
+  margin-top: 0.75rem;
+}
+
+
+details.adm-details summary {
+  cursor: pointer;
+
+  font-weight: 700;
+
+  font-size: 0.82rem;
+
+  color: #333;
+}
+
+
+/* Foco visível para navegação por teclado. */
+.adm-content a:focus-visible,
+.adm-content button:focus-visible,
+.adm-content input:focus-visible,
+.adm-content select:focus-visible,
+.adm-content summary:focus-visible {
+  outline: 2px solid #2563eb;
+
+  outline-offset: 2px;
+}
+
+
+@media (max-width: 600px) {
+
+  .adm-filters {
+    flex-direction: column;
+
+    align-items: stretch;
+  }
+
+
+  .adm-filters .adm-btn {
+    justify-content: center;
+  }
+
+
+  .adm-name {
+    max-width: 140px;
+  }
+
+}
+
+/* Refinamento limitado às quatro abas de Operações. */
+[data-partial-root] { min-width: 0; }
+[data-partial-root] .adm-ops-head { margin-bottom: 1.5rem; }
+[data-partial-root] .adm-stat-sub { line-height: 1.55; overflow-wrap: anywhere; }
+[data-partial-root] .adm-table td { vertical-align: top; }
+[data-partial-root] .adm-table-wrap:focus-visible {
+  outline: 3px solid #2563eb; outline-offset: -3px;
+}
+[data-partial-root] .adm-name {
+  display: block; width: 230px; max-width: 230px;
+  white-space: normal; overflow-wrap: anywhere;
+}
+[data-partial-root] .adm-actions { flex-wrap: wrap; gap: .75rem; }
+[data-partial-root="manual-review"] .adm-actions {
+  display: grid; gap: 1rem; min-width: 220px;
+}
+[data-partial-root] .adm-form-col { align-items: stretch; }
+[data-partial-root] .adm-review-reason {
+  min-width: 170px; max-width: 300px; padding: .75rem;
+  border-left: 3px solid #b45309; background: #fffbeb;
+  color: #78350f; border-radius: 4px; line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+[data-partial-root] .adm-badge-yellow { background: #fef3c7; color: #78350f; }
+[data-partial-root] .adm-reasons { min-width: 220px; max-width: 340px; line-height: 1.5; }
+[data-partial-root] .adm-reasons li + li { margin-top: .4rem; }
+[data-partial-root] .adm-details summary { padding: .5rem 0; }
+.adm-lazy .adm-loading {
+  min-height: 240px; display: flex; flex-direction: column;
+  justify-content: center; align-items: center; gap: 1rem;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: #fff; color: #555;
+}
+.adm-lazy .adm-loading-mark {
+  width: 44px; height: 6px; border-radius: 3px; background: var(--accent);
+}
+@media (max-width: 600px) {
+  [data-partial-root] .adm-input, [data-partial-root] .adm-btn { min-height: 44px; }
+  [data-partial-root] .adm-input { font-size: 1rem; max-width: 100%; }
+  [data-partial-root] .adm-filters .adm-field { min-width: 0; }
+  [data-partial-root] .adm-name { width: 180px; max-width: 180px; }
+  [data-partial-root] .adm-card-header,
+  [data-partial-root] .adm-card-body { padding: 1rem; }
+}
+
+@media (max-width: 600px) {
+  [data-partial-root] .adm-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+  [data-partial-root] .adm-stat-card { min-width: 0; padding: 1rem; }
+  [data-partial-root] .adm-stat-label { overflow-wrap: anywhere; line-height: 1.4; }
+  [data-partial-root] .adm-stat-value { font-size: 1.65rem; overflow-wrap: anywhere; }
+  .adm-mobile-nav [data-panel="orders"],
+  .adm-mobile-nav [data-panel="manual-review"],
+  .adm-mobile-nav [data-panel="sales-readiness"],
+  .adm-mobile-nav [data-panel="checkout-recovery"] {
+    width: auto; flex: 0 0 auto; min-height: 44px; white-space: nowrap;
+  }
+}
+
+[data-partial-root] .adm-stat-value-text { font-size: 1.1rem; }
+.adm-nav-link[data-panel="orders"]:focus-visible,
+.adm-nav-link[data-panel="manual-review"]:focus-visible,
+.adm-nav-link[data-panel="sales-readiness"]:focus-visible,
+.adm-nav-link[data-panel="checkout-recovery"]:focus-visible {
+  outline: 2px solid #fff; outline-offset: -3px;
+}
+
+/* Token escuro da própria marca garante contraste nos botões pequenos. */
+[data-partial-root] .adm-btn-primary { background: var(--accent-hover); }

@@ -132,9 +132,12 @@ def test_admin_orders_permissions(db, client, login, make_user, admin):
     user = make_user(is_admin=admin)
     order = make_order(db, user)
     login(user.email)
-    for path in ["/admin/pedidos", f"/admin/pedidos/{order.id}"]:
-        response = client.get(path)
-        assert response.status_code == (200 if admin else 302)
+    response = client.get("/admin/pedidos")
+    assert response.status_code == 302
+    if admin:
+        assert response.headers["Location"] == "/admin#orders"
+    detail = client.get(f"/admin/pedidos/{order.id}")
+    assert detail.status_code == (200 if admin else 302)
 
 
 def test_admin_orders_anonymous(client):
@@ -151,7 +154,7 @@ def test_admin_lookup_is_read_only_and_hides_raw_payment(db, client, login, admi
     monkeypatch.setattr(db.session, "commit", forbidden)
     monkeypatch.setattr(routes, "get_payment", forbidden)
     for reference in [order.order_number, str(order.id), order.mp_payment_id]:
-        response = client.get("/admin/pedidos", query_string={"q": reference})
+        response = client.get("/admin/painel/orders", query_string={"q": reference})
         assert response.status_code == 200
         assert order.order_number in response.get_data(as_text=True)
     html = client.get(f"/admin/pedidos/{order.id}").get_data(as_text=True)
@@ -161,14 +164,14 @@ def test_admin_lookup_is_read_only_and_hides_raw_payment(db, client, login, admi
     assert "Nenhum rastreio registrado" in html
     assert client.post(f"/admin/pedidos/{order.id}").status_code == 405
     assert client.get(f"/admin/pedidos/{uuid.uuid4()}").status_code == 404
-    assert client.get("/admin/pedidos?status=invalid").status_code == 400
+    assert client.get("/admin/painel/orders", query_string={"status": "invalid"}).status_code == 400
 
 
 def test_admin_status_filter_and_dashboard_link(db, client, login, admin_user):
     pending = make_order(db, admin_user)
     paid = make_order(db, admin_user, "paid")
     login(admin_user.email)
-    html = client.get("/admin/pedidos?status=pending_payment").get_data(as_text=True)
+    html = client.get("/admin/painel/orders", query_string={"status": "pending_payment"}).get_data(as_text=True)
     assert pending.order_number in html
     assert paid.order_number not in html
     # First dashboard access bootstraps singletons. Restore the prior state:
@@ -179,7 +182,7 @@ def test_admin_status_filter_and_dashboard_link(db, client, login, admin_user):
     try:
         response = client.get("/admin")
         assert response.status_code == 200
-        assert response.get_data(as_text=True).count('href="/admin/pedidos"') >= 2
+        assert 'data-panel="orders"' in response.get_data(as_text=True)
     finally:
         db.session.rollback()
         for model in models:
@@ -192,8 +195,8 @@ def test_admin_status_filter_and_dashboard_link(db, client, login, admin_user):
 def test_admin_list_paginates_without_duplicate_orders(db, client, login, admin_user):
     orders = [make_order(db, admin_user, "charged_back") for _ in range(26)]
     login(admin_user.email)
-    first = client.get("/admin/pedidos?status=charged_back").get_data(as_text=True)
-    second = client.get("/admin/pedidos?status=charged_back&page=2").get_data(as_text=True)
+    first = client.get("/admin/painel/orders", query_string={"status": "charged_back"}).get_data(as_text=True)
+    second = client.get("/admin/painel/orders", query_string={"status": "charged_back", "page": 2}).get_data(as_text=True)
     assert sum(order.order_number in first for order in orders) == 25
     assert sum(order.order_number in second for order in orders) == 1
     assert all(not (order.order_number in first and order.order_number in second) for order in orders)

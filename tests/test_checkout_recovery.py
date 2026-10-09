@@ -26,6 +26,23 @@ from loja.services.checkout_recovery import (
 NOW = datetime(2026, 9, 14, 12, 0, 0)
 
 
+@pytest.fixture(autouse=True)
+def _clean_dashboard_singletons(db):
+    """Ações redirecionam ao dashboard, que cria singletons no 1º acesso."""
+    from loja.modules.models import ContactInfo, FooterConfig, SiteConfig
+
+    known = {
+        model: {row[0] for row in db.session.query(model.id).all()}
+        for model in (SiteConfig, FooterConfig, ContactInfo)
+    }
+    yield
+    for model, ids in known.items():
+        for row in model.query.all():
+            if row.id not in ids:
+                db.session.delete(row)
+    db.session.commit()
+
+
 def _order(**overrides):
     values = dict(
         id=uuid.uuid4(),
@@ -283,20 +300,20 @@ def test_recovery_route_admin_get(client, admin_user, login, db):
     login(admin_user.email, "senha123")
     db.session.add(_order(status="pending_payment", created_at=NOW - timedelta(hours=4)))
     db.session.commit()
-    response = client.get("/admin/recuperacao-checkout")
+    response = client.get("/admin/painel/checkout-recovery")
     assert response.status_code == 200
-    assert "Recuperação de Checkout" in response.get_data(as_text=True)
+    assert "Fila de recuperação" in response.get_data(as_text=True)
     assert "Lote administrativo desligado" in response.get_data(as_text=True)
 
 
 def test_recovery_route_anonymous_redirect(client):
-    response = client.get("/admin/recuperacao-checkout")
+    response = client.get("/admin/painel/checkout-recovery")
     assert response.status_code in (302, 303)
 
 
 def test_recovery_route_non_admin_denied(client, regular_user, login):
     login(regular_user.email, "senha123")
-    response = client.get("/admin/recuperacao-checkout")
+    response = client.get("/admin/painel/checkout-recovery")
     assert response.status_code in (302, 303)
 
 
@@ -305,11 +322,10 @@ def test_recovery_post_honors_gate(client, admin_user, login, db, monkeypatch):
     login(admin_user.email, "senha123")
     db.session.add(_order(status="pending_payment", created_at=NOW - timedelta(hours=4)))
     db.session.commit()
-    response = client.post("/admin/recuperacao-checkout")
+    response = client.post("/admin/recuperacao-checkout", follow_redirects=True)
     assert response.status_code == 200
     text = response.get_data(as_text=True)
-    assert "E-mails enviados" in text
-    assert "Habilitado" in text
+    assert "Lote desligado" in text
 
 def test_batch_gate_defaults_off_even_when_individual_is_enabled(monkeypatch):
     monkeypatch.setenv("CHECKOUT_RECOVERY_ENABLED", "1")
@@ -570,7 +586,7 @@ def test_admin_page_keeps_batch_form_hidden_by_default(
     db.session.commit()
     login(admin_user.email, "senha123")
 
-    response = client.get("/admin/recuperacao-checkout")
+    response = client.get("/admin/painel/checkout-recovery")
     text = response.get_data(as_text=True)
 
     assert response.status_code == 200
@@ -771,7 +787,7 @@ def test_admin_page_exposes_confirmed_skip_even_when_email_gate_is_off(
     db.session.commit()
     login(admin_user.email, "senha123")
 
-    response = client.get("/admin/recuperacao-checkout")
+    response = client.get("/admin/painel/checkout-recovery")
     text = response.get_data(as_text=True)
 
     assert response.status_code == 200

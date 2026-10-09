@@ -1,0 +1,100 @@
+{# Fragmento da aba Revisão manual (sob demanda em /admin#manual-review).
+   POSTs de aprovar/rejeitar submetem normalmente; o servidor redireciona
+   de volta para a aba. Sem <script>. #}
+<div data-partial-root="manual-review">
+  <div class="adm-ops-head">
+    <div>
+      <h2 class="adm-ops-title">Revisão manual</h2>
+      <p class="adm-stat-sub">
+        Confira o motivo e registre sua decisão. Aprovar revalida a compra;
+        rejeitar cancela o pedido e devolve a reserva. Toda decisão fica auditada.
+      </p>
+    </div>
+  </div>
+
+  <div class="adm-stats" aria-label="Resumo da revisão manual">
+    <div class="adm-stat-card">
+      <div class="adm-stat-label">Pedidos na fila</div>
+      <div class="adm-stat-value">{{ orders|length }}</div>
+      <div class="adm-stat-sub">Aguardando decisão administrativa</div>
+    </div>
+  </div>
+
+  <div class="adm-card">
+    <div class="adm-card-header">
+      <span class="adm-card-title">Fila de revisão</span>
+      <span class="adm-stat-sub">Aprovação exige confirmação; rejeição exige motivo. Nenhuma ação consulta provedores externos.</span>
+    </div>
+    <div class="adm-table-wrap" role="region" aria-label="Tabela: Revisão manual" tabindex="0">
+      <table class="adm-table">
+        <thead>
+          <tr>
+            <th>Pedido</th>
+            <th>Cliente</th>
+            <th class="adm-num">Total</th>
+            <th>Criado em</th>
+            <th>Reserva</th>
+            <th>Motivo da revisão</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in orders %}
+          <tr>
+            <td>
+              <strong>{{ order.order_number }}</strong>
+
+            </td>
+            <td>
+              <span class="adm-name" title="{{ order.customer_name or '—' }}">{{ order.customer_name or "—" }}</span>
+              <div class="adm-stat-sub">{{ order.customer_email }}</div>
+            </td>
+            <td class="adm-num"><strong>R$ {{ '%.2f'|format(order.total)|replace('.', ',') }}</strong></td>
+            <td>{{ order.created_at.strftime('%d/%m/%Y %H:%M') if order.created_at else "—" }} UTC</td>
+            <td>
+              {% if order.stock_reserved %}
+              <span class="adm-badge adm-badge-green">sim</span>
+              {% else %}
+              <span class="adm-badge adm-badge-gray">não</span>
+              {% endif %}
+            </td>
+            <td><div class="adm-review-reason">{{ order.manual_review_reason or "—" }}</div></td>
+            <td>
+              <div class="adm-actions">
+                <form method="POST" class="adm-form-col"
+                      action="{{ url_for('admin.manual_review_approve', order_id=order.id) }}"
+                      data-confirm="Aprovar este pedido? O estoque será revalidado e o pedido virará paid.">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="confirm_approve" value="1">
+                  <label class="adm-stat-sub" for="note-{{ order.id }}">Nota da aprovação (opcional)</label>
+                  <input type="text" id="note-{{ order.id }}" name="note" maxlength="500"
+                         placeholder="Nota da aprovação (opcional)"
+                         class="adm-input" autocomplete="off">
+                  <button type="submit" class="adm-btn adm-btn-primary adm-btn-sm">
+                    Aprovar
+                  </button>
+                </form>
+                <form method="POST" class="adm-form-col"
+                      action="{{ url_for('admin.manual_review_reject', order_id=order.id) }}"
+                      data-confirm="Rejeitar este pedido? O status ficará cancelled e a reserva será devolvida.">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="confirm_reject" value="1">
+                  <label class="adm-stat-sub" for="reason-{{ order.id }}">Motivo da rejeição</label>
+                  <input type="text" id="reason-{{ order.id }}" name="reason" maxlength="500" required
+                         placeholder="Motivo da rejeição"
+                         class="adm-input" autocomplete="off">
+                  <button type="submit" class="adm-btn adm-btn-danger adm-btn-sm">
+                    Rejeitar
+                  </button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="adm-empty">Nenhum pedido aguardando revisão manual.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
