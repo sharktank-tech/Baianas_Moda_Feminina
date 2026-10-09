@@ -287,7 +287,7 @@ def test_correcao_com_auditoria_e_stale_check(db, make_user, make_product):
         **_purchase_args(order, item, admin_user_id=admin.id))
     db.session.commit()
     purchase = db.session.get(ManualSupplierPurchase, res.purchase_id)
-    stamp = purchase.updated_at.strftime("%Y-%m-%dT%H:%M:%S")
+    stamp = purchase.updated_at.isoformat()
 
     fixed = dispatch.correct_manual_purchase(
         purchase_id=purchase.id, external_order_id="ALI-2002",
@@ -296,7 +296,8 @@ def test_correcao_com_auditoria_e_stale_check(db, make_user, make_product):
     db.session.commit()
     assert fixed.external_order_id == "ALI-2002"
     audit = ManualOperationalAudit.query.filter_by(
-        entity="purchase", entity_id=str(purchase.id)).all()
+        entity="purchase", entity_id=str(purchase.id),
+        field="external_order_id").all()
     assert len(audit) == 1
     assert (audit[0].field, audit[0].old_value, audit[0].new_value) == (
         "external_order_id", "ALI-1001", "ALI-2002")
@@ -311,7 +312,20 @@ def test_correcao_com_auditoria_e_stale_check(db, make_user, make_product):
     with pytest.raises(ValueError, match="reason_invalid"):
         dispatch.correct_manual_purchase(
             purchase_id=purchase.id, external_order_id="ALI-3003",
-            reason=" ", admin_user_id=admin.id)
+            reason=" ", admin_user_id=admin.id,
+            expected_updated_at=db.session.get(
+                ManualSupplierPurchase, purchase.id).updated_at.isoformat())
+    db.session.rollback()
+    with pytest.raises(ValueError, match="expected_updated_at_required"):
+        dispatch.correct_manual_purchase(
+            purchase_id=purchase.id, external_order_id="ALI-3003",
+            reason="x", admin_user_id=admin.id)
+    db.session.rollback()
+    with pytest.raises(ValueError, match="expected_updated_at_invalid"):
+        dispatch.correct_manual_purchase(
+            purchase_id=purchase.id, external_order_id="ALI-3003",
+            reason="x", admin_user_id=admin.id,
+            expected_updated_at="nao-e-data")
     db.session.rollback()
     assert db.session.get(
         ManualSupplierPurchase, purchase.id).external_order_id == "ALI-2002"
@@ -330,7 +344,7 @@ def test_correcao_rastreio(db, make_user, make_product):
         evidence_ref="EV", items={item.id: 1})
     db.session.commit()
     shipment = db.session.get(Shipment, ship.shipment_id)
-    stamp = shipment.updated_at.strftime("%Y-%m-%dT%H:%M:%S")
+    stamp = shipment.updated_at.isoformat()
 
     dispatch.correct_manual_shipment(
         shipment_id=shipment.id, carrier="Jadlog", reason="etiqueta trocada",
@@ -338,7 +352,8 @@ def test_correcao_rastreio(db, make_user, make_product):
     db.session.commit()
     assert db.session.get(Shipment, shipment.id).carrier == "Jadlog"
     rows = ManualOperationalAudit.query.filter_by(
-        entity="shipment", entity_id=str(shipment.id)).all()
+        entity="shipment", entity_id=str(shipment.id),
+        field="carrier").all()
     assert [(r.field, r.old_value, r.new_value) for r in rows] == [
         ("carrier", "Correios", "Jadlog")]
     assert order.status == "paid"  # correção não muda o pedido
@@ -505,10 +520,152 @@ def test_sem_chamadas_externas_sem_mutacao(db, make_user, make_product, monkeypa
         tracking_code="BR123456789XX", carrier="Correios",
         evidence_ref="EV", items={item.id: 1})
     db.session.commit()
+    ship_row = db.session.query(Shipment).first()
     dispatch.correct_manual_shipment(
-        shipment_id=db.session.query(Shipment).first().id,
-        carrier="Jadlog", reason="ajuste", admin_user_id=admin.id)
+        shipment_id=ship_row.id,
+        carrier="Jadlog", reason="ajuste", admin_user_id=admin.id,
+        expected_updated_at=ship_row.updated_at.isoformat())
     db.session.commit()
     db.session.expire_all()
     assert (product.stock, order.total, order.status, order.stock_reserved) == snapshot
     assert product.price == Decimal("49.90")
+
+
+# --------------------------------------------------------------------------
+# 10) Itens da revisão: parciais, vínculo, evidência privada, bucket
+# --------------------------------------------------------------------------
+
+def test_form_parcial_ignora_zeros_mas_exige_positiva(
+    client, db, admin_user, login, make_product
+):
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product)
+    login(admin_user.email)
+    # Zero em outro item + positiva neste: registra parcial.
+    other, other_item = _paid_order(db, admin_user, product)
+    resp = client.post(
+        f"/admin/pedidos/{order.id}/compra-manual",
+        data={"external_order_id": "ALI-P", f"item_{item.id}": "1",
+              f"item_{other_item.id}": "0",
+              "purchased_at": "2026-10-08T10:00", "evidence_ref": "EV"},
+        follow_redirects=True,
+    )
+    assert "Compra registrada" in resp.get_data(as_text=True)
+    # Item de outro pedido mesmo com zero? não — outro pedido é recusado.
+    resp = client.post(
+        f"/admin/pedidos/{order.id}/compra-manual",
+        data={"external_order_id": "ALI-Q", f"item_{other_item.id}": "2",
+              "purchased_at": "2026-10-08T10:00", "evidence_ref": "EV"},
+        follow_redirects=True,
+    )
+    assert "não pertence" in resp.get_data(as_text=True)
+    # Só zeros: items_required.
+    resp = client.post(
+        f"/admin/pedidos/{order.id}/compra-manual",
+        data={"external_order_id": "ALI-R", f"item_{item.id}": "0",
+              "purchased_at": "2026-10-08T10:00", "evidence_ref": "EV"},
+        follow_redirects=True,
+    )
+    assert "ao menos um item" in resp.get_data(as_text=True)
+    # Negativo: recusado.
+    resp = client.post(
+        f"/admin/pedidos/{order.id}/compra-manual",
+        data={"external_order_id": "ALI-S", f"item_{item.id}": "-1",
+              "purchased_at": "2026-10-08T10:00", "evidence_ref": "EV"},
+        follow_redirects=True,
+    )
+    assert "Quantidade inválida" in resp.get_data(as_text=True)
+
+
+def test_mesmo_codigo_outra_compra_mesmo_pedido_conflito(
+    db, make_user, make_product
+):
+    user = make_user()
+    product = make_product(stock=10)
+    order, item = _paid_order(db, user, product, quantity=4)
+    pa = dispatch.register_manual_purchase(
+        **_purchase_args(order, item, external_order_id="ALI-1",
+                         items={item.id: 2}))
+    db.session.commit()
+    pb = dispatch.register_manual_purchase(
+        **_purchase_args(order, item, external_order_id="ALI-2",
+                         items={item.id: 2}))
+    db.session.commit()
+    dispatch.register_manual_shipment(
+        order_id=order.id, purchase_id=pa.purchase_id,
+        tracking_code="BR000000001XX",
+        carrier="Correios", evidence_ref="EV-1", items={item.id: 1})
+    db.session.commit()
+    # Mesmo código na outra compra: conflito, sem escrita parcial.
+    with pytest.raises(ValueError, match="tracking_code_other_purchase"):
+        dispatch.register_manual_shipment(
+            order_id=order.id, purchase_id=pb.purchase_id,
+            tracking_code="BR000000001XX",
+            carrier="Correios", evidence_ref="EV-2", items={item.id: 1})
+    db.session.rollback()
+    assert Shipment.query.count() == 1
+    assert ShipmentItem.query.count() == 1
+
+
+def test_evidencia_fora_das_telas_publicas(
+    client, db, make_user, make_product, login
+):
+    owner = make_user()
+    product = make_product(stock=10)
+    order, item = _paid_order(db, owner, product)
+    res = dispatch.register_manual_purchase(
+        **_purchase_args(order, item, evidence_ref="EV-IDENTIFICAVEL-XYZ"))
+    db.session.commit()
+    dispatch.register_manual_shipment(
+        order_id=order.id, purchase_id=res.purchase_id,
+        tracking_code="BR123456789XX", carrier="Correios",
+        posted_at="2026-10-08T12:00:00", evidence_ref="EV-POST-XYZ",
+        items={item.id: 1})
+    db.session.commit()
+    login(owner.email)
+    for path in (f"/encomendas/pedido/{order.id}", "/acompanhar-pedido"):
+        html = client.get(path).get_data(as_text=True)
+        assert "EV-IDENTIFICAVEL-XYZ" not in html
+        assert "EV-POST-XYZ" not in html
+    html = client.get(f"/encomendas/pedido/{order.id}").get_data(as_text=True)
+    assert "BR123456789XX" in html  # código público segue visível
+
+
+def test_bucket_exige_entrega_total(client, db, make_user, make_product, login):
+    from loja.views.routes import _order_purchase_bucket
+
+    owner = make_user()
+    product = make_product(stock=10)
+    order, item = _paid_order(db, owner, product, quantity=2)
+    res = dispatch.register_manual_purchase(**_purchase_args(order, item))
+    db.session.commit()
+    ship = dispatch.register_manual_shipment(
+        order_id=order.id, purchase_id=res.purchase_id,
+        tracking_code="BR123456789XX", carrier="Correios",
+        evidence_ref="EV", items={item.id: 1})
+    db.session.commit()
+    db.session.expire_all()
+    loaded = db.session.get(Order, order.id)
+    # Uma remessa entregue cobrindo 1 de 2: NÃO conclui.
+    db.session.query(Shipment).filter_by(
+        id=ship.shipment_id).update({"status": "entregue"})
+    db.session.commit()
+    db.session.expire_all()
+    assert _order_purchase_bucket(db.session.get(Order, order.id)) == "enviado"
+    login(owner.email)
+    partial = client.get(f"/encomendas/pedido/{order.id}").get_data(as_text=True)
+    assert "itens pendentes" in partial
+    # Cobertura total entregue: conclui.
+    ship2 = dispatch.register_manual_shipment(
+        order_id=order.id, purchase_id=res.purchase_id,
+        tracking_code="BR987654321XX", carrier="Correios",
+        evidence_ref="EV", items={item.id: 1})
+    db.session.commit()
+    db.session.query(Shipment).filter_by(
+        id=ship2.shipment_id).update({"status": "entregue"})
+    db.session.commit()
+    db.session.expire_all()
+    assert _order_purchase_bucket(
+        db.session.get(Order, order.id)) == "aguardando_avaliacao"
+    html = client.get(f"/encomendas/pedido/{order.id}").get_data(as_text=True)
+    assert "itens pendentes" not in html

@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS manual_supplier_purchase_items (
     purchase_id UUID NOT NULL
         REFERENCES manual_supplier_purchases(id) ON DELETE CASCADE,
     order_item_id UUID NOT NULL REFERENCES order_items(id) ON DELETE RESTRICT,
-    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    quantity INTEGER NOT NULL,
+    CONSTRAINT ck_manual_purchase_item_qty CHECK (quantity > 0),
     UNIQUE(purchase_id, order_item_id)
 );
 
@@ -60,9 +61,10 @@ CREATE INDEX IF NOT EXISTS ix_shipments_manual_purchase
 
 CREATE TABLE IF NOT EXISTS shipment_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    shipment_id BigInteger NOT NULL REFERENCES shipments(id) ON DELETE CASCADE,
+    shipment_id BIGINT NOT NULL REFERENCES shipments(id) ON DELETE CASCADE,
     order_item_id UUID NOT NULL REFERENCES order_items(id) ON DELETE RESTRICT,
-    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    quantity INTEGER NOT NULL,
+    CONSTRAINT ck_shipment_item_qty CHECK (quantity > 0),
     UNIQUE(shipment_id, order_item_id)
 );
 
@@ -71,7 +73,9 @@ CREATE INDEX IF NOT EXISTS ix_shipment_items_shipment
 
 CREATE TABLE IF NOT EXISTS manual_operational_audit (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    entity VARCHAR(16) NOT NULL CHECK (entity IN ('purchase', 'shipment')),
+    entity VARCHAR(16) NOT NULL,
+    CONSTRAINT ck_manual_audit_entity
+        CHECK (entity IN ('purchase', 'shipment')),
     entity_id TEXT NOT NULL,
     field VARCHAR(64) NOT NULL,
     old_value TEXT,

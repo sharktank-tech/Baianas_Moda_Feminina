@@ -85,34 +85,109 @@ def pg_app(monkeypatch):
 
 
 def test_migration_0039_aplica_e_valida(pg_app):
+    """Parte de schema legado: aplica 2x, valida tipos/constraints/índices.
+
+    Usa engine/schema próprios SEM create_all: prova atualização real do
+    schema anterior (não no-op sobre tabelas já criadas pelos models).
+    """
     from migrations.validate_0039 import validate_schema
 
-    schema = pg_app.config["TEST_SCHEMA"]
+    schema = "pollo_test_manual_mig_%s" % secrets.token_hex(4)
     engine = create_engine(
         DATABASE_URL,
         connect_args={"options": "-csearch_path=%s" % schema},
     )
-    with engine.begin() as conn:
-        assert conn.execute(text("SELECT current_schema()")).scalar() == schema
-        migration = Path("migrations/0039_manual_dispatch.sql").read_text()
-        migration = migration.replace("SET search_path TO pollomodas;",
-                                      'SET search_path TO "%s";' % schema)
-        lines = [ln for ln in migration.splitlines()
-                 if not ln.lstrip().startswith("\\")]
-        for _ in (1, 2):  # idempotente: aplica 2x
-            conn.exec_driver_sql("\n".join(lines))
-    engine.dispose()
+    try:
+        with engine.begin() as conn:
+            conn.execute(text('CREATE SCHEMA "%s"' % schema))
+            for stmt in (
+                "CREATE TABLE users (id uuid PRIMARY KEY)",
+                "CREATE TABLE orders (id uuid PRIMARY KEY)",
+                "CREATE TABLE order_items (id uuid PRIMARY KEY, "
+                "order_id uuid NOT NULL REFERENCES orders(id))",
+                "CREATE TABLE shipments (id bigint PRIMARY KEY, "
+                "order_id uuid NOT NULL REFERENCES orders(id), "
+                "tracking_code text UNIQUE NOT NULL, carrier text, "
+                "provider text NOT NULL DEFAULT 'manual', "
+                "status text NOT NULL DEFAULT 'aguardando_postagem')",
+            ):
+                conn.execute(text(stmt))
+            seed_order = uuid.uuid4()
+            conn.execute(
+                text("INSERT INTO orders (id) VALUES (:id)"),
+                {"id": str(seed_order)},
+            )
+            conn.execute(
+                text("INSERT INTO shipments (id, order_id, tracking_code) "
+                     "VALUES (7, :id, 'BR000000007XX')"),
+                {"id": str(seed_order)},
+            )
+            migration = Path(
+                "migrations/0039_manual_dispatch.sql").read_text()
+            migration = migration.replace(
+                "SET search_path TO pollomodas;",
+                'SET search_path TO "%s";' % schema,
+            )
+            runnable = "\n".join(
+                ln for ln in migration.splitlines()
+                if not ln.lstrip().startswith("\\")
+            )
+            for _ in (1, 2):  # idempotente: aplica 2x
+                conn.exec_driver_sql(runnable)
+            cols = dict(conn.execute(text(
+                "SELECT table_name || '.' || column_name, "
+                "       data_type || ',' || is_nullable "
+                "FROM information_schema.columns "
+                "WHERE table_schema = :s AND table_name IN "
+                "('manual_supplier_purchases', "
+                " 'manual_supplier_purchase_items', 'shipment_items', "
+                " 'manual_operational_audit')"
+            ), {"s": schema}).fetchall())
+            assert cols["manual_supplier_purchases.external_order_id"] == \
+                "character varying,NO", cols
+            assert cols["manual_supplier_purchase_items.quantity"] == \
+                "integer,NO", cols
+            assert cols["shipment_items.shipment_id"] == "bigint,NO", cols
+            assert cols["manual_operational_audit.reason"] == \
+                "character varying,NO", cols
+            checks = {r[0] for r in conn.execute(text(
+                "SELECT conname FROM pg_constraint "
+                "WHERE connamespace = to_regnamespace(:s) AND contype = 'c'"
+            ), {"s": schema}).fetchall()}
+            assert {"ck_manual_purchase_item_qty", "ck_shipment_item_qty",
+                    "ck_manual_audit_entity"} <= checks, checks
+            idx = {r[0] for r in conn.execute(text(
+                "SELECT indexname FROM pg_indexes WHERE schemaname = :s"
+            ), {"s": schema}).fetchall()}
+            assert {"ix_manual_purchases_order",
+                    "ix_shipments_manual_purchase",
+                    "ix_manual_audit_entity"} <= idx, idx
+            # Registros legados preservados.
+            assert conn.execute(
+                text("SELECT tracking_code FROM shipments WHERE id = 7")
+            ).scalar() == "BR000000007XX"
+            assert conn.execute(
+                text("SELECT count(*) FROM orders")).scalar() == 1
 
-    import psycopg2
+        import psycopg2
 
-    raw = psycopg2.connect(
-        DATABASE_URL.replace("postgresql+psycopg2://", "postgresql://"),
-        connect_timeout=15,
-    )
-    raw.autocommit = True
-    errors = validate_schema(raw, schema=schema)
-    raw.close()
-    assert errors == []
+        raw = psycopg2.connect(
+            DATABASE_URL.replace("postgresql+psycopg2://", "postgresql://"),
+            connect_timeout=15,
+        )
+        raw.autocommit = True
+        try:
+            from migrations.validate_0039 import validate_schema
+
+            assert validate_schema(raw, schema=schema) == []
+        finally:
+            raw.close()
+    finally:
+        with engine.begin() as conn:
+            conn.execute(
+                text('DROP SCHEMA IF EXISTS "%s" CASCADE' % schema))
+        engine.dispose()
+        engine.dispose()
 
 
 def _materialize(app):
@@ -165,17 +240,22 @@ def _materialize(app):
 
 
 def _race(pg_app, ids, call):
+    """Duas threads largando juntas da barreira; retorna tudo + eventos."""
     from loja import db
 
     gate = threading.Barrier(3)
     errors, results = [], []
+    entered = [threading.Event(), threading.Event()]
+    done = [threading.Event(), threading.Event()]
 
     def worker(tag):
         with pg_app.app_context():
             try:
                 gate.wait(30)
+                entered[tag].set()
                 results.append((tag, call()))
                 db.session.commit()
+                done[tag].set()
             except Exception as exc:  # noqa: BLE001 (duplicata esperada)
                 db.session.rollback()
                 errors.append((tag, type(exc).__name__, str(exc)[:200]))
@@ -187,18 +267,44 @@ def _race(pg_app, ids, call):
     for thread in threads:
         thread.start()
     gate.wait(30)
+    return threads, entered, done, results, errors
+
+
+def _join_all(threads):
     for thread in threads:
         thread.join(60)
     assert not any(t.is_alive() for t in threads)
-    return results, errors
 
 
-def test_corrida_mesmo_numero_externo_uma_linha(pg_app):
+def test_corrida_mesmo_numero_externo_uma_linha(pg_app, monkeypatch):
+    """Sobreposição real: a 2ª thread espera o lock da 1ª; 1 linha + totais.
+
+    Pausa a 1ª chamada DENTRO da seção crítica (contabilidade sob o lock
+    de Order); a 2ª larga junto da barreira e não termina enquanto o lock
+    está segurado — evidência de contenção, não execução serial.
+    """
     from loja import db
-    from loja.modules.models import ManualSupplierPurchase
+    from loja.modules.models import (
+        ManualSupplierPurchase, ManualSupplierPurchaseItem,
+    )
     from loja.services import manual_dispatch as dispatch
 
     ids = _materialize(pg_app)
+    holding = threading.Event()
+    allow = threading.Event()
+    paused = threading.Event()
+    original_sum = dispatch._sum_registered
+
+    def pausing_sum(order_item_id, *, exclude_purchase_id=None):
+        if not paused.is_set():
+            paused.set()
+            holding.set()
+            assert allow.wait(60)
+        return original_sum(
+            order_item_id, exclude_purchase_id=exclude_purchase_id
+        )
+
+    monkeypatch.setattr(dispatch, "_sum_registered", pausing_sum)
 
     def call():
         return dispatch.register_manual_purchase(
@@ -208,19 +314,33 @@ def test_corrida_mesmo_numero_externo_uma_linha(pg_app):
             admin_user_id=ids["user_id"],
         )
 
-    results, errors = _race(pg_app, ids, call)
+    threads, entered, done, results, errors = _race(pg_app, ids, call)
+    assert holding.wait(30)
+    assert entered[0].wait(15) and entered[1].wait(15)
+    assert done[0].wait(3) is False and done[1].wait(3) is False
+    allow.set()
+    _join_all(threads)
+
+    assert errors == [] or all(k == "ValueError" for _, k, _ in errors)
     with pg_app.app_context():
-        total = ManualSupplierPurchase.query.count()
-    assert total == 1
-    assert len(results) + len(errors) == 2
-    # Perdedor: erro limpo de duplicidade (constraint ou pré-checagem).
-    for _, kind, _ in errors:
-        assert kind in ("IntegrityError", "ValueError")
+        assert ManualSupplierPurchase.query.count() == 1
+        purchase = ManualSupplierPurchase.query.first()
+        assert purchase.external_order_id == "ALI-RACE-1"
+        linked = sum(
+            link.quantity for link in purchase.items
+        )
+        assert linked == 2  # quantidade final exata, sem duplicar nem perder
+        assert ManualSupplierPurchaseItem.query.count() == 1
 
 
-def test_corrida_mesmo_rastreio_uma_remessa(pg_app):
+def test_corrida_mesmo_rastreio_uma_remessa(pg_app, monkeypatch):
+    """Mesmo código em corrida: sobreposição sob lock, 1 remessa idêntica.
+
+    A repetição idêntica (mesma compra + mesmos itens) retorna o registro
+    existente; cobertura final exata, sem duplicar.
+    """
     from loja import db
-    from loja.modules.models import ManualSupplierPurchase, Shipment
+    from loja.modules.models import Shipment, ShipmentItem
     from loja.services import manual_dispatch as dispatch
 
     ids = _materialize(pg_app)
@@ -234,6 +354,23 @@ def test_corrida_mesmo_rastreio_uma_remessa(pg_app):
         db.session.commit()
         purchase_id = purchase.purchase_id
 
+    holding = threading.Event()
+    allow = threading.Event()
+    paused = threading.Event()
+    original_covered = dispatch._sum_covered
+
+    def pausing_covered(purchase_id_, order_item_id, *, exclude_shipment_id=None):
+        if not paused.is_set():
+            paused.set()
+            holding.set()
+            assert allow.wait(60)
+        return original_covered(
+            purchase_id_, order_item_id,
+            exclude_shipment_id=exclude_shipment_id,
+        )
+
+    monkeypatch.setattr(dispatch, "_sum_covered", pausing_covered)
+
     def call():
         return dispatch.register_manual_shipment(
             order_id=ids["order_id"], purchase_id=purchase_id,
@@ -241,10 +378,21 @@ def test_corrida_mesmo_rastreio_uma_remessa(pg_app):
             evidence_ref="EV", items={ids["item_id"]: 1},
         )
 
-    results, errors = _race(pg_app, ids, call)
+    threads, entered, done, results, errors = _race(pg_app, ids, call)
+    assert holding.wait(30)
+    assert entered[0].wait(15) and entered[1].wait(15)
+    assert done[0].wait(3) is False and done[1].wait(3) is False
+    allow.set()
+    _join_all(threads)
+
+    assert errors == []
+    assert sorted(r.created for _, r in results) == [False, True]
     with pg_app.app_context():
-        total = Shipment.query.filter_by(tracking_code="BR999999999XX").count()
-    assert total == 1
-    assert len(results) + len(errors) == 2
-    for _, kind, _ in errors:
-        assert kind in ("IntegrityError", "ValueError")
+        shipments = Shipment.query.filter_by(
+            tracking_code="BR999999999XX").all()
+        assert len(shipments) == 1
+        assert shipments[0].status == "aguardando_postagem"
+        assert sum(
+            link.quantity for link in ShipmentItem.query.filter_by(
+                shipment_id=shipments[0].id).all()
+        ) == 1

@@ -1444,6 +1444,12 @@ class Shipment(db.Model):
         order_by=lambda: TrackingEvent.event_at.desc(),
     )
 
+    coverage = db.relationship(
+        "ShipmentItem",
+        cascade="all, delete-orphan",
+        lazy=True,
+    )
+
     def __repr__(self):
         return (
             f"<Shipment {self.id} order={self.order_id} "

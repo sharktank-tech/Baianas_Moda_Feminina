@@ -170,20 +170,18 @@ def _audit(*, entity, entity_id, field, old, new, admin_user_id, reason) -> None
 
 
 def _check_fresh(row, expected_updated_at) -> None:
-    """Rejeita alteração sobre estado desatualizado (peça recarregar).
+    """Versão obrigatória, comparada exatamente sob lock.
 
-    Compara em granularidade de segundo: o formulário carrega
-    `datetime-local` (sem microssegundos) e o banco os preserva.
+    O token viaja com microssegundos (`isoformat` completo); omitir ou
+    adulterar o token recusa a alteração — peça recarregar.
     """
     if expected_updated_at in (None, ""):
-        return
+        raise ValueError("expected_updated_at_required")
     expected = _parse_naive_dt(expected_updated_at, field="expected_updated_at")
-    expected = expected.replace(microsecond=0)
+    expected = expected.replace(tzinfo=None)
     current = getattr(row, "updated_at", None)
     current = current.replace(tzinfo=None) if current is not None else None
-    if current is not None:
-        current = current.replace(microsecond=0)
-    if current != expected:
+    if current is None or current != expected:
         raise ValueError("stale_state_reload")
 
 
@@ -256,6 +254,11 @@ def register_manual_purchase(
             order_item_id=item_id,
             quantity=qty,
         ))
+    _audit(
+        entity="purchase", entity_id=purchase.id, field="created",
+        old=None, new=f"{code} | evidencia: {purchase.evidence_ref}",
+        admin_user_id=admin_user_id, reason="registro inicial",
+    )
     db.session.flush()
     return ManualDispatchResult(created=True, purchase_id=purchase.id)
 
@@ -317,14 +320,6 @@ def register_manual_shipment(
         evidence_ref, field="evidence_ref", maximum=EVIDENCE_REF_MAX
     )
 
-    existing = Shipment.query.filter_by(tracking_code=code).first()
-    if existing is not None:
-        if existing.order_id != order.id:
-            raise ValueError("tracking_code_in_use")
-        return ManualDispatchResult(
-            created=False, purchase_id=purchase.id, shipment_id=existing.id
-        )
-
     if not items:
         raise ValueError("items_required")
     sold = _order_items_map(order)
@@ -337,12 +332,35 @@ def register_manual_shipment(
         if item_id not in sold:
             raise ValueError("order_item_not_in_order")
         qty = _require_qty(raw_qty)
-        linked = _purchase_linked_qty(purchase, item_id)
-        if linked <= 0:
+        if _purchase_linked_qty(purchase, item_id) <= 0:
             raise ValueError("order_item_not_in_purchase")
+        coverage[item_id] = qty
+
+    existing = Shipment.query.filter_by(tracking_code=code).first()
+    if existing is not None:
+        if existing.order_id != order.id:
+            raise ValueError("tracking_code_in_use")
+        if existing.manual_purchase_id != purchase.id:
+            # Mesmo código em OUTRA compra (ainda que do mesmo pedido):
+            # vínculo diferente = conflito claro, sem escrita parcial.
+            raise ValueError("tracking_code_other_purchase")
+        covered_now = {
+            str(link.order_item_id): int(link.quantity or 0)
+            for link in ShipmentItem.query.filter_by(
+                shipment_id=existing.id
+            ).all()
+        }
+        wanted = {str(item_id): qty for item_id, qty in coverage.items()}
+        if covered_now != wanted:
+            raise ValueError("shipment_content_differs")
+        return ManualDispatchResult(
+            created=False, purchase_id=purchase.id, shipment_id=existing.id
+        )
+
+    for item_id, qty in coverage.items():
+        linked = _purchase_linked_qty(purchase, item_id)
         if _sum_covered(purchase.id, item_id) + qty > linked:
             raise ValueError("quantity_exceeds_purchase")
-        coverage[item_id] = qty
 
     shipment = Shipment(
         id=_new_bigint_id(),
@@ -363,6 +381,8 @@ def register_manual_shipment(
         id=_new_bigint_id(),
         shipment_id=shipment.id,
         status="aguardando_postagem",
+        # Descrição pública genérica: a referência da postagem é privada
+        # (auditoria abaixo) e nunca aparece nas telas do cliente.
         description="Código de rastreio cadastrado. Aguardando postagem.",
         event_at=utcnow(),
     ))
@@ -377,10 +397,16 @@ def register_manual_shipment(
             id=_new_bigint_id(),
             shipment_id=shipment.id,
             status="postado",
-            description=f"Postagem registrada (evidência: {ref}).",
+            description="Postagem registrada.",
             event_at=_parse_naive_dt(posted_at, field="posted_at"),
         ))
         shipment.status = "postado"
+    _audit(
+        entity="shipment", entity_id=shipment.id, field="created",
+        old=None,
+        new=f"{code} | {carrier_name} | evidencia: {ref}",
+        admin_user_id=admin_user_id, reason="registro inicial",
+    )
     db.session.flush()
     return ManualDispatchResult(
         created=True, purchase_id=purchase.id, shipment_id=shipment.id

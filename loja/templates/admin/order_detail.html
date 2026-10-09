@@ -36,7 +36,7 @@
     </ul>
     <form method="POST" action="{{ url_for('admin.correct_manual_purchase', purchase_id=purchase.id) }}" class="mt-2 flex flex-wrap gap-2 items-end">
       {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-      <input type="hidden" name="expected_updated_at" value="{{ purchase.updated_at.strftime('%Y-%m-%dT%H:%M:%S') if purchase.updated_at else '' }}">
+      <input type="hidden" name="expected_updated_at" value="{{ purchase.updated_at.isoformat() if purchase.updated_at else '' }}">
       <label class="text-sm">Novo número <input class="border p-1" type="text" name="external_order_id" maxlength="64" value="{{ purchase.external_order_id }}" required></label>
       <label class="text-sm">Justificativa <input class="border p-1" type="text" name="reason" maxlength="500" required placeholder="Motivo da correção"></label>
       <button class="border p-1" type="submit">Corrigir número</button>
@@ -83,7 +83,7 @@
     <p><strong>{{ shipment.tracking_code }}</strong> · {{ shipment.carrier or '—' }} · {{ shipment.status }}</p>
     <form method="POST" action="{{ url_for('admin.correct_manual_shipment', shipment_id=shipment.id) }}" class="mt-2 flex flex-wrap gap-2 items-end">
       {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-      <input type="hidden" name="expected_updated_at" value="{{ shipment.updated_at.strftime('%Y-%m-%dT%H:%M:%S') if shipment.updated_at else '' }}">
+      <input type="hidden" name="expected_updated_at" value="{{ shipment.updated_at.isoformat() if shipment.updated_at else '' }}">
       <label class="text-sm">Transportadora <input class="border p-1" type="text" name="carrier" maxlength="60" value="{{ shipment.carrier or '' }}"></label>
       <label class="text-sm">Código <input class="border p-1" type="text" name="tracking_code" maxlength="64" value="{{ shipment.tracking_code }}"></label>
       <label class="text-sm">Justificativa <input class="border p-1" type="text" name="reason" maxlength="500" required placeholder="Motivo da correção"></label>

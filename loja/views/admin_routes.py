@@ -126,16 +126,21 @@ def order_detail(order_id):
             .all()
         )
         coverage = {item_id: int(total or 0) for item_id, total in rows}
-    known_ids = {str(p.id) for p in purchases} | {
-        str(s.id) for s in order.shipments
-    }
-    audit = [
-        a for a in (
+    # Filtra no banco pelo pedido (entidade + ids vinculados): os últimos N
+    # globais poderiam esconder o histórico deste pedido.
+    entity_ids = (
+        [str(p.id) for p in purchases]
+        + [str(s.id) for s in order.shipments]
+    )
+    audit = []
+    if entity_ids:
+        audit = (
             ManualOperationalAudit.query
-            .order_by(ManualOperationalAudit.created_at.desc()).limit(100).all()
+            .filter(ManualOperationalAudit.entity_id.in_(entity_ids))
+            .order_by(ManualOperationalAudit.created_at.desc())
+            .limit(100)
+            .all()
         )
-        if str(a.entity_id) in known_ids
-    ]
     return render_template(
         "admin/order_detail.html", order=order, status_labels=ORDER_STATUS_LABELS,
         payment_confirmed=payment_is_confirmed(order),
@@ -145,7 +150,12 @@ def order_detail(order_id):
 
 
 def _manual_items_from_form():
-    """Itens `item_<uuid>=qtd` do formulário (ids persistidos, nunca nomes)."""
+    """Itens `item_<uuid>=qtd` do formulário (ids persistidos, nunca nomes).
+
+    Zeros/ausentes são ignorados (permite selecionar só parte dos itens);
+    negativos ou inválidos recusam o formulário; sem ao menos uma
+    quantidade positiva, o serviço levanta `items_required`.
+    """
     items = {}
     for key, raw in request.form.items():
         if not key.startswith("item_"):
@@ -154,7 +164,16 @@ def _manual_items_from_form():
             item_id = PythonUUID(key[5:])
         except ValueError:
             raise ValueError("order_item_invalid")
-        items[item_id] = raw
+        text = str(raw or "").strip()
+        if text in ("", "0"):
+            continue
+        try:
+            qty = int(text)
+        except (TypeError, ValueError):
+            raise ValueError("quantity_invalid")
+        if qty < 0:
+            raise ValueError("quantity_invalid")
+        items[item_id] = qty
     return items
 
 
@@ -179,6 +198,8 @@ _MANUAL_ERROR_MESSAGES = {
     "external_order_id_in_use": "Número externo já registrado em outro pedido.",
     "tracking_code_invalid": "Código de rastreio inválido.",
     "tracking_code_in_use": "Código de rastreio já ligado a outro pedido.",
+    "tracking_code_other_purchase": "Código já vinculado a outra compra deste pedido.",
+    "shipment_content_differs": "Rastreio existente com cobertura diferente; corrija em vez de duplicar.",
     "carrier_invalid": "Transportadora inválida.",
     "evidence_ref_invalid": "Referência da evidência inválida.",
     "purchased_at_invalid": "Data/hora da compra inválida.",
@@ -192,6 +213,8 @@ _MANUAL_ERROR_MESSAGES = {
     "shipment_invalid": "Remessa inválida.",
     "shipment_not_found": "Remessa não encontrada.",
     "reason_invalid": "Justificativa obrigatória.",
+    "expected_updated_at_required": "Versão do registro ausente — recarregue a página.",
+    "expected_updated_at_invalid": "Versão do registro inválida — recarregue a página.",
     "stale_state_reload": "Registro alterado por outro operador — recarregue e confira antes de corrigir.",
 }
 
