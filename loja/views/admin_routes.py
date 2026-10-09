@@ -10,6 +10,7 @@ from flask import (
     url_for,
     flash,
     current_app,
+    abort,
 )
 from flask_login import login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash
@@ -50,6 +51,61 @@ admin_blueprint = Blueprint(
     __name__,
     template_folder="templates/admin"
 )
+
+ORDER_STATUS_LABELS = {
+    "pending_payment": "Aguardando pagamento", "paid": "Pago",
+    "manual_review": "Revisão manual", "payment_failed": "Pagamento recusado",
+    "expired": "Expirado", "cancelled": "Cancelado",
+    "refunded": "Reembolsado", "charged_back": "Contestação",
+}
+
+
+@admin_blueprint.route("/admin/pedidos")
+@admin_required
+def orders_list():
+    """Consulta administrativa sem sincronizar ou alterar pagamentos."""
+    from loja.modules.getway_mercado_pago.payment_models import Order
+    from loja.services.order_payment_evidence import payment_is_confirmed
+
+    status = request.args.get("status", "")
+    if status and status not in ORDER_STATUS_LABELS:
+        abort(400)
+    search = request.args.get("q", "").strip()[:100]
+    query = Order.query.options(selectinload(Order.payments))
+    if status:
+        query = query.filter(Order.status == status)
+    if search:
+        # Exact references prevent accidental wildcard searches across clients.
+        predicates = [Order.order_number == search, Order.mp_payment_id == search]
+        try:
+            predicates.append(Order.id == PythonUUID(search))
+        except ValueError:
+            pass
+        query = query.filter(db.or_(*predicates))
+    page = query.order_by(Order.created_at.desc(), Order.id.desc()).paginate(
+        page=max(1, request.args.get("page", 1, type=int)), per_page=25,
+        error_out=False,
+    )
+    return render_template(
+        "admin/orders.html", page=page, status=status, search=search,
+        status_labels=ORDER_STATUS_LABELS, payment_is_confirmed=payment_is_confirmed,
+    )
+
+
+@admin_blueprint.route("/admin/pedidos/<uuid:order_id>")
+@admin_required
+def order_detail(order_id):
+    from loja.modules.getway_mercado_pago.payment_models import Order
+    from loja.services.order_payment_evidence import payment_is_confirmed
+
+    order = Order.query.options(
+        selectinload(Order.items), selectinload(Order.payments),
+        selectinload(Order.shipments),
+    ).filter_by(id=order_id).first_or_404()
+    return render_template(
+        "admin/order_detail.html", order=order, status_labels=ORDER_STATUS_LABELS,
+        payment_confirmed=payment_is_confirmed(order),
+    )
 
 # ── Variáveis de contexto globais ────────────────────────────────────────────────────────
 
