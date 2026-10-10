@@ -204,6 +204,8 @@ def test_css_responsivo_presente():
     assert "object-position: var(--hero-focal-mobile" in src
     assert "prefers-reduced-motion" in src
     assert "hero-carousel__slide--content-right" in src
+    # Controles fora da altura do texto em tablets/janelas estreitas.
+    assert "max-width: 1024px" in src
 
 
 # --------------------------------------------------------------------------

@@ -277,6 +277,28 @@
       .hero-carousel__dots { bottom: 29px; }
     }
 
+    /* Tablets/janelas estreitas: setas laterais na altura média colidem
+       com o texto (conteúdo até ~66px da borda vs. seta em 18–66px).
+       Controles vão para a base, como no mobile; o conteúdo centralizado
+       permanece até 700px. */
+    @media (max-width: 1024px) {
+      .hero-carousel__nav {
+        top: auto;
+        bottom: 14px;
+        width: 42px;
+        height: 42px;
+        transform: none;
+      }
+
+      .hero-carousel__nav:hover {
+        transform: scale(1.04);
+      }
+
+      .hero-carousel__prev { left: 16px; }
+      .hero-carousel__next { right: 16px; }
+      .hero-carousel__dots { bottom: 29px; }
+    }
+
     @media (prefers-reduced-motion: reduce) {
       .hero-carousel__track {
         transition: none;
