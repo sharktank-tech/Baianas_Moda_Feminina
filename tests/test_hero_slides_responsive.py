@@ -284,3 +284,61 @@ def test_validate_0040_recusa_estrutura_incorreta():
     assert len(errors) >= 2, errors
     assert any("description" in e for e in errors)
     assert any("focal_desktop" in e for e in errors)
+
+
+def test_descricao_ausente_e_conteudo_totalmente_oculto(client, db):
+    _slide(db, description=None, show_title=False, show_description=False,
+           eyebrow=None, title="Oculto")
+    html = client.get("/").get_data(as_text=True)
+    track = html.split('id="heroTrack"', 1)[1].split('id="heroDots"', 1)[0]
+    slides = track.split('<article', 1)[1]
+    assert "Oculto" not in slides
+    assert '<p class="hero-carousel__description"' not in slides
+    assert "<h2" not in slides  # título oculto (eyebrow também ausente)
+    assert "Ver coleção" in slides  # botão permanece
+
+
+def test_primeira_imagem_priorizada_e_unica_por_dispositivo(client, db):
+    _slide(db, image_mobile="https://exemplo.com/m1.jpg")
+    _slide(db, title="Segunda")
+    html = client.get("/").get_data(as_text=True)
+    track = html.split('id="heroTrack"', 1)[1].split('id="heroDots"', 1)[0]
+    assert track.count('loading="eager"') == 1
+    assert track.count('fetchpriority="high"') == 1
+    assert track.count('loading="lazy"') == 1
+    # Uma única fonte mobile (só o 1º slide tem); desktop sem source.
+    assert track.count("<source") == 1
+    assert track.count('media="(max-width: 700px)"') == 1
+
+
+def test_slide_existente_preservado_no_banco(db):
+    slide = _slide(db)
+    db.session.expire_all()
+    fresh = db.session.get(HeroSlide, slide.id)
+    assert (fresh.image, fresh.alt, fresh.eyebrow, fresh.title) == \
+        ("https://exemplo.com/desk.jpg", "Alt", "Novo", "Título")
+    assert fresh.is_active is True and fresh.order == 0
+
+
+def test_modelo_confere_com_migracao_0040():
+    from sqlalchemy import BOOLEAN, TEXT
+
+    expected = {
+        "image_mobile": (TEXT, True, None),
+        "focal_desktop": ("String", False, "center"),
+        "focal_mobile": ("String", False, "center"),
+        "content_position": ("String", False, "left"),
+        "description": (TEXT, True, None),
+        "show_title": (BOOLEAN, False, True),
+        "show_description": (BOOLEAN, False, True),
+    }
+    table = HeroSlide.__table__
+    for column, (dtype, nullable, default) in expected.items():
+        col = table.columns[column]
+        want = dtype.upper() if isinstance(dtype, str) else dtype.__name__.upper()
+        assert type(col.type).__name__.upper() == want, column
+        assert col.nullable is nullable, column
+        if default is None:
+            assert col.default is None, column
+        else:
+            assert col.default.arg == default, column
