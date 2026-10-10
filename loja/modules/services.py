@@ -33,6 +33,44 @@ from loja.modules.footer_links import is_safe_footer_url
 from loja.utils import as_sao_paulo, utcnow
 
 
+#: Posições válidas de foco (`object-position`) e de conteúdo do hero.
+#: Valores fora da lista caem no padrão sem alterar o slide salvo.
+HERO_FOCAL_POSITIONS = ("center", "top", "bottom", "left", "right")
+HERO_CONTENT_POSITIONS = ("left", "center", "right")
+
+
+def sanitize_hero_slide(slide) -> dict:
+    """Projeção segura do slide para o template (nunca ORM vivo)."""
+    focal_desktop = (getattr(slide, "focal_desktop", None) or "center").strip()
+    if focal_desktop not in HERO_FOCAL_POSITIONS:
+        focal_desktop = "center"
+    focal_mobile = (getattr(slide, "focal_mobile", None) or "center").strip()
+    if focal_mobile not in HERO_FOCAL_POSITIONS:
+        focal_mobile = "center"
+    content_position = (
+        getattr(slide, "content_position", None) or "left"
+    ).strip()
+    if content_position not in HERO_CONTENT_POSITIONS:
+        content_position = "left"
+    return {
+        "image": getattr(slide, "image", None),
+        "image_mobile": getattr(slide, "image_mobile", None) or None,
+        "alt": getattr(slide, "alt", None),
+        "eyebrow": getattr(slide, "eyebrow", None),
+        "title": getattr(slide, "title", None)
+        if getattr(slide, "show_title", True) is not False else None,
+        "description": (
+            getattr(slide, "description", None)
+            if getattr(slide, "show_description", True) is not False
+            else None
+        ),
+        "link": getattr(slide, "link", None),
+        "focal_desktop": focal_desktop,
+        "focal_mobile": focal_mobile,
+        "content_position": content_position,
+    }
+
+
 # ── Layout base (contexto global de admin) ─────────────────────────────────────
 
 def get_layout_data() -> dict:
@@ -189,13 +227,7 @@ def get_home_data() -> dict:
     data = {
         "structured_data": structured_data,
         "hero_slides": [
-            {
-                "image": slide.image,
-                "alt": slide.alt,
-                "eyebrow": slide.eyebrow,
-                "title": slide.title,
-                "link": slide.link,
-            }
+            sanitize_hero_slide(slide)
             for slide in hero_slides
         ],
         "categories": _get_home_categories(),

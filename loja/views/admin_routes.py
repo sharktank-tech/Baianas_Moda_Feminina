@@ -1584,12 +1584,48 @@ def delete_testimonial(id):
 # Adicionar hero slide
 # -------------------------------------------------------------------
 
+def _hero_slide_extra_fields() -> dict:
+    """Campos responsivos do slide com fallbacks fail-closed.
+
+    Foco/posição fora da lista voltam ao padrão sem alterar o salvo;
+    checkboxes usam par hidden(0)+checkbox(1), então ausência nunca
+    desliga silenciosamente — só "0" explícito desliga.
+    """
+    from loja.modules.services import (
+        HERO_CONTENT_POSITIONS,
+        HERO_FOCAL_POSITIONS,
+    )
+
+    focal_desktop = request.form.get("focal_desktop", "center").strip()
+    if focal_desktop not in HERO_FOCAL_POSITIONS:
+        focal_desktop = "center"
+    focal_mobile = request.form.get("focal_mobile", "center").strip()
+    if focal_mobile not in HERO_FOCAL_POSITIONS:
+        focal_mobile = "center"
+    content_position = request.form.get("content_position", "left").strip()
+    if content_position not in HERO_CONTENT_POSITIONS:
+        content_position = "left"
+    description = (request.form.get("description") or "").strip() or None
+    # Checkbox com par hidden(0)+checkbox(1): getlist distingue "0 explícito"
+    # de ausente; só "1" liga.
+    show_title = "1" in request.form.getlist("show_title")
+    show_description = "1" in request.form.getlist("show_description")
+    return {
+        "image_mobile": (request.form.get("image_mobile") or "").strip() or None,
+        "focal_desktop": focal_desktop,
+        "focal_mobile": focal_mobile,
+        "content_position": content_position,
+        "description": description,
+        "show_title": show_title,
+        "show_description": show_description,
+    }
+
+
 @admin_blueprint.route("/admin/add_hero_slide", methods=["GET", "POST"])
 @admin_required
 def add_hero_slide():
 
     if request.method == "POST":
-
         image   = request.form.get("image", "").strip()
         alt     = request.form.get("alt", "").strip()
         eyebrow = request.form.get("eyebrow", "").strip()
@@ -1601,6 +1637,7 @@ def add_hero_slide():
                 alt     = alt     or None,
                 eyebrow = eyebrow or None,
                 title   = title   or None,
+                **_hero_slide_extra_fields(),
             )
             db.session.add(slide)
             db.session.commit()
@@ -1630,6 +1667,8 @@ def edit_hero_slide(id):
         slide.alt     = request.form.get("alt")     or None
         slide.eyebrow = request.form.get("eyebrow") or None
         slide.title   = request.form.get("title")   or None
+        for key, value in _hero_slide_extra_fields().items():
+            setattr(slide, key, value)
 
         try:
             db.session.commit()

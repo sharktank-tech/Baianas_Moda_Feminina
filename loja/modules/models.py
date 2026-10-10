@@ -77,6 +77,17 @@ class HeroSlide(db.Model):
     title = db.Column(db.String(100))
     link = db.Column(db.String(255))          # NOVO: destino do botão "Ver coleção"
 
+    # Responsivo (0040): imagem mobile opcional (fallback = image), foco
+    # por dispositivo, posição/visibilidade do conteúdo. Defaults reproduzem
+    # o comportamento anterior para slides existentes.
+    image_mobile = db.Column(db.Text)
+    focal_desktop = db.Column(db.String(24), nullable=False, default="center")
+    focal_mobile = db.Column(db.String(24), nullable=False, default="center")
+    content_position = db.Column(db.String(16), nullable=False, default="left")
+    description = db.Column(db.Text)
+    show_title = db.Column(db.Boolean, nullable=False, default=True)
+    show_description = db.Column(db.Boolean, nullable=False, default=True)
+
     is_active = db.Column(db.Boolean, default=True)   # NOVO: liga/desliga sem apagar
     order = db.Column(db.Integer, default=0)          # NOVO: ordem de exibição no carrossel
     created_at = db.Column(db.DateTime, default=utcnow)

@@ -127,6 +127,7 @@ jobs:
           tests/test_aliexpress_sync_attempts_pg.py
           tests/test_published_sync_concurrency_pg.py
           tests/test_variant_availability_release_pg.py
+          tests/test_hero_slides_pg.py
 
       - name: Prova disponibilidade x restituição (3 testes, sem skips)
         run: |

@@ -15,7 +15,10 @@
   <meta property="og:image" content="{{ hero_slides[0].image }}">
   {% endif %}
 
-  <link rel="preload" as="image" href="{{ hero_slides[0].image if hero_slides else url_for('static', filename='img/agua-de-coco.jpg') }}">
+  <link rel="preload" as="image" href="{{ hero_slides[0].image if hero_slides else url_for('static', filename='img/agua-de-coco.jpg') }}" media="(min-width: 701px)">
+  {% if hero_slides and hero_slides[0].image_mobile %}
+  <link rel="preload" as="image" href="{{ hero_slides[0].image_mobile }}" media="(max-width: 700px)">
+  {% endif %}
 
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/styles.css') }}">
 
@@ -51,18 +54,25 @@
 
     .hero-carousel__media {
       position: relative;
-      min-height: clamp(420px, 52vw, 700px);
+      aspect-ratio: 21 / 9;
+      max-height: 700px;
+      overflow: hidden;
     }
 
     .hero-carousel__image {
       display: block;
       width: 100%;
-      height: clamp(420px, 52vw, 700px);
+      height: 100%;
       object-fit: cover;
-      object-position: center;
+      object-position: var(--hero-focal, center);
       user-select: none;
       -webkit-user-drag: none;
     }
+
+    .hero-focal-d-top { --hero-focal: top; }
+    .hero-focal-d-bottom { --hero-focal: bottom; }
+    .hero-focal-d-left { --hero-focal: left; }
+    .hero-focal-d-right { --hero-focal: right; }
 
     .hero-carousel__media::after {
       content: "";
@@ -74,6 +84,18 @@
       pointer-events: none;
     }
 
+    .hero-carousel__slide--content-center .hero-carousel__media::after {
+      background:
+        linear-gradient(90deg, rgba(0, 0, 0, .30) 0%, rgba(0, 0, 0, .55) 50%, rgba(0, 0, 0, .30) 100%),
+        linear-gradient(0deg, rgba(0, 0, 0, .45) 0%, transparent 55%);
+    }
+
+    .hero-carousel__slide--content-right .hero-carousel__media::after {
+      background:
+        linear-gradient(270deg, rgba(0, 0, 0, .68) 0%, rgba(0, 0, 0, .30) 45%, rgba(0, 0, 0, .08) 75%),
+        linear-gradient(0deg, rgba(0, 0, 0, .35) 0%, transparent 48%);
+    }
+
     .hero-carousel__content {
       position: absolute;
       z-index: 2;
@@ -82,6 +104,19 @@
       width: min(620px, calc(100% - 48px));
       color: #fff;
       transform: translateY(-50%);
+    }
+
+    .hero-carousel__slide--content-center .hero-carousel__content {
+      left: 50%;
+      right: auto;
+      text-align: center;
+      transform: translate(-50%, -50%);
+    }
+
+    .hero-carousel__slide--content-right .hero-carousel__content {
+      left: auto;
+      right: max(6vw, 24px);
+      text-align: right;
     }
 
     .hero-carousel__eyebrow {
@@ -99,6 +134,20 @@
       font-size: clamp(2rem, 5vw, 4.8rem);
       line-height: .98;
       text-wrap: balance;
+      overflow-wrap: anywhere;
+    }
+
+    .hero-carousel__description {
+      max-width: 46ch;
+      margin: -8px 0 24px;
+      font-size: clamp(.95rem, 1.6vw, 1.2rem);
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .hero-carousel__slide--content-center .hero-carousel__description {
+      margin-left: auto;
+      margin-right: auto;
     }
 
     .hero-carousel__nav {
@@ -179,11 +228,18 @@
     }
 
     @media (max-width: 700px) {
-      .hero-carousel__media,
+      .hero-focal-m-top { --hero-focal-mobile: top; }
+      .hero-focal-m-bottom { --hero-focal-mobile: bottom; }
+      .hero-focal-m-left { --hero-focal-mobile: left; }
+      .hero-focal-m-right { --hero-focal-mobile: right; }
+
+      .hero-carousel__media {
+        aspect-ratio: 4 / 5;
+        max-height: 78vh;
+      }
+
       .hero-carousel__image {
-        min-height: 520px;
-        height: 72vh;
-        max-height: 680px;
+        object-position: var(--hero-focal-mobile, center);
       }
 
       .hero-carousel__media::after {
@@ -257,7 +313,7 @@
 
         {% for slide in hero_slides %}
         <article
-          class="hero-carousel__slide{% if loop.first %} is-active{% endif %}"
+          class="hero-carousel__slide hero-carousel__slide--content-{{ slide.content_position }} hero-focal-d-{{ slide.focal_desktop }} hero-focal-m-{{ slide.focal_mobile }}"{% if loop.first %} is-active{% endif %}
           data-hero-slide
           role="group"
           aria-roledescription="slide"
@@ -265,16 +321,21 @@
           aria-hidden="{{ 'false' if loop.first else 'true' }}"
         >
           <div class="hero-carousel__media">
-            <img
-              class="hero-carousel__image"
-              src="{{ slide.image }}"
-              alt="{{ slide.alt or (slide.title or 'Destaque da coleção') }}"
-              width="1600"
-              height="700"
-              loading="{% if loop.first %}eager{% else %}lazy{% endif %}"
-              fetchpriority="{% if loop.first %}high{% else %}auto{% endif %}"
-              draggable="false"
-            >
+            <picture>
+              {% if slide.image_mobile %}
+              <source media="(max-width: 700px)" srcset="{{ slide.image_mobile }}">
+              {% endif %}
+              <img
+                class="hero-carousel__image"
+                src="{{ slide.image }}"
+                alt="{{ slide.alt or (slide.title or 'Destaque da coleção') }}"
+                width="1600"
+                height="700"
+                loading="{% if loop.first %}eager{% else %}lazy{% endif %}"
+                fetchpriority="{% if loop.first %}high{% else %}auto{% endif %}"
+                draggable="false"
+              >
+            </picture>
 
             <div class="hero-carousel__content">
               {% if slide.eyebrow %}
@@ -283,6 +344,10 @@
 
               {% if slide.title %}
               <h2 class="hero-carousel__title">{{ slide.title }}</h2>
+              {% endif %}
+
+              {% if slide.description %}
+              <p class="hero-carousel__description">{{ slide.description }}</p>
               {% endif %}
 
               <a
