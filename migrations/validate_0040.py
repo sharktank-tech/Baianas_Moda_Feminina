@@ -45,13 +45,8 @@ def validate_schema(conn, schema="pollomodas"):
     for column in ("show_title", "show_description"):
         if column in found and (found[column][2] or "") != "true":
             errors.append(f"{column}: default inesperado: {found[column][2]}")
-    cur.execute(
-        """
-        SELECT to_regclass('public.hero_slides')
-        """
-    )
-    if cur.fetchone()[0] is not None:
-        errors.append("hero_slides existe em public")
+    # Sem checagem em public: hero_slides legado existe no schema public
+    # do sistema anterior por desenho (migration 0001) — não é contaminação.
     return errors
 
 
