@@ -144,7 +144,8 @@ def test_customer_detail_status_matches_persisted_order(db, client, login, make_
 @pytest.mark.parametrize("shipment_status,label,heading", [
     ("aguardando_postagem", "Aguardando envio", "Seu pedido está sendo preparado."),
     ("em_transito", "Enviado", "Sua encomenda já está a caminho."),
-    ("entregue", "Aguardando avaliação", "Sua encomenda foi entregue."),
+    # Entregue SEM cobertura comprovada não conclui o pedido.
+    ("entregue", "Enviado", "Sua encomenda já está a caminho."),
 ])
 def test_customer_list_detail_and_admin_share_shipment(db, client, login, make_user, shipment_status, label, heading):
     user = make_user(is_admin=True)
@@ -163,6 +164,29 @@ def test_customer_list_detail_and_admin_share_shipment(db, client, login, make_u
     assert heading in class_text(detail, "order-status-content")
     admin = client.get(f"/admin/pedidos/{order.id}").get_data(as_text=True)
     assert code in admin and "Transportadora sintética" in admin
+
+
+def test_entrega_total_com_cobertura_conclui(db, client, login, make_user):
+    """Cobertura entregue == vendido: aí sim conclui para avaliação."""
+    from loja.modules.models import ShipmentItem
+
+    user = make_user(is_admin=True)
+    order = order_with_item(db, user)
+    item = order.items[0]
+    code = "SYNTHETIC" + uuid.uuid4().hex[:10].upper()
+    shipment = Shipment(id=uuid.uuid4().int % (2**62), order_id=order.id,
+                        tracking_code=code, carrier="Transportadora sintética",
+                        status="entregue", provider="manual")
+    db.session.add(shipment)
+    db.session.flush()
+    db.session.add(ShipmentItem(id=uuid.uuid4(), shipment_id=shipment.id,
+                                order_item_id=item.id, quantity=1))
+    db.session.commit()
+    login(user.email)
+    listing = client.get("/encomendas").get_data(as_text=True)
+    assert "Aguardando avaliação" in listing
+    detail = client.get(f"/encomendas/pedido/{order.id}").get_data(as_text=True)
+    assert "Sua encomenda foi entregue." in class_text(detail, "order-status-content")
 
 
 def test_owner_cannot_view_other_customers_order_or_admin(db, client, login, make_user):

@@ -25,12 +25,13 @@
 
         <!-- URL da imagem -->
         <div>
-            <label class="block font-medium text-gray-700 mb-2">
-                URL da imagem
+            <label class="block font-medium text-gray-700 mb-2" for="hero-image">
+                Imagem desktop
             </label>
 
             <input
                 type="url"
+                id="hero-image"
                 name="image"
                 required
                 value="{{ slide.image }}"
@@ -39,9 +40,43 @@
             >
 
             <p class="text-sm text-gray-500 mt-1">
-                Imagem principal exibida no banner.
+                Imagem principal (desktop e fallback). Recomendado 1680×720 (21:9) ou 2100×900.
+                Sem textos ou botões incorporados.
+            </p>
+        </div>
+
+        <!-- URL da imagem mobile -->
+        <div>
+            <label class="block font-medium text-gray-700 mb-2" for="hero-image-mobile">
+                Imagem mobile (opcional)
+            </label>
+
+            <input
+                type="url"
+                id="hero-image-mobile"
+                name="image_mobile"
+                value="{{ slide.image_mobile or '' }}"
+                class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                placeholder="https://..."
+            >
+
+            <p class="text-sm text-gray-500 mt-1">
+                Exibida em telas de até 700px. Recomendado 1080×1350 (4:5), sem
+                textos incorporados. Ausente: usa a imagem desktop.
             </p>
 
+            {% if slide.image_mobile %}
+            <div class="mt-4">
+                <img
+                    src="{{ slide.image_mobile }}"
+                    alt="Preview mobile do slide"
+                    class="w-full max-w-xs rounded-xl border shadow object-cover"
+                >
+            </div>
+            {% endif %}
+        </div>
+
+        <div>
             {% if slide.image %}
             <div class="mt-4">
                 <img
@@ -55,12 +90,13 @@
 
         <!-- Texto alternativo -->
         <div>
-            <label class="block font-medium text-gray-700 mb-2">
+            <label class="block font-medium text-gray-700 mb-2" for="hero-alt">
                 Texto alternativo (ALT)
             </label>
 
             <input
                 type="text"
+                id="hero-alt"
                 name="alt"
                 value="{{ slide.alt or '' }}"
                 class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
@@ -74,12 +110,13 @@
 
         <!-- Eyebrow -->
         <div>
-            <label class="block font-medium text-gray-700 mb-2">
+            <label class="block font-medium text-gray-700 mb-2" for="hero-eyebrow">
                 Texto superior (Eyebrow)
             </label>
 
             <input
                 type="text"
+                id="hero-eyebrow"
                 name="eyebrow"
                 value="{{ slide.eyebrow or '' }}"
                 class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
@@ -93,17 +130,121 @@
 
         <!-- Título -->
         <div>
-            <label class="block font-medium text-gray-700 mb-2">
+            <label class="block font-medium text-gray-700 mb-2" for="hero-title">
                 Título do slide
             </label>
 
             <input
                 type="text"
+                id="hero-title"
                 name="title"
                 value="{{ slide.title or '' }}"
                 class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
                 placeholder="Ex: Vista o estilo que combina com você"
             >
+        </div>
+
+        <!-- Descrição -->
+        <div>
+            <label class="block font-medium text-gray-700 mb-2" for="hero-description">
+                Descrição (opcional)
+            </label>
+
+            <input
+                type="text"
+                id="hero-description"
+                name="description"
+                value="{{ slide.description or '' }}"
+                class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                placeholder="Ex: Peças leves para os dias frescos"
+            >
+
+            <p class="text-sm text-gray-500 mt-1">
+                Texto do site exibido abaixo do título (imagens sem texto incorporado).
+            </p>
+        </div>
+
+        <!-- Posição do foco -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+                <label class="block font-medium text-gray-700 mb-2" for="hero-focal-desktop">
+                    Foco da imagem (desktop)
+                </label>
+
+                <select
+                    id="hero-focal-desktop"
+                    name="focal_desktop"
+                    class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                >
+                    {% for value, label in [('center', 'Centro'), ('top', 'Topo'), ('bottom', 'Base'), ('left', 'Esquerda'), ('right', 'Direita')] %}
+                    <option value="{{ value }}"{{ ' selected' if slide.focal_desktop == value }}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+
+                <p class="text-sm text-gray-500 mt-1">
+                    Ponto preservado no recorte da imagem desktop.
+                </p>
+            </div>
+
+            <div>
+                <label class="block font-medium text-gray-700 mb-2" for="hero-focal-mobile">
+                    Foco da imagem (mobile)
+                </label>
+
+                <select
+                    id="hero-focal-mobile"
+                    name="focal_mobile"
+                    class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                >
+                    {% for value, label in [('center', 'Centro'), ('top', 'Topo'), ('bottom', 'Base'), ('left', 'Esquerda'), ('right', 'Direita')] %}
+                    <option value="{{ value }}"{{ ' selected' if slide.focal_mobile == value }}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+
+                <p class="text-sm text-gray-500 mt-1">
+                    Ponto preservado no recorte da imagem mobile.
+                </p>
+            </div>
+        </div>
+
+        <!-- Posição do conteúdo -->
+        <div>
+            <label class="block font-medium text-gray-700 mb-2" for="hero-content-position">
+                Posição do conteúdo (desktop)
+            </label>
+
+            <select
+                id="hero-content-position"
+                name="content_position"
+                class="w-full border rounded-lg px-4 py-3 focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+            >
+                {% for value, label in [('left', 'Esquerda'), ('center', 'Centro'), ('right', 'Direita')] %}
+                <option value="{{ value }}"{{ ' selected' if slide.content_position == value }}>{{ label }}</option>
+                {% endfor %}
+            </select>
+
+            <p class="text-sm text-gray-500 mt-1">
+                Posição do conteúdo no desktop (produtos à direita pedem
+                conteúdo à esquerda e vice-versa). No celular o conteúdo fica
+                sempre na base, com os produtos ao centro/topo da imagem —
+                ajuste o foco mobile para preservar o assunto. O sombreado
+                acompanha a posição.
+            </p>
+        </div>
+
+        <!-- Visibilidade do conteúdo -->
+        <div class="flex flex-col gap-3">
+            <label class="inline-flex items-center gap-2 font-medium text-gray-700">
+                <input type="hidden" name="show_title" value="0">
+                <input type="checkbox" name="show_title" value="1"{{ ' checked' if slide.show_title }}>
+                Mostrar título
+            </label>
+
+            <label class="inline-flex items-center gap-2 font-medium text-gray-700">
+                <input type="hidden" name="show_description" value="0">
+                <input type="checkbox" name="show_description" value="1"{{ ' checked' if slide.show_description }}>
+                Mostrar descrição
+            </label>
         </div>
 
         <!-- Botões -->

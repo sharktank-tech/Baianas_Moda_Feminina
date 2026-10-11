@@ -2092,6 +2092,30 @@ def _shipment_is_delivered(status):
     return "entreg" in normalized or "delivered" in normalized
 
 
+def _order_fully_delivered(order, shipments) -> bool:
+    """Todas as unidades vendidas cobertas por remessa ENTREGUE.
+
+    Soma por item: cobertura de remessa entregue >= quantidade vendida em
+    TODOS os itens. Sem itens ou sem cobertura total: False.
+    """
+    items = list(getattr(order, "items", None) or [])
+    if not items:
+        return False
+    delivered = {}
+    for shipment in shipments:
+        if not _shipment_is_delivered(getattr(shipment, "status", None)):
+            continue
+        for link in (getattr(shipment, "coverage", None) or []):
+            key = getattr(link, "order_item_id", None)
+            delivered[key] = delivered.get(key, 0) + int(
+                getattr(link, "quantity", 0) or 0
+            )
+    return all(
+        delivered.get(item.id, 0) >= int(getattr(item, "quantity", 0) or 0)
+        for item in items
+    )
+
+
 def _order_purchase_bucket(order):
     """Converte Order + Shipment para um dos quatro cards da área do cliente."""
     order_status = _normalize_status(getattr(order, "status", None))
@@ -2117,8 +2141,10 @@ def _order_purchase_bucket(order):
         for shipment in shipments
     ]
 
-    # Se qualquer remessa estiver entregue, o pedido já pode ser avaliado.
-    if any(_shipment_is_delivered(status) for status in shipment_statuses):
+    # Conclusão exige cobertura ENTREGUE de todas as unidades vendidas:
+    # uma remessa entregue não conclui o pedido se outra ainda aguarda
+    # postagem. "Vinculado a uma remessa" != "entregue".
+    if _order_fully_delivered(order, shipments):
         return "aguardando_avaliacao"
 
     # Todas as remessas ainda aguardam postagem.
@@ -2133,7 +2159,7 @@ def _get_user_orders(user_id):
     """Pedidos do usuário, mais recentes primeiro, com remessas pré-carregadas."""
     return (
         Order.query
-        .options(selectinload(Order.shipments))
+        .options(selectinload(Order.shipments), selectinload(Order.items))
         .filter(Order.user_id == user_id)
         .order_by(Order.created_at.desc())
         .all()
@@ -2215,10 +2241,35 @@ def detalhes_encomenda(order_id):
 
     _prepare_orders_for_customer([pedido])
 
+    # Itens ainda sem cobertura total de remessa (somente contagens,
+    # sem dados operacionais): entrega parcial deixa pendência explícita.
+    from loja.modules.models import ShipmentItem
+
+    covered = {}
+    if pedido.shipments:
+        rows = (
+            db.session.query(
+                ShipmentItem.order_item_id,
+                db.func.coalesce(db.func.sum(ShipmentItem.quantity), 0),
+            )
+            .filter(
+                ShipmentItem.shipment_id.in_([s.id for s in pedido.shipments])
+            )
+            .group_by(ShipmentItem.order_item_id)
+            .all()
+        )
+        covered = {item_id: int(total or 0) for item_id, total in rows}
+    pending_lines = [
+        {"name": item.product_name, "quantity": int(item.quantity or 0) - covered.get(item.id, 0)}
+        for item in (pedido.items or [])
+        if int(item.quantity or 0) - covered.get(item.id, 0) > 0
+    ]
+
     return render_template(
         "conta/detalhes_encomenda.html",
         pedido=pedido,
         payment_confirmed=payment_is_confirmed(pedido),
+        pending_lines=pending_lines,
     )
 
 
