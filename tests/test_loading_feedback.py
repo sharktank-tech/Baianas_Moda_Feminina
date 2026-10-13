@@ -51,6 +51,13 @@ def test_navegacao_normal_preservada():
     assert "preventDefault" not in click_block
     assert "fetch(" not in src
     assert "XMLHttpRequest" not in src
+    # defaultPrevented respeitado: decisão após handlers que cancelam.
+    assert "event.defaultPrevented" in src
+    # Âncora de mesma página em qualquer forma: sem loading.
+    assert "pathname" in src and "search" in src
+    assert "sameDocument" in src
+    # Links das parciais usam só o feedback do dashboard.
+    assert "data-partial-container" in src
 
 
 def test_css_indeterminado_e_movimento_reduzido():
@@ -76,6 +83,9 @@ def test_botao_spinner_texto_e_bloqueio_sem_perder_dados():
     assert ".disabled = true" not in src
     # Só após validação (inclusive novalidate via checkValidity).
     assert "checkValidity" in src
+    assert "novalidate" in src and "formnovalidate" in src
+    # Destino/janela respeitados (target, formtarget, dialog).
+    assert "formtarget" in src and "dialog" in src
     # Mecanismos próprios preservados (checkout + data-once).
     assert "checkoutForm" in src and "data-once" in src
     assert 'data-loading' in src and "'off'" in src
@@ -128,9 +138,18 @@ def test_pageshow_restaura_tudo():
     # Restaura texto original e habilita só o que este handler marcou.
     assert "loadingOriginal" in src
     assert "querySelectorAll('[data-loading-active]')" in src
+    # Cancelamento posterior limpa a marcação (sem travar).
+    assert "delete form.dataset.submitted" in src
+    # Anúncio acessível separado do indicador: barra sem aria-hidden,
+    # spinner decorativo com aria-hidden.
+    assert "bar.setAttribute('aria-hidden'" not in src
+    assert "setTimeout" in src
 
 
 def test_textos_sao_texto_e_historico_preservado():
     src = _js()
     assert "pushState" not in src  # este módulo nunca mexe no histórico
     assert "replaceState" not in src
+    # <input type=submit>: value nunca sobrescrito (é dado enviado).
+    assert ".value =" not in src
+    assert "loadingMinWidth" in src  # min-width anterior restaurado
