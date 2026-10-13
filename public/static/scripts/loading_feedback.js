@@ -65,6 +65,7 @@
   }
 
   var progressTimer = null;
+  var progressEvent = null;
 
   function ensureBar() {
     var bar = document.getElementById('page-progress');
@@ -80,6 +81,11 @@
 
   function showProgress() {
     progressTimer = null;
+    if (progressEvent && progressEvent.defaultPrevented) {
+      progressEvent = null;
+      return;
+    }
+    progressEvent = null;
     ensureBar().classList.add('is-active');
   }
 
@@ -88,12 +94,14 @@
       clearTimeout(progressTimer);
       progressTimer = null;
     }
+    progressEvent = null;
     var bar = document.getElementById('page-progress');
     if (bar) bar.classList.remove('is-active');
   }
 
-  function armBar() {
+  function armBar(event) {
     if (progressTimer) return;
+    progressEvent = event || null;
     progressTimer = setTimeout(showProgress, PROGRESS_DELAY_MS);
   }
 
@@ -104,7 +112,7 @@
       ? event.target.closest('a[href]')
       : null;
     if (!anchor || isSkippableLink(anchor)) return;
-    armBar();
+    armBar(event);
   });
 
   /* Navegação cancelada após o clique: sem barra presa. */
@@ -129,6 +137,9 @@
       control.dataset.loadingMinWidth = control.style.minWidth;
     }
     control.style.minWidth = control.offsetWidth + 'px';
+    if (control.hasAttribute('aria-busy')) {
+      control.dataset.loadingAriaBusy = control.getAttribute('aria-busy');
+    }
     control.setAttribute('aria-busy', 'true');
     if (isInputSubmit(control)) {
       /* <input>: nunca sobrescrever `value` (é o dado enviado).
@@ -168,7 +179,12 @@
     } else {
       control.style.minWidth = '';
     }
-    control.removeAttribute('aria-busy');
+    if (control.dataset.loadingAriaBusy !== undefined) {
+      control.setAttribute('aria-busy', control.dataset.loadingAriaBusy);
+      delete control.dataset.loadingAriaBusy;
+    } else {
+      control.removeAttribute('aria-busy');
+    }
   }
 
   function opensElsewhere(form, submitter) {

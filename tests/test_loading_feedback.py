@@ -144,6 +144,10 @@ def test_pageshow_restaura_tudo():
     # spinner decorativo com aria-hidden.
     assert "bar.setAttribute('aria-hidden'" not in src
     assert "setTimeout" in src
+    # Cancelamento tardio: releitura de defaultPrevented ao exibir.
+    assert "progressEvent" in src
+    # aria-busy pré-existente preservado e restaurado.
+    assert "loadingAriaBusy" in src
 
 
 def test_textos_sao_texto_e_historico_preservado():
