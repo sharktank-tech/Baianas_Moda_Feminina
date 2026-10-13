@@ -77,7 +77,7 @@ function showPartialError(container, url) {
   container.dataset.partialUrl = url;
 }
 
-function fetchInto(container, url) {
+function fetchInto(container, url, initiator) {
   const key = container.dataset.partialContainer;
   const previous = controllers.get(key);
   if (previous) previous.abort();
@@ -86,6 +86,10 @@ function fetchInto(container, url) {
   container.dataset.partialLoaded = '';
   container.style.minHeight = Math.max(container.getBoundingClientRect().height, 240) + 'px';
   container.setAttribute('aria-busy', 'true');
+  if (initiator && initiator instanceof HTMLElement) {
+    container._loadingControl = initiator;
+    initiator.setAttribute('aria-busy', 'true');
+  }
   container.innerHTML = '<div class="adm-loading" role="status" aria-live="polite"><span class="adm-loading-mark" aria-hidden="true"></span><p>Carregando…</p></div>';
   return fetch(url, {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
@@ -106,10 +110,13 @@ function fetchInto(container, url) {
       showPartialError(container, url);
     })
     .finally(() => {
-      if (controllers.get(key) === ctrl) {
-        controllers.delete(key);
-        container.setAttribute('aria-busy', 'false');
-        container.style.removeProperty('min-height');
+      if (controllers.get(key) !== ctrl) return;
+      controllers.delete(key);
+      container.setAttribute('aria-busy', 'false');
+      container.style.removeProperty('min-height');
+      if (container._loadingControl) {
+        container._loadingControl.removeAttribute('aria-busy');
+        delete container._loadingControl;
       }
     });
 }
@@ -197,7 +204,7 @@ document.addEventListener('click', e => {
     const container = retry.closest('[data-partial-container]');
     if (container) {
       /* Refaz a última URL (com filtros/busca/página), não a visão padrão. */
-      fetchInto(container, container.dataset.partialUrl || container.dataset.partialSrc);
+      fetchInto(container, container.dataset.partialUrl || container.dataset.partialSrc, retry);
     }
     return;
   }
@@ -214,7 +221,7 @@ document.addEventListener('click', e => {
   url.searchParams.forEach((value, key) => {
     if (HASH_PARAMS_ALLOW.has(key) && value) kept.set(key, value);
   });
-  fetchInto(container, url.toString());
+  fetchInto(container, url.toString(), link);
   activatePanel(panel, { query: kept.toString(), load: false });
 });
 
@@ -235,7 +242,10 @@ document.addEventListener('submit', e => {
   /* Busca livre (q) aplica no fetch sem viajar no fragmento. */
   let url = container.dataset.partialSrc;
   url += (url.indexOf('?') === -1 ? '?' : '&') + data.toString();
-  fetchInto(container, url);
+  const initiator = (e.submitter && e.submitter instanceof HTMLElement)
+    ? e.submitter
+    : form.querySelector('button[type="submit"]');
+  fetchInto(container, url, initiator);
   activatePanel(panel, { query: kept.toString(), load: false });
 });
 
