@@ -104,8 +104,10 @@ def test_selecao_atualiza_principal(page):
         "() => document.querySelector('#productGalleryCounter')"
         ".textContent.trim() === '6 / 12'",
         timeout=8000)
-    after = page.get_attribute("#productGalleryMain", "src")
-    assert before != after
+    # A troca do src ocorre 90ms após o clique (transição); aguardar.
+    page.wait_for_function(
+        "(prev) => document.querySelector('#productGalleryMain').src !== prev",
+        arg=before, timeout=8000)
     active = page.locator(".product-gallery-thumb.is-active").count()
     assert active == 1
 
@@ -117,7 +119,8 @@ def test_zoom_abre_lightbox(page):
     page.click("[data-gallery-zoom]")
     page.wait_for_selector("#productLightbox:not([hidden])", timeout=8000)
     assert page.locator("#productLightboxImage").is_visible()
-    page.click("[data-lightbox-close]")
+    # Clique via JS: imune a deslocamento do botão pelo carregamento tardio.
+    page.eval_on_selector("[data-lightbox-close]", "b => b.click()")
     page.wait_for_selector("#productLightbox[hidden]", timeout=8000)
 
 

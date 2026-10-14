@@ -57,8 +57,14 @@ def test_thumbs_com_dimensao_consistente():
 
 
 def test_principal_com_contain():
-    main = _rule(_css(), ".product-gallery-main")
+    css = _css()
+    main = _rule(css, ".product-gallery-main")
     assert re.search(r"object-fit\s*:\s*contain", main)
+    # A regra externa `.product-gallery img` (cover, 0,1,1) vence a classe
+    # sozinha: o override desktop usa seletor mais específico.
+    desktop = _media(css, "@media (min-width: 801px)")
+    assert "product-gallery-main" in desktop
+    assert re.search(r"object-fit\s*:\s*contain", desktop)
 
 
 def test_faixa_com_rolagem_no_desktop():

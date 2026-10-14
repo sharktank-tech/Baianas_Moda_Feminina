@@ -362,6 +362,15 @@ body.product-lightbox-open {
     }
 }
 
+/* Desktop: a regra externa `.product-gallery img` (cover) tem especificidade
+   maior que `.product-gallery-main`; este override a vence só no desktop,
+   exibindo o produto inteiro sem distorção. Mobile preservado (cover). */
+@media (min-width: 801px) {
+    .product-gallery-stage .product-gallery-main {
+        object-fit: contain;
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .product-gallery-thumb,
     .product-gallery-main,
