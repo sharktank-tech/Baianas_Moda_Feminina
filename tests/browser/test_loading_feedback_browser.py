@@ -51,10 +51,13 @@ def csrf_of(html):
 
 def fill_login(page, email, password):
     page.goto(BASE_URL + "/login")
-    page.fill('input[name="email"]', email)
-    page.fill('input[name="password"]', password)
+    card = ".auth-card "
+    page.fill(card + 'input[name="email"]', email)
+    page.fill(card + 'input[name="password"]', password)
     page.evaluate(
-        """(tok) => { document.querySelector('input[name="csrf_token"]').value = tok; }""",
+        """(tok) => {
+          document.querySelector('.auth-card input[name="csrf_token"]').value = tok;
+        }""",
         csrf_of(page.content()),
     )
 
@@ -62,7 +65,7 @@ def fill_login(page, email, password):
 def admin_login(page):
     fill_login(page, ADMIN_EMAIL, ADMIN_PASSWORD)
     with page.expect_navigation():
-        page.click('button[type="submit"]')
+        page.click('.auth-card button[type="submit"]')
     assert "/conta" in page.url
 
 
@@ -84,19 +87,21 @@ def delayed(page, pattern, seconds=1.5):
 def test_nav_normal_exibe_barra(page):
     page.goto(BASE_URL + "/login")
     delayed(page, "**/register", seconds=1.5)
-    with page.expect_navigation():
-        page.click('a[href$="/register"], a[href="/register"]')
+    page.click('a[href$="/register"], a[href="/register"]')
     page.wait_for_selector("#page-progress.is-active", timeout=8000)
     page.wait_for_url("**/register", timeout=15000)
+    assert page.evaluate(
+        "!!document.querySelector('#page-progress.is-active')") is False
 
 
 def test_nav_normal_exibe_barra_desktop(page):
     page.goto(BASE_URL + "/login")
     delayed(page, "**/register", seconds=1.5)
-    with page.expect_navigation():
-        page.click('a[href$="/register"], a[href="/register"]')
+    page.click('a[href$="/register"], a[href="/register"]')
     page.wait_for_selector("#page-progress.is-active", timeout=8000)
     page.wait_for_url("**/register", timeout=15000)
+    assert page.evaluate(
+        "!!document.querySelector('#page-progress.is-active')") is False
 
 
 def test_clique_cancelado_tardio_sem_barra(page):
@@ -152,7 +157,7 @@ def _dynamic_form(page, *, action="/login", method="post", novalidate=False,
     noval = "novalidate" if novalidate else ""
     btns = "".join(
         f'<button type="submit" name="acao" value="{v}">{t}</button>'
-        for t, v in buttons)
+        for v, t in buttons)
     page.evaluate(
         """([action, method, noval, target, btns, csrf]) => {
           const f = document.createElement('form');
@@ -337,8 +342,7 @@ def test_admin_fetch_erro_retry_abort_sobreposicao(page):
     page.click("[data-partial-retry]")
     page.wait_for_selector("[data-partial-root='orders'] table",
                            timeout=20000)
-    page.click("aside button[data-panel='manual-review'], "
-               "nav button[data-panel='manual-review']")
+    page.click("aside button[data-panel='manual-review']")
     page.wait_for_selector("[data-partial-root='manual-review']",
                            timeout=20000)
     assert page.evaluate(
