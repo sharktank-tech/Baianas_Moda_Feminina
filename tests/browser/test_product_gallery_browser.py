@@ -121,7 +121,10 @@ def test_zoom_abre_lightbox(page):
     assert page.locator("#productLightboxImage").is_visible()
     # Clique via JS: imune a deslocamento do botão pelo carregamento tardio.
     page.eval_on_selector("[data-lightbox-close]", "b => b.click()")
-    page.wait_for_selector("#productLightbox[hidden]", timeout=8000)
+    page.wait_for_function(
+        "() => document.querySelector('#productLightbox')"
+        ".hasAttribute('hidden')",
+        timeout=8000)
 
 
 @pytest.mark.parametrize("page", ["mobile"], indirect=True)
