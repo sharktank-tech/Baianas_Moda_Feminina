@@ -103,13 +103,14 @@ def admin_login(page):
 @pytest.mark.parametrize("page", ["mobile"], indirect=True)
 def test_nav_normal_exibe_barra(page):
     page.goto(BASE_URL + "/login")
-    dialogs = hold_with_beforeunload(page)
-    # Clique sintético (retorna de imediato, sem travar no diálogo);
-    # a navegação real pende no beforeunload até accept().
-    page.eval_on_selector('a[href$="/register"]', "a => a.click()")
-    wait_bar_visible(page)
-    assert len(dialogs) == 1
-    dialogs[0].accept()
+    session = slow_network(page)
+    try:
+        # Clique sintético retorna de imediato; a resposta lenta mantém
+        # a navegação pendente com o JS vivo para a barra aparecer.
+        page.eval_on_selector('a[href$="/register"]', "a => a.click()")
+        wait_bar_visible(page)
+    finally:
+        fast_network(session)
     page.wait_for_url("**/register", timeout=15000)
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
@@ -117,11 +118,12 @@ def test_nav_normal_exibe_barra(page):
 
 def test_nav_normal_exibe_barra_desktop(page):
     page.goto(BASE_URL + "/login")
-    dialogs = hold_with_beforeunload(page)
-    page.eval_on_selector('a[href$="/register"]', "a => a.click()")
-    wait_bar_visible(page)
-    assert len(dialogs) == 1
-    dialogs[0].accept()
+    session = slow_network(page)
+    try:
+        page.eval_on_selector('a[href$="/register"]', "a => a.click()")
+        wait_bar_visible(page)
+    finally:
+        fast_network(session)
     page.wait_for_url("**/register", timeout=15000)
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
@@ -191,19 +193,27 @@ def wait_bar_visible(page, timeout_ms=6000):
         "barra de progresso não apareceu durante a navegação")
 
 
-def hold_with_beforeunload(page):
-    """Segura a próxima navegação com beforeunload: o navegador aguarda
-    o diálogo, a barra (150ms) aparece e o teste libera com accept().
-    Tudo na própria página — sem proxy, sleep ou estado cross-thread."""
-    dialogs = []
-    page.on("dialog", lambda dialog: dialogs.append(dialog))
-    page.evaluate("""() => {
-      window.addEventListener('beforeunload', (e) => {
-        e.preventDefault();
-        e.returnValue = '';
-      });
-    }""")
-    return dialogs
+def slow_network(page, latency=300, download=2048):
+    """Rede lenta via CDP (browser-side): a navegação pende com o JS da
+    página vivo (sem congelar como diálogo modal), a barra aparece e o
+    teste restaura com fast_network. Sem sleep em handler do Playwright."""
+    session = page.context.new_cdp_session(page)
+    session.send("Network.emulateNetworkConditions", {
+        "offline": False,
+        "latency": latency,
+        "downloadThroughput": download,
+        "uploadThroughput": download,
+    })
+    return session
+
+
+def fast_network(session):
+    session.send("Network.emulateNetworkConditions", {
+        "offline": False,
+        "latency": 0,
+        "downloadThroughput": -1,
+        "uploadThroughput": -1,
+    })
 
 
 def fulfill_204(page, pattern, sink):
