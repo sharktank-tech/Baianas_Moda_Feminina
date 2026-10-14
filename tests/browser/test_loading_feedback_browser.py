@@ -118,8 +118,7 @@ def test_nav_normal_exibe_barra(page):
 def test_nav_normal_exibe_barra_desktop(page):
     page.goto(BASE_URL + "/login")
     dialogs = hold_with_beforeunload(page)
-    page.click('a[href$="/register"], a[href="/register"]',
-               no_wait_after=True)
+    page.eval_on_selector('a[href$="/register"]', "a => a.click()")
     wait_bar_visible(page)
     assert len(dialogs) == 1
     dialogs[0].accept()
