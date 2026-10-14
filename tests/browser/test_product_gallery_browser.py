@@ -86,7 +86,9 @@ def test_principal_contem_sem_rolagem_horizontal(page):
     fit = page.evaluate(
         "getComputedStyle(document.querySelector('#productGalleryMain'))"
         ".objectFit")
-    assert fit == "contain"
+    # Desktop: contain (produto inteiro); mobile preservado (cover).
+    expected = "contain" if page._shot_w >= 801 else "cover"
+    assert fit == expected, f"objectFit={fit} em {page._shot_w}px"
     overflow = page.evaluate(
         "document.documentElement.scrollWidth - window.innerWidth")
     assert overflow <= 1, f"rolagem horizontal: {overflow}px"
