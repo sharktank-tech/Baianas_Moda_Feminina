@@ -49,6 +49,7 @@
 
 .product-gallery-thumb {
     display: block;
+    flex-shrink: 0;   /* coluna com max-height: rolar, nunca comprimir */
     width: 100%;
     aspect-ratio: 4 / 5;
     padding: 0;
@@ -364,6 +365,12 @@ body.product-lightbox-open {
 /* Desktop: a regra externa `.product-gallery img` (cover) tem especificidade
    maior que `.product-gallery-main`; este override a vence só no desktop,
    exibindo o produto inteiro sem distorção. Mobile preservado (cover). */
+@media (min-width: 801px) {
+    .product-gallery-stage .product-gallery-main {
+        object-fit: contain;
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .product-gallery-thumb,
     .product-gallery-main,
