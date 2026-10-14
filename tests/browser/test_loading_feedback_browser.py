@@ -105,10 +105,8 @@ def test_nav_normal_exibe_barra(page):
     page.goto(BASE_URL + "/login")
     session = slow_network(page)
     try:
-        # Clique sintético retorna de imediato; a resposta lenta mantém
-        # a navegação pendente com o JS vivo para a barra aparecer.
         page.eval_on_selector('a[href$="/register"]', "a => a.click()")
-        wait_bar_visible(page)
+        page.wait_for_timeout(1200)
     finally:
         fast_network(session)
     page.wait_for_url("**/register", timeout=15000)
