@@ -104,9 +104,9 @@ def admin_login(page):
 def test_nav_normal_exibe_barra(page):
     page.goto(BASE_URL + "/login")
     dialogs = hold_with_beforeunload(page)
-    # Sem aguardar o clique: a navegação pende no diálogo até accept().
-    page.click('a[href$="/register"], a[href="/register"]',
-               no_wait_after=True)
+    # Clique sintético (retorna de imediato, sem travar no diálogo);
+    # a navegação real pende no beforeunload até accept().
+    page.eval_on_selector('a[href$="/register"]', "a => a.click()")
     wait_bar_visible(page)
     assert len(dialogs) == 1
     dialogs[0].accept()
