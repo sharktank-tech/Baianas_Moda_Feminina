@@ -8,7 +8,6 @@ são somente leitura.
 """
 import os
 import re
-import time
 
 import pytest
 
@@ -97,30 +96,40 @@ def admin_login(page):
     assert "/conta" in page.url
 
 
-def delayed(page, pattern, seconds=1.5):
-    """Atrasa a resposta: a página permanece viva para observar o loading."""
+def record_posts(page, pattern, sink):
+    """Registra POSTs sem atrasar (sleep no handler congelaria o cliente)."""
 
     def handle(route):
-        time.sleep(seconds)
+        sink.append(route.request.post_data or "1")
         route.continue_()
 
     page.route(pattern, handle)
 
 
-def delayed_ok(page, pattern, sink, seconds=2.0):
-    """Como `delayed`, mas conclui com 200 'ok' registrando o POST."""
+def slow_network(page, latency=400, download=4096):
+    """Rede lenta via CDP (browser-side): resposta pendente sem bloquear."""
+    session = page.context.new_cdp_session(page)
+    session.send("Network.emulateNetworkConditions", {
+        "offline": False,
+        "latency": latency,
+        "downloadThroughput": download,
+        "uploadThroughput": download,
+    })
+    return session
 
-    def handle(route):
-        sink.append(route.request.post_data or "1")
-        time.sleep(seconds)
-        route.fulfill(status=200, body="ok")
 
-    page.route(pattern, handle)
+def fast_network(session):
+    session.send("Network.emulateNetworkConditions", {
+        "offline": False,
+        "latency": 0,
+        "downloadThroughput": -1,
+        "uploadThroughput": -1,
+    })
 
 
-def wait_ok_doc(page, timeout=15000):
-    """Aguarda a resposta 'ok' substituir o documento (navegação real)."""
-    page.wait_for_function("() => document.body.textContent === 'ok'",
+def wait_replaced(page, timeout=15000):
+    """Aguarda o servidor real substituir o documento (navegação real)."""
+    page.wait_for_function("() => !document.querySelector('#dyn')",
                            timeout=timeout)
 
 
@@ -131,9 +140,10 @@ def wait_ok_doc(page, timeout=15000):
 @pytest.mark.parametrize("page", ["mobile"], indirect=True)
 def test_nav_normal_exibe_barra(page):
     page.goto(BASE_URL + "/login")
-    delayed(page, "**/register", seconds=1.5)
+    session = slow_network(page)
     page.click('a[href$="/register"], a[href="/register"]')
     page.wait_for_selector("#page-progress.is-active", timeout=8000)
+    fast_network(session)
     page.wait_for_url("**/register", timeout=15000)
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
@@ -141,9 +151,10 @@ def test_nav_normal_exibe_barra(page):
 
 def test_nav_normal_exibe_barra_desktop(page):
     page.goto(BASE_URL + "/login")
-    delayed(page, "**/register", seconds=1.5)
+    session = slow_network(page)
     page.click('a[href$="/register"], a[href="/register"]')
     page.wait_for_selector("#page-progress.is-active", timeout=8000)
+    fast_network(session)
     page.wait_for_url("**/register", timeout=15000)
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
@@ -220,7 +231,8 @@ def _dynamic_form(page, *, action="/login", method="post", novalidate=False,
 def test_submit_valido_marca_e_bloqueia_duplo(page):
     posts = []
     _dynamic_form(page)
-    delayed_ok(page, "**/login", posts)
+    record_posts(page, "**/login", posts)
+    net = slow_network(page)
     page.eval_on_selector("#dyn button[value='b']", "b => b.click()")
     page.wait_for_function(
         "() => document.querySelector('#dyn button[value=\"b\"]')"
@@ -231,19 +243,22 @@ def test_submit_valido_marca_e_bloqueia_duplo(page):
         is True
     # 2º clique no botão desabilitado: sem efeito.
     page.eval_on_selector("#dyn button[value='b']", "b => b.click()")
-    wait_ok_doc(page)
+    fast_network(net)
+    wait_replaced(page)
     assert len(posts) == 1
 
 
 def test_multiplos_botoes_preservam_name_value(page):
     bodies = []
     _dynamic_form(page)
-    delayed_ok(page, "**/login", bodies)
+    record_posts(page, "**/login", bodies)
+    net = slow_network(page)
     page.eval_on_selector("#dyn button[value='b']", "b => b.click()")
     page.wait_for_function(
         "() => document.querySelector('#dyn').dataset.submitted === '1'",
         timeout=5000)
-    wait_ok_doc(page)
+    fast_network(net)
+    wait_replaced(page)
     assert len(bodies) == 1
     assert "acao=b" in bodies[0] and "acao=a" not in bodies[0]
 
@@ -270,12 +285,14 @@ def test_novalidate_envia_com_loading(page):
       document.querySelector('#dyn').insertAdjacentHTML('afterbegin',
         '<input name="obrig" required value="">');
     }""")
-    delayed_ok(page, "**/login", bodies)
+    record_posts(page, "**/login", bodies)
+    net = slow_network(page)
     page.eval_on_selector("#dyn button[value='a']", "b => b.click()")
     page.wait_for_function(
         "() => document.querySelector('#dyn').dataset.submitted === '1'",
         timeout=5000)
-    wait_ok_doc(page)
+    fast_network(net)
+    wait_replaced(page)
     assert len(bodies) == 1
 
 
@@ -288,12 +305,14 @@ def test_formnovalidate_passa_com_campo_invalido(page):
       f.querySelector('button').setAttribute('formnovalidate', '');
     }""")
     bodies = []
-    delayed_ok(page, "**/login", bodies)
+    record_posts(page, "**/login", bodies)
+    net = slow_network(page)
     page.eval_on_selector("#dyn button", "b => b.click()")
     page.wait_for_function(
         "() => document.querySelector('#dyn').dataset.submitted === '1'",
         timeout=5000)
-    wait_ok_doc(page)
+    fast_network(net)
+    wait_replaced(page)
     assert len(bodies) == 1
 
 
@@ -323,7 +342,8 @@ def test_input_submit_nao_tem_value_sobrescrito(page):
         '<input type="submit" name="acao" value="Pagar agora">');
     }""")
     bodies = []
-    delayed_ok(page, "**/login", bodies)
+    record_posts(page, "**/login", bodies)
+    net = slow_network(page)
     page.eval_on_selector("#dyn input[type='submit']", "b => b.click()")
     page.wait_for_function(
         "() => document.querySelector('#dyn input[type=\"submit\"]')"
@@ -335,7 +355,8 @@ def test_input_submit_nao_tem_value_sobrescrito(page):
     assert page.evaluate(
         "document.querySelector('#dyn input[type=\"submit\"]').value") \
         == "Pagar agora"
-    wait_ok_doc(page)
+    fast_network(net)
+    wait_replaced(page)
     assert len(bodies) == 1
     assert "acao=Pagar+agora" in bodies[0] or "acao=Pagar agora" in bodies[0]
 
@@ -347,14 +368,16 @@ def test_enter_sem_submitter_explicito(page):
         '<input name="q" value="x">');
     }""")
     bodies = []
-    delayed_ok(page, "**/login", bodies)
+    record_posts(page, "**/login", bodies)
     page.eval_on_selector("#dyn input[name='q']", "i => i.focus()")
+    net = slow_network(page)
     page.keyboard.press("Enter")
     page.wait_for_function(
         "() => (document.querySelector('#dyn button')"
         ".getAttribute('aria-busy') === 'true')",
         timeout=5000)
-    wait_ok_doc(page)
+    fast_network(net)
+    wait_replaced(page)
     assert len(bodies) == 1
 
 
