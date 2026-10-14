@@ -22,6 +22,8 @@ class SlowProxy:
         self.target_port = target_port
         self.delay_paths = set()
         self.delay_seconds = 2.5
+        self.hits = {}
+        self.delayed = []
         handler = self._make_handler()
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.port = self._server.server_address[1]
@@ -40,7 +42,10 @@ class SlowProxy:
                     path = "/" + url.split("/", 3)[-1]
                 else:
                     path = url
-                if path.split("?", 1)[0] in proxy.delay_paths:
+                key = path.split("?", 1)[0]
+                proxy.hits[key] = proxy.hits.get(key, 0) + 1
+                if key in proxy.delay_paths:
+                    proxy.delayed.append(key)
                     time.sleep(proxy.delay_seconds)
                 length = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(length) if length else None

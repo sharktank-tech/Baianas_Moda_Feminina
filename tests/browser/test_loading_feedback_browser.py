@@ -36,11 +36,12 @@ def slow_proxy():
 @pytest.fixture(scope="module")
 def browser(slow_proxy):
     with playwright.sync_playwright() as runner:
-        instance = runner.chromium.launch(args=[
-            "--no-sandbox",
-            f"--proxy-server=http://127.0.0.1:{slow_proxy.port}",
-            "--proxy-bypass-list=<-loopback>",
-        ])
+        # Proxy nativo (flags CLI conflitam com --no-proxy-server do
+        # Playwright); "<-loopback>" desfaz o bypass implícito de localhost.
+        instance = runner.chromium.launch(
+            args=["--no-sandbox"],
+            proxy={"server": f"http://127.0.0.1:{slow_proxy.port}",
+                   "bypass": "<-loopback>"})
         yield instance
         instance.close()
 
@@ -129,6 +130,7 @@ def test_nav_normal_exibe_barra(page, slow_proxy):
     finally:
         slow_proxy.delay_paths.discard("/register")
     page.wait_for_url("**/register", timeout=15000)
+    assert "/register" in slow_proxy.delayed  # passou pelo proxy com atraso
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
 
@@ -143,6 +145,7 @@ def test_nav_normal_exibe_barra_desktop(page, slow_proxy):
     finally:
         slow_proxy.delay_paths.discard("/register")
     page.wait_for_url("**/register", timeout=15000)
+    assert "/register" in slow_proxy.delayed  # passou pelo proxy com atraso
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
 
