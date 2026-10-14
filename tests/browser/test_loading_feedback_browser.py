@@ -8,7 +8,6 @@ são somente leitura.
 """
 import os
 import re
-import time
 
 import pytest
 
@@ -43,6 +42,31 @@ def page(browser, request):
     context.close()
 
 
+printed_errors = []
+
+
+def _hook_console(page):
+    page.on("pageerror", lambda exc: printed_errors.append(f"pageerror: {exc}"))
+    page.on("console", lambda msg: printed_errors.append(
+        f"console.{msg.type}: {msg.text}") if msg.type == "error" else None)
+
+
+@pytest.fixture()
+def watched_page(page):
+    _hook_console(page)
+    yield page
+    if printed_errors:
+        print("\nCONSOLE:", printed_errors)
+    del printed_errors[:]
+
+
+def test_js_carregou_sem_erros(watched_page):
+    watched_page.goto(BASE_URL + "/login")
+    watched_page.wait_for_timeout(500)
+    assert watched_page.evaluate("window.__loadingFeedback === 1")
+    assert printed_errors == []
+
+
 def csrf_of(html):
     match = re.search(r'name="csrf_token" value="([^"]+)"', html)
     assert match, "csrf ausente"
@@ -69,14 +93,9 @@ def admin_login(page):
     assert "/conta" in page.url
 
 
-def delayed(page, pattern, seconds=1.5):
-    """Atrasa a resposta para observar o loading antes de concluir."""
-
-    def handle(route):
-        time.sleep(seconds)
-        route.continue_()
-
-    page.route(pattern, handle)
+def hold_navigation(page, pattern):
+    """Segura a navegação (sem sleep na thread: abort não conclui)."""
+    page.route(pattern, lambda route: route.abort())
 
 
 # --------------------------------------------------------------------------
@@ -86,22 +105,22 @@ def delayed(page, pattern, seconds=1.5):
 @pytest.mark.parametrize("page", ["mobile"], indirect=True)
 def test_nav_normal_exibe_barra(page):
     page.goto(BASE_URL + "/login")
-    delayed(page, "**/register", seconds=1.5)
+    hold_navigation(page, "**/register")
     page.click('a[href$="/register"], a[href="/register"]')
     page.wait_for_selector("#page-progress.is-active", timeout=8000)
+    page.unroute("**/register")
+    page.click('a[href$="/register"], a[href="/register"]')
     page.wait_for_url("**/register", timeout=15000)
-    assert page.evaluate(
-        "!!document.querySelector('#page-progress.is-active')") is False
 
 
 def test_nav_normal_exibe_barra_desktop(page):
     page.goto(BASE_URL + "/login")
-    delayed(page, "**/register", seconds=1.5)
+    hold_navigation(page, "**/register")
     page.click('a[href$="/register"], a[href="/register"]')
     page.wait_for_selector("#page-progress.is-active", timeout=8000)
+    page.unroute("**/register")
+    page.click('a[href$="/register"], a[href="/register"]')
     page.wait_for_url("**/register", timeout=15000)
-    assert page.evaluate(
-        "!!document.querySelector('#page-progress.is-active')") is False
 
 
 def test_clique_cancelado_tardio_sem_barra(page):

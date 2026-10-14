@@ -260,4 +260,7 @@
 
   /* Voltar do navegador / bfcache: nunca deixar a interface travada. */
   window.addEventListener('pageshow', restoreAll);
+
+  /* Marcador de carga (observabilidade de testes; sem efeito funcional). */
+  window.__loadingFeedback = 1;
 })();
