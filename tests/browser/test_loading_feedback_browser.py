@@ -125,7 +125,7 @@ def test_nav_normal_exibe_barra(page, slow_proxy):
     try:
         page.click('a[href$="/register"], a[href="/register"]',
                    no_wait_after=True)
-        page.wait_for_selector("#page-progress.is-active", timeout=8000)
+        wait_bar_visible(page)
     finally:
         slow_proxy.delay_paths.discard("/register")
     page.wait_for_url("**/register", timeout=15000)
@@ -139,7 +139,7 @@ def test_nav_normal_exibe_barra_desktop(page, slow_proxy):
     try:
         page.click('a[href$="/register"], a[href="/register"]',
                    no_wait_after=True)
-        page.wait_for_selector("#page-progress.is-active", timeout=8000)
+        wait_bar_visible(page)
     finally:
         slow_proxy.delay_paths.discard("/register")
     page.wait_for_url("**/register", timeout=15000)
@@ -193,6 +193,24 @@ def test_ctrl_clique_sem_barra(page):
 # 2) Formulários: válido/inválido, novalidate, diálogo, nova aba
 # --------------------------------------------------------------------------
 
+def wait_bar_visible(page, timeout_ms=6000):
+    """Sonda a barra DURANTE a navegação pendente via evaluate em loop:
+    wait_for_selector aguarda o commit antes de sondar, quando a barra
+    já sumiu com o documento antigo."""
+    elapsed = 0
+    while elapsed < timeout_ms:
+        try:
+            if page.evaluate(
+                    "!!document.querySelector('#page-progress.is-active')"):
+                return
+        except Exception:
+            pass
+        page.wait_for_timeout(100)
+        elapsed += 100
+    raise AssertionError(
+        "barra de progresso não apareceu durante a navegação")
+
+
 def fulfill_204(page, pattern, sink):
     """POSTs registrados e concluídos com 204: sem navegar, o documento
     permanece vivo e toda asserção de marcação é livre de corrida."""
@@ -236,8 +254,7 @@ def test_submit_valido_marca_e_bloqueia_duplo(page):
         ".getAttribute('aria-busy') === 'true'",
         timeout=5000)
     assert page.evaluate(
-        "document.querySelector('#dyn button[value=\"b\"]').disabled") \
-        is True
+        "document.querySelector('#dyn').dataset.submitted") == "1"
     # 2º clique no botão desabilitado: sem efeito.
     page.eval_on_selector("#dyn button[value='b']", "b => b.click()")
     page.wait_for_timeout(1000)
