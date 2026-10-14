@@ -32,15 +32,18 @@ def main():
     from loja.modules.models import Product, ProductImage
     with app.app_context():
         prod = Product.query.filter_by(name=NAME).first()
+        first_url = f"https://picsum.photos/seed/galeria0/{DIMS[0][0]}/{DIMS[0][1]}"
         if prod is None:
             prod = Product(
                 id=uuid.uuid4(), name=NAME,
                 description="Produto sintético p/ galeria desktop.",
                 price=Decimal("129.90"),
-                image1="https://picsum.photos/seed/galeria0/800/1000",
+                image1=first_url,  # igual à 1ª ProductImage: deduplica (12)
                 category="feminino", stock=30, is_active=True)
             db.session.add(prod)
             db.session.flush()
+        else:
+            prod.image1 = first_url
         ProductImage.query.filter_by(product_id=prod.id).delete()
         for i, (w, h) in enumerate(DIMS):
             db.session.add(ProductImage(

@@ -69,14 +69,14 @@ def test_thumbs_sem_esmagamento(page):
     pid = seed_product()
     page.goto(f"{BASE_URL}/produtos/{pid}")
     page.wait_for_selector(".product-gallery-thumb")
+    if page._shot_w == 1280:
+        shot(page, "galeria-muitas")
     boxes = thumb_boxes(page)
     assert len(boxes) == 12
     heights = {round(b["height"]) for b in boxes if b}
     assert len(heights) == 1, f"alturas divergentes: {sorted(heights)}"
     for b in boxes:
         assert abs(b["height"] - b["width"] * 5 / 4) <= 2, b
-    if page._shot_w == 1280:
-        shot(page, "galeria-muitas")
 
 
 def test_principal_contem_sem_rolagem_horizontal(page):
@@ -126,7 +126,7 @@ def test_mobile_fileira_com_rolagem(page):
     pid = seed_product()
     page.goto(f"{BASE_URL}/produtos/{pid}")
     page.wait_for_selector(".product-gallery-thumb")
+    shot(page, "galeria-muitas")
     boxes = thumb_boxes(page)
     assert len(boxes) == 12
     assert len({round(b["height"]) for b in boxes if b}) == 1
-    shot(page, "galeria-muitas")
