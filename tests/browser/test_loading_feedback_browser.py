@@ -105,17 +105,14 @@ def test_nav_normal_exibe_barra(page):
     page.goto(BASE_URL + "/login")
     session = slow_network(page)
     try:
+        # Latência alta atrasa o commit: a barra (150ms) aparece com folga.
         page.eval_on_selector('a[href$="/register"]', "a => a.click()")
-        page.wait_for_timeout(1200)
+        wait_bar_visible(page, timeout_ms=8000)
     finally:
         fast_network(session)
     page.wait_for_url("**/register", timeout=15000)
-    timing = page.evaluate("""() => {
-      const n = performance.getEntriesByType('navigation')[0];
-      return n ? n.duration + '/' + n.responseEnd + '/' + n.requestStart
-               : 'sem-entry';
-    }""")
-    assert False, "TIMING-NAV " + str(timing)
+    assert page.evaluate(
+        "!!document.querySelector('#page-progress.is-active')") is False
 
 
 def test_nav_normal_exibe_barra_desktop(page):
@@ -189,13 +186,13 @@ def wait_bar_visible(page, timeout_ms=6000):
                 return
         except Exception:
             pass
-        page.wait_for_timeout(100)
-        elapsed += 100
+        page.wait_for_timeout(50)
+        elapsed += 50
     raise AssertionError(
         "barra de progresso não apareceu durante a navegação")
 
 
-def slow_network(page, latency=300, download=2048):
+def slow_network(page, latency=2000, download=2048):
     """Rede lenta via CDP (browser-side): a navegação pende com o JS da
     página vivo (sem congelar como diálogo modal), a barra aparece e o
     teste restaura com fast_network. Sem sleep em handler do Playwright."""
