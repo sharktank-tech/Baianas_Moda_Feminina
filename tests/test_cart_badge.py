@@ -130,5 +130,6 @@ def test_css_badge_no_template():
     assert ".cart-badge" in base
     assert "#2563eb" in base  # azul do projeto (info/admin)
     assert ".navbar-icon .cart-icon-wrap" in base  # visível no mobile
+    assert ".navbar-icon .cart-badge" in base  # número visível no mobile
     assert "pointer-events: none" in base  # área clicável intacta
     assert "cart-icon-wrap" in base and "navbar-cart" in base
