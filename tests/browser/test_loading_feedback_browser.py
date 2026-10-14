@@ -8,14 +8,8 @@ são somente leitura.
 """
 import os
 import re
-import sys
-import time
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
-
-from slow_proxy import SlowProxy
 
 playwright = pytest.importorskip("playwright.sync_api")
 
@@ -28,21 +22,9 @@ MOBILE = {"width": 390, "height": 844}
 
 
 @pytest.fixture(scope="module")
-def slow_proxy():
-    proxy = SlowProxy().start()
-    yield proxy
-    proxy.stop()
-
-
-@pytest.fixture(scope="module")
-def browser(slow_proxy):
+def browser():
     with playwright.sync_playwright() as runner:
-        # Proxy nativo (flags CLI conflitam com --no-proxy-server do
-        # Playwright); "<-loopback>" desfaz o bypass implícito de localhost.
-        instance = runner.chromium.launch(
-            args=["--no-sandbox"],
-            proxy={"server": f"http://127.0.0.1:{slow_proxy.port}",
-                   "bypass": "<-loopback>"})
+        instance = runner.chromium.launch(args=["--no-sandbox"])
         yield instance
         instance.close()
 
@@ -119,89 +101,25 @@ def admin_login(page):
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("page", ["mobile"], indirect=True)
-def test_nav_normal_exibe_barra(page, slow_proxy):
-    page.goto(BASE_URL + "/login")
-    # Proxy atrasa /register: a barra (150ms) aparece antes de concluir.
-    # Sem aguardar o clique: a conclusão vem sozinha após o atraso.
-    slow_proxy.delay_paths.add("/register")
-    try:
-        page.click('a[href$="/register"], a[href="/register"]',
-                   no_wait_after=True)
-        wait_proxied(slow_proxy, "/register")
-        wait_bar_visible(page)
-    finally:
-        slow_proxy.delay_paths.discard("/register")
+def test_nav_normal_exibe_barra(page):
+    install_stall_sw(page)
+    # Sem aguardar o clique: a conclusão vem sozinha após o atraso do SW.
+    page.click('a[href$="/register"], a[href="/register"]',
+               no_wait_after=True)
+    wait_bar_visible(page)
     page.wait_for_url("**/register", timeout=15000)
-    assert "/register" in slow_proxy.delayed  # passou pelo proxy com atraso
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
 
 
-def test_nav_normal_exibe_barra_desktop(page, slow_proxy):
-    page.goto(BASE_URL + "/login")
-    slow_proxy.delay_paths.add("/register")
-    try:
-        page.click('a[href$="/register"], a[href="/register"]',
-                   no_wait_after=True)
-        wait_proxied(slow_proxy, "/register")
-        wait_bar_visible(page)
-    finally:
-        slow_proxy.delay_paths.discard("/register")
+def test_nav_normal_exibe_barra_desktop(page):
+    install_stall_sw(page)
+    page.click('a[href$="/register"], a[href="/register"]',
+               no_wait_after=True)
+    wait_bar_visible(page)
     page.wait_for_url("**/register", timeout=15000)
-    assert "/register" in slow_proxy.delayed  # passou pelo proxy com atraso
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
-
-
-def test_zzz_diagnostico_clique(page, slow_proxy):
-    import json
-    page.goto(BASE_URL + "/login")
-    info = page.evaluate("""() => {
-      const a = document.querySelector('a[href$="/register"]');
-      if (!a) return {anchor: false};
-      return {
-        anchor: true,
-        hrefAttr: a.getAttribute('href'),
-        hrefProp: a.href,
-        target: a.target,
-        dataLoading: a.getAttribute('data-loading'),
-        inPartial: !!a.closest('[data-partial-container]'),
-        origin: new URL(a.href).origin,
-        loc: location.origin,
-        marker: window.__loadingFeedback,
-        hasBar: !!document.querySelector('#page-progress'),
-      };
-    }""")
-    slow_proxy.delay_paths.add("/register")
-    try:
-        page.evaluate("""() => {
-          window.__diag = [];
-          document.addEventListener('click', (e) => {
-            const a = e.target && e.target.closest
-              ? e.target.closest('a[href]') : null;
-            window.__diag.push({
-              trusted: e.isTrusted,
-              button: e.button,
-              preventedAtDispatch: e.defaultPrevented,
-              target: e.target ? e.target.tagName : null,
-              anchorHref: a ? a.getAttribute('href') : null,
-            });
-            setTimeout(() => {
-              window.__diag.push({
-                preventedAt150: e.defaultPrevented,
-                bar: !!document.querySelector('#page-progress.is-active'),
-              });
-            }, 300);
-          });
-        }""")
-        page.click('a[href$="/register"], a[href="/register"]',
-                   no_wait_after=True)
-        wait_proxied(slow_proxy, "/register")
-        page.wait_for_timeout(800)
-        diag = page.evaluate("window.__diag")
-    finally:
-        slow_proxy.delay_paths.discard("/register")
-    assert False, "DIAG anchor=" + json.dumps(info) + " events=" + json.dumps(diag)
 
 
 def test_clique_cancelado_tardio_sem_barra(page):
@@ -268,16 +186,31 @@ def wait_bar_visible(page, timeout_ms=6000):
         "barra de progresso não apareceu durante a navegação")
 
 
-def wait_proxied(proxy, path, timeout=10.0):
-    """Aguarda a requisição chegar ao proxy (lado teste, sem navegador):
-    prova que a navegação está realmente estolada antes de sondar a barra."""
-    end = time.monotonic() + timeout
-    while time.monotonic() < end:
-        if path in proxy.delayed:
-            return
-        time.sleep(0.05)
-    raise AssertionError(
-        f"{path} não passou pelo proxy: hits={proxy.hits}")
+SW_STALL_CODE = """self.addEventListener('fetch', (event) => {
+  let path = '/x';
+  try { path = new URL(event.request.url).pathname; } catch (e) {}
+  if (path === '/register' && event.request.mode === 'navigate') {
+    event.respondWith(new Promise((resolve) => {
+      setTimeout(() => resolve(fetch(event.request)), 2500);
+    }));
+  }
+});"""
+
+
+def install_stall_sw(page):
+    """Service Worker de teste: estola a navegação a /register por 2,5s
+    em thread própria do navegador — sem proxy, sleep ou estado
+    cross-thread no cliente de teste."""
+    page.route("**/sw-stall.js", lambda route: route.fulfill(
+        status=200, content_type="application/javascript",
+        body=SW_STALL_CODE))
+    page.goto(BASE_URL + "/login")
+    page.evaluate("""async () => {
+      await navigator.serviceWorker.register('/sw-stall.js', {scope: '/'});
+      await navigator.serviceWorker.ready;
+    }""")
+    page.goto(BASE_URL + "/login")  # recarrega sob controle do SW
+    assert page.evaluate("navigator.serviceWorker.controller !== null")
 
 
 def fulfill_204(page, pattern, sink):
