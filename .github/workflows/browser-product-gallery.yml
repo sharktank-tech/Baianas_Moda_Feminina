@@ -1,0 +1,97 @@
+name: Browser product gallery
+
+# Chromium real (Playwright) contra app local + Postgres descartável.
+# Valida a galeria do produto no desktop (1024/1280/1440) e mobile com
+# produto sintético de 12 imagens. Somente leitura pública.
+on:
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-product-gallery-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-product-gallery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: .
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/browserqa
+      # Espelho nunca tocado pelo conftest do pytest (que troca DATABASE_URL
+      # por SQLite no processo de teste): seed em subprocesso usa esta.
+      BROWSER_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/browserqa
+      POLLOMODAS_SCHEMA: browser_qa
+      POLLOMODAS_BOOTSTRAP_ON_STARTUP: "1"
+      SECRET_KEY: browser-qa-secret-key
+      PORT: "5111"
+      BROWSER_BASE_URL: http://127.0.0.1:5111
+      BROWSER_ADMIN_EMAIL: browser.admin@sintetico.test
+      BROWSER_ADMIN_PASSWORD: browser-admin-123
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: browserqa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install playwright
+          python -m playwright install chromium --with-deps
+
+      - name: Seed banco descartável
+        run: python tests/browser/seed_browser_qa.py
+
+      - name: Start app
+        run: |
+          nohup python run.py > /tmp/browser-app.log 2>&1 &
+          for i in $(seq 1 60); do
+            if python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5111/', timeout=5)" 2>/dev/null; then
+              echo "app no ar"; break
+            fi
+            sleep 2
+          done
+
+      - name: Run gallery tests (desktop)
+        run: python -m pytest -v tests/browser/test_product_gallery_browser.py
+
+      - name: Run gallery tests (mobile)
+        run: BROWSER_MOBILE=1 python -m pytest -v tests/browser/test_product_gallery_browser.py
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-gallery-shots
+          path: /tmp/galleryshots/
+          if-no-files-found: error
+
+      - name: App log on failure
+        if: failure()
+        run: tail -100 /tmp/browser-app.log
