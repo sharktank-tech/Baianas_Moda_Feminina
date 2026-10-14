@@ -8,6 +8,7 @@ são somente leitura.
 """
 import os
 import re
+import threading
 
 import pytest
 
@@ -96,35 +97,31 @@ def admin_login(page):
     assert "/conta" in page.url
 
 
-def record_posts(page, pattern, sink):
-    """Registra POSTs sem atrasar (sleep no handler congelaria o cliente)."""
+class HeldRequest:
+    """Segura a requisição: o handler só sinaliza e retorna (sem sleep,
+    que congelaria o cliente); o teste observa o loading com calma e
+    libera com `release()` para a navegação real concluir."""
 
-    def handle(route):
-        sink.append(route.request.post_data or "1")
+    def __init__(self, page, pattern, sink=None):
+        self.arrived = threading.Event()
+        self.route = None
+        self.sink = sink
+
+        def handle(route):
+            if self.sink is not None:
+                self.sink.append(route.request.post_data or "1")
+            self.route = route
+            self.arrived.set()
+
+        page.route(pattern, handle)
+
+    def expect(self, timeout=10000):
+        assert self.arrived.wait(timeout), "requisição não chegou à rota"
+
+    def release(self):
+        assert self.route is not None
+        route, self.route = self.route, None
         route.continue_()
-
-    page.route(pattern, handle)
-
-
-def slow_network(page, latency=400, download=4096):
-    """Rede lenta via CDP (browser-side): resposta pendente sem bloquear."""
-    session = page.context.new_cdp_session(page)
-    session.send("Network.emulateNetworkConditions", {
-        "offline": False,
-        "latency": latency,
-        "downloadThroughput": download,
-        "uploadThroughput": download,
-    })
-    return session
-
-
-def fast_network(session):
-    session.send("Network.emulateNetworkConditions", {
-        "offline": False,
-        "latency": 0,
-        "downloadThroughput": -1,
-        "uploadThroughput": -1,
-    })
 
 
 def wait_replaced(page, timeout=15000):
@@ -140,10 +137,11 @@ def wait_replaced(page, timeout=15000):
 @pytest.mark.parametrize("page", ["mobile"], indirect=True)
 def test_nav_normal_exibe_barra(page):
     page.goto(BASE_URL + "/login")
-    session = slow_network(page)
+    held = HeldRequest(page, "**/register")
     page.click('a[href$="/register"], a[href="/register"]')
+    held.expect()
     page.wait_for_selector("#page-progress.is-active", timeout=8000)
-    fast_network(session)
+    held.release()
     page.wait_for_url("**/register", timeout=15000)
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
@@ -151,10 +149,11 @@ def test_nav_normal_exibe_barra(page):
 
 def test_nav_normal_exibe_barra_desktop(page):
     page.goto(BASE_URL + "/login")
-    session = slow_network(page)
+    held = HeldRequest(page, "**/register")
     page.click('a[href$="/register"], a[href="/register"]')
+    held.expect()
     page.wait_for_selector("#page-progress.is-active", timeout=8000)
-    fast_network(session)
+    held.release()
     page.wait_for_url("**/register", timeout=15000)
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
@@ -231,9 +230,9 @@ def _dynamic_form(page, *, action="/login", method="post", novalidate=False,
 def test_submit_valido_marca_e_bloqueia_duplo(page):
     posts = []
     _dynamic_form(page)
-    record_posts(page, "**/login", posts)
-    net = slow_network(page)
+    held = HeldRequest(page, "**/login", posts)
     page.eval_on_selector("#dyn button[value='b']", "b => b.click()")
+    held.expect()
     page.wait_for_function(
         "() => document.querySelector('#dyn button[value=\"b\"]')"
         ".getAttribute('aria-busy') === 'true'",
@@ -243,7 +242,7 @@ def test_submit_valido_marca_e_bloqueia_duplo(page):
         is True
     # 2º clique no botão desabilitado: sem efeito.
     page.eval_on_selector("#dyn button[value='b']", "b => b.click()")
-    fast_network(net)
+    held.release()
     wait_replaced(page)
     assert len(posts) == 1
 
@@ -251,13 +250,13 @@ def test_submit_valido_marca_e_bloqueia_duplo(page):
 def test_multiplos_botoes_preservam_name_value(page):
     bodies = []
     _dynamic_form(page)
-    record_posts(page, "**/login", bodies)
-    net = slow_network(page)
+    held = HeldRequest(page, "**/login", bodies)
     page.eval_on_selector("#dyn button[value='b']", "b => b.click()")
+    held.expect()
     page.wait_for_function(
         "() => document.querySelector('#dyn').dataset.submitted === '1'",
         timeout=5000)
-    fast_network(net)
+    held.release()
     wait_replaced(page)
     assert len(bodies) == 1
     assert "acao=b" in bodies[0] and "acao=a" not in bodies[0]
@@ -285,13 +284,13 @@ def test_novalidate_envia_com_loading(page):
       document.querySelector('#dyn').insertAdjacentHTML('afterbegin',
         '<input name="obrig" required value="">');
     }""")
-    record_posts(page, "**/login", bodies)
-    net = slow_network(page)
+    held = HeldRequest(page, "**/login", bodies)
     page.eval_on_selector("#dyn button[value='a']", "b => b.click()")
+    held.expect()
     page.wait_for_function(
         "() => document.querySelector('#dyn').dataset.submitted === '1'",
         timeout=5000)
-    fast_network(net)
+    held.release()
     wait_replaced(page)
     assert len(bodies) == 1
 
@@ -305,13 +304,13 @@ def test_formnovalidate_passa_com_campo_invalido(page):
       f.querySelector('button').setAttribute('formnovalidate', '');
     }""")
     bodies = []
-    record_posts(page, "**/login", bodies)
-    net = slow_network(page)
+    held = HeldRequest(page, "**/login", bodies)
     page.eval_on_selector("#dyn button", "b => b.click()")
+    held.expect()
     page.wait_for_function(
         "() => document.querySelector('#dyn').dataset.submitted === '1'",
         timeout=5000)
-    fast_network(net)
+    held.release()
     wait_replaced(page)
     assert len(bodies) == 1
 
@@ -342,9 +341,9 @@ def test_input_submit_nao_tem_value_sobrescrito(page):
         '<input type="submit" name="acao" value="Pagar agora">');
     }""")
     bodies = []
-    record_posts(page, "**/login", bodies)
-    net = slow_network(page)
+    held = HeldRequest(page, "**/login", bodies)
     page.eval_on_selector("#dyn input[type='submit']", "b => b.click()")
+    held.expect()
     page.wait_for_function(
         "() => document.querySelector('#dyn input[type=\"submit\"]')"
         ".getAttribute('aria-busy') === 'true'",
@@ -355,7 +354,7 @@ def test_input_submit_nao_tem_value_sobrescrito(page):
     assert page.evaluate(
         "document.querySelector('#dyn input[type=\"submit\"]').value") \
         == "Pagar agora"
-    fast_network(net)
+    held.release()
     wait_replaced(page)
     assert len(bodies) == 1
     assert "acao=Pagar+agora" in bodies[0] or "acao=Pagar agora" in bodies[0]
@@ -368,15 +367,15 @@ def test_enter_sem_submitter_explicito(page):
         '<input name="q" value="x">');
     }""")
     bodies = []
-    record_posts(page, "**/login", bodies)
+    held = HeldRequest(page, "**/login", bodies)
     page.eval_on_selector("#dyn input[name='q']", "i => i.focus()")
-    net = slow_network(page)
     page.keyboard.press("Enter")
+    held.expect()
     page.wait_for_function(
         "() => (document.querySelector('#dyn button')"
         ".getAttribute('aria-busy') === 'true')",
         timeout=5000)
-    fast_network(net)
+    held.release()
     wait_replaced(page)
     assert len(bodies) == 1
 
