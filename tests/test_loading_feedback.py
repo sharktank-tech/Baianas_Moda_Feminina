@@ -62,6 +62,7 @@ def test_navegacao_normal_preservada():
 
 def test_css_indeterminado_e_movimento_reduzido():
     css = _css()
+    assert "__lfArm" in _js()  # rastro de armamento p/ testes de navegador
     assert "@keyframes page-progress-slide" in css
     assert "@keyframes loading-spin" in css
     assert ".loading-spinner" in css

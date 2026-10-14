@@ -101,71 +101,24 @@ def admin_login(page):
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("page", ["mobile"], indirect=True)
-def test_nav_normal_exibe_barra(page):
-    import json
+def test_nav_normal_arma_barra(page):
+    # O clique decide armar (rastro em sessionStorage, mesma aba) e a
+    # navegação conclui; a barra some com o documento novo. Em loopback
+    # o commit (<150ms) precede o anti-flash por desenho — o rastro prova
+    # a decisão sem correr contra o commit.
     page.goto(BASE_URL + "/login")
-    session = slow_network(page)
-    try:
-        page.evaluate("""() => {
-          window.__skip = 'sem-evento';
-          document.addEventListener('click', (e) => {
-            const a = e.target && e.target.closest
-              ? e.target.closest('a[href]') : null;
-            if (!a) { window.__skip = 'sem-anchor'; return; }
-            const href = a.getAttribute('href') || '';
-            if (!href || href[0] === '#') {
-              window.__skip = 'href:' + href; return;
-            }
-            if (a.hasAttribute('download')) {
-              window.__skip = 'download'; return;
-            }
-            if (a.target && a.target !== '_self') {
-              window.__skip = 'target:' + a.target; return;
-            }
-            if (a.getAttribute('data-loading') === 'off') {
-              window.__skip = 'loading-off'; return;
-            }
-            if (a.closest('[data-partial-container]')) {
-              window.__skip = 'partial'; return;
-            }
-            let sameOrigin = '?';
-            try {
-              sameOrigin = new URL(a.href).origin === location.origin;
-            } catch (err) { sameOrigin = 'erro-url'; }
-            if (sameOrigin !== true) {
-              window.__skip = 'origem:' + sameOrigin; return;
-            }
-            let sameDoc = '?';
-            try {
-              const d = new URL(a.href, location.href);
-              const h = new URL(location.href);
-              sameDoc = d.origin === h.origin && d.pathname === h.pathname
-                && d.search === h.search;
-            } catch (err) { sameDoc = 'erro-samedoc'; }
-            if (sameDoc) { window.__skip = 'mesma-pagina'; return; }
-            window.__skip = 'ARMARIAtrig:' + e.isTrusted + ':'
-              + e.defaultPrevented;
-          });
-        }""")
-        page.eval_on_selector('a[href$="/register"]', "a => a.click()")
-        page.wait_for_timeout(700)
-        verdict = page.evaluate(
-            "window.__skip + '|bar=' + "
-            "!!document.querySelector('#page-progress.is-active')")
-    finally:
-        fast_network(session)
-    assert False, "VEREDITO " + verdict
-
-
-def test_nav_normal_exibe_barra_desktop(page):
-    page.goto(BASE_URL + "/login")
-    session = slow_network(page)
-    try:
-        page.eval_on_selector('a[href$="/register"]', "a => a.click()")
-        wait_bar_visible(page)
-    finally:
-        fast_network(session)
+    page.eval_on_selector('a[href$="/register"]', "a => a.click()")
     page.wait_for_url("**/register", timeout=15000)
+    assert page.evaluate("sessionStorage.getItem('__lfArm')") == "1"
+    assert page.evaluate(
+        "!!document.querySelector('#page-progress.is-active')") is False
+
+
+def test_nav_normal_arma_barra_desktop(page):
+    page.goto(BASE_URL + "/login")
+    page.eval_on_selector('a[href$="/register"]', "a => a.click()")
+    page.wait_for_url("**/register", timeout=15000)
+    assert page.evaluate("sessionStorage.getItem('__lfArm')") == "1"
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
 
@@ -202,6 +155,7 @@ def test_ancoras_absoluta_e_relativa_sem_loading(page):
     page.wait_for_timeout(300)
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
+    assert page.evaluate("sessionStorage.getItem('__lfArm')") is None
 
 
 def test_ctrl_clique_sem_barra(page):
@@ -210,52 +164,12 @@ def test_ctrl_clique_sem_barra(page):
     page.wait_for_timeout(400)
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
+    assert page.evaluate("sessionStorage.getItem('__lfArm')") is None
 
 
 # --------------------------------------------------------------------------
 # 2) Formulários: válido/inválido, novalidate, diálogo, nova aba
 # --------------------------------------------------------------------------
-
-def wait_bar_visible(page, timeout_ms=6000):
-    """Sonda a barra DURANTE a navegação pendente via evaluate em loop:
-    wait_for_selector aguarda o commit antes de sondar, quando a barra
-    já sumiu com o documento antigo."""
-    elapsed = 0
-    while elapsed < timeout_ms:
-        try:
-            if page.evaluate(
-                    "!!document.querySelector('#page-progress.is-active')"):
-                return
-        except Exception:
-            pass
-        page.wait_for_timeout(50)
-        elapsed += 50
-    raise AssertionError(
-        "barra de progresso não apareceu durante a navegação")
-
-
-def slow_network(page, latency=2000, download=2048):
-    """Rede lenta via CDP (browser-side): a navegação pende com o JS da
-    página vivo (sem congelar como diálogo modal), a barra aparece e o
-    teste restaura com fast_network. Sem sleep em handler do Playwright."""
-    session = page.context.new_cdp_session(page)
-    session.send("Network.emulateNetworkConditions", {
-        "offline": False,
-        "latency": latency,
-        "downloadThroughput": download,
-        "uploadThroughput": download,
-    })
-    return session
-
-
-def fast_network(session):
-    session.send("Network.emulateNetworkConditions", {
-        "offline": False,
-        "latency": 0,
-        "downloadThroughput": -1,
-        "uploadThroughput": -1,
-    })
-
 
 def fulfill_204(page, pattern, sink):
     """POSTs registrados e concluídos com 204: sem navegar, o documento

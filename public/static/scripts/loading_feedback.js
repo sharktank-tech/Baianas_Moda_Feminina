@@ -102,6 +102,13 @@
   function armBar(event) {
     if (progressTimer) return;
     progressEvent = event || null;
+    /* Rastro de observabilidade (testes): a decisão de armar ocorre no
+       clique, antes da navegação — ler a barra depois do commit seria
+       impossível em respostas rápidas (o anti-flash de 150ms é proposital).
+       Sem efeito visual ou funcional. */
+    try {
+      sessionStorage.setItem('__lfArm', '1');
+    } catch (err) { /* armazenamento indisponível: segue sem rastro */ }
     progressTimer = setTimeout(showProgress, PROGRESS_DELAY_MS);
   }
 
