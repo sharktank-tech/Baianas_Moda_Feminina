@@ -7,8 +7,8 @@ teste; nenhum pagamento, checkout ou e-mail.
 """
 import os
 import re
-import uuid
-from decimal import Decimal
+import subprocess
+import sys
 
 import pytest
 
@@ -57,45 +57,16 @@ def shot(page, name):
 def seed_cart(entries):
     """Zera o carrinho do cliente de teste e insere `entries=[(qtd,)]`.
 
-    Escreve direto no banco descartável (mesma fonte do badge, sem
-    contagem paralela); o app em teste lê normalmente.
+    Via subprocesso (o conftest do pytest troca DATABASE_URL por SQLite
+    no processo de teste). Mesma fonte lida pelo badge, sem contagem
+    paralela; banco 100% descartável do CI.
     """
-    sys_path = os.getcwd()
-    import sys
-    if sys_path not in sys.path:
-        sys.path.insert(0, sys_path)
-    from run import app
-    from loja import db
-    from loja.modules.models import Cart, CartItem, Product, User
-    with app.app_context():
-        customer = User.query.filter_by(email=CUSTOMER_EMAIL).first()
-        assert customer is not None, "seed do cliente ausente"
-        cart = Cart.query.filter_by(user_id=customer.id).first()
-        if cart is None:
-            cart = Cart(id=uuid.uuid4(), user_id=customer.id)
-            db.session.add(cart)
-            db.session.flush()
-        CartItem.query.filter_by(cart_id=cart.id).delete()
-        prods = []
-        for i in range(max(1, len(entries))):
-            name = ("Vestido Sintético Browser" if i == 0
-                    else "Blusa Sintética Badge")
-            prod = Product.query.filter_by(name=name).first()
-            if prod is None:
-                prod = Product(
-                    id=uuid.uuid4(), name=name,
-                    description="Produto sintético p/ badge.",
-                    price=Decimal("89.90"),
-                    image1="https://exemplo.com/badge.png",
-                    category="feminino", stock=200, is_active=True)
-                db.session.add(prod)
-                db.session.flush()
-            prods.append(prod)
-        for prod, (qty,) in zip(prods, entries):
-            db.session.add(CartItem(
-                id=uuid.uuid4(), cart_id=cart.id, product_id=prod.id,
-                selected_size="M", quantity=qty, unit_price=prod.price))
-        db.session.commit()
+    import json
+    proc = subprocess.run(
+        [sys.executable, "tests/browser/seed_cart_state.py",
+         json.dumps([list(e) for e in entries])],
+        cwd=os.getcwd(), capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, proc.stderr[-2000:]
 
 
 def csrf_of(html):
