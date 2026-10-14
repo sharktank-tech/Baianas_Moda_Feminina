@@ -153,6 +153,57 @@ def test_nav_normal_exibe_barra_desktop(page, slow_proxy):
         "!!document.querySelector('#page-progress.is-active')") is False
 
 
+def test_zzz_diagnostico_clique(page, slow_proxy):
+    import json
+    page.goto(BASE_URL + "/login")
+    info = page.evaluate("""() => {
+      const a = document.querySelector('a[href$="/register"]');
+      if (!a) return {anchor: false};
+      return {
+        anchor: true,
+        hrefAttr: a.getAttribute('href'),
+        hrefProp: a.href,
+        target: a.target,
+        dataLoading: a.getAttribute('data-loading'),
+        inPartial: !!a.closest('[data-partial-container]'),
+        origin: new URL(a.href).origin,
+        loc: location.origin,
+        marker: window.__loadingFeedback,
+        hasBar: !!document.querySelector('#page-progress'),
+      };
+    }""")
+    slow_proxy.delay_paths.add("/register")
+    try:
+        page.evaluate("""() => {
+          window.__diag = [];
+          document.addEventListener('click', (e) => {
+            const a = e.target && e.target.closest
+              ? e.target.closest('a[href]') : null;
+            window.__diag.push({
+              trusted: e.isTrusted,
+              button: e.button,
+              preventedAtDispatch: e.defaultPrevented,
+              target: e.target ? e.target.tagName : null,
+              anchorHref: a ? a.getAttribute('href') : null,
+            });
+            setTimeout(() => {
+              window.__diag.push({
+                preventedAt150: e.defaultPrevented,
+                bar: !!document.querySelector('#page-progress.is-active'),
+              });
+            }, 300);
+          });
+        }""")
+        page.click('a[href$="/register"], a[href="/register"]',
+                   no_wait_after=True)
+        wait_proxied(slow_proxy, "/register")
+        page.wait_for_timeout(800)
+        diag = page.evaluate("window.__diag")
+    finally:
+        slow_proxy.delay_paths.discard("/register")
+    assert False, "DIAG anchor=" + json.dumps(info) + " events=" + json.dumps(diag)
+
+
 def test_clique_cancelado_tardio_sem_barra(page):
     page.goto(BASE_URL + "/login")
     # Handler registrado DEPOIS do módulo (que carrega no <head> com defer):
