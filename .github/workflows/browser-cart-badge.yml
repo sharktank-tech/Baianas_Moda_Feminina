@@ -23,6 +23,9 @@ jobs:
     env:
       PYTHONPATH: .
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/browserqa
+      # Espelho nunca tocado pelo conftest do pytest (que troca DATABASE_URL
+      # por SQLite no processo de teste): seed em subprocesso usa esta.
+      BROWSER_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/browserqa
       POLLOMODAS_SCHEMA: browser_qa
       POLLOMODAS_BOOTSTRAP_ON_STARTUP: "1"
       SECRET_KEY: browser-qa-secret-key

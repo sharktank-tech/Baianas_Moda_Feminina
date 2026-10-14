@@ -13,6 +13,14 @@ from decimal import Decimal
 
 CUSTOMER_EMAIL = "browser.cliente@sintetico.test"
 
+# O conftest do pytest troca DATABASE_URL por SQLite no processo de teste;
+# o subprocesso herda esse ambiente — por isso a URL PG vem da variável
+# espelho do workflow, nunca tocada pelo conftest.
+os.environ["DATABASE_URL"] = (
+    os.environ.get("BROWSER_DATABASE_URL")
+    or os.environ.get("DATABASE_URL", "")
+)
+
 
 def main(entries):
     sys.path.insert(0, os.getcwd())
