@@ -9,6 +9,7 @@ são somente leitura.
 import os
 import re
 import sys
+import time
 
 import pytest
 
@@ -126,6 +127,7 @@ def test_nav_normal_exibe_barra(page, slow_proxy):
     try:
         page.click('a[href$="/register"], a[href="/register"]',
                    no_wait_after=True)
+        wait_proxied(slow_proxy, "/register")
         wait_bar_visible(page)
     finally:
         slow_proxy.delay_paths.discard("/register")
@@ -141,6 +143,7 @@ def test_nav_normal_exibe_barra_desktop(page, slow_proxy):
     try:
         page.click('a[href$="/register"], a[href="/register"]',
                    no_wait_after=True)
+        wait_proxied(slow_proxy, "/register")
         wait_bar_visible(page)
     finally:
         slow_proxy.delay_paths.discard("/register")
@@ -212,6 +215,18 @@ def wait_bar_visible(page, timeout_ms=6000):
         elapsed += 100
     raise AssertionError(
         "barra de progresso não apareceu durante a navegação")
+
+
+def wait_proxied(proxy, path, timeout=10.0):
+    """Aguarda a requisição chegar ao proxy (lado teste, sem navegador):
+    prova que a navegação está realmente estolada antes de sondar a barra."""
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if path in proxy.delayed:
+            return
+        time.sleep(0.05)
+    raise AssertionError(
+        f"{path} não passou pelo proxy: hits={proxy.hits}")
 
 
 def fulfill_204(page, pattern, sink):
