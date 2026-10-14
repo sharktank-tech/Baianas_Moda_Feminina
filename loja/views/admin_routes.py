@@ -1982,12 +1982,20 @@ def _hero_slide_extra_fields() -> dict:
     if content_position not in HERO_CONTENT_POSITIONS:
         content_position = "left"
     description = (request.form.get("description") or "").strip() or None
+    # Link do slide (clique na imagem + botão): mesma política das URLs do
+    # rodapé — interno que resolve por GET ou https externa; inválido vira
+    # None (fail-closed, botão/imagem caem no fallback /produtos).
+    from loja.modules.footer_links import is_safe_footer_url
+    raw_link = (request.form.get("link") or "").strip()
+    link = (raw_link if raw_link and len(raw_link) <= 255
+            and is_safe_footer_url(raw_link) else None)
     # Checkbox com par hidden(0)+checkbox(1): getlist distingue "0 explícito"
     # de ausente; só "1" liga.
     show_title = "1" in request.form.getlist("show_title")
     show_description = "1" in request.form.getlist("show_description")
     return {
         "image_mobile": (request.form.get("image_mobile") or "").strip() or None,
+        "link": link,
         "focal_desktop": focal_desktop,
         "focal_mobile": focal_mobile,
         "content_position": content_position,
