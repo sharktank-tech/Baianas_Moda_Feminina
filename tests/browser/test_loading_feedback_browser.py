@@ -101,22 +101,29 @@ def admin_login(page):
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("page", ["mobile"], indirect=True)
+@pytest.mark.parametrize("page", ["mobile"], indirect=True)
 def test_nav_normal_exibe_barra(page):
-    install_stall_sw(page)
-    # Sem aguardar o clique: a conclusão vem sozinha após o atraso do SW.
+    page.goto(BASE_URL + "/login")
+    dialogs = hold_with_beforeunload(page)
+    # Sem aguardar o clique: a navegação pende no diálogo até accept().
     page.click('a[href$="/register"], a[href="/register"]',
                no_wait_after=True)
     wait_bar_visible(page)
+    assert len(dialogs) == 1
+    dialogs[0].accept()
     page.wait_for_url("**/register", timeout=15000)
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
 
 
 def test_nav_normal_exibe_barra_desktop(page):
-    install_stall_sw(page)
+    page.goto(BASE_URL + "/login")
+    dialogs = hold_with_beforeunload(page)
     page.click('a[href$="/register"], a[href="/register"]',
                no_wait_after=True)
     wait_bar_visible(page)
+    assert len(dialogs) == 1
+    dialogs[0].accept()
     page.wait_for_url("**/register", timeout=15000)
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
@@ -186,31 +193,19 @@ def wait_bar_visible(page, timeout_ms=6000):
         "barra de progresso não apareceu durante a navegação")
 
 
-SW_STALL_CODE = """self.addEventListener('fetch', (event) => {
-  let path = '/x';
-  try { path = new URL(event.request.url).pathname; } catch (e) {}
-  if (path === '/register' && event.request.mode === 'navigate') {
-    event.respondWith(new Promise((resolve) => {
-      setTimeout(() => resolve(fetch(event.request)), 2500);
-    }));
-  }
-});"""
-
-
-def install_stall_sw(page):
-    """Service Worker de teste: estola a navegação a /register por 2,5s
-    em thread própria do navegador — sem proxy, sleep ou estado
-    cross-thread no cliente de teste."""
-    page.route("**/sw-stall.js", lambda route: route.fulfill(
-        status=200, content_type="application/javascript",
-        body=SW_STALL_CODE))
-    page.goto(BASE_URL + "/login")
-    page.evaluate("""async () => {
-      await navigator.serviceWorker.register('/sw-stall.js', {scope: '/'});
-      await navigator.serviceWorker.ready;
+def hold_with_beforeunload(page):
+    """Segura a próxima navegação com beforeunload: o navegador aguarda
+    o diálogo, a barra (150ms) aparece e o teste libera com accept().
+    Tudo na própria página — sem proxy, sleep ou estado cross-thread."""
+    dialogs = []
+    page.on("dialog", lambda dialog: dialogs.append(dialog))
+    page.evaluate("""() => {
+      window.addEventListener('beforeunload', (e) => {
+        e.preventDefault();
+        e.returnValue = '';
+      });
     }""")
-    page.goto(BASE_URL + "/login")  # recarrega sob controle do SW
-    assert page.evaluate("navigator.serviceWorker.controller !== null")
+    return dialogs
 
 
 def fulfill_204(page, pattern, sink):
