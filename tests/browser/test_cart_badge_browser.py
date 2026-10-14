@@ -128,7 +128,7 @@ def test_soma_quantidades_repetidas(page):
     page.reload()
     assert badge_text(page) == "6"
     # Ir ao carrinho e voltar pelo histórico mantém.
-    page.goto(BASE_URL + "/carrinho")
+    page.goto(BASE_URL + "/cart")
     page.go_back()
     page.wait_for_timeout(800)
     assert badge_text(page) == "6"
@@ -137,7 +137,7 @@ def test_soma_quantidades_repetidas(page):
 def test_remocao_via_ui_oculta_badge(page):
     seed_cart([(2,)])
     customer_login(page)
-    page.goto(BASE_URL + "/carrinho")
+    page.goto(BASE_URL + "/cart")
     assert badge_text(page) == "2"
     with page.expect_navigation():
         page.click(".remove-form .remove-btn")
