@@ -138,7 +138,9 @@ def wait_replaced(page, timeout=15000):
 def test_nav_normal_exibe_barra(page):
     page.goto(BASE_URL + "/login")
     held = HeldRequest(page, "**/register")
-    page.click('a[href$="/register"], a[href="/register"]')
+    # Sem aguardar a navegação: ela fica segurada pela rota até release().
+    page.click('a[href$="/register"], a[href="/register"]',
+               no_wait_after=True)
     held.expect()
     page.wait_for_selector("#page-progress.is-active", timeout=8000)
     held.release()
@@ -150,7 +152,9 @@ def test_nav_normal_exibe_barra(page):
 def test_nav_normal_exibe_barra_desktop(page):
     page.goto(BASE_URL + "/login")
     held = HeldRequest(page, "**/register")
-    page.click('a[href$="/register"], a[href="/register"]')
+    # Sem aguardar a navegação: ela fica segurada pela rota até release().
+    page.click('a[href$="/register"], a[href="/register"]',
+               no_wait_after=True)
     held.expect()
     page.wait_for_selector("#page-progress.is-active", timeout=8000)
     held.release()
