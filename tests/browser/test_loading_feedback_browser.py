@@ -102,17 +102,59 @@ def admin_login(page):
 
 @pytest.mark.parametrize("page", ["mobile"], indirect=True)
 def test_nav_normal_exibe_barra(page):
+    import json
     page.goto(BASE_URL + "/login")
     session = slow_network(page)
     try:
-        # Latência alta atrasa o commit: a barra (150ms) aparece com folga.
+        page.evaluate("""() => {
+          window.__skip = 'sem-evento';
+          document.addEventListener('click', (e) => {
+            const a = e.target && e.target.closest
+              ? e.target.closest('a[href]') : null;
+            if (!a) { window.__skip = 'sem-anchor'; return; }
+            const href = a.getAttribute('href') || '';
+            if (!href || href[0] === '#') {
+              window.__skip = 'href:' + href; return;
+            }
+            if (a.hasAttribute('download')) {
+              window.__skip = 'download'; return;
+            }
+            if (a.target && a.target !== '_self') {
+              window.__skip = 'target:' + a.target; return;
+            }
+            if (a.getAttribute('data-loading') === 'off') {
+              window.__skip = 'loading-off'; return;
+            }
+            if (a.closest('[data-partial-container]')) {
+              window.__skip = 'partial'; return;
+            }
+            let sameOrigin = '?';
+            try {
+              sameOrigin = new URL(a.href).origin === location.origin;
+            } catch (err) { sameOrigin = 'erro-url'; }
+            if (sameOrigin !== true) {
+              window.__skip = 'origem:' + sameOrigin; return;
+            }
+            let sameDoc = '?';
+            try {
+              const d = new URL(a.href, location.href);
+              const h = new URL(location.href);
+              sameDoc = d.origin === h.origin && d.pathname === h.pathname
+                && d.search === h.search;
+            } catch (err) { sameDoc = 'erro-samedoc'; }
+            if (sameDoc) { window.__skip = 'mesma-pagina'; return; }
+            window.__skip = 'ARMARIAtrig:' + e.isTrusted + ':'
+              + e.defaultPrevented;
+          });
+        }""")
         page.eval_on_selector('a[href$="/register"]', "a => a.click()")
-        wait_bar_visible(page, timeout_ms=8000)
+        page.wait_for_timeout(700)
+        verdict = page.evaluate(
+            "window.__skip + '|bar=' + "
+            "!!document.querySelector('#page-progress.is-active')")
     finally:
         fast_network(session)
-    page.wait_for_url("**/register", timeout=15000)
-    assert page.evaluate(
-        "!!document.querySelector('#page-progress.is-active')") is False
+    assert False, "VEREDITO " + verdict
 
 
 def test_nav_normal_exibe_barra_desktop(page):
