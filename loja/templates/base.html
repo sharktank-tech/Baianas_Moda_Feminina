@@ -1002,5 +1002,9 @@
   </script>
 
   {% block extra_scripts %}{% endblock %}
+  <script
+    src="{{ url_for('static', filename='scripts/loading_feedback.js') }}"
+    defer
+  ></script>
 </body>
 </html>
