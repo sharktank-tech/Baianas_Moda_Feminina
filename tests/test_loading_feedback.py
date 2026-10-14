@@ -75,7 +75,8 @@ def test_css_indeterminado_e_movimento_reduzido():
 def test_botao_spinner_texto_e_bloqueio_sem_perder_dados():
     src = _js()
     assert "aria-busy" in src
-    assert "minWidth" in src
+    # CSP `style-src-attr 'none'`: nenhuma escrita via CSSOM.
+    assert ".style." not in src
     assert "data-loading-text" in src
     assert "Entrando" not in src  # textos vivem nos templates, não no JS
     assert "dataset.submitted" in src
@@ -156,4 +157,4 @@ def test_textos_sao_texto_e_historico_preservado():
     assert "replaceState" not in src
     # <input type=submit>: value nunca sobrescrito (é dado enviado).
     assert ".value =" not in src
-    assert "loadingMinWidth" in src  # min-width anterior restaurado
+    assert "disarmControl" in src  # estado visual restaurado (voltar/bfcache)

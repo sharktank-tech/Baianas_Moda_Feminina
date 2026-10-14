@@ -132,11 +132,9 @@
   function armControl(control) {
     if (!control || control.dataset.loadingActive) return;
     control.dataset.loadingActive = '1';
-    /* Guarda tudo que será modificado para restaurar depois. */
-    if (control.style.minWidth) {
-      control.dataset.loadingMinWidth = control.style.minWidth;
-    }
-    control.style.minWidth = control.offsetWidth + 'px';
+    /* Sem escrita via CSSOM: o CSP do app usa `style-src-attr 'none'`
+       e bloquearia (outros scripts da loja já geram esse tipo de
+       violação; este módulo não adiciona nenhuma). */
     if (control.hasAttribute('aria-busy')) {
       control.dataset.loadingAriaBusy = control.getAttribute('aria-busy');
     }
@@ -172,12 +170,6 @@
     if (control.dataset.loadingOriginal !== undefined) {
       control.innerHTML = control.dataset.loadingOriginal;
       delete control.dataset.loadingOriginal;
-    }
-    if (control.dataset.loadingMinWidth !== undefined) {
-      control.style.minWidth = control.dataset.loadingMinWidth;
-      delete control.dataset.loadingMinWidth;
-    } else {
-      control.style.minWidth = '';
     }
     if (control.dataset.loadingAriaBusy !== undefined) {
       control.setAttribute('aria-busy', control.dataset.loadingAriaBusy);
