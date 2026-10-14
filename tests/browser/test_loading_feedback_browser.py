@@ -373,7 +373,9 @@ def test_enter_sem_submitter_explicito(page):
     bodies = []
     held = HeldRequest(page, "**/login", bodies)
     page.eval_on_selector("#dyn input[name='q']", "i => i.focus()")
-    page.keyboard.press("Enter")
+    # Entrada confiável (submissão implícita real), sem aguardar a
+    # navegação segurada pela rota.
+    page.locator("#dyn input[name='q']").press("Enter", no_wait_after=True)
     held.expect()
     page.wait_for_function(
         "() => (document.querySelector('#dyn button')"
