@@ -221,6 +221,35 @@
     .navbar-icon span { line-height: 1; }
     .navbar-icon:hover { color: var(--brand-pink); background: var(--gray-100); }
 
+    /* ── Badge de quantidade sobre o ícone da sacola ── */
+    .cart-icon-wrap {
+      position: relative;
+      display: inline-flex;
+      line-height: 1;
+    }
+    .cart-badge {
+      position: absolute;
+      top: -6px;
+      right: -7px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      box-sizing: border-box;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: #2563eb;
+      color: #fff;
+      font-size: 0.65rem;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: 0;
+      text-transform: none;
+      pointer-events: none;   /* área clicável do ícone intacta */
+      box-shadow: 0 0 0 2px var(--white);
+    }
+
     /* ── Menu de categorias (linha abaixo do header) ── */
     .cat-menu {
       background: var(--white);
@@ -649,6 +678,7 @@
       .navbar-hamburger { display: block; }
       .navbar-search { margin: 0 0.6rem; }
       .navbar-icon span { display: none; }   /* mantém só o ícone no mobile */
+      .navbar-icon .cart-icon-wrap { display: inline-flex; }  /* badge sempre visível */
       .navbar-icon { padding: 6px; }
       .cat-menu { display: none; }            /* categorias vão para o drawer */
       .benefits-strip { gap: 1rem; flex-wrap: wrap; }
@@ -740,8 +770,11 @@
         <span>Entrar</span>
       </a>
       {% endif %}
-      <a href="{{ url_for('main.carrinho') }}" class="navbar-icon" aria-label="Sacola">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+      <a href="{{ url_for('main.carrinho') }}" class="navbar-icon navbar-cart" aria-label="{{ cart_count_label }}">
+        <span class="cart-icon-wrap" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+          {% if cart_count_display %}<span class="cart-badge">{{ cart_count_display }}</span>{% endif %}
+        </span>
       </a>
       <button class="navbar-hamburger" id="navHamburger" aria-label="Menu" aria-expanded="false">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1004,6 +1037,10 @@
   {% block extra_scripts %}{% endblock %}
   <script
     src="{{ url_for('static', filename='scripts/loading_feedback.js') }}"
+    defer
+  ></script>
+  <script
+    src="{{ url_for('static', filename='scripts/cart_badge.js') }}"
     defer
   ></script>
 </body>

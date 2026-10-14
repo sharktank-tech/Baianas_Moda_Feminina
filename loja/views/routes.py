@@ -907,6 +907,84 @@ def newsletter():
 
 
 # ── Carrinho ────────────────────────────────────────────────────────────────
+def get_cart_count():
+    """Soma das quantidades do carrinho (fonte única, sem contagem paralela).
+
+    Autenticado: soma `CartItem.quantity` do `Cart` do usuário. Visitante:
+    quantidade do item pendente em sessão (o fluxo exige login para
+    persistir o carrinho no banco). Nunca mexe em preço, estoque ou regras.
+    """
+    if current_user.is_authenticated:
+        cart = _get_user_cart()
+        return sum(int(item.quantity or 0) for item in _cart_items_as_list(cart))
+    pending = session.get("pending_cart_item") or {}
+    try:
+        return max(0, int(pending.get("quantity") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def format_cart_count(count):
+    """Texto do badge: oculta no zero; acima de 99 exibe "99+"."""
+    try:
+        total = int(count or 0)
+    except (TypeError, ValueError):
+        total = 0
+    if total <= 0:
+        return ""
+    if total > 99:
+        return "99+"
+    return str(total)
+
+
+def cart_count_label(count):
+    """Descrição acessível do ícone (não depende só da cor)."""
+    try:
+        total = int(count or 0)
+    except (TypeError, ValueError):
+        total = 0
+    if total <= 0:
+        return "Sacola"
+    item = "item" if total == 1 else "itens"
+    return f"Carrinho com {total} {item}"
+
+
+@main_blueprint.app_context_processor
+def inject_cart_count():
+    """Disponibiliza a contagem ao cabeçalho (base.html) em toda página."""
+    try:
+        count = get_cart_count()
+    except Exception:
+        current_app.logger.warning("Falha ao contar carrinho p/ badge.",
+                                   exc_info=True)
+        count = 0
+    return {
+        "cart_count": count,
+        "cart_count_display": format_cart_count(count),
+        "cart_count_label": cart_count_label(count),
+    }
+
+
+@main_blueprint.get("/cart/count")
+def cart_count_json():
+    """Contagem atual em JSON (mesma fonte do badge server-render).
+
+    Usado para corrigir o badge ao voltar pelo histórico quando o
+    navegador restaura a página do bfcache. Somente leitura.
+    """
+    try:
+        count = get_cart_count()
+    except Exception:
+        current_app.logger.warning("Falha ao contar carrinho (JSON).",
+                                   exc_info=True)
+        count = 0
+    return jsonify({
+        "count": count,
+        "display": format_cart_count(count),
+        "label": cart_count_label(count),
+    })
+
+
 def _get_user_cart():
     """Carrinho persistido pertencente ao usuário autenticado."""
     return Cart.query.filter_by(
