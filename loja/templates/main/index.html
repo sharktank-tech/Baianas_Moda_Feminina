@@ -59,6 +59,11 @@
       overflow: hidden;
     }
 
+    .hero-carousel__link {
+      display: block;
+      height: 100%;
+    }
+
     .hero-carousel__image {
       display: block;
       width: 100%;
@@ -344,6 +349,11 @@
           aria-hidden="{{ 'false' if loop.first else 'true' }}"
         >
           <div class="hero-carousel__media">
+            <a
+              class="hero-carousel__link"
+              href="{{ slide.link or url_for('main.produtos') }}"
+              aria-label="{{ slide.title or 'Ver coleção' }}"
+            >
             <picture>
               {% if slide.image_mobile %}
               <source media="(max-width: 700px)" srcset="{{ slide.image_mobile }}">
@@ -359,6 +369,7 @@
                 draggable="false"
               >
             </picture>
+            </a>
 
             <div class="hero-carousel__content">
               {% if slide.eyebrow %}
