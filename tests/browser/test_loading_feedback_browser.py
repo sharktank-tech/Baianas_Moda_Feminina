@@ -112,8 +112,12 @@ def test_nav_normal_exibe_barra(page):
     finally:
         fast_network(session)
     page.wait_for_url("**/register", timeout=15000)
-    assert page.evaluate(
-        "!!document.querySelector('#page-progress.is-active')") is False
+    timing = page.evaluate("""() => {
+      const n = performance.getEntriesByType('navigation')[0];
+      return n ? n.duration + '/' + n.responseEnd + '/' + n.requestStart
+               : 'sem-entry';
+    }""")
+    assert False, "TIMING-NAV " + str(timing)
 
 
 def test_nav_normal_exibe_barra_desktop(page):
