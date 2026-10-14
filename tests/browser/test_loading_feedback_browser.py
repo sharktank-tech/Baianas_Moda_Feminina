@@ -382,7 +382,10 @@ def test_admin_fetch_erro_retry_abort_sobreposicao(page):
     page.click("[data-partial-retry]")
     page.wait_for_selector("[data-partial-root='orders'] table",
                            timeout=20000)
-    page.click("aside button[data-panel='manual-review']")
+    # <=900px a sidebar some e entra o nav mobile (mesmo data-panel).
+    wide = (page.viewport_size or {}).get("width", 1366) >= 900
+    nav = "aside" if wide else "nav.adm-mobile-nav"
+    page.click(f"{nav} button[data-panel='manual-review']")
     page.wait_for_selector("[data-partial-root='manual-review']",
                            timeout=20000)
     assert page.evaluate(
