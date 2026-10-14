@@ -101,7 +101,6 @@ def admin_login(page):
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("page", ["mobile"], indirect=True)
-@pytest.mark.parametrize("page", ["mobile"], indirect=True)
 def test_nav_normal_exibe_barra(page):
     page.goto(BASE_URL + "/login")
     dialogs = hold_with_beforeunload(page)
