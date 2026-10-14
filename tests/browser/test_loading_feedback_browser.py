@@ -8,9 +8,13 @@ são somente leitura.
 """
 import os
 import re
-import threading
+import sys
 
 import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
+
+from slow_proxy import SlowProxy
 
 playwright = pytest.importorskip("playwright.sync_api")
 
@@ -23,9 +27,20 @@ MOBILE = {"width": 390, "height": 844}
 
 
 @pytest.fixture(scope="module")
-def browser():
+def slow_proxy():
+    proxy = SlowProxy().start()
+    yield proxy
+    proxy.stop()
+
+
+@pytest.fixture(scope="module")
+def browser(slow_proxy):
     with playwright.sync_playwright() as runner:
-        instance = runner.chromium.launch(args=["--no-sandbox"])
+        instance = runner.chromium.launch(args=[
+            "--no-sandbox",
+            f"--proxy-server=http://127.0.0.1:{slow_proxy.port}",
+            "--proxy-bypass-list=<-loopback>",
+        ])
         yield instance
         instance.close()
 
@@ -97,67 +112,36 @@ def admin_login(page):
     assert "/conta" in page.url
 
 
-class HeldRequest:
-    """Segura a requisição: o handler só sinaliza e retorna (sem sleep,
-    que congelaria o cliente); o teste observa o loading com calma e
-    libera com `release()` para a navegação real concluir."""
-
-    def __init__(self, page, pattern, sink=None):
-        self.arrived = threading.Event()
-        self.route = None
-        self.sink = sink
-
-        def handle(route):
-            if self.sink is not None:
-                self.sink.append(route.request.post_data or "1")
-            self.route = route
-            self.arrived.set()
-
-        page.route(pattern, handle)
-
-    def expect(self, timeout=10000):
-        assert self.arrived.wait(timeout), "requisição não chegou à rota"
-
-    def release(self):
-        assert self.route is not None
-        route, self.route = self.route, None
-        route.continue_()
-
-
-def wait_replaced(page, timeout=15000):
-    """Aguarda o servidor real substituir o documento (navegação real)."""
-    page.wait_for_function("() => !document.querySelector('#dyn')",
-                           timeout=timeout)
-
-
 # --------------------------------------------------------------------------
 # 1) Barra: navegação normal mostra; cancelada e âncora, não
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("page", ["mobile"], indirect=True)
-def test_nav_normal_exibe_barra(page):
+def test_nav_normal_exibe_barra(page, slow_proxy):
     page.goto(BASE_URL + "/login")
-    held = HeldRequest(page, "**/register")
-    # Sem aguardar a navegação: ela fica segurada pela rota até release().
-    page.click('a[href$="/register"], a[href="/register"]',
-               no_wait_after=True)
-    held.expect()
-    page.wait_for_selector("#page-progress.is-active", timeout=8000)
-    held.release()
+    # Proxy atrasa /register: a barra (150ms) aparece antes de concluir.
+    # Sem aguardar o clique: a conclusão vem sozinha após o atraso.
+    slow_proxy.delay_paths.add("/register")
+    try:
+        page.click('a[href$="/register"], a[href="/register"]',
+                   no_wait_after=True)
+        page.wait_for_selector("#page-progress.is-active", timeout=8000)
+    finally:
+        slow_proxy.delay_paths.discard("/register")
     page.wait_for_url("**/register", timeout=15000)
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
 
 
-def test_nav_normal_exibe_barra_desktop(page):
+def test_nav_normal_exibe_barra_desktop(page, slow_proxy):
     page.goto(BASE_URL + "/login")
-    held = HeldRequest(page, "**/register")
-    # Sem aguardar a navegação: ela fica segurada pela rota até release().
-    page.click('a[href$="/register"], a[href="/register"]',
-               no_wait_after=True)
-    held.expect()
-    page.wait_for_selector("#page-progress.is-active", timeout=8000)
-    held.release()
+    slow_proxy.delay_paths.add("/register")
+    try:
+        page.click('a[href$="/register"], a[href="/register"]',
+                   no_wait_after=True)
+        page.wait_for_selector("#page-progress.is-active", timeout=8000)
+    finally:
+        slow_proxy.delay_paths.discard("/register")
     page.wait_for_url("**/register", timeout=15000)
     assert page.evaluate(
         "!!document.querySelector('#page-progress.is-active')") is False
@@ -209,6 +193,17 @@ def test_ctrl_clique_sem_barra(page):
 # 2) Formulários: válido/inválido, novalidate, diálogo, nova aba
 # --------------------------------------------------------------------------
 
+def fulfill_204(page, pattern, sink):
+    """POSTs registrados e concluídos com 204: sem navegar, o documento
+    permanece vivo e toda asserção de marcação é livre de corrida."""
+
+    def handle(route):
+        sink.append(route.request.post_data or "1")
+        route.fulfill(status=204)
+
+    page.route(pattern, handle)
+
+
 def _dynamic_form(page, *, action="/login", method="post", novalidate=False,
                   target=None, buttons=(("a", "A"), ("b", "B"))):
     page.goto(BASE_URL + "/login")
@@ -234,9 +229,8 @@ def _dynamic_form(page, *, action="/login", method="post", novalidate=False,
 def test_submit_valido_marca_e_bloqueia_duplo(page):
     posts = []
     _dynamic_form(page)
-    held = HeldRequest(page, "**/login", posts)
+    fulfill_204(page, "**/login", posts)
     page.eval_on_selector("#dyn button[value='b']", "b => b.click()")
-    held.expect()
     page.wait_for_function(
         "() => document.querySelector('#dyn button[value=\"b\"]')"
         ".getAttribute('aria-busy') === 'true'",
@@ -246,22 +240,20 @@ def test_submit_valido_marca_e_bloqueia_duplo(page):
         is True
     # 2º clique no botão desabilitado: sem efeito.
     page.eval_on_selector("#dyn button[value='b']", "b => b.click()")
-    held.release()
-    wait_replaced(page)
+    page.wait_for_timeout(1000)
     assert len(posts) == 1
+    assert page.evaluate("!!document.querySelector('#dyn')") is True
 
 
 def test_multiplos_botoes_preservam_name_value(page):
     bodies = []
     _dynamic_form(page)
-    held = HeldRequest(page, "**/login", bodies)
+    fulfill_204(page, "**/login", bodies)
     page.eval_on_selector("#dyn button[value='b']", "b => b.click()")
-    held.expect()
     page.wait_for_function(
         "() => document.querySelector('#dyn').dataset.submitted === '1'",
         timeout=5000)
-    held.release()
-    wait_replaced(page)
+    page.wait_for_timeout(1000)
     assert len(bodies) == 1
     assert "acao=b" in bodies[0] and "acao=a" not in bodies[0]
 
@@ -288,14 +280,12 @@ def test_novalidate_envia_com_loading(page):
       document.querySelector('#dyn').insertAdjacentHTML('afterbegin',
         '<input name="obrig" required value="">');
     }""")
-    held = HeldRequest(page, "**/login", bodies)
+    fulfill_204(page, "**/login", bodies)
     page.eval_on_selector("#dyn button[value='a']", "b => b.click()")
-    held.expect()
     page.wait_for_function(
         "() => document.querySelector('#dyn').dataset.submitted === '1'",
         timeout=5000)
-    held.release()
-    wait_replaced(page)
+    page.wait_for_timeout(1000)
     assert len(bodies) == 1
 
 
@@ -308,14 +298,12 @@ def test_formnovalidate_passa_com_campo_invalido(page):
       f.querySelector('button').setAttribute('formnovalidate', '');
     }""")
     bodies = []
-    held = HeldRequest(page, "**/login", bodies)
+    fulfill_204(page, "**/login", bodies)
     page.eval_on_selector("#dyn button", "b => b.click()")
-    held.expect()
     page.wait_for_function(
         "() => document.querySelector('#dyn').dataset.submitted === '1'",
         timeout=5000)
-    held.release()
-    wait_replaced(page)
+    page.wait_for_timeout(1000)
     assert len(bodies) == 1
 
 
@@ -345,9 +333,8 @@ def test_input_submit_nao_tem_value_sobrescrito(page):
         '<input type="submit" name="acao" value="Pagar agora">');
     }""")
     bodies = []
-    held = HeldRequest(page, "**/login", bodies)
+    fulfill_204(page, "**/login", bodies)
     page.eval_on_selector("#dyn input[type='submit']", "b => b.click()")
-    held.expect()
     page.wait_for_function(
         "() => document.querySelector('#dyn input[type=\"submit\"]')"
         ".getAttribute('aria-busy') === 'true'",
@@ -358,8 +345,7 @@ def test_input_submit_nao_tem_value_sobrescrito(page):
     assert page.evaluate(
         "document.querySelector('#dyn input[type=\"submit\"]').value") \
         == "Pagar agora"
-    held.release()
-    wait_replaced(page)
+    page.wait_for_timeout(1000)
     assert len(bodies) == 1
     assert "acao=Pagar+agora" in bodies[0] or "acao=Pagar agora" in bodies[0]
 
@@ -371,18 +357,16 @@ def test_enter_sem_submitter_explicito(page):
         '<input name="q" value="x">');
     }""")
     bodies = []
-    held = HeldRequest(page, "**/login", bodies)
+    fulfill_204(page, "**/login", bodies)
     page.eval_on_selector("#dyn input[name='q']", "i => i.focus()")
     # Entrada confiável (submissão implícita real), sem aguardar a
     # navegação segurada pela rota.
     page.locator("#dyn input[name='q']").press("Enter", no_wait_after=True)
-    held.expect()
     page.wait_for_function(
         "() => (document.querySelector('#dyn button')"
         ".getAttribute('aria-busy') === 'true')",
         timeout=5000)
-    held.release()
-    wait_replaced(page)
+    page.wait_for_timeout(1000)
     assert len(bodies) == 1
 
 
