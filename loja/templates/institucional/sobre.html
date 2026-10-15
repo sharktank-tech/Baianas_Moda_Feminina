@@ -4,8 +4,8 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='styles/animation.css') }}">
-<meta name="description" content="Conheça a Pollo Modas — nossa história, missão e os valores que guiam cada peça que vendemos.">
-<meta name="keywords" content="sobre, história, missão, valores, Pollo Modas">
+<meta name="description" content="Conheça a Pollo Modas — missão e os valores que guiam cada peça que vendemos.">
+<meta name="keywords" content="sobre, missão, valores, Pollo Modas">
 {% endblock %}
 
 {% block content %}
@@ -231,76 +231,6 @@
 }
 
 /* ════════════════════════════════════════════════════════
-   HISTÓRIA — linha do tempo
-════════════════════════════════════════════════════════ */
-.sobre-historia {
-  background: var(--cream);
-  margin-top: 6rem;
-  padding: 6rem 1.5rem;
-}
-.sobre-historia-inner {
-  max-width: 900px;
-  margin: 0 auto;
-}
-
-.sobre-timeline {
-  position: relative;
-  margin-top: 3rem;
-  padding-left: 2rem;
-}
-.sobre-timeline::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0; bottom: 0;
-  width: 1px;
-  background: linear-gradient(to bottom, var(--accent), transparent);
-}
-
-.sobre-timeline-item {
-  position: relative;
-  padding: 0 0 3rem 2.5rem;
-}
-.sobre-timeline-item:last-child { padding-bottom: 0; }
-
-.sobre-timeline-item::before {
-  content: '';
-  position: absolute;
-  left: -4px;
-  top: 6px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px var(--cream);
-}
-
-.sobre-timeline-year {
-  font-family: 'DM Sans', sans-serif;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--accent);
-  margin-bottom: 0.4rem;
-}
-.sobre-timeline-heading {
-  font-family: 'Poppins', sans-serif;
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--black);
-  margin: 0 0 0.5rem;
-}
-.sobre-timeline-text {
-  font-family: 'DM Sans', sans-serif;
-  font-size: 0.9rem;
-  color: #666;
-  line-height: 1.75;
-  margin: 0;
-  max-width: 580px;
-}
-
-/* ════════════════════════════════════════════════════════
    CTA FINAL
 ════════════════════════════════════════════════════════ */
 .sobre-cta {
@@ -363,8 +293,6 @@
 @media (max-width: 640px) {
   .sobre-missao { grid-template-columns: 1fr; }
   .sobre-missao-bar { display: none; }
-  .sobre-timeline { padding-left: 1.5rem; }
-  .sobre-timeline-item { padding-left: 2rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -449,55 +377,6 @@
         </p>
       </div>
 
-    </div>
-  </section>
-
-
-  <!-- ══ HISTÓRIA ══════════════════════════════════════════ -->
-  <section class="sobre-historia reveal">
-    <div class="sobre-historia-inner">
-      <p class="sobre-section-label">Como chegamos até aqui</p>
-      <h2 class="sobre-section-title">Nossa história</h2>
-
-      <div class="sobre-timeline">
-
-        <div class="sobre-timeline-item">
-          <p class="sobre-timeline-year">2010</p>
-          <h3 class="sobre-timeline-heading">O começo familiar</h3>
-          <p class="sobre-timeline-text">
-            A Pollo Modas nasce como um negócio familiar pequeno, com um único
-            objetivo: oferecer roupas de qualidade a preços justos para a comunidade local.
-          </p>
-        </div>
-
-        <div class="sobre-timeline-item">
-          <p class="sobre-timeline-year">2015</p>
-          <h3 class="sobre-timeline-heading">Crescimento e expansão</h3>
-          <p class="sobre-timeline-text">
-            A reputação construída boca a boca levou à abertura de um espaço maior
-            e à ampliação do catálogo — chegamos ao feminino, masculino e infantil.
-          </p>
-        </div>
-
-        <div class="sobre-timeline-item">
-          <p class="sobre-timeline-year">2020</p>
-          <h3 class="sobre-timeline-heading">A loja online</h3>
-          <p class="sobre-timeline-text">
-            Levamos a experiência da loja física para o digital. Mais pessoas,
-            mesma atenção — agora com entrega em todo o Brasil.
-          </p>
-        </div>
-
-        <div class="sobre-timeline-item">
-          <p class="sobre-timeline-year">Hoje</p>
-          <h3 class="sobre-timeline-heading">Uma referência em moda acessível</h3>
-          <p class="sobre-timeline-text">
-            Mais de uma década depois, somos reconhecidos pela curadoria honesta,
-            pelo atendimento próximo e por uma clientela que cresce a cada coleção.
-          </p>
-        </div>
-
-      </div>
     </div>
   </section>
 
