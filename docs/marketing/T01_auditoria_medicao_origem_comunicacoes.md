@@ -49,6 +49,10 @@ Nenhum agendador (cron/APScheduler/Celery) encontrado; nenhum envio automático 
 
 ## 6. Pendência prioritária P0 — saída da newsletter
 
+> **Status 17/10/2026:** implementado em `feature/newsletter-opt-out` (PR aberto;
+> ver `docs/marketing/NEWSLETTER_UNSUBSCRIBE.md`). A trava de campanhas
+> recorrentes permanece até merge/deploy e revisão da entrega.
+
 - **Estado:** cadastro + boas-vindas existem; **nenhum fluxo de cancelamento (opt-out) encontrado no código**; sem lista de supressão; reinscrição do mesmo e-mail retorna mensagem amigável sem reenviar (não reinscreve, mas também não oferece saída).
 - **Proposta (não implementada):** link de cancelamento simples (token por e-mail, sem login), tabela/coluna de supressão consultada antes de qualquer envio promocional, boas-vindas sem reenvio após saída.
 - **Trava:** nenhuma campanha promocional recorrente antes de resolver isso (A7).

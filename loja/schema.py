@@ -87,6 +87,13 @@ def install_search_path_hook(engine, schema):
 # em _render_column(). Apenas colunas que podem estar AUSENTES num banco
 # antigo entram aqui. (category_id / variant_id são tratados em REQUIRED_FOREIGN_KEYS.)
 REQUIRED_COLUMNS = {
+    # newsletter (opt-out de comunicações promocionais)
+    ("newsletter_subscribers", "unsubscribed_at"): {
+        "type": "datetime", "nullable": True,
+    },
+    ("newsletter_subscribers", "resubscribed_at"): {
+        "type": "datetime", "nullable": True,
+    },
     ("orders", "stock_reserved"): {
         "type": "boolean", "nullable": False, "default": "FALSE",
     },

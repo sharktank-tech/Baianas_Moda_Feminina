@@ -906,6 +906,41 @@ def newsletter():
     return redirect(url_for("main.home") + "#newsletter")
 
 
+@main_blueprint.route("/newsletter/cancelar/<token>", methods=["GET"])
+def newsletter_cancelar(token):
+    """Página de confirmação do cancelamento (GET não altera estado)."""
+    from loja.modules.newsletter import verify_unsubscribe_token
+
+    subscriber = verify_unsubscribe_token(token)
+    return render_template(
+        "main/newsletter_cancelar.html",
+        valido=subscriber is not None,
+        token=token,
+    )
+
+
+@main_blueprint.route("/newsletter/cancelar/<token>", methods=["POST"])
+def newsletter_cancelar_confirmar(token):
+    """Cancelamento ou reativação por ação explícita (POST)."""
+    from loja.modules.newsletter import (
+        reactivate_by_token,
+        unsubscribe_by_token,
+    )
+
+    acao = request.form.get("acao", "cancelar")
+    if acao == "reativar":
+        result = reactivate_by_token(token)
+    else:
+        result = unsubscribe_by_token(token)
+
+    return render_template(
+        "main/newsletter_cancelar.html",
+        valido=True,
+        token=token,
+        resultado=result,
+    )
+
+
 # ── Carrinho ────────────────────────────────────────────────────────────────
 def get_cart_count():
     """Soma das quantidades do carrinho (fonte única, sem contagem paralela).

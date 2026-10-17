@@ -1,14 +1,18 @@
+import hashlib
+import hmac
 import logging
 import re
 import uuid
 from dataclasses import dataclass
 from typing import Optional
 
+from flask import current_app, url_for
 from sqlalchemy.exc import IntegrityError
 
 from loja import db
 from loja.modules.enviar_email import enviar_email
 from loja.modules.models import NewsletterSubscriber
+from loja.utils import utcnow
 
 
 logger = logging.getLogger(__name__)
@@ -19,6 +23,11 @@ _EMAIL_PATTERN = re.compile(
     r"(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+$",
     re.IGNORECASE,
 )
+
+# Prefixo do MAC do token de cancelamento (evita reuso do mesmo segredo em
+# outro contexto).
+_TOKEN_CONTEXT = "newsletter-unsubscribe"
+_MAC_HEX_LEN = 32
 
 
 @dataclass(frozen=True)
@@ -43,13 +52,140 @@ def is_valid_email(email: str) -> bool:
     return bool(_EMAIL_PATTERN.fullmatch(email))
 
 
-def _send_welcome_email(email: str) -> bool:
+def is_subscription_suppressed(email: Optional[str]) -> bool:
+    """True se o e-mail tem cancelamento ativo (não enviar promoção)."""
+    normalized_email = normalize_email(email)
+    if not normalized_email:
+        return False
+    subscriber = NewsletterSubscriber.query.filter_by(
+        email=normalized_email
+    ).first()
+    return bool(subscriber and subscriber.unsubscribed_at is not None)
+
+
+def is_marketable(email: Optional[str]) -> bool:
+    """Liberação para envios promocionais (supressão de cancelados)."""
+    return not is_subscription_suppressed(email)
+
+
+def _unsubscribe_mac(subscriber_id_hex: str) -> str:
+    secret = current_app.config.get("SECRET_KEY") or ""
+    return hmac.new(
+        secret.encode("utf-8"),
+        f"{_TOKEN_CONTEXT}:{subscriber_id_hex}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:_MAC_HEX_LEN]
+
+
+def generate_unsubscribe_token(subscriber: NewsletterSubscriber) -> str:
+    """Token opaco (id + MAC): não expõe e-mail nem depende de login."""
+    return f"{subscriber.id.hex}.{_unsubscribe_mac(subscriber.id.hex)}"
+
+
+def verify_unsubscribe_token(
+    token: Optional[str],
+) -> Optional[NewsletterSubscriber]:
+    """Valida token e devolve o assinante; inválido/falho => None."""
+    if not token or "." not in token:
+        return None
+    id_hex, _, mac = token.partition(".")
+    if len(id_hex) != 32 or len(mac) != _MAC_HEX_LEN:
+        return None
+    try:
+        subscriber_id = uuid.UUID(hex=id_hex)
+    except ValueError:
+        return None
+    subscriber = db.session.get(NewsletterSubscriber, subscriber_id)
+    if subscriber is None:
+        return None
+    expected = _unsubscribe_mac(id_hex)
+    if not hmac.compare_digest(mac, expected):
+        return None
+    return subscriber
+
+
+def unsubscribe_by_token(token: Optional[str]) -> NewsletterResult:
+    """Cancela a inscrição validada pelo token (idempotente)."""
+    subscriber = verify_unsubscribe_token(token)
+    if subscriber is None:
+        return NewsletterResult(
+            success=False,
+            message="Link de cancelamento inválido ou expirado.",
+        )
+    if subscriber.unsubscribed_at is None:
+        subscriber.unsubscribed_at = utcnow()
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            logger.exception(
+                "Erro ao cancelar newsletter para %s.", subscriber.email,
+            )
+            return NewsletterResult(
+                success=False,
+                message="Não foi possível concluir o cancelamento. Tente novamente.",
+            )
+    return NewsletterResult(
+        success=True,
+        message="Sua inscrição foi cancelada. Você não receberá mais novidades e promoções.",
+        subscriber=subscriber,
+    )
+
+
+def reactivate_by_token(token: Optional[str]) -> NewsletterResult:
+    """Reativa inscrição cancelada (manifestação explícita via token)."""
+    subscriber = verify_unsubscribe_token(token)
+    if subscriber is None:
+        return NewsletterResult(
+            success=False,
+            message="Link inválido ou expirado.",
+        )
+    if subscriber.unsubscribed_at is not None:
+        subscriber.unsubscribed_at = None
+        subscriber.resubscribed_at = utcnow()
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            logger.exception(
+                "Erro ao reativar newsletter para %s.", subscriber.email,
+            )
+            return NewsletterResult(
+                success=False,
+                message="Não foi possível reativar. Tente novamente.",
+            )
+    return NewsletterResult(
+        success=True,
+        message="Pronto! Sua inscrição está ativa novamente.",
+        subscriber=subscriber,
+    )
+
+
+def _welcome_cancel_link(subscriber: NewsletterSubscriber) -> Optional[str]:
+    try:
+        return url_for(
+            "main.newsletter_cancelar",
+            token=generate_unsubscribe_token(subscriber),
+            _external=True,
+        )
+    except Exception:
+        logger.exception(
+            "Não foi possível gerar o link de cancelamento para %s.",
+            subscriber.email,
+        )
+        return None
+
+
+def _send_welcome_email(subscriber: NewsletterSubscriber) -> bool:
     """
-    Envia a mensagem de boas-vindas.
+    Envia a mensagem de boas-vindas com o link de cancelamento.
 
     A falha no envio não desfaz o cadastro, pois o assinante já foi salvo
     com sucesso no banco de dados.
     """
+    email = subscriber.email
+    if subscriber.unsubscribed_at is not None:
+        return False
     subject = "Seu cupom de boas-vindas — Pollo Modas"
     message = """
 Olá!
@@ -62,6 +198,12 @@ Você receberá novidades, lançamentos e promoções em primeira mão.
 
 Pollo Modas
     """.strip()
+    cancel_link = _welcome_cancel_link(subscriber)
+    if cancel_link:
+        message += (
+            "\n\nPara cancelar sua inscrição a qualquer momento:\n"
+            f"{cancel_link}"
+        )
 
     try:
         enviar_email(email, subject, message)
@@ -97,6 +239,19 @@ def subscribe_newsletter(
     ).first()
 
     if existing_subscriber:
+        if existing_subscriber.unsubscribed_at is not None:
+            # Cancelado: NÃO reativar por repetição de cadastro. Reinscrição
+            # exige manifestação explícita via token (reactivate_by_token).
+            return NewsletterResult(
+                success=False,
+                message=(
+                    "Este e-mail está cancelado na nossa newsletter. "
+                    "Use o link de reativação para voltar a receber novidades."
+                ),
+                subscriber=existing_subscriber,
+                created=False,
+                email_sent=False,
+            )
         return NewsletterResult(
             success=True,
             message="Este e-mail já está cadastrado na nossa newsletter.",
@@ -123,6 +278,17 @@ def subscribe_newsletter(
         ).first()
 
         if existing_subscriber:
+            if existing_subscriber.unsubscribed_at is not None:
+                return NewsletterResult(
+                    success=False,
+                    message=(
+                        "Este e-mail está cancelado na nossa newsletter. "
+                        "Use o link de reativação para voltar a receber novidades."
+                    ),
+                    subscriber=existing_subscriber,
+                    created=False,
+                    email_sent=False,
+                )
             return NewsletterResult(
                 success=True,
                 message="Este e-mail já está cadastrado na nossa newsletter.",
@@ -156,8 +322,8 @@ def subscribe_newsletter(
 
     email_sent = False
 
-    if send_welcome_email:
-        email_sent = _send_welcome_email(normalized_email)
+    if send_welcome_email and subscriber.unsubscribed_at is None:
+        email_sent = _send_welcome_email(subscriber)
 
     if email_sent:
         message = (

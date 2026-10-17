@@ -515,8 +515,12 @@ class NewsletterSubscriber(db.Model):   # NOVO: faltava para o form de newslette
     )
     email = db.Column(db.String(150), nullable=False, unique=True)
     created_at = db.Column(db.DateTime, default=utcnow)
+    # Opt-out: NULL = ativo; preenchido = cancelado (supressão para envios
+    # promocionais). resubscribed_at marca reativação explícita posterior.
+    unsubscribed_at = db.Column(db.DateTime, nullable=True)
+    resubscribed_at = db.Column(db.DateTime, nullable=True)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<NewsletterSubscriber {self.email}>"
 
 
