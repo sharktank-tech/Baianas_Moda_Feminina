@@ -202,7 +202,7 @@ jobs:
           tests/test_verify_payment_evidence_readonly_pg.py
 
 
-pytest-postgres-validacao-0041:
+  pytest-postgres-validacao-0041:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: pytest-postgres
@@ -259,3 +259,4 @@ pytest-postgres-validacao-0041:
           cur.close()
           conn.close()
           print("Preservacao de registros: confirmada")
+          PY
