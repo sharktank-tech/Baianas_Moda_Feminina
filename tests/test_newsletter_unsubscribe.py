@@ -15,6 +15,7 @@ from loja.modules.newsletter import (
     unsubscribe_by_token,
     verify_unsubscribe_token,
 )
+from loja.utils import utcnow
 from tests.conftest import unique_email
 
 
@@ -150,6 +151,26 @@ def test_reinscrição_explícita(subscriber_ativo, client):
     assert "já está cadastrado" in result.message.lower()
 
 
+def test_mesmo_token_cancelar_reativar_cancelar(client, subscriber_ativo):
+    """Reutilização do mesmo token: cancelar → reativar → cancelar de novo."""
+    token = generate_unsubscribe_token(subscriber_ativo)
+
+    client.post(f"/newsletter/cancelar/{token}", data={"acao": "cancelar"})
+    db.session.refresh(subscriber_ativo)
+    assert subscriber_ativo.unsubscribed_at is not None
+
+    client.post(f"/newsletter/cancelar/{token}", data={"acao": "reativar"})
+    db.session.refresh(subscriber_ativo)
+    assert subscriber_ativo.unsubscribed_at is None
+    assert subscriber_ativo.resubscribed_at is not None
+
+    client.post(f"/newsletter/cancelar/{token}", data={"acao": "cancelar"})
+    db.session.refresh(subscriber_ativo)
+    assert subscriber_ativo.unsubscribed_at is not None
+    assert is_subscription_suppressed(subscriber_ativo.email)
+    assert not is_marketable(subscriber_ativo.email)
+
+
 def test_token_nao_contem_email(subscriber_ativo):
     token = generate_unsubscribe_token(subscriber_ativo)
     assert "@" not in token
@@ -270,53 +291,41 @@ def _get_csrf_token_from_form(html):
 
 
 def test_csrf_sem_token(client, subscriber_ativo, app):
-    """POST sem csrf_token deve ser rejeitado quando CSRF estiver ativo."""
-    # Habilita CSRF temporariamente para o teste
+    """POST sem csrf_token: 400 e banco intacto com CSRF ativo."""
     original = app.config.get("WTF_CSRF_ENABLED", False)
     app.config["WTF_CSRF_ENABLED"] = True
     app.config["SECRET_KEY"] = "test-csrf-secret-key-" + str(uuid.uuid4())[:8]
-    
+
     try:
         token = generate_unsubscribe_token(subscriber_ativo)
-        # Pega a página para obter o csrf_token (vinda do template)
-        from loja.views.routes import main_blueprint
-        with app.test_request_context():
-            from flask import url_for
-            html = url_for("main.newsletter_cancelar", token=token)
-            # Note: url_for so gera a URL, não retorna HTML.
-            # Para pegar o HTML do template, precisamos renderizar.
-            from flask import Flask
-            pass
-        # Como complicado pegar o HTML, testaremos o bloqueio de POST direto
-        # usando o cliente de teste com WTF_CSRF_ENABLED=True.
-        
-        # POST sem o campo csrf_token no body
         resp = client.post(
             f"/newsletter/cancelar/{token}",
-            data={"acao": "cancelar"},  # sem csrf_token
+            data={"acao": "cancelar"},
         )
-        # Com CSRF ativado, deve retornar 400 ou redirect com erro
-        # Como o form no template tem o campo, mas testamos o cenario sem
-        assert resp.status_code != 200 or b"erro" in resp.data.lower() or b"falha" in resp.data.lower()
+        assert resp.status_code == 400
+        db.session.refresh(subscriber_ativo)
+        assert subscriber_ativo.unsubscribed_at is None
+        assert is_marketable(subscriber_ativo.email)
     finally:
         app.config["WTF_CSRF_ENABLED"] = original
 
 
 def test_csrf_token_invalido(client, subscriber_ativo, app):
-    """POST com csrf_token inválido deve ser rejeitado."""
+    """POST com csrf_token inválido: 400 e banco intacto com CSRF ativo."""
     original = app.config.get("WTF_CSRF_ENABLED", False)
     app.config["WTF_CSRF_ENABLED"] = True
     app.config["SECRET_KEY"] = "test-csrf-secret-key-" + str(uuid.uuid4())[:8]
-    
+
     try:
         token = generate_unsubscribe_token(subscriber_ativo)
-        # POST com csrf_token inventado/inválido
         resp = client.post(
             f"/newsletter/cancelar/{token}",
             data={"acao": "cancelar", "csrf_token": "token-invalido-12345"},
         )
-        # Deve ser rejeitado
-        assert resp.status_code != 200 or b"erro" in resp.data.lower() or b"falha" in resp.data.lower()
+        assert resp.status_code == 400
+        db.session.refresh(subscriber_ativo)
+        assert subscriber_ativo.unsubscribed_at is None
+        assert is_marketable(subscriber_ativo.email)
     finally:
         app.config["WTF_CSRF_ENABLED"] = original
 
@@ -388,91 +397,59 @@ def test_csrf_estado_banco(client, subscriber_ativo, app):
         app.config["WTF_CSRF_ENABLED"] = original
 
 
-def test_concorrencia_cancelamento_bloqueia_envio(app, _no_real_email):
-    """Duas sessoes: cancelamento confirmado antes da verificacao final
-    impede a chamada ao provedor, mesmo com objeto antigo carregado."""
-    from loja.modules.models import NewsletterSubscriber
-    from loja.modules.newsletter import (
-        generate_unsubscribe_token,
-        is_marketable,
-        subscribe_newsletter,
-    )
+def test_concorrencia_objeto_stale_nao_envia(app, _no_real_email):
+    """Duas sessões SQLAlchemy distintas: cancelamento confirmado na
+    segunda sessão impede o envio com o objeto antigo carregado na
+    primeira. Exige retorno sem envio e zero chamadas ao provedor."""
+    from sqlalchemy.orm import Session
 
-    from loja import db as _db
+    from loja.modules.newsletter import _send_welcome_email
 
-    email = "concorrencia-" + uuid.uuid4().hex[:8] + "@teste.com"
+    email = unique_email("conc")
     result = subscribe_newsletter(email)
     assert result.success and result.created
     subscriber_id = result.subscriber.id
 
-    token = generate_unsubscribe_token(result.subscriber)
-
     with app.app_context():
-        subscriber_stale = (
-            NewsletterSubscriber.query.filter_by(id=subscriber_id).first()
-        )
-        assert subscriber_stale.unsubscribed_at is None
-        assert is_marketable(email)
+        # Sessão 1 (db.session): carrega o assinante (identity map).
+        sessao1_obj = db.session.get(NewsletterSubscriber, subscriber_id)
+        assert sessao1_obj is not None
+        assert sessao1_obj.unsubscribed_at is None
+        db.session.expunge(sessao1_obj)  # objeto antigo, detached
 
-        _db.session.expunge(subscriber_stale)
-        stale_unsub_before = subscriber_stale.unsubscribed_at
+        # Sessão 2 (realmente distinta): cancela e confirma no banco.
+        with Session(db.engine) as sessao2:
+            sub2 = sessao2.get(NewsletterSubscriber, subscriber_id)
+            sub2.unsubscribed_at = utcnow()
+            sessao2.commit()
+            confirmado = sessao2.get(NewsletterSubscriber, subscriber_id)
+            assert confirmado.unsubscribed_at is not None
 
-        unsubscribe_by_token(token)
+        # Caminho real de envio com o objeto antigo (stale/detached).
+        sent_before = len(_no_real_email)
+        ok = _send_welcome_email(sessao1_obj)
+        assert ok is False
+        assert len(_no_real_email) == sent_before  # zero chamadas ao provedor
 
-        assert subscriber_stale.unsubscribed_at == stale_unsub_before
-        subscriber_fresco = (
-            NewsletterSubscriber.query.filter_by(id=subscriber_id).first()
-        )
-        assert subscriber_fresco.unsubscribed_at is not None
+        # Estado real no banco permanece cancelado.
+        fresco = db.session.get(NewsletterSubscriber, subscriber_id)
+        db.session.refresh(fresco)
+        assert fresco.unsubscribed_at is not None
         assert not is_marketable(email)
 
-        emails_antes = len(_no_real_email)
-        if subscriber_fresco.unsubscribed_at is not None:
-            pass
-        else:
-            raise AssertionError("deveria ter bloqueado o envio")
 
-        assert len(_no_real_email) == emails_antes
+def test_concorrencia_contraprova_ativo_envia(app, _no_real_email):
+    """Contraprova: assinante ativo passa pela recarga e o envio ocorre."""
+    from loja.modules.newsletter import _send_welcome_email
 
-
-def test_concorrencia_janela_residual(app, _no_real_email):
-    """Mesmo com objeto antigo em memoria, a recarga do banco bloqueia envio."""
-    from loja import db as _db
-    from loja.modules.models import NewsletterSubscriber
-    from loja.modules.newsletter import (
-        generate_unsubscribe_token,
-        subscribe_newsletter,
-    )
-
-    email = "janela-" + uuid.uuid4().hex[:8] + "@teste.com"
-    result = subscribe_newsletter(email)
+    email = unique_email("conc-ok")
+    result = subscribe_newsletter(email, send_welcome_email=False)
     assert result.success and result.created
-    subscriber_id = result.subscriber.id
-
-    token = generate_unsubscribe_token(result.subscriber)
 
     with app.app_context():
-        subscriber_stale = (
-            NewsletterSubscriber.query.filter_by(id=subscriber_id).first()
-        )
-        assert subscriber_stale.unsubscribed_at is None
-
-        _db.session.expunge(subscriber_stale)
-        stale_unsub_before = subscriber_stale.unsubscribed_at
-
-        unsubscribe_by_token(token)
-
-        assert subscriber_stale.unsubscribed_at == stale_unsub_before
-
-        subscriber_fresco = (
-            NewsletterSubscriber.query.filter_by(id=subscriber_id).first()
-        )
-        assert subscriber_fresco.unsubscribed_at is not None
-
-        emails_antes = len(_no_real_email)
-        if subscriber_fresco.unsubscribed_at is not None:
-            pass
-        else:
-            raise AssertionError("deveria ter bloqueado o envio")
-
-        assert len(_no_real_email) == emails_antes
+        obj = db.session.get(NewsletterSubscriber, result.subscriber.id)
+        db.session.expunge(obj)  # detached, mas ativo no banco
+        sent_before = len(_no_real_email)
+        ok = _send_welcome_email(obj)
+        assert ok is True
+        assert len(_no_real_email) == sent_before + 1

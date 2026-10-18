@@ -176,15 +176,45 @@ def _welcome_cancel_link(subscriber: NewsletterSubscriber) -> Optional[str]:
         return None
 
 
+def _persisted_subscription_state(
+    subscriber_id: uuid.UUID,
+) -> Optional[NewsletterSubscriber]:
+    """Recarrega o estado persistido, imediatamente antes do envio.
+
+    Não confia no objeto recebido (pode estar stale — cancelamento
+    confirmado em outra sessão após a leitura). `populate_existing()`
+    força o refresh do identity map da sessão, evitando que `.first()`
+    reutilize o estado em memória. Objeto detached também é tratado:
+    a consulta roda na sessão ativa atrelada ao contexto. Qualquer falha
+    na verificação deve ser tratada como supressão (fail-closed).
+    """
+    try:
+        return (
+            NewsletterSubscriber.query
+            .filter_by(id=subscriber_id)
+            .populate_existing()
+            .first()
+        )
+    except Exception:
+        logger.exception(
+            "Não foi possível recarregar o estado da newsletter (id=%s).",
+            subscriber_id,
+        )
+        return None
+
+
 def _send_welcome_email(subscriber: NewsletterSubscriber) -> bool:
     """
     Envia a mensagem de boas-vindas com o link de cancelamento.
 
-    A falha no envio não desfaz o cadastro, pois o assinante já foi salvo
-    com sucesso no banco de dados.
+    Consulta o estado persistido imediatamente antes da chamada ao
+    provedor: o objeto recebido pode estar stale (cancelamento confirmado
+    em outra sessão após a leitura). Falha na verificação impede o envio
+    (fail-closed). A falha no envio não desfaz o cadastro.
     """
     email = subscriber.email
-    if subscriber.unsubscribed_at is not None:
+    persisted = _persisted_subscription_state(subscriber.id)
+    if persisted is None or persisted.unsubscribed_at is not None:
         return False
     subject = "Seu cupom de boas-vindas — Pollo Modas"
     message = """

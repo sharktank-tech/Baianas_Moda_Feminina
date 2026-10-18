@@ -268,8 +268,15 @@ jobs:
               ON CONFLICT (id) DO NOTHING
           """)
           conn.commit()
-          cur.execute("SELECT COUNT(*) FROM pollomodas.newsletter_subscribers")
-          print("Sinteticos inseridos:", cur.fetchone()[0])
+          cur.execute(
+              "SELECT id::text, email, created_at::text "
+              "FROM pollomodas.newsletter_subscribers ORDER BY id"
+          )
+          snapshot = cur.fetchall()
+          import json
+          with open("/tmp/0041_snapshot.json", "w", encoding="utf-8") as f:
+              json.dump(snapshot, f)
+          print("Sinteticos inseridos:", len(snapshot))
           cur.close()
           conn.close()
           print("Schema/tabela sinteticos: OK")
@@ -309,23 +316,53 @@ jobs:
       - name: Verificar preservacao de registros
         run: |
           python - <<'PY'
+          import json
           import os
           import psycopg2
           from sqlalchemy.engine import make_url
+
+          esperado_ids = {
+              "11111111-1111-1111-1111-111111111111",
+              "22222222-2222-2222-2222-222222222222",
+              "33333333-3333-3333-3333-333333333333",
+          }
+          esperado_emails = {
+              "11111111-1111-1111-1111-111111111111":
+                  "sintetico.0041.a@descartavel.test",
+              "22222222-2222-2222-2222-222222222222":
+                  "sintetico.0041.b@descartavel.test",
+              "33333333-3333-3333-3333-333333333333":
+                  "sintetico.0041.c@descartavel.test",
+          }
+          with open("/tmp/0041_snapshot.json", encoding="utf-8") as f:
+              snapshot = json.load(f)
+          snapshot_por_id = {row[0]: row for row in snapshot}
+          assert set(snapshot_por_id) == esperado_ids, snapshot_por_id
+          for sid, email in esperado_emails.items():
+              assert snapshot_por_id[sid][1] == email, snapshot_por_id[sid]
 
           url = make_url(os.environ["DATABASE_URL"])
           conn = psycopg2.connect(
               host=url.host, port=url.port or 5432, dbname=url.database,
               user=url.username, password=url.password)
           cur = conn.cursor()
-          cur.execute("SELECT COUNT(*) FROM pollomodas.newsletter_subscribers")
-          count = cur.fetchone()[0]
-          cur.execute("SELECT COUNT(*) FROM pollomodas.newsletter_subscribers WHERE unsubscribed_at IS NULL AND resubscribed_at IS NULL")
-          intactos = cur.fetchone()[0]
-          print(f"Inscritos no banco: {count}")
-          print(f"Registros intactos (supressao nula): {intactos}")
-          assert count == 3 and intactos == 3, "preservacao de registros falhou"
+          cur.execute(
+              "SELECT id::text, email, created_at::text, "
+              "unsubscribed_at, resubscribed_at "
+              "FROM pollomodas.newsletter_subscribers ORDER BY id"
+          )
+          rows = cur.fetchall()
+          assert len(rows) == 3, rows
+          for row in rows:
+              sid, email, created_at, unsub, resub = row
+              original = snapshot_por_id[sid]
+              assert sid == original[0], row
+              assert email == original[1], row          # email preservado
+              assert created_at == original[2], row    # created_at preservado
+              assert unsub is None, row                 # supressao nula
+              assert resub is None, row
+              print(f"OK {sid} {email} created_at={created_at}")
           cur.close()
           conn.close()
-          print("Preservacao de registros: confirmada")
+          print("Preservacao de registros e valores originais: confirmada")
           PY
