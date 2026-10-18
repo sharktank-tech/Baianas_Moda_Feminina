@@ -274,8 +274,14 @@ jobs:
       - name: Verificar preservacao de registros
         run: |
           python - <<'PY'
+          import os
           import psycopg2
-          conn = psycopg2.connect(host="127.0.0.1", dbname="pollotest", user="postgres", password="postgres")
+          from sqlalchemy.engine import make_url
+
+          url = make_url(os.environ["DATABASE_URL"])
+          conn = psycopg2.connect(
+              host=url.host, port=url.port or 5432, dbname=url.database,
+              user=url.username, password=url.password)
           cur = conn.cursor()
           cur.execute("SELECT COUNT(*) FROM pollomodas.newsletter_subscribers")
           count = cur.fetchone()[0]

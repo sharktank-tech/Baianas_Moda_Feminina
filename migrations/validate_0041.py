@@ -36,8 +36,16 @@ def validate_schema(conn, schema="pollomodas"):
 def main():
     import os
     import psycopg2
+    from sqlalchemy.engine import make_url
 
-    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    url = make_url(os.environ["DATABASE_URL"])
+    conn = psycopg2.connect(
+        host=url.host,
+        port=url.port or 5432,
+        dbname=url.database,
+        user=url.username,
+        password=url.password,
+    )
     errors = validate_schema(conn)
     conn.close()
     if errors:
