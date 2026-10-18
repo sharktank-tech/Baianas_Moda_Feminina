@@ -288,11 +288,15 @@ jobs:
               user=url.username, password=url.password)
           with open("migrations/0041_newsletter_unsubscribe.sql", encoding="utf-8") as f:
               sql = f.read()
+          sql_limpo = "\n".join(
+              linha for linha in sql.splitlines()
+              if not linha.strip().startswith("\\")
+          )
           cur = conn.cursor()
-          cur.execute(sql)
+          cur.execute(sql_limpo)
           conn.commit()
           print("Aplicacao 0041: OK")
-          cur.execute(sql)
+          cur.execute(sql_limpo)
           conn.commit()
           print("Reaplicacao 0041 (idempotente): OK")
           cur.close()
