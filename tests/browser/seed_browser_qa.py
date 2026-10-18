@@ -102,4 +102,5 @@ def seed_newsletter():
 
 if __name__ == "__main__":
     main()
-    seed_newsletter()
+    with app.app_context():
+        seed_newsletter()
