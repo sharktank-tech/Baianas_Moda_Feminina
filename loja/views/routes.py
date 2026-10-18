@@ -10,7 +10,7 @@ from sqlalchemy import asc, desc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
-from loja.modules.newsletter import subscribe_newsletter
+from loja.modules.newsletter import NewsletterResult, subscribe_newsletter
 from loja.services.product_content import (
     build_product_gallery,
     product_description_excerpt,
@@ -904,6 +904,51 @@ def newsletter():
     flash(result.message, category)
 
     return redirect(url_for("main.home") + "#newsletter")
+
+
+@main_blueprint.route("/newsletter/cancelar/<token>", methods=["GET"])
+def newsletter_cancelar(token):
+    """Página de confirmação do cancelamento (GET não altera estado)."""
+    from loja.modules.newsletter import verify_unsubscribe_token
+
+    subscriber = verify_unsubscribe_token(token)
+    return render_template(
+        "main/newsletter_cancelar.html",
+        valido=subscriber is not None,
+        token=token,
+    )
+
+
+@main_blueprint.route("/newsletter/cancelar/<token>", methods=["POST"])
+def newsletter_cancelar_confirmar(token):
+    """Cancelamento ou reativação por ação explícita (POST)."""
+    from loja.modules.newsletter import (
+        reactivate_by_token,
+        unsubscribe_by_token,
+    )
+
+    acao = request.form.get("acao")
+    if acao not in ("cancelar", "reativar"):
+        return render_template(
+            "main/newsletter_cancelar.html",
+            valido=True,
+            token=token,
+            resultado=NewsletterResult(
+                success=False,
+                message="Ação desconhecida. Use o formulário da página para cancelar ou reativar.",
+            ),
+        )
+    if acao == "reativar":
+        result = reactivate_by_token(token)
+    else:
+        result = unsubscribe_by_token(token)
+
+    return render_template(
+        "main/newsletter_cancelar.html",
+        valido=True,
+        token=token,
+        resultado=result,
+    )
 
 
 # ── Carrinho ────────────────────────────────────────────────────────────────

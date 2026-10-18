@@ -106,9 +106,21 @@ def test_reset_dispatch_waits_for_smtp_by_default(app, smtp, monkeypatch):
     assert len(smtp[-1][1].get_payload()) == 2
 
 
-def test_newsletter_uses_shared_sender(smtp):
+def test_newsletter_uses_shared_sender(app, smtp):
+    import uuid
+
+    from loja import db
+    from loja.modules.models import NewsletterSubscriber
     from loja.modules.newsletter import _send_welcome_email
-    assert _send_welcome_email('customer@example.test')
+
+    subscriber = NewsletterSubscriber(
+        id=uuid.uuid4(),
+        email="customer@example.test",
+    )
+    with app.app_context():
+        db.session.add(subscriber)
+        db.session.commit()
+        assert _send_welcome_email(subscriber)
     assert smtp[-1][1]['From'] == 'PolloModas <atendimento@pollomodas.com.br>'
 
 

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Newsletter — Pollo Modas{% endblock %}
+
+{% block content %}
+<style nonce="{{ csp_nonce }}">
+.nl-cancel-wrap { max-width: 34rem; margin: 6rem auto 4rem; padding: 0 1.5rem; }
+.nl-cancel-card {
+  background: #fff; border: 1px solid #e5e5e5; border-radius: 12px;
+  padding: 2rem; text-align: center;
+}
+.nl-cancel-card h1 { font-size: 1.35rem; margin: 0 0 .75rem; color: #1a1a1a; }
+.nl-cancel-card p { color: #444; line-height: 1.6; margin: 0 0 1.25rem; }
+.nl-cancel-actions { display: flex; gap: .75rem; justify-content: center; flex-wrap: wrap; }
+.nl-cancel-actions form { display: inline; }
+.nl-cancel-actions button {
+  border: 0; border-radius: 8px; padding: .7rem 1.4rem; font-size: .95rem;
+  cursor: pointer;
+}
+.nl-btn-danger { background: #b91c1c; color: #fff; }
+.nl-btn-ghost { background: #f5f5f5; color: #1a1a1a; border: 1px solid #ddd; }
+.nl-cancel-ok { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46;
+  border-radius: 8px; padding: 1rem; margin-bottom: 1.25rem; }
+.nl-cancel-err { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;
+  border-radius: 8px; padding: 1rem; margin-bottom: 1.25rem; }
+</style>
+
+<div class="nl-cancel-wrap">
+  <div class="nl-cancel-card">
+    {% if resultado %}
+      {% if resultado.success %}
+        <div class="nl-cancel-ok" role="status">{{ resultado.message }}</div>
+      {% else %}
+        <div class="nl-cancel-err" role="alert">{{ resultado.message }}</div>
+      {% endif %}
+      <p><a href="{{ url_for('main.home') }}">Voltar para a loja</a></p>
+
+    {% elif valido %}
+      <h1>Cancelar inscrição na newsletter?</h1>
+      <p>Confirme abaixo se deseja parar de receber novidades e promoções por e-mail.</p>
+      <div class="nl-cancel-actions">
+        <form method="post" action="{{ url_for('main.newsletter_cancelar_confirmar', token=token) }}">
+          {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+          <input type="hidden" name="acao" value="cancelar">
+          <button type="submit" class="nl-btn-danger">Sim, cancelar minha inscrição</button>
+        </form>
+        <form method="post" action="{{ url_for('main.newsletter_cancelar_confirmar', token=token) }}">
+          {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+          <input type="hidden" name="acao" value="reativar">
+          <button type="submit" class="nl-btn-ghost">Não, manter minha inscrição</button>
+        </form>
+      </div>
+
+    {% else %}
+      <h1>Link inválido</h1>
+      <p>Este link de cancelamento não é válido. Verifique o link do seu e-mail.</p>
+      <p><a href="{{ url_for('main.home') }}">Voltar para a loja</a></p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
