@@ -10,7 +10,7 @@ from sqlalchemy import asc, desc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
-from loja.modules.newsletter import subscribe_newsletter
+from loja.modules.newsletter import NewsletterResult, subscribe_newsletter
 from loja.services.product_content import (
     build_product_gallery,
     product_description_excerpt,
@@ -927,7 +927,17 @@ def newsletter_cancelar_confirmar(token):
         unsubscribe_by_token,
     )
 
-    acao = request.form.get("acao", "cancelar")
+    acao = request.form.get("acao")
+    if acao not in ("cancelar", "reativar"):
+        return render_template(
+            "main/newsletter_cancelar.html",
+            valido=True,
+            token=token,
+            resultado=NewsletterResult(
+                success=False,
+                message="Ação desconhecida. Use o formulário da página para cancelar ou reativar.",
+            ),
+        )
     if acao == "reativar":
         result = reactivate_by_token(token)
     else:

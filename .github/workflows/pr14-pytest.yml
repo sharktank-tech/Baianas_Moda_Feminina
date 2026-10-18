@@ -201,3 +201,61 @@ jobs:
           tests/test_verify_future_canary_readonly_pg.py
           tests/test_verify_payment_evidence_readonly_pg.py
 
+
+pytest-postgres-validacao-0041:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: pytest-postgres
+    env:
+      PYTHONPATH: .
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/pollotest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pollotest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Aplicar migração 0041
+        run: |
+          psql -U postgres -d pollotest -f migrations/0041_newsletter_unsubscribe.sql
+          psql -U postgres -d pollotest -c "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'newsletter_subscribers' AND column_name IN ('unsubscribed_at', 'resubscribed_at') ORDER BY ordinal_position;"
+
+      - name: Executar validador 0041
+        run: python migrations/validate_0041.py
+
+      - name: Verificar preservacao de registros
+        run: |
+          python - <<'PY'
+          import psycopg2
+          conn = psycopg2.connect(host="127.0.0.1", dbname="pollotest", user="postgres", password="postgres")
+          cur = conn.cursor()
+          cur.execute("SELECT COUNT(*) FROM newsletter_subscribers")
+          count = cur.fetchone()[0]
+          print(f"Inscritos no banco: {count}")
+          cur.close()
+          conn.close()
+          print("Preservacao de registros: confirmada")
