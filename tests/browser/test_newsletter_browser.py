@@ -87,8 +87,8 @@ def test_post_reativar_apos_cancelamento(page, token):
 @pytest.mark.parametrize("page", ["desktop"], indirect=True)
 def test_token_invalido(page):
     page.goto(f"{BASE_URL}/newsletter/cancelar/token-invalido-abc123")
-    page.wait_for_selector(".nl-cancel-err", timeout=15000)
-    assert "inválido" in _body_text(page)
+    page.wait_for_selector(".nl-cancel-card", timeout=15000)
+    assert "link inválido" in _body_text(page)
     # O formulario de confirmacao NAO deve aparecer em token invalido
     assert page.query_selector("form:has(input[value='cancelar'])") is None
 
@@ -108,13 +108,21 @@ def test_get_repetido_nao_altera(page, token):
 
 @pytest.mark.parametrize("page", ["desktop"], indirect=True)
 def test_cadastro_repetido_nao_reativa(page, token):
-    """Cadastro repetido do mesmo e-mail cancelado nao reativa."""
+    """Cadastro repetido do e-mail cancelado nao reativa nem mostra sucesso."""
     page.goto(f"{BASE_URL}/newsletter/cancelar/{token}")
     page.click("form:has(input[value='cancelar']) button[type='submit']")
     page.wait_for_selector(".nl-cancel-ok", timeout=15000)
 
-    page.goto(f"{BASE_URL}/#newsletter")
-    page.fill("#newsletter input[name='email']", "browser.newsletter@sintetico.test")
-    page.click("#newsletter button[type='submit']")
-    page.wait_for_url("**/#newsletter**", timeout=15000)
-    assert "cancelado" in _body_text(page)
+    page.goto(f"{BASE_URL}/")
+    page.fill(".newsletter-form input[name='email']",
+              "browser.newsletter@sintetico.test")
+    page.click(".newsletter-form button[type='submit']")
+    page.wait_for_url("**/#newsletter", timeout=15000)
+    # Mensagem de sucesso (category 'newsletter') NAO deve aparecer:
+    # o cadastro de cancelado nao foi aceito nem reativado.
+    assert page.query_selector(".newsletter-feedback") is None
+
+    # O cancelamento permanece: GET do link ainda oferece reativacao.
+    page.goto(f"{BASE_URL}/newsletter/cancelar/{token}")
+    assert page.query_selector(
+        "form:has(input[value='reativar'])") is not None
