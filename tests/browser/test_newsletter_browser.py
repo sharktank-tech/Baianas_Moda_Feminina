@@ -1,22 +1,18 @@
-"""Newsletter opt-out browser tests (desktop/mobile).
+"""Navegador real (Playwright/Chromium): opt-out da newsletter.
 
-These tests verify the newsletter cancel flow through the browser.
-They use the existing Playwright infrastructure (BASE_URL, browser fixture,
-seed data). Tokens are generated server-side; the tests navigate to the
-cancel URL and verify the flow.
-
-Note: Full newsletter browser tests require newsletter subscribers with
-tokens in the database. These tests verify the URLs are reachable and
-the basic flow works with synthetic data.
+Cobre desktop e mobile: GET de confirmacao sem alteracao, POST de
+cancelamento, reativacao, token invalido, repeticao de GET e cadastro
+repetido que nao reativa. O token sintetico vem do seed
+(seed_browser_qa.py -> /tmp/browser_newsletter_token.txt).
 """
 import os
-import re
 
 import pytest
 
 playwright = pytest.importorskip("playwright.sync_api")
 
 BASE_URL = os.environ.get("BROWSER_BASE_URL", "http://127.0.0.1:5111")
+TOKEN_FILE = "/tmp/browser_newsletter_token.txt"
 
 DESKTOP = {"width": 1366, "height": 900}
 MOBILE = {"width": 390, "height": 844}
@@ -24,11 +20,16 @@ MOBILE = {"width": 390, "height": 844}
 
 @pytest.fixture(scope="module")
 def browser():
-    import playwright.sync_api
     with playwright.sync_playwright() as runner:
         instance = runner.chromium.launch(args=["--no-sandbox"])
         yield instance
         instance.close()
+
+
+@pytest.fixture(scope="module")
+def token():
+    with open(TOKEN_FILE, encoding="utf-8") as f:
+        return f.read().strip()
 
 
 @pytest.fixture()
@@ -44,51 +45,76 @@ def page(browser, request):
     context.close()
 
 
-def goto_newsletter_cancel(page, token):
-    """Acessa a página de cancelamento de newsletter."""
-    page.goto(BASE_URL + "/newsletter/cancelar/" + token)
-
-
-@pytest.mark.parametrize("page", ["mobile"], indirect=True)
-def test_newsletter_cancel_page_loads_desktop(page, browser):
-    """Desktop: página de cancelamento carrega sem erros."""
-    # O token precisa existir no banco; este teste verifica que a URL
-    # é tratada corretamente pelo app (não 404 inusitado).
-    # Em CI, o token viria do seeding do banco.
-    pytest.xfail("Token de newsletter não sinteticamente criado neste ambiente")
-
-
-@pytest.mark.parametrize("page", ["mobile"], indirect=True)
-def test_newsletter_cancel_page_loads_mobile(page, browser):
-    """Mobile: página de cancelamento carrega sem erros."""
-    pytest.xfail("Token de newsletter não sinteticamente criado neste ambiente")
+def _body_text(page):
+    return (page.text_content("body") or "").lower()
 
 
 @pytest.mark.parametrize("page", ["desktop"], indirect=True)
-def test_newsletter_cancel_desktop_get(page, browser):
-    """Desktop: GET /newsletter/cancelar/<token> não altera estado."""
-    pytest.xfail("Token de newsletter não sinteticamente criado neste ambiente")
+def test_get_confirmacao_sem_alteracao(page, token):
+    """GET renderiza a pagina de confirmacao com os dois formularios."""
+    page.goto(f"{BASE_URL}/newsletter/cancelar/{token}")
+    assert page.wait_for_selector("form", timeout=15000)
+    assert "cancelar" in _body_text(page)
 
 
 @pytest.mark.parametrize("page", ["mobile"], indirect=True)
-def test_newsletter_cancel_desktop_post_cancelar(page, browser):
-    """Desktop: POST cancelar cancela a inscrição."""
-    pytest.xfail("Token de newsletter não sinteticamente criado neste ambiente")
+def test_get_mobile(page, token):
+    page.goto(f"{BASE_URL}/newsletter/cancelar/{token}")
+    assert page.wait_for_selector("form", timeout=15000)
 
 
 @pytest.mark.parametrize("page", ["desktop"], indirect=True)
-def test_newsletter_cancel_desktop_post_reativar(page, browser):
-    """Desktop: POST reativar reativa a inscrição."""
-    pytest.xfail("Token de newsletter não sinteticamente criado neste ambiente")
-
-
-@pytest.mark.parametrize("page", ["mobile"], indirect=True)
-def test_newsletter_token_invalido_mobile(page, browser):
-    """Mobile: token inválido mostra página de erro."""
-    pytest.xfail("Token de newsletter não sinteticamente criado neste ambiente")
+def test_post_cancelar(page, token):
+    page.goto(f"{BASE_URL}/newsletter/cancelar/{token}")
+    page.click("form:has(input[value='cancelar']) button[type='submit']")
+    page.wait_for_selector(".nl-cancel-ok", timeout=15000)
+    assert "cancelada" in _body_text(page)
 
 
 @pytest.mark.parametrize("page", ["desktop"], indirect=True)
-def test_newsletter_repetido_nao_reativa_desktop(page, browser):
-    """Desktop: cadastro repetido após cancelamento não reativa."""
-    pytest.xfail("Token de newsletter não sinteticamente criado neste ambiente")
+def test_post_reativar_apos_cancelamento(page, token):
+    """Cancela e em seguida reativa pelo mesmo link."""
+    page.goto(f"{BASE_URL}/newsletter/cancelar/{token}")
+    page.click("form:has(input[value='cancelar']) button[type='submit']")
+    page.wait_for_selector(".nl-cancel-ok", timeout=15000)
+
+    page.goto(f"{BASE_URL}/newsletter/cancelar/{token}")
+    page.click("form:has(input[value='reativar']) button[type='submit']")
+    page.wait_for_selector(".nl-cancel-ok", timeout=15000)
+    assert "ativa" in _body_text(page)
+
+
+@pytest.mark.parametrize("page", ["desktop"], indirect=True)
+def test_token_invalido(page):
+    page.goto(f"{BASE_URL}/newsletter/cancelar/token-invalido-abc123")
+    page.wait_for_selector(".nl-cancel-err", timeout=15000)
+    assert "inválido" in _body_text(page)
+    # O formulario de confirmacao NAO deve aparecer em token invalido
+    assert page.query_selector("form:has(input[value='cancelar'])") is None
+
+
+@pytest.mark.parametrize("page", ["desktop"], indirect=True)
+def test_get_repetido_nao_altera(page, token):
+    """GET seguido de GET apos POST nao reverte o estado."""
+    page.goto(f"{BASE_URL}/newsletter/cancelar/{token}")
+    page.click("form:has(input[value='cancelar']) button[type='submit']")
+    page.wait_for_selector(".nl-cancel-ok", timeout=15000)
+
+    page.goto(f"{BASE_URL}/newsletter/cancelar/{token}")
+    assert page.wait_for_selector("form", timeout=15000)
+    # Reativacao continua disponivel: GET nao altera nada
+    assert page.query_selector("form:has(input[value='reativar'])") is not None
+
+
+@pytest.mark.parametrize("page", ["desktop"], indirect=True)
+def test_cadastro_repetido_nao_reativa(page, token):
+    """Cadastro repetido do mesmo e-mail cancelado nao reativa."""
+    page.goto(f"{BASE_URL}/newsletter/cancelar/{token}")
+    page.click("form:has(input[value='cancelar']) button[type='submit']")
+    page.wait_for_selector(".nl-cancel-ok", timeout=15000)
+
+    page.goto(f"{BASE_URL}/#newsletter")
+    page.fill("#newsletter input[name='email']", "browser.newsletter@sintetico.test")
+    page.click("#newsletter button[type='submit']")
+    page.wait_for_url("**/#newsletter**", timeout=15000)
+    assert "cancelado" in _body_text(page)

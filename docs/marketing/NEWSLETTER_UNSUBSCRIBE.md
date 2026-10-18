@@ -33,7 +33,7 @@ Implementado em `feature/newsletter-opt-out` — PR aberto, sem merge/deploy.
 
 ## Reversão
 
-- **Executar o down (0041_newsletter_unsubscribe_down.sql) elimina o histórico de supressão**: removes `unsubscribed_at` e `resubscribed_at` columns. Inscritos anteriormente cancelados tornam-se elegíveis novamente automaticamente.
-- **Não apresentar down como reversão operacional segura**: representa perda permanente de dados (histórico de cancelamento). Pode re-enrollar indesejados sem intenção registrada.
-- **Rollback preferido**: reverter as alterações de código preservando as colunas. As colunas são aditivas (additive) e idempotentes — podem ser seguramente deixadas em produção após o code revert.
-- Apenas remover colunas via migração futura e planejada, com anúncio adequado e consentimento dos assinantes afetados.
+- **Executar o down (0041_newsletter_unsubscribe_down.sql) elimina o histórico de supressão**: remove `unsubscribed_at` e `resubscribed_at`. Inscritos anteriormente cancelados tornam-se elegíveis novamente automaticamente.
+- **Rollback preferido (código)**: reverter o código preservando as colunas. As colunas são aditivas e idempotentes — podem permanecer em produção após o revert.
+- **Risco do rollback de código sem salvaguarda**: se o código revertido voltar a enviar promoções sem consultar a supressão, cancelados voltará a receber e-mails indesejados — com as colunas presentes no banco, porém ignoradas pelo código antigo. **Antes de qualquer rollback de código, bloquear/disabilitar os disparos promocionais** (ex.: desativar envios em lote e automações) até que o código com a verificação de supressão esteja no ar. Somente após o código protegido em produção o rollback está completo.
+- **Não apresentar down como reversão operacional segura**: perda permanente do histórico de cancelamento; apenas remover colunas via migração futura e planejada.

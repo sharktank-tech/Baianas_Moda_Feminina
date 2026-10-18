@@ -83,5 +83,23 @@ def main():
         print("seed browser QA OK")
 
 
+def seed_newsletter():
+    """Assinante + token sintetico para os testes browser de newsletter."""
+    from loja.modules.models import NewsletterSubscriber
+    from loja.modules.newsletter import generate_unsubscribe_token
+
+    email = "browser.newsletter@sintetico.test"
+    subscriber = NewsletterSubscriber.query.filter_by(email=email).first()
+    if subscriber is None:
+        subscriber = NewsletterSubscriber(id=uuid.uuid4(), email=email)
+        db.session.add(subscriber)
+        db.session.commit()
+    token = generate_unsubscribe_token(subscriber)
+    with open("/tmp/browser_newsletter_token.txt", "w", encoding="utf-8") as f:
+        f.write(token)
+    print(f"newsletter seed OK: {email} token={token[:16]}...")
+
+
 if __name__ == "__main__":
     main()
+    seed_newsletter()
