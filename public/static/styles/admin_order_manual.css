@@ -99,6 +99,10 @@
   border-color: #fecaca;
   color: #991b1b;
 }
+.om-banner--erro:focus {
+  outline: 3px solid rgba(236, 72, 153, 0.4);
+  outline-offset: 2px;
+}
 
 /* ── Cartões de seção ──────────────────────────────────────────────────── */
 .om-card {

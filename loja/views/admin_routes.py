@@ -379,9 +379,6 @@ def _order_detail_payload(order, *, error=None):
             .limit(100)
             .all()
         )
-    salvo = request.args.get("salvo")
-    if salvo not in ("compra", "rastreio"):
-        salvo = None
     payload = {
         "order": order, "status_labels": ORDER_STATUS_LABELS,
         "payment_confirmed": payment_is_confirmed(order),
@@ -393,7 +390,6 @@ def _order_detail_payload(order, *, error=None):
         "items_by_id": items_by_id,
         "operational_audit": _audit_entries(audit),
         "shipment_status_labels": _SHIPMENT_STATUS_LABELS,
-        "salvo": salvo,
         "error_kind": None, "error_summary": None,
         "purchase_field_errors": {}, "shipment_field_errors": {},
         "shipment_form_purchase_id": None,
@@ -452,9 +448,9 @@ def _manual_items_from_form():
     return items
 
 
-def _manual_back(order_id, salvo=None):
-    kwargs = {"salvo": salvo} if salvo else {}
-    return redirect(url_for("admin.order_detail", order_id=order_id, **kwargs))
+def _manual_back(order_id):
+    """Redirect ao detalhe do pedido após POST concluído (confirmação via flash)."""
+    return redirect(url_for("admin.order_detail", order_id=order_id))
 
 
 _MANUAL_ERROR_MESSAGES = {
@@ -582,7 +578,7 @@ def register_manual_purchase(order_id):
         if result.created else "Compra já registrada anteriormente.",
         "success" if result.created else "warning",
     )
-    return _manual_back(order_id, salvo="compra" if result.created else None)
+    return _manual_back(order_id)
 
 
 @admin_blueprint.route(
@@ -701,9 +697,7 @@ def register_manual_shipment(purchase_id):
         if result.created else "Rastreio já registrado anteriormente.",
         "success" if result.created else "warning",
     )
-    return _manual_back(
-        purchase.order_id, salvo="rastreio" if result.created else None
-    )
+    return _manual_back(purchase.order_id)
 
 
 @admin_blueprint.route(

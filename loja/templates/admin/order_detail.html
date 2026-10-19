@@ -37,25 +37,15 @@
     {% endif %}
   </header>
 
-  {% if salvo %}
-  <div class="om-banner om-banner--ok" role="status" data-om-salvo="{{ salvo }}">
-    <strong>
-      {{ 'Compra registrada com sucesso.' if salvo == 'compra' else 'Rastreio registrado (aguardando postagem).' }}
-    </strong>
-    <span>
-      {% if salvo == 'compra' %}
-        O número do fornecedor, os itens vinculados e a evidência ficaram no
-        pedido — nada foi comprado nem pago com este registro.
-      {% else %}
-        A remessa entrou como <em>aguardando postagem</em>; atualize quando o
-        fornecedor confirmar a postagem real.
-      {% endif %}
-    </span>
-  </div>
-  {% endif %}
-
   {% if error_summary %}
-  <div class="om-banner om-banner--erro" role="alert" data-om-error data-error-kind="{{ error_kind }}">
+  <div
+    class="om-banner om-banner--erro"
+    role="alert"
+    tabindex="-1"
+    id="om-error-summary"
+    data-om-error
+    data-error-kind="{{ error_kind }}"
+  >
     <strong>Não foi possível concluir.</strong>
     <span>{{ error_summary }}</span>
   </div>
@@ -235,6 +225,9 @@
             name="item_{{ item.id }}" min="0" max="{{ disponivel }}"
             value="{{ purchase_values.get('item_' ~ item.id, '0') }}"
             {% if disponivel == 0 %}disabled{% endif %}
+            {% if purchase_field_errors.get('items') and disponivel > 0 %}
+            aria-invalid="true"
+            {% endif %}
             aria-label="Quantidade de {{ item.product_name }} vinculada a esta compra"
           >
         </div>
@@ -507,6 +500,9 @@
             class="om-qty" type="number" inputmode="numeric"
             name="item_{{ link.order_item_id }}" min="0" max="{{ left }}"
             value="{{ shipment_values.get('item_' ~ link.order_item_id, '0') if shipment_form_purchase_id == purchase.id else '0' }}"
+            {% if shipment_form_purchase_id == purchase.id and shipment_field_errors.get('items') %}
+            aria-invalid="true"
+            {% endif %}
             aria-label="Quantidade de {{ item.product_name if item else link.order_item_id }} coberta por este rastreio"
           >
         </div>
@@ -636,6 +632,18 @@
       btn.disabled = false;
       btn.removeAttribute("aria-disabled");
     });
+  });
+  document.addEventListener("DOMContentLoaded", () => {
+    if (!document.querySelector("[data-om-error]")) return;
+    const campo = document.querySelector(
+      '.om-main [aria-invalid="true"]:not([disabled])'
+    );
+    if (campo) {
+      campo.focus();
+      return;
+    }
+    const resumo = document.getElementById("om-error-summary");
+    if (resumo) resumo.focus();
   });
 </script>
 {% endblock %}
