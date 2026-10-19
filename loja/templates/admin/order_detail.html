@@ -1,115 +1,649 @@
 {% extends "base.html" %}
 {% block title %}Pedido {{ order.order_number }} — Pollo Modas{% endblock %}
+
+{% block extra_head %}
+<link
+  rel="stylesheet"
+  href="{{ url_for('static', filename='styles/admin_order_manual.css') }}"
+>
+{% endblock %}
+
 {% block content %}
-<main class="max-w-6xl mx-auto px-4 py-8">
-  <a href="{{ url_for('admin.dashboard') }}#orders">← Pedidos</a>
-  <h1 class="text-3xl font-bold my-4">Pedido {{ order.order_number }}</h1>
-  <p>Estado do pedido: <strong>{{ status_labels.get(order.status, order.status) }}</strong></p>
-  <p>Pagamento: <strong>{{ 'Confirmado' if payment_confirmed else 'Não confirmado' }}</strong></p>
-  <p>Estado informado pelo Mercado Pago: {{ order.mp_status or 'Não informado' }}</p>
-  {% if order.status == 'manual_review' %}<a class="underline" href="{{ url_for('admin.dashboard') }}#manual-review">Abrir fila de revisão manual</a>{% endif %}
-  <h2 class="text-xl font-bold mt-6">Itens</h2>
-  <table class="w-full text-left"><thead><tr><th>Produto</th><th>Variação</th><th>Quantidade</th><th>Total</th></tr></thead>
-    <tbody>{% for item in order.items %}<tr><td>{{ item.product_name }}</td><td>{{ item.selected_size or '—' }}</td><td>{{ item.quantity }}</td><td>R$ {{ '%.2f'|format(item.line_total)|replace('.', ',') }}</td></tr>{% else %}<tr><td colspan="4">Nenhum item registrado.</td></tr>{% endfor %}</tbody>
-  </table>
-  <h2 class="text-xl font-bold mt-6">Valores</h2>
-  <p>Subtotal: R$ {{ '%.2f'|format(order.subtotal)|replace('.', ',') }} · Frete: R$ {{ '%.2f'|format(order.shipping)|replace('.', ',') }} · Desconto: R$ {{ '%.2f'|format(order.discount)|replace('.', ',') }}</p>
-  <p>Total: <strong>R$ {{ '%.2f'|format(order.total)|replace('.', ',') }}</strong></p>
-  <h2 class="text-xl font-bold mt-6">Pagamentos registrados</h2>
-  <table class="w-full text-left"><thead><tr><th>Referência</th><th>Estado</th><th>Valor</th><th>Modalidade</th></tr></thead>
-    <tbody>{% for payment in order.payments %}<tr><td>{{ payment.provider_payment_id }}</td><td>{{ payment.status }}</td><td>{{ payment.currency }} {{ '%.2f'|format(payment.amount)|replace('.', ',') }}</td><td>{{ payment.payment_type_id or '—' }}</td></tr>{% else %}<tr><td colspan="4">Nenhum pagamento registrado.</td></tr>{% endfor %}</tbody>
-  </table>
-  <h2 class="text-xl font-bold mt-6">Cliente e entrega</h2>
-  <p>{{ order.customer_name }} · {{ order.customer_email }} · {{ order.customer_phone or '—' }}</p>
-  <p>{{ order.street }}, {{ order.number }} {{ order.complement or '' }} · {{ order.neighborhood }} · {{ order.city }}/{{ order.state }} · CEP {{ order.zip_code }}</p>
-  <h2 class="text-xl font-bold mt-6">Rastreio registrado</h2>
-  {% for shipment in order.shipments %}<p>{{ shipment.carrier or 'Transportadora não informada' }} · {{ shipment.tracking_code }} · {{ shipment.status }}</p>{% else %}<p>Nenhum rastreio registrado.</p>{% endfor %}
-  <h2 class="text-xl font-bold mt-6">Compra no fornecedor (registro manual)</h2>
-  <p class="text-sm text-gray-600">Pagamento: <strong>{{ 'Confirmado' if payment_confirmed else 'Não confirmado' }}</strong> · Registrar compra não compra no AliExpress nem altera pagamento, preço, estoque ou reservas.</p>
-  {% for purchase in manual_purchases %}
-  <div class="border rounded-lg p-4 mt-3">
-    <p><strong>Pedido AliExpress:</strong> {{ purchase.external_order_id }}</p>
-    <p class="text-sm text-gray-600">Comprado em {{ purchase.purchased_at.strftime('%d/%m/%Y %H:%M') if purchase.purchased_at else '—' }} ({{ purchase.purchased_tz }}) · Evidência: {{ purchase.evidence_ref }}</p>
-    {% if purchase.note %}<p class="text-sm text-gray-600">Obs.: {{ purchase.note }}</p>{% endif %}
-    <ul class="text-sm mt-1">
-      {% for link in purchase.items %}{% set item = items_by_id.get(link.order_item_id) %}<li>{{ link.quantity }}× {{ item.product_name if item else link.order_item_id }}</li>{% endfor %}
-    </ul>
-    <form method="POST" action="{{ url_for('admin.correct_manual_purchase', purchase_id=purchase.id) }}" class="mt-2 flex flex-wrap gap-2 items-end">
-      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-      <input type="hidden" name="expected_updated_at" value="{{ purchase.updated_at.isoformat() if purchase.updated_at else '' }}">
-      <label class="text-sm">Novo número <input class="border p-1" type="text" name="external_order_id" maxlength="64" value="{{ purchase.external_order_id }}" required></label>
-      <label class="text-sm">Justificativa <input class="border p-1" type="text" name="reason" maxlength="500" required placeholder="Motivo da correção"></label>
-      <button class="border p-1" type="submit">Corrigir número</button>
-    </form>
-  </div>
-  {% else %}<p>Nenhuma compra registrada no fornecedor.</p>{% endfor %}
-  {% if payment_confirmed and order.status == 'paid' %}
-  <form method="POST" action="{{ url_for('admin.register_manual_purchase', order_id=order.id) }}" class="border rounded-lg p-4 mt-3">
-    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-    <h3 class="font-bold">Registrar compra no AliExpress</h3>
-    <label class="block text-sm mt-2">Número do pedido no AliExpress <input class="border p-1 block" type="text" name="external_order_id" maxlength="64" required></label>
-    {% for item in order.items %}
-    <label class="block text-sm mt-1">{{ item.product_name }} ({{ item.selected_size or '—' }}) — vendido: {{ item.quantity }} <input class="border p-1" type="number" name="item_{{ item.id }}" min="0" max="{{ item.quantity }}" value="0"></label>
-    {% endfor %}
-    <label class="block text-sm mt-2">Data/hora da compra <input class="border p-1" type="datetime-local" name="purchased_at" required></label>
-    <label class="block text-sm mt-1">Fuso <input class="border p-1" type="text" name="purchased_tz" value="America/Sao_Paulo" required></label>
-    <label class="block text-sm mt-1">Referência da evidência <input class="border p-1 block" type="text" name="evidence_ref" maxlength="255" required></label>
-    <label class="block text-sm mt-1">Observação (opcional) <input class="border p-1 block" type="text" name="note" maxlength="2000"></label>
-    <button class="border p-2 mt-2" type="submit">Registrar compra (não compra no fornecedor)</button>
-  </form>
-  {% else %}<p class="text-sm text-gray-600 mt-2">Registro disponível após pagamento comprovado em pedido pago.</p>{% endif %}
-  <h2 class="text-xl font-bold mt-6">Despacho e rastreio</h2>
-  {% for purchase in manual_purchases %}
-  <div class="border rounded-lg p-4 mt-3">
-    <p><strong>Compra {{ purchase.external_order_id }}</strong></p>
-    <ul class="text-sm mt-1">
-      {% for link in purchase.items %}
-      {% set covered = coverage_by_purchase.get(purchase.id, {}).get(link.order_item_id, 0) %}
-      {% set item = items_by_id.get(link.order_item_id) %}
-      <li>{{ item.product_name if item else link.order_item_id }} — vinculado: {{ link.quantity }} · coberto: {{ covered }} · restante: {{ link.quantity - covered }}</li>
-      {% endfor %}
-    </ul>
-    {% for shipment in shipments_by_purchase.get(purchase.id, []) %}
-    <div class="border rounded-lg p-3 mt-2">
-      <p class="text-sm"><strong>{{ shipment.tracking_code }}</strong> · {{ shipment.carrier or '—' }} · {{ shipment.status }}</p>
-      <form method="POST" action="{{ url_for('admin.correct_manual_shipment', shipment_id=shipment.id) }}" class="mt-2 flex flex-wrap gap-2 items-end">
-        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-        <input type="hidden" name="expected_updated_at" value="{{ shipment.updated_at.isoformat() if shipment.updated_at else '' }}">
-        <label class="text-sm">Transportadora <input class="border p-1" type="text" name="carrier" maxlength="60" value="{{ shipment.carrier or '' }}"></label>
-        <label class="text-sm">Código <input class="border p-1" type="text" name="tracking_code" maxlength="64" value="{{ shipment.tracking_code }}"></label>
-        <label class="text-sm">Justificativa <input class="border p-1" type="text" name="reason" maxlength="500" required placeholder="Motivo da correção"></label>
-        <button class="border p-1" type="submit">Corrigir</button>
-      </form>
+{% set can_register = payment_confirmed and order.status == 'paid' %}
+{% set ns = namespace(disp=0) %}
+{% for item in order.items %}
+  {% if item.quantity - linked_by_item.get(item.id, 0) > 0 %}
+    {% set ns.disp = ns.disp + 1 %}
+  {% endif %}
+{% endfor %}
+{% set mostrar_form = can_register and ns.disp > 0 %}
+<main class="om-main">
+  <a class="om-back" href="{{ url_for('admin.dashboard') }}#orders">← Pedidos</a>
+
+  <header class="om-head">
+    <div>
+      <h1>Pedido {{ order.order_number }}</h1>
+      <p class="om-sub">Criado em {{ order.created_at.strftime('%d/%m/%Y %H:%M') }} UTC</p>
     </div>
-    {% endfor %}
-    {% set remaining = remaining_by_purchase.get(purchase.id, {}) %}
-    {% if remaining.values()|select('>', 0)|list %}
-    <form method="POST" action="{{ url_for('admin.register_manual_shipment', purchase_id=purchase.id) }}" class="mt-2">
-      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-      <h3 class="font-bold text-sm">Registrar rastreio</h3>
-      <label class="block text-sm mt-1">Código <input class="border p-1 block" type="text" name="tracking_code" maxlength="64" required></label>
-      <label class="block text-sm mt-1">Transportadora <input class="border p-1 block" type="text" name="carrier" maxlength="60" required></label>
-      <label class="block text-sm mt-1">Data de postagem (opcional) <input class="border p-1" type="datetime-local" name="posted_at"></label>
-      <label class="block text-sm mt-1">Previsão de entrega (opcional) <input class="border p-1" type="date" name="estimated_delivery"></label>
-      <label class="block text-sm mt-1">Referência da evidência <input class="border p-1 block" type="text" name="evidence_ref" maxlength="255" required></label>
-      {% for link in purchase.items %}
-      {% set left = remaining.get(link.order_item_id, 0) %}
-      {% set item = items_by_id.get(link.order_item_id) %}
-      {% if left > 0 %}
-      <label class="block text-sm mt-1">{{ item.product_name if item else link.order_item_id }} — restante: {{ left }} <input class="border p-1" type="number" name="item_{{ link.order_item_id }}" min="0" max="{{ left }}" value="0"></label>
-      {% endif %}
-      {% endfor %}
-      <button class="border p-2 mt-2" type="submit">Registrar rastreio (aguardando postagem)</button>
-    </form>
-    {% else %}
-    <p class="text-sm text-gray-600 mt-2">Cobertura completa — nenhum novo rastreio para esta compra.</p>
+    <div class="om-pills">
+      <span class="om-pill">Estado: <strong>{{ status_labels.get(order.status, order.status) }}</strong></span>
+      <span class="om-pill {{ 'om-pill--ok' if payment_confirmed else 'om-pill--warn' }}">
+        Pagamento {{ 'Confirmado' if payment_confirmed else 'Não confirmado' }}
+      </span>
+      <span class="om-pill">Mercado Pago: {{ order.mp_status or 'não informado' }}</span>
+    </div>
+    {% if order.status == 'manual_review' %}
+      <a class="om-link" href="{{ url_for('admin.dashboard') }}#manual-review">Abrir fila de revisão manual</a>
     {% endif %}
+  </header>
+
+  {% if error_summary %}
+  <div
+    class="om-banner om-banner--erro"
+    role="alert"
+    tabindex="-1"
+    id="om-error-summary"
+    data-om-error
+    data-error-kind="{{ error_kind }}"
+  >
+    <strong>Não foi possível concluir.</strong>
+    <span>{{ error_summary }}</span>
   </div>
-  {% endfor %}
-  <h2 class="text-xl font-bold mt-6">Histórico operacional</h2>
-  <table class="w-full text-left text-sm"><thead><tr><th>Quando</th><th>Entidade</th><th>Campo</th><th>Antes → depois</th><th>Motivo</th></tr></thead>
-    <tbody>{% for entry in operational_audit %}<tr><td>{{ entry.created_at.strftime('%d/%m/%Y %H:%M') if entry.created_at else '—' }}</td><td>{{ entry.entity }}</td><td>{{ entry.field }}</td><td>{{ entry.old_value or '—' }} → {{ entry.new_value or '—' }}</td><td>{{ entry.reason }}</td></tr>{% else %}<tr><td colspan="5">Sem correções registradas.</td></tr>{% endfor %}</tbody>
-  </table>
-  <p class="mt-6">Criado em {{ order.created_at.strftime('%d/%m/%Y %H:%M') }} UTC. Registros e correções manuais ficam auditados no histórico operacional acima.</p>
+  {% endif %}
+
+  <!-- 1) Resumo do pedido da loja -->
+  <section class="om-card" aria-labelledby="om-resumo-t">
+    <div class="om-card-head">
+      <h2 id="om-resumo-t">Resumo do pedido da loja</h2>
+      <span class="om-eyebrow">o que o cliente comprou</span>
+    </div>
+    <div class="om-grid2">
+      <div>
+        <h3 class="om-h3">Itens</h3>
+        <ul class="om-items">
+          {% for item in order.items %}
+          <li class="om-item">
+            <div class="om-item-main">
+              <span class="om-item-name">{{ item.product_name }}</span>
+              <span class="om-item-meta">
+                {{ item.variant.color + ' · ' if item.variant and item.variant.color }}{{ item.selected_size or '—' }}
+              </span>
+            </div>
+            <span class="om-item-qty">{{ item.quantity }}×</span>
+            <span class="om-item-total">R$ {{ '%.2f'|format(item.line_total)|replace('.', ',') }}</span>
+          </li>
+          {% else %}
+          <li class="om-note">Nenhum item registrado.</li>
+          {% endfor %}
+        </ul>
+        <dl class="om-values">
+          <div><dt>Subtotal</dt><dd>R$ {{ '%.2f'|format(order.subtotal)|replace('.', ',') }}</dd></div>
+          <div><dt>Frete</dt><dd>R$ {{ '%.2f'|format(order.shipping)|replace('.', ',') }}</dd></div>
+          <div><dt>Desconto</dt><dd>R$ {{ '%.2f'|format(order.discount)|replace('.', ',') }}</dd></div>
+          <div class="om-values-total"><dt>Total da loja</dt><dd><strong>R$ {{ '%.2f'|format(order.total)|replace('.', ',') }}</strong></dd></div>
+        </dl>
+      </div>
+      <div>
+        <h3 class="om-h3">Pagamento da loja × compra no fornecedor</h3>
+        <p class="om-note">
+          O pagamento abaixo é o da <strong>loja (Mercado Pago)</strong>. Já a
+          compra no fornecedor é um registro à parte, feito por você depois de
+          pagar no AliExpress — ela não altera pagamento, preço, estoque nem
+          reservas.
+        </p>
+        <ul class="om-payments">
+          {% for payment in order.payments %}
+          <li class="om-payment">
+            <span class="om-payment-ref">{{ payment.provider_payment_id }}</span>
+            <span class="om-badge {{ 'om-badge--ok' if payment.status in ('approved', 'paid') else 'om-badge--warn' }}">{{ payment.status }}</span>
+            <span>{{ payment.currency }} {{ '%.2f'|format(payment.amount)|replace('.', ',') }}</span>
+            <span class="om-payment-type">{{ payment.payment_type_id or '—' }}</span>
+          </li>
+          {% else %}
+          <li class="om-note">Nenhum pagamento registrado.</li>
+          {% endfor %}
+        </ul>
+        <h3 class="om-h3">Cliente e entrega</h3>
+        <p class="om-customer">
+          {{ order.customer_name }}<br>
+          {{ order.customer_email }} · {{ order.customer_phone or '—' }}
+        </p>
+        <p class="om-address">
+          {{ order.street }}, {{ order.number }}{{ ' · ' + order.complement if order.complement }}<br>
+          {{ order.neighborhood }} · {{ order.city }}/{{ order.state }}<br>
+          CEP {{ order.zip_code }}
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2) Registro da compra já realizada -->
+  <section class="om-card" aria-labelledby="om-compra-t">
+    <div class="om-card-head">
+      <h2 id="om-compra-t">Compra no fornecedor</h2>
+      <span class="om-eyebrow">registro manual, sem automação</span>
+    </div>
+    <p class="om-lead">
+      Use esta área depois de comprar no fornecedor. Este formulário apenas
+      registra a compra; não compra nem paga no AliExpress.
+    </p>
+
+    {% if mostrar_form %}
+    <form
+      method="POST"
+      action="{{ url_for('admin.register_manual_purchase', order_id=order.id) }}"
+      class="om-form"
+      id="om-form-compra"
+      data-om-submit
+    >
+      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+      <h3 class="om-form-title" id="om-registrar-compra">Registrar compra no AliExpress</h3>
+
+      <!-- 3) Dados da compra -->
+      <fieldset class="om-fieldset">
+        <legend><span class="om-step">1</span> Dados da compra</legend>
+        <div class="om-field {{ 'om-field--erro' if purchase_field_errors.get('external_order_id') }}">
+          <label for="om-external">Número do pedido no AliExpress</label>
+          <input
+            id="om-external" name="external_order_id" type="text" maxlength="64"
+            required autocomplete="off"
+            value="{{ purchase_values.get('external_order_id', '') }}"
+            {% if purchase_field_errors.get('external_order_id') %}
+            aria-invalid="true" aria-describedby="om-erro-external"
+            {% endif %}
+          >
+          {% if purchase_field_errors.get('external_order_id') %}
+          <p class="om-field-erro" id="om-erro-external" data-error-for="external_order_id">
+            {{ purchase_field_errors['external_order_id'] }}
+          </p>
+          {% endif %}
+          <p class="om-hint">Como aparece no site ou app do AliExpress (por exemplo, 9901234567890042).</p>
+        </div>
+        <div class="om-field {{ 'om-field--erro' if purchase_field_errors.get('purchased_at') }}">
+          <label for="om-purchased-at">Data e hora da compra</label>
+          <input
+            id="om-purchased-at" name="purchased_at" type="datetime-local" required
+            value="{{ purchase_values.get('purchased_at', '') }}"
+            {% if purchase_field_errors.get('purchased_at') %}
+            aria-invalid="true" aria-describedby="om-erro-purchased-at"
+            {% endif %}
+          >
+          {% if purchase_field_errors.get('purchased_at') %}
+          <p class="om-field-erro" id="om-erro-purchased-at" data-error-for="purchased_at">
+            {{ purchase_field_errors['purchased_at'] }}
+          </p>
+          {% endif %}
+          <p class="om-hint">
+            Use o relógio local da compra no fornecedor. O formato é
+            <strong>AAAA-MM-DD HH:MM</strong> (ex.: 2026-10-18 15:30) e o fuso
+            ao lado registra qual horário foi considerado.
+          </p>
+        </div>
+        <div class="om-field om-field--narrow {{ 'om-field--erro' if purchase_field_errors.get('purchased_tz') }}">
+          <label for="om-tz">Fuso do horário informado</label>
+          <input
+            id="om-tz" name="purchased_tz" type="text" required
+            value="{{ purchase_values.get('purchased_tz', 'America/Sao_Paulo') }}"
+            {% if purchase_field_errors.get('purchased_tz') %}
+            aria-invalid="true" aria-describedby="om-erro-tz"
+            {% endif %}
+          >
+          {% if purchase_field_errors.get('purchased_tz') %}
+          <p class="om-field-erro" id="om-erro-tz" data-error-for="purchased_tz">
+            {{ purchase_field_errors['purchased_tz'] }}
+          </p>
+          {% endif %}
+          <p class="om-hint">Ex.: America/Sao_Paulo.</p>
+        </div>
+      </fieldset>
+
+      <!-- 4) Itens comprados -->
+      <fieldset class="om-fieldset">
+        <legend><span class="om-step">2</span> Itens comprados</legend>
+        <p class="om-hint">
+          Informe quantas unidades <strong>deste pedido da loja</strong> o
+          número do AliExpress cobre. Cada linha mostra o que já foi vendido,
+          o que remessas já cobriram, o que outras compras já vincularam e o
+          que ainda dá para vincular agora.
+        </p>
+        {% for item in order.items %}
+        {% set linked = linked_by_item.get(item.id, 0) %}
+        {% set disponivel = [item.quantity - linked, 0] | max %}
+        <div class="om-itemrow {{ 'om-field--erro' if purchase_field_errors.get('items') }}">
+          <div class="om-itemrow-info">
+            <span class="om-item-name">{{ item.product_name }}</span>
+            <span class="om-item-meta">
+              {{ item.variant.color + ' · ' if item.variant and item.variant.color }}{{ item.selected_size or '—' }}
+            </span>
+            <span class="om-counts">
+              vendido: {{ item.quantity }} · coberto: {{ shipment_coverage.get(item.id, 0) }}
+              · já vinculado: {{ linked }} · disponível para vincular: {{ disponivel }}
+            </span>
+          </div>
+          <input
+            class="om-qty" type="number" inputmode="numeric"
+            name="item_{{ item.id }}" min="0" max="{{ disponivel }}"
+            value="{{ purchase_values.get('item_' ~ item.id, '0') }}"
+            {% if disponivel == 0 %}disabled{% endif %}
+            {% if purchase_field_errors.get('items') and disponivel > 0 %}
+            aria-invalid="true"
+            {% endif %}
+            aria-label="Quantidade de {{ item.product_name }} vinculada a esta compra"
+          >
+        </div>
+        {% endfor %}
+        {% if purchase_field_errors.get('items') %}
+        <p class="om-field-erro" data-error-for="items">
+          {{ purchase_field_errors['items'] }}
+        </p>
+        {% endif %}
+      </fieldset>
+
+      <!-- 5) Comprovante e observações -->
+      <fieldset class="om-fieldset">
+        <legend><span class="om-step">3</span> Comprovante e observações</legend>
+        <div class="om-field {{ 'om-field--erro' if purchase_field_errors.get('evidence_ref') }}">
+          <label for="om-evidence">Referência do comprovante</label>
+          <input
+            id="om-evidence" name="evidence_ref" type="text" maxlength="255"
+            required autocomplete="off"
+            value="{{ purchase_values.get('evidence_ref', '') }}"
+            {% if purchase_field_errors.get('evidence_ref') %}
+            aria-invalid="true" aria-describedby="om-erro-evidence"
+            {% endif %}
+          >
+          {% if purchase_field_errors.get('evidence_ref') %}
+          <p class="om-field-erro" id="om-erro-evidence" data-error-for="evidence_ref">
+            {{ purchase_field_errors['evidence_ref'] }}
+          </p>
+          {% endif %}
+          <p class="om-hint">
+            Nome do arquivo, link ou código que identifica o comprovante
+            (até 255 caracteres) — algo que permita achar a evidência depois.
+          </p>
+        </div>
+        <div class="om-field {{ 'om-field--erro' if purchase_field_errors.get('note') }}">
+          <label for="om-note">Observações (opcional)</label>
+          <textarea
+            id="om-note" name="note" rows="3" maxlength="2000"
+          >{{ purchase_values.get('note', '') }}</textarea>
+          {% if purchase_field_errors.get('note') %}
+          <p class="om-field-erro" data-error-for="note">
+            {{ purchase_field_errors['note'] }}
+          </p>
+          {% endif %}
+          <p class="om-hint">
+            Útil para registrar anúncio substituto, SKU, custo efetivo,
+            cotação e motivo — até 2000 caracteres.
+          </p>
+        </div>
+      </fieldset>
+
+      <div class="om-actions">
+        <button class="om-btn om-btn--primary" type="submit" data-om-submit-btn>
+          Registrar compra já realizada
+        </button>
+        <span class="om-hint">
+          Ao salvar, nada é comprado: apenas fica registrado aqui o que você
+          já fez no fornecedor.
+        </span>
+      </div>
+    </form>
+    {% elif can_register %}
+    <p class="om-note">
+      Todos os itens deste pedido já estão vinculados a compras registradas.
+      Para mudar um vínculo, corrija a compra correspondente no bloco de
+      correções abaixo.
+    </p>
+    {% else %}
+    <p class="om-note">Registro disponível após pagamento comprovado em pedido pago.</p>
+    {% endif %}
+  </section>
+
+  <!-- 6) Compras registradas -->
+  <section class="om-card" aria-labelledby="om-registradas-t">
+    <div class="om-card-head">
+      <h2 id="om-registradas-t">Compras registradas</h2>
+      <span class="om-count-badge">{{ manual_purchases|length }}</span>
+    </div>
+    {% for purchase in manual_purchases %}
+    {% set ships = shipments_by_purchase.get(purchase.id, []) %}
+    {% set rem = remaining_by_purchase.get(purchase.id, {}) %}
+    {% set restantes = rem.values() | select('>', 0) | list %}
+    {% set tem_postagem = ships | selectattr('status', 'equalto', 'postado') | list %}
+    {% set tem_entrega = ships | selectattr('status', 'equalto', 'entregue') | list %}
+    <article class="om-purchase" data-om-purchase>
+      <header class="om-purchase-head">
+        <div>
+          <p class="om-purchase-title">Compra {{ purchase.external_order_id }}</p>
+          <p class="om-purchase-sub">
+            Comprado em {{ purchase.purchased_at.strftime('%d/%m/%Y %H:%M') if purchase.purchased_at else '—' }}
+            ({{ purchase.purchased_tz }}) · Comprovante: {{ purchase.evidence_ref }}
+          </p>
+        </div>
+        <div class="om-badges">
+          <span class="om-badge om-badge--ok">Compra registrada</span>
+          {% if ships %}<span class="om-badge">Rastreio informado</span>{% endif %}
+          {% if tem_entrega %}
+            <span class="om-badge om-badge--ok">Entrega confirmada</span>
+          {% elif tem_postagem %}
+            <span class="om-badge om-badge--ok">Postagem confirmada</span>
+          {% elif not ships %}
+            <span class="om-badge om-badge--warn">Aguardando confirmação do fornecedor</span>
+          {% endif %}
+          {% if not restantes %}<span class="om-badge om-badge--ok">Cobertura completa</span>{% endif %}
+        </div>
+      </header>
+      {% if purchase.note %}
+      <p class="om-purchase-note"><strong>Observações:</strong> {{ purchase.note }}</p>
+      {% endif %}
+      <ul class="om-purchase-items">
+        {% for link in purchase.items %}
+        {% set item = items_by_id.get(link.order_item_id) %}
+        <li>
+          <span class="om-item-name">{{ item.product_name if item else link.order_item_id }}</span>
+          <span class="om-counts">{{ link.quantity }} unidade(s) deste pedido da loja</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </article>
+    {% else %}
+    <p class="om-note">Nenhuma compra registrada no fornecedor ainda.</p>
+    {% endfor %}
+  </section>
+
+  <!-- 7) Despacho e rastreio -->
+  <section class="om-card" aria-labelledby="om-despacho-t">
+    <div class="om-card-head">
+      <h2 id="om-despacho-t">Despacho e rastreio</h2>
+      <span class="om-eyebrow">informe quando o fornecedor despachar</span>
+    </div>
+
+    {% set outros_ships = order.shipments | rejectattr('manual_purchase_id') | list %}
+    {% if order.shipments %}
+      {% for shipment in outros_ships %}
+      <div class="om-shipment" data-om-shipment>
+        <div class="om-shipment-line">
+          <strong>{{ shipment.tracking_code }}</strong>
+          <span>{{ shipment.carrier or '—' }}</span>
+          <span class="om-badge {{ 'om-badge--ok' if shipment.status in ('postado', 'entregue', 'em_transito') else 'om-badge--warn' }}">
+            {{ shipment_status_labels.get(shipment.status, shipment.status) }}
+          </span>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+    <p class="om-note">Nenhum rastreio registrado.</p>
+    {% endif %}
+
+    {% for purchase in manual_purchases %}
+    {% set ships = shipments_by_purchase.get(purchase.id, []) %}
+    {% set remaining = remaining_by_purchase.get(purchase.id, {}) %}
+    <div class="om-ship-block">
+      <p class="om-ship-title">Compra {{ purchase.external_order_id }}</p>
+      <ul class="om-coverage">
+        {% for link in purchase.items %}
+        {% set covered = coverage_by_purchase.get(purchase.id, {}).get(link.order_item_id, 0) %}
+        {% set item = items_by_id.get(link.order_item_id) %}
+        <li>
+          {{ item.product_name if item else link.order_item_id }} —
+          vinculado: {{ link.quantity }} · coberto: {{ covered }} · restante: {{ link.quantity - covered }}
+        </li>
+        {% endfor %}
+      </ul>
+
+      {% for shipment in ships %}
+      <div class="om-shipment" data-om-shipment>
+        <div class="om-shipment-line">
+          <strong>{{ shipment.tracking_code }}</strong>
+          <span>{{ shipment.carrier or '—' }}</span>
+          <span class="om-badge {{ 'om-badge--ok' if shipment.status in ('postado', 'entregue') else 'om-badge--warn' }}">
+            {{ shipment_status_labels.get(shipment.status, shipment.status) }}
+          </span>
+          {% if shipment.estimated_delivery %}
+          <span class="om-counts">previsão {{ shipment.estimated_delivery.strftime('%d/%m/%Y') }}</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+
+      {% if remaining.values() | select('>', 0) | list %}
+      <form
+        method="POST"
+        action="{{ url_for('admin.register_manual_shipment', purchase_id=purchase.id) }}"
+        class="om-form om-form--inline"
+        data-om-submit
+      >
+        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+        <h3 class="om-form-title-sm">Registrar rastreio</h3>
+        <div class="om-field-row">
+          <div class="om-field {{ 'om-field--erro' if shipment_form_purchase_id == purchase.id and shipment_field_errors.get('tracking_code') }}">
+            <label for="om-tracking-{{ purchase.id }}">Código</label>
+            <input
+              id="om-tracking-{{ purchase.id }}" name="tracking_code" type="text"
+              maxlength="64" required autocomplete="off"
+              value="{{ shipment_values.get('tracking_code', '') if shipment_form_purchase_id == purchase.id else '' }}"
+              {% if shipment_form_purchase_id == purchase.id and shipment_field_errors.get('tracking_code') %}
+              aria-invalid="true"
+              {% endif %}
+            >
+            {% if shipment_form_purchase_id == purchase.id and shipment_field_errors.get('tracking_code') %}
+            <p class="om-field-erro" data-error-for="tracking_code">
+              {{ shipment_field_errors['tracking_code'] }}
+            </p>
+            {% endif %}
+          </div>
+          <div class="om-field {{ 'om-field--erro' if shipment_form_purchase_id == purchase.id and shipment_field_errors.get('carrier') }}">
+            <label for="om-carrier-{{ purchase.id }}">Transportadora</label>
+            <input
+              id="om-carrier-{{ purchase.id }}" name="carrier" type="text"
+              maxlength="60" required autocomplete="off"
+              value="{{ shipment_values.get('carrier', '') if shipment_form_purchase_id == purchase.id else '' }}"
+              {% if shipment_form_purchase_id == purchase.id and shipment_field_errors.get('carrier') %}
+              aria-invalid="true"
+              {% endif %}
+            >
+            {% if shipment_form_purchase_id == purchase.id and shipment_field_errors.get('carrier') %}
+            <p class="om-field-erro" data-error-for="carrier">
+              {{ shipment_field_errors['carrier'] }}
+            </p>
+            {% endif %}
+          </div>
+        </div>
+        <div class="om-field-row">
+          <div class="om-field">
+            <label for="om-posted-{{ purchase.id }}">Data de postagem (opcional)</label>
+            <input
+              id="om-posted-{{ purchase.id }}" name="posted_at" type="datetime-local"
+              value="{{ shipment_values.get('posted_at', '') if shipment_form_purchase_id == purchase.id else '' }}"
+            >
+          </div>
+          <div class="om-field">
+            <label for="om-eta-{{ purchase.id }}">Previsão de entrega (opcional)</label>
+            <input
+              id="om-eta-{{ purchase.id }}" name="estimated_delivery" type="date"
+              value="{{ shipment_values.get('estimated_delivery', '') if shipment_form_purchase_id == purchase.id else '' }}"
+            >
+          </div>
+        </div>
+        <div class="om-field {{ 'om-field--erro' if shipment_form_purchase_id == purchase.id and shipment_field_errors.get('evidence_ref') }}">
+          <label for="om-ship-evidence-{{ purchase.id }}">Referência da evidência</label>
+          <input
+            id="om-ship-evidence-{{ purchase.id }}" name="evidence_ref" type="text"
+            maxlength="255" required autocomplete="off"
+            value="{{ shipment_values.get('evidence_ref', '') if shipment_form_purchase_id == purchase.id else '' }}"
+            {% if shipment_form_purchase_id == purchase.id and shipment_field_errors.get('evidence_ref') %}
+            aria-invalid="true"
+            {% endif %}
+          >
+          {% if shipment_form_purchase_id == purchase.id and shipment_field_errors.get('evidence_ref') %}
+          <p class="om-field-erro" data-error-for="evidence_ref">
+            {{ shipment_field_errors['evidence_ref'] }}
+          </p>
+          {% endif %}
+          <p class="om-hint">Arquivo, link ou código que mostra o rastreio (até 255 caracteres).</p>
+        </div>
+        <p class="om-hint">
+          Cubra apenas o que esta compra ainda tem de restante — informar além
+          do restante é recusado.
+        </p>
+        {% for link in purchase.items %}
+        {% set left = remaining.get(link.order_item_id, 0) %}
+        {% set item = items_by_id.get(link.order_item_id) %}
+        {% if left > 0 %}
+        <div class="om-itemrow {{ 'om-field--erro' if shipment_form_purchase_id == purchase.id and shipment_field_errors.get('items') }}">
+          <div class="om-itemrow-info">
+            <span class="om-item-name">{{ item.product_name if item else link.order_item_id }}</span>
+            <span class="om-counts">restante: {{ left }}</span>
+          </div>
+          <input
+            class="om-qty" type="number" inputmode="numeric"
+            name="item_{{ link.order_item_id }}" min="0" max="{{ left }}"
+            value="{{ shipment_values.get('item_' ~ link.order_item_id, '0') if shipment_form_purchase_id == purchase.id else '0' }}"
+            {% if shipment_form_purchase_id == purchase.id and shipment_field_errors.get('items') %}
+            aria-invalid="true"
+            {% endif %}
+            aria-label="Quantidade de {{ item.product_name if item else link.order_item_id }} coberta por este rastreio"
+          >
+        </div>
+        {% endif %}
+        {% endfor %}
+        {% if shipment_form_purchase_id == purchase.id and shipment_field_errors.get('items') %}
+        <p class="om-field-erro" data-error-for="items">
+          {{ shipment_field_errors['items'] }}
+        </p>
+        {% endif %}
+        <div class="om-actions">
+          <button class="om-btn om-btn--primary" type="submit" data-om-submit-btn>
+            Registrar rastreio (aguardando postagem)
+          </button>
+        </div>
+      </form>
+      {% else %}
+      <p class="om-note">Cobertura completa — nenhum novo rastreio para esta compra.</p>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="om-note">Nenhuma compra registrada — registre a compra acima antes do rastreio.</p>
+    {% endfor %}
+
+    {% if manual_purchases %}
+    <div class="om-corr">
+      <h3 class="om-h3">Correções</h3>
+      <p class="om-hint">
+        Correções exigem justificativa e ficam auditadas no histórico
+        operacional (responsável, data, antes → depois). Elas não alteram
+        pagamento, preço, estoque nem remessas já postadas.
+      </p>
+      {% for purchase in manual_purchases %}
+      <div class="om-corr-block">
+        <p class="om-corr-title">Compra {{ purchase.external_order_id }} — corrigir número</p>
+        <form method="POST" action="{{ url_for('admin.correct_manual_purchase', purchase_id=purchase.id) }}" class="om-corr-form">
+          {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+          <input type="hidden" name="expected_updated_at" value="{{ purchase.updated_at.isoformat() if purchase.updated_at else '' }}">
+          <div class="om-field om-field--narrow">
+            <label for="om-fix-purchase-{{ purchase.id }}">Novo número</label>
+            <input id="om-fix-purchase-{{ purchase.id }}" type="text" name="external_order_id" maxlength="64" value="{{ purchase.external_order_id }}" required>
+          </div>
+          <div class="om-field om-field--grow">
+            <label for="om-fix-purchase-reason-{{ purchase.id }}">Justificativa</label>
+            <input id="om-fix-purchase-reason-{{ purchase.id }}" type="text" name="reason" maxlength="500" required placeholder="Motivo da correção">
+          </div>
+          <button class="om-btn om-btn--ghost" type="submit">Corrigir número</button>
+        </form>
+      </div>
+      {% for shipment in shipments_by_purchase.get(purchase.id, []) %}
+      <div class="om-corr-block">
+        <p class="om-corr-title">Remessa {{ shipment.tracking_code }} — corrigir transportadora/código</p>
+        <form method="POST" action="{{ url_for('admin.correct_manual_shipment', shipment_id=shipment.id) }}" class="om-corr-form">
+          {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+          <input type="hidden" name="expected_updated_at" value="{{ shipment.updated_at.isoformat() if shipment.updated_at else '' }}">
+          <div class="om-field om-field--narrow">
+            <label for="om-fix-carrier-{{ shipment.id }}">Transportadora</label>
+            <input id="om-fix-carrier-{{ shipment.id }}" type="text" name="carrier" maxlength="60" value="{{ shipment.carrier or '' }}">
+          </div>
+          <div class="om-field om-field--narrow">
+            <label for="om-fix-tracking-{{ shipment.id }}">Código</label>
+            <input id="om-fix-tracking-{{ shipment.id }}" type="text" name="tracking_code" maxlength="64" value="{{ shipment.tracking_code }}">
+          </div>
+          <div class="om-field om-field--grow">
+            <label for="om-fix-shipment-reason-{{ shipment.id }}">Justificativa</label>
+            <input id="om-fix-shipment-reason-{{ shipment.id }}" type="text" name="reason" maxlength="500" required placeholder="Motivo da correção">
+          </div>
+          <button class="om-btn om-btn--ghost" type="submit">Corrigir</button>
+        </form>
+      </div>
+      {% endfor %}
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- 8) Histórico operacional -->
+  <section class="om-card" id="om-historico" aria-labelledby="om-hist-t">
+    <div class="om-card-head">
+      <h2 id="om-hist-t">Histórico operacional</h2>
+      <span class="om-eyebrow">quem fez o quê, e quando</span>
+    </div>
+    {% if operational_audit %}
+    <ol class="om-timeline">
+      {% for entry in operational_audit %}
+      <li class="om-audit">
+        <div class="om-audit-line1">
+          <time class="om-audit-when">{{ entry.when }}</time>
+          <strong class="om-audit-label">{{ entry.label }}</strong>
+          <span class="om-audit-who">{{ entry.admin_name }}</span>
+        </div>
+        {% if entry.reason %}
+        <p class="om-audit-reason">{{ entry.reason }}</p>
+        {% endif %}
+        <details class="om-audit-details">
+          <summary>Detalhes técnicos</summary>
+          <p>Entidade: {{ entry.entity }} · Campo: {{ entry.field }}</p>
+          <p>Antes: {{ entry.old or '—' }} → Depois: {{ entry.new or '—' }}</p>
+        </details>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="om-note">Nenhum registro ou correção manual para este pedido ainda.</p>
+    {% endif %}
+    <p class="om-foot">
+      Criado em {{ order.created_at.strftime('%d/%m/%Y %H:%M') }} UTC.
+      Registros e correções manuais ficam auditados no histórico operacional acima.
+    </p>
+  </section>
 </main>
+{% endblock %}
+
+{% block extra_scripts %}
+<script nonce="{{ csp_nonce }}">
+  document.addEventListener("submit", (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    if (!form.hasAttribute("data-om-submit")) return;
+    const btn = form.querySelector("[data-om-submit-btn]");
+    if (!btn || btn.disabled) return;
+    btn.disabled = true;
+    btn.setAttribute("aria-disabled", "true");
+  });
+  window.addEventListener("pageshow", () => {
+    document.querySelectorAll("[data-om-submit-btn][disabled]").forEach((btn) => {
+      btn.disabled = false;
+      btn.removeAttribute("aria-disabled");
+    });
+  });
+  document.addEventListener("DOMContentLoaded", () => {
+    if (!document.querySelector("[data-om-error]")) return;
+    const campo = document.querySelector(
+      '.om-main [aria-invalid="true"]:not([disabled])'
+    );
+    if (campo) {
+      campo.focus();
+      return;
+    }
+    const resumo = document.getElementById("om-error-summary");
+    if (resumo) resumo.focus();
+  });
+</script>
 {% endblock %}

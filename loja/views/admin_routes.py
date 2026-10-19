@@ -153,13 +153,159 @@ def ops_partial_orders():
 @admin_blueprint.route("/admin/pedidos/<uuid:order_id>")
 @admin_required
 def order_detail(order_id):
-    from loja.modules.getway_mercado_pago.payment_models import Order
+    return _render_order_detail(order_id)
+
+
+#: Estados da remessa exibidos ao operador (o valor persistido segue o
+#: modelo; aqui só ganha rótulo legível).
+_SHIPMENT_STATUS_LABELS = {
+    "aguardando_postagem": "Aguardando postagem",
+    "em_transito": "Em trânsito",
+    "postado": "Postado",
+    "entregue": "Entregue",
+}
+
+#: Rótulo amigável da ação auditada. entity/field/old/new continuam sendo
+#: gravados exatamente como sempre; só a leitura ganha linguagem de gente.
+_AUDIT_ACTION_LABELS = {
+    ("purchase", "created"): "Compra registrada no fornecedor",
+    ("shipment", "created"): "Rastreio registrado",
+    ("purchase", "external_order_id"): "Número do pedido no fornecedor corrigido",
+    ("purchase", "evidence_ref"): "Referência da evidência da compra corrigida",
+    ("purchase", "purchased_at"): "Data/hora da compra corrigida",
+    ("shipment", "carrier"): "Transportadora corrigida",
+    ("shipment", "tracking_code"): "Código de rastreio corrigido",
+    ("shipment", "evidence_ref"): "Referência da evidência do envio corrigida",
+    ("shipment", "posted_at"): "Data de postagem corrigida",
+    ("shipment", "estimated_delivery"): "Previsão de entrega corrigida",
+}
+
+#: Código de ValueError → campo do formulário que explica o erro. Códigos
+#: fora destes mapas viram erro de formulário (resumo na página).
+_PURCHASE_ERROR_FIELDS = {
+    "external_order_id_invalid": "external_order_id",
+    "external_order_id_in_use": "external_order_id",
+    "purchase_content_differs": "external_order_id",
+    "purchased_at_invalid": "purchased_at",
+    "purchased_tz_invalid": "purchased_tz",
+    "evidence_ref_invalid": "evidence_ref",
+    "items_required": "items",
+    "quantity_invalid": "items",
+    "quantity_exceeds_sold": "items",
+    "order_item_invalid": "items",
+    "order_item_not_in_order": "items",
+    "order_without_items": "items",
+}
+_SHIPMENT_ERROR_FIELDS = {
+    "tracking_code_invalid": "tracking_code",
+    "tracking_code_in_use": "tracking_code",
+    "tracking_code_other_purchase": "tracking_code",
+    "shipment_content_differs": "tracking_code",
+    "carrier_invalid": "carrier",
+    "evidence_ref_invalid": "evidence_ref",
+    "posted_at_invalid": "posted_at",
+    "estimated_delivery_invalid": "estimated_delivery",
+    "items_required": "items",
+    "quantity_invalid": "items",
+    "quantity_exceeds_purchase": "items",
+    "order_item_invalid": "items",
+    "order_item_not_in_purchase": "items",
+}
+
+_PURCHASE_VALUE_KEYS = (
+    "external_order_id", "purchased_at", "purchased_tz",
+    "evidence_ref", "note",
+)
+_SHIPMENT_VALUE_KEYS = (
+    "tracking_code", "carrier", "posted_at",
+    "estimated_delivery", "evidence_ref",
+)
+
+
+def _form_values(keys):
+    """Valores submetidos, para devolver ao operador após um erro (200)."""
+    values = {}
+    for key in keys:
+        raw = request.form.get(key)
+        if raw is not None:
+            values[key] = raw
+    for key, raw in request.form.items():
+        if key.startswith("item_"):
+            values[key] = raw
+    return values
+
+
+def _purchase_error(code=None, message=None, *, values=None):
+    if code is not None:
+        text = _manual_error_message(code)
+        field = _PURCHASE_ERROR_FIELDS.get(code)
+    else:
+        text = message or "Dados inválidos; nada foi alterado."
+        field = None
+    return {
+        "error_kind": "purchase",
+        "error_summary": text,
+        "purchase_field_errors": {field: text} if field else {},
+        "purchase_values": (
+            _form_values(_PURCHASE_VALUE_KEYS) if values is None else values
+        ),
+    }
+
+
+def _shipment_error(purchase_id, code=None, message=None, *, values=None):
+    if code is not None:
+        text = _manual_error_message(code)
+        field = _SHIPMENT_ERROR_FIELDS.get(code)
+    else:
+        text = message or "Dados inválidos; nada foi alterado."
+        field = None
+    return {
+        "error_kind": "shipment",
+        "error_summary": text,
+        "shipment_form_purchase_id": purchase_id,
+        "shipment_field_errors": {field: text} if field else {},
+        "shipment_values": (
+            _form_values(_SHIPMENT_VALUE_KEYS) if values is None else values
+        ),
+    }
+
+
+def _audit_entries(rows):
+    """Auditoria em dicts com rótulo amigável; detalhes técnicos preservados."""
+    from loja.modules.models import User
+
+    admin_ids = {row.admin_user_id for row in rows if row.admin_user_id}
+    names = {}
+    if admin_ids:
+        names = {
+            user.id: user.name
+            for user in User.query.filter(User.id.in_(admin_ids)).all()
+        }
+    entries = []
+    for row in rows:
+        entries.append({
+            "when": (
+                row.created_at.strftime("%d/%m/%Y %H:%M") + " UTC"
+                if row.created_at else "—"
+            ),
+            "label": _AUDIT_ACTION_LABELS.get(
+                (row.entity, row.field),
+                f"{row.field or 'registro'} atualizado",
+            ),
+            "admin_name": names.get(row.admin_user_id) or "Operador",
+            "reason": row.reason or "",
+            "entity": row.entity or "—",
+            "field": row.field or "—",
+            "old": row.old_value or "",
+            "new": row.new_value or "",
+        })
+    return entries
+
+
+def _order_detail_payload(order, *, error=None):
+    """Contexto do detalhe administrativo (GET e re-render pós-erro)."""
     from loja.services.order_payment_evidence import payment_is_confirmed
 
-    order = Order.query.options(
-        selectinload(Order.items), selectinload(Order.payments),
-        selectinload(Order.shipments),
-    ).filter_by(id=order_id).first_or_404()
     from loja.modules.models import (
         ManualOperationalAudit, ManualSupplierPurchase, ShipmentItem,
     )
@@ -207,6 +353,16 @@ def order_detail(order_id):
                 int(link.quantity or 0) - covered
             )
         remaining_by_purchase[purchase.id] = remaining
+    # Já vinculado a compras (por item do pedido): limita o que um NOVO
+    # registro de compra pode vincular (o serviço soma tudo e compara com
+    # o vendido).
+    linked_by_item = {}
+    for purchase in purchases:
+        for link in (purchase.items or []):
+            linked_by_item[link.order_item_id] = (
+                linked_by_item.get(link.order_item_id, 0)
+                + int(link.quantity or 0)
+            )
     items_by_id = {item.id: item for item in (order.items or [])}
     # Filtra no banco pelo pedido (entidade + ids vinculados): os últimos N
     # globais poderiam esconder o histórico deste pedido.
@@ -223,15 +379,44 @@ def order_detail(order_id):
             .limit(100)
             .all()
         )
-    return render_template(
-        "admin/order_detail.html", order=order, status_labels=ORDER_STATUS_LABELS,
-        payment_confirmed=payment_is_confirmed(order),
-        manual_purchases=purchases, shipment_coverage=coverage,
-        coverage_by_purchase=coverage_by_purchase,
-        shipments_by_purchase=shipments_by_purchase,
-        remaining_by_purchase=remaining_by_purchase,
-        items_by_id=items_by_id,
-        operational_audit=audit,
+    payload = {
+        "order": order, "status_labels": ORDER_STATUS_LABELS,
+        "payment_confirmed": payment_is_confirmed(order),
+        "manual_purchases": purchases, "shipment_coverage": coverage,
+        "coverage_by_purchase": coverage_by_purchase,
+        "shipments_by_purchase": shipments_by_purchase,
+        "remaining_by_purchase": remaining_by_purchase,
+        "linked_by_item": linked_by_item,
+        "items_by_id": items_by_id,
+        "operational_audit": _audit_entries(audit),
+        "shipment_status_labels": _SHIPMENT_STATUS_LABELS,
+        "error_kind": None, "error_summary": None,
+        "purchase_field_errors": {}, "shipment_field_errors": {},
+        "shipment_form_purchase_id": None,
+        "purchase_values": {}, "shipment_values": {},
+    }
+    if error:
+        payload.update(error)
+    return payload
+
+
+def _order_detail_query(order_id):
+    from loja.modules.getway_mercado_pago.payment_models import Order
+
+    return Order.query.options(
+        selectinload(Order.items), selectinload(Order.payments),
+        selectinload(Order.shipments),
+    ).filter_by(id=order_id).first_or_404()
+
+
+def _render_order_detail(order_id, *, error=None, status=200):
+    """Re-render do detalhe (GET ou pós-erro de POST, preservando valores)."""
+    order = _order_detail_query(order_id)
+    return (
+        render_template(
+            "admin/order_detail.html", **_order_detail_payload(order, error=error)
+        ),
+        status,
     )
 
 
@@ -264,6 +449,7 @@ def _manual_items_from_form():
 
 
 def _manual_back(order_id):
+    """Redirect ao detalhe do pedido após POST concluído (confirmação via flash)."""
     return redirect(url_for("admin.order_detail", order_id=order_id))
 
 
@@ -375,13 +561,18 @@ def register_manual_purchase(order_id):
             flash("Compra já registrada anteriormente.", "warning")
             return _manual_back(order_id)
         current_app.logger.warning("compra manual: conflito de número externo")
-        flash("Número externo já registrado em outro pedido.", "danger")
-        return _manual_back(order_id)
+        # Re-render 200: o operador vê o erro junto ao campo, com os dados
+        # que digitou de volta no formulário (nada foi gravado).
+        return _render_order_detail(
+            order_id,
+            error=_purchase_error(code="external_order_id_in_use"),
+        )
     except ValueError as exc:
         db.session.rollback()
         current_app.logger.warning("compra manual: %s", exc)
-        flash(_manual_error_message(exc), "danger")
-        return _manual_back(order_id)
+        return _render_order_detail(
+            order_id, error=_purchase_error(code=str(exc))
+        )
     flash(
         "Compra registrada com sucesso."
         if result.created else "Compra já registrada anteriormente.",
@@ -488,13 +679,19 @@ def register_manual_shipment(purchase_id):
             flash("Rastreio já registrado anteriormente.", "warning")
             return _manual_back(purchase.order_id)
         current_app.logger.warning("rastreio manual: código em outro pedido")
-        flash("Código de rastreio já ligado a outro pedido.", "danger")
-        return _manual_back(purchase.order_id)
+        return _render_order_detail(
+            purchase.order_id,
+            error=_shipment_error(
+                purchase.id, code="tracking_code_in_use"
+            ),
+        )
     except ValueError as exc:
         db.session.rollback()
         current_app.logger.warning("rastreio manual: %s", exc)
-        flash(_manual_error_message(exc), "danger")
-        return _manual_back(purchase.order_id)
+        return _render_order_detail(
+            purchase.order_id,
+            error=_shipment_error(purchase.id, code=str(exc)),
+        )
     flash(
         "Rastreio registrado (aguardando postagem)."
         if result.created else "Rastreio já registrado anteriormente.",

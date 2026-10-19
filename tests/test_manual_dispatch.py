@@ -940,3 +940,205 @@ def test_form_presente_com_restante_parcial(
     assert "restante: 1" in html
     assert "Registrar rastreio (aguardando postagem)" in html
     assert 'max="1"' in html
+
+
+# --------------------------------------------------------------------------
+# 11) UX do detalhe: erro de POST re-renderiza 200 junto ao campo, com os
+#     valores preservados e foco no primeiro campo inválido; sucesso confirma
+#     só com flash pós-redirect (sem banner ?salvo=); GET com ?salvo= não
+#     exibe sucesso; textos obrigatórios da área de registro.
+# --------------------------------------------------------------------------
+
+def test_erro_compra_re_render_200_preserva_valores_e_campo(
+    client, db, admin_user, login, make_product
+):
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product)
+    login(admin_user.email)
+    resp = client.post(
+        f"/admin/pedidos/{order.id}/compra-manual",
+        data={
+            "external_order_id": "X",
+            f"item_{item.id}": "1",
+            "purchased_at": "2026-10-08T10:00",
+            "purchased_tz": "America/Sao_Paulo",
+            "evidence_ref": "EV-PRESERVA",
+            "note": "obs preservada",
+        },
+    )
+    assert resp.status_code == 200  # re-render, sem redirect
+    html = resp.get_data(as_text=True)
+    assert 'data-error-kind="purchase"' in html
+    assert 'data-error-for="external_order_id"' in html
+    assert "Número do pedido no AliExpress inválido." in html
+    assert 'value="EV-PRESERVA"' in html
+    assert "obs preservada" in html
+    assert 'value="2026-10-08T10:00"' in html
+    assert ManualSupplierPurchase.query.count() == 0
+    # Foco: campo inválido marcado e resumo focável (JS foca o primeiro
+    # [aria-invalid]; se o form estiver oculto, o resumo recebe o foco).
+    assert 'aria-invalid="true"' in html
+    assert 'id="om-error-summary"' in html
+    assert 'tabindex="-1"' in html
+
+
+def test_erro_compra_com_form_oculto_mantem_erro_e_foca_resumo(
+    client, db, admin_user, login, make_product
+):
+    """POST manual com qtd acima do vendido, quando o form já sumiu da página:
+    o erro continua visível no resumo e o resumo é focável — sem reabrir o
+    formulário de operação indisponível."""
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product)
+    dispatch.register_manual_purchase(**_purchase_args(order, item))
+    db.session.commit()
+    login(admin_user.email)
+    resp = client.post(
+        f"/admin/pedidos/{order.id}/compra-manual",
+        data={
+            "external_order_id": "ALI-OVER",
+            f"item_{item.id}": "5",  # acima do vendido (1)
+            "purchased_at": "2026-10-08T11:00",
+            "purchased_tz": "America/Sao_Paulo",
+            "evidence_ref": "EV-OVER",
+        },
+    )
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert 'data-error-kind="purchase"' in html
+    assert "Quantidade registrada ultrapassa a vendida." in html
+    assert 'id="om-error-summary"' in html
+    assert 'tabindex="-1"' in html
+    # Formulário de compra permanece oculto (operação indisponível).
+    assert "Registrar compra no AliExpress" not in html
+    assert ManualSupplierPurchase.query.count() == 1
+
+
+def test_erro_rastreio_re_render_preserva_codigo(
+    client, db, admin_user, login, make_product
+):
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product)
+    res = dispatch.register_manual_purchase(**_purchase_args(order, item))
+    db.session.commit()
+    login(admin_user.email)
+    resp = client.post(
+        f"/admin/pedidos/compras/{res.purchase_id}/rastreio",
+        data={
+            "tracking_code": "BR-PRESERVA",
+            "carrier": "Correios",
+            "evidence_ref": "",
+            f"item_{item.id}": "1",
+        },
+    )
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert 'data-error-kind="shipment"' in html
+    assert 'data-error-for="evidence_ref"' in html
+    assert "Referência da evidência inválida." in html
+    assert 'value="BR-PRESERVA"' in html
+    assert Shipment.query.count() == 0
+    # Foco no campo inválido (evidência) e resumo focável.
+    assert 'aria-invalid="true"' in html
+    assert 'id="om-error-summary"' in html
+
+
+def test_textos_obrigatorios_da_area_de_registro(
+    client, db, admin_user, make_user, make_product, login
+):
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product)
+    login(admin_user.email)
+    intro = (
+        "Use esta área depois de comprar no fornecedor. Este formulário "
+        "apenas registra a compra; não compra nem paga no AliExpress."
+    )
+    html = " ".join(
+        client.get(f"/admin/pedidos/{order.id}").get_data(as_text=True).split()
+    )
+    assert " ".join(intro.split()) in html
+    assert "Registrar compra já realizada" in html
+    # Pedido ainda não pago: mesma orientação, sem o formulário.
+    pending, pending_item = _product_item(db, make_user(), product)
+    html2 = " ".join(
+        client.get(f"/admin/pedidos/{pending.id}").get_data(as_text=True).split()
+    )
+    assert " ".join(intro.split()) in html2
+    assert "Registrar compra já realizada" not in html2
+
+
+def test_sucesso_compra_flash_e_sem_banner_salvo(
+    client, db, admin_user, login, make_product
+):
+    """POST válido: 302 + flash 'Compra registrada com sucesso.'; a página
+    pós-redirect NÃO tem banner de sucesso derivado de query param."""
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product)
+    login(admin_user.email)
+    resp = client.post(
+        f"/admin/pedidos/{order.id}/compra-manual",
+        data={
+            "external_order_id": "ALI-9002",
+            f"item_{item.id}": "1",
+            "purchased_at": "2026-10-08T10:00",
+            "purchased_tz": "America/Sao_Paulo",
+            "evidence_ref": "EV-9002",
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "Compra registrada com sucesso." in html  # flash pós-redirect
+    assert "data-om-salvo" not in html  # sem banner de query param
+    assert "ALI-9002" in html
+
+
+def test_sucesso_rastreio_flash_e_sem_banner_salvo(
+    client, db, admin_user, login, make_product
+):
+    """POST de rastreio válido: flash 'Rastreio registrado (aguardando
+    postagem).' após redirect; sem banner ?salvo=."""
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product)
+    res = dispatch.register_manual_purchase(**_purchase_args(order, item))
+    db.session.commit()
+    login(admin_user.email)
+    resp = client.post(
+        f"/admin/pedidos/compras/{res.purchase_id}/rastreio",
+        data={
+            "tracking_code": "BR9900112233SY",
+            "carrier": "Correios",
+            "evidence_ref": "EV-SHIP-OK",
+            f"item_{item.id}": "1",
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "Rastreio registrado (aguardando postagem)." in html
+    assert "data-om-salvo" not in html
+
+
+def test_get_com_salvo_query_nao_exibe_sucesso(
+    client, db, admin_user, login, make_product
+):
+    """GET com ?salvo=compra ou ?salvo=rastreio NÃO pode exibir mensagem de
+    sucesso — a confirmação só decorre de POST concluído (flash)."""
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product)
+    login(admin_user.email)
+    for valor in ("compra", "rastreio"):
+        html = client.get(
+            f"/admin/pedidos/{order.id}?salvo={valor}"
+        ).get_data(as_text=True)
+        assert "data-om-salvo" not in html
+        assert "Compra registrada com sucesso." not in html
+        assert "Rastreio registrado (aguardando postagem)." not in html
+    # E um pedido com compra registrada também não fabrica sucesso no GET.
+    dispatch.register_manual_purchase(**_purchase_args(order, item))
+    db.session.commit()
+    html = client.get(
+        f"/admin/pedidos/{order.id}?salvo=compra"
+    ).get_data(as_text=True)
+    assert "data-om-salvo" not in html
+    assert "Compra registrada com sucesso." not in html
