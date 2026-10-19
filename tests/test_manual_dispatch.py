@@ -940,3 +940,110 @@ def test_form_presente_com_restante_parcial(
     assert "restante: 1" in html
     assert "Registrar rastreio (aguardando postagem)" in html
     assert 'max="1"' in html
+
+
+# --------------------------------------------------------------------------
+# 11) UX do detalhe: erro de POST re-renderiza 200 junto ao campo, com os
+#     valores preservados; sucesso confirma com banner ?salvo=; textos
+#     obrigatórios da área de registro.
+# --------------------------------------------------------------------------
+
+def test_erro_compra_re_render_200_preserva_valores_e_campo(
+    client, db, admin_user, login, make_product
+):
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product)
+    login(admin_user.email)
+    resp = client.post(
+        f"/admin/pedidos/{order.id}/compra-manual",
+        data={
+            "external_order_id": "X",
+            f"item_{item.id}": "1",
+            "purchased_at": "2026-10-08T10:00",
+            "purchased_tz": "America/Sao_Paulo",
+            "evidence_ref": "EV-PRESERVA",
+            "note": "obs preservada",
+        },
+    )
+    assert resp.status_code == 200  # re-render, sem redirect
+    html = resp.get_data(as_text=True)
+    assert 'data-error-kind="purchase"' in html
+    assert 'data-error-for="external_order_id"' in html
+    assert "Número do pedido no AliExpress inválido." in html
+    assert 'value="EV-PRESERVA"' in html
+    assert "obs preservada" in html
+    assert 'value="2026-10-08T10:00"' in html
+    assert ManualSupplierPurchase.query.count() == 0
+
+
+def test_erro_rastreio_re_render_preserva_codigo(
+    client, db, admin_user, login, make_product
+):
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product)
+    res = dispatch.register_manual_purchase(**_purchase_args(order, item))
+    db.session.commit()
+    login(admin_user.email)
+    resp = client.post(
+        f"/admin/pedidos/compras/{res.purchase_id}/rastreio",
+        data={
+            "tracking_code": "BR-PRESERVA",
+            "carrier": "Correios",
+            "evidence_ref": "",
+            f"item_{item.id}": "1",
+        },
+    )
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert 'data-error-kind="shipment"' in html
+    assert 'data-error-for="evidence_ref"' in html
+    assert "Referência da evidência inválida." in html
+    assert 'value="BR-PRESERVA"' in html
+    assert Shipment.query.count() == 0
+
+
+def test_textos_obrigatorios_da_area_de_registro(
+    client, db, admin_user, make_user, make_product, login
+):
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product)
+    login(admin_user.email)
+    intro = (
+        "Use esta área depois de comprar no fornecedor. Este formulário "
+        "apenas registra a compra; não compra nem paga no AliExpress."
+    )
+    html = " ".join(
+        client.get(f"/admin/pedidos/{order.id}").get_data(as_text=True).split()
+    )
+    assert " ".join(intro.split()) in html
+    assert "Registrar compra já realizada" in html
+    # Pedido ainda não pago: mesma orientação, sem o formulário.
+    pending, pending_item = _product_item(db, make_user(), product)
+    html2 = " ".join(
+        client.get(f"/admin/pedidos/{pending.id}").get_data(as_text=True).split()
+    )
+    assert " ".join(intro.split()) in html2
+    assert "Registrar compra já realizada" not in html2
+
+
+def test_sucesso_mostra_banner_salvo_e_flash(
+    client, db, admin_user, login, make_product
+):
+    product = make_product(stock=10)
+    order, item = _paid_order(db, admin_user, product)
+    login(admin_user.email)
+    resp = client.post(
+        f"/admin/pedidos/{order.id}/compra-manual",
+        data={
+            "external_order_id": "ALI-9002",
+            f"item_{item.id}": "1",
+            "purchased_at": "2026-10-08T10:00",
+            "purchased_tz": "America/Sao_Paulo",
+            "evidence_ref": "EV-9002",
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert 'data-om-salvo="compra"' in html
+    assert "Compra registrada" in html

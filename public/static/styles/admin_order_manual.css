@@ -1,0 +1,693 @@
+/* Detalhe administrativo do pedido — área de registro de compras manuais.
+   Layout, foco e responsividade da página /admin/pedidos/<id>.
+   O site usa Tailwind purgado SEM prefixos md:/lg:, então os pontos de
+   quebra vivem aqui (mobile-first). */
+
+.om-main {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 28px 20px 72px;
+  color: #1f2430;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.om-back {
+  display: inline-block;
+  color: #6b7280;
+  font-size: 14px;
+  text-decoration: none;
+}
+.om-back:hover {
+  color: #111827;
+  text-decoration: underline;
+}
+
+/* ── Cabeçalho ─────────────────────────────────────────────────────────── */
+.om-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  margin-top: 14px;
+}
+.om-head h1 {
+  font-size: 27px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.om-sub {
+  margin: 2px 0 0;
+  color: #6b7280;
+  font-size: 13px;
+}
+.om-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+.om-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #f9fafb;
+  font-size: 13px;
+  color: #374151;
+}
+.om-pill--ok {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+.om-pill--warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+.om-link {
+  font-size: 14px;
+  color: #be185d;
+  font-weight: 600;
+}
+
+/* ── Faixas de aviso/sucesso ───────────────────────────────────────────── */
+.om-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 16px;
+  padding: 13px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  border: 1px solid transparent;
+}
+.om-banner strong {
+  font-weight: 700;
+}
+.om-banner--ok {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+.om-banner--erro {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+/* ── Cartões de seção ──────────────────────────────────────────────────── */
+.om-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 20px 22px;
+  margin-top: 18px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+.om-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 14px;
+  border-bottom: 1px solid #f1f3f5;
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+.om-card-head h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+}
+.om-eyebrow {
+  font-size: 12.5px;
+  color: #9ca3af;
+}
+.om-h3 {
+  margin: 16px 0 8px;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #111827;
+}
+.om-grid2 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px 28px;
+}
+.om-lead {
+  background: #fdf2f8;
+  border-left: 4px solid #ec4899;
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+.om-note {
+  color: #6b7280;
+  font-size: 14px;
+  margin: 10px 0;
+}
+.om-count-badge {
+  min-width: 26px;
+  text-align: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* ── Itens/valores/pagamentos do resumo ────────────────────────────────── */
+.om-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.om-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px dashed #eceff3;
+}
+.om-item-main {
+  flex: 1;
+  min-width: 0;
+}
+.om-item-name {
+  display: block;
+  font-weight: 600;
+  font-size: 14.5px;
+}
+.om-item-meta {
+  display: block;
+  font-size: 12.5px;
+  color: #6b7280;
+}
+.om-item-qty {
+  font-weight: 700;
+  font-size: 14px;
+}
+.om-item-total {
+  min-width: 84px;
+  text-align: right;
+  font-size: 14px;
+}
+.om-values {
+  margin: 12px 0 0;
+}
+.om-values > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 14px;
+}
+.om-values dt {
+  color: #6b7280;
+}
+.om-values dd {
+  margin: 0;
+}
+.om-values-total {
+  border-top: 1px solid #eceff3;
+  margin-top: 6px;
+  padding-top: 7px !important;
+}
+.om-payments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.om-payment {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 10px;
+  border: 1px solid #eef0f3;
+  border-radius: 10px;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.om-payment-ref {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  color: #374151;
+}
+.om-payment-type {
+  color: #6b7280;
+}
+.om-customer,
+.om-address {
+  font-size: 14px;
+  margin: 4px 0;
+}
+.om-address {
+  color: #4b5563;
+}
+
+/* ── Formulários ───────────────────────────────────────────────────────── */
+.om-form {
+  margin-top: 14px;
+}
+.om-form-title {
+  margin: 0 0 4px;
+  font-size: 16.5px;
+  font-weight: 800;
+}
+.om-form-title-sm {
+  margin: 0 0 6px;
+  font-size: 14.5px;
+  font-weight: 700;
+}
+.om-fieldset {
+  border: 1px solid #eef0f3;
+  border-radius: 12px;
+  padding: 14px 16px 16px;
+  margin-top: 14px;
+}
+.om-fieldset legend {
+  padding: 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+}
+.om-step {
+  display: inline-grid;
+  place-items: center;
+  width: 21px;
+  height: 21px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #ec4899;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+.om-field {
+  margin-top: 10px;
+}
+.om-field label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+.om-field input,
+.om-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d7dbe0;
+  border-radius: 9px;
+  padding: 9px 11px;
+  font-size: 14.5px;
+  font-family: inherit;
+  color: #1f2430;
+  background: #fff;
+}
+.om-field--narrow input {
+  max-width: 320px;
+}
+.om-field textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+.om-hint {
+  margin: 5px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #6b7280;
+}
+.om-field-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0 14px;
+}
+
+/* Foco visível (teclado) em tudo que é interativo da página */
+.om-main a:focus-visible,
+.om-main input:focus-visible,
+.om-main textarea:focus-visible,
+.om-main button:focus-visible,
+.om-main summary:focus-visible {
+  outline: 3px solid rgba(236, 72, 153, 0.4);
+  outline-offset: 2px;
+  border-color: #ec4899;
+}
+
+.om-field--erro input,
+.om-field--erro textarea,
+.om-itemrow.om-field--erro input {
+  border-color: #dc2626;
+  background: #fff5f5;
+}
+.om-field-erro {
+  margin: 5px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #b91c1c;
+}
+
+.om-itemrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid #eef0f3;
+  border-radius: 11px;
+  background: #fafbfc;
+  margin-top: 9px;
+}
+.om-itemrow-info {
+  min-width: 0;
+}
+.om-counts {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: #6b7280;
+}
+.om-qty {
+  width: 96px !important;
+  text-align: center;
+  font-weight: 700;
+}
+.om-qty:disabled {
+  background: #f3f4f6;
+  color: #9ca3af;
+}
+
+.om-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 18px;
+}
+.om-btn {
+  display: inline-block;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  padding: 11px 20px;
+  font-size: 14.5px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+.om-btn:active {
+  transform: translateY(1px);
+}
+.om-btn--primary {
+  background: #ec4899;
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(236, 72, 153, 0.35);
+}
+.om-btn--primary:hover {
+  background: #db2777;
+}
+.om-btn--primary:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.om-btn--ghost {
+  background: #fff;
+  border-color: #d7dbe0;
+  color: #374151;
+  padding: 9px 14px;
+  font-size: 13.5px;
+}
+.om-btn--ghost:hover {
+  background: #f9fafb;
+  border-color: #9ca3af;
+}
+
+/* ── Compras registradas (badges) ──────────────────────────────────────── */
+.om-purchase {
+  border: 1px solid #eef0f3;
+  border-radius: 13px;
+  padding: 14px 16px;
+  margin-top: 12px;
+  background: #fcfcfd;
+}
+.om-purchase-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 14px;
+}
+.om-purchase-title {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 800;
+}
+.om-purchase-sub {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: #6b7280;
+}
+.om-purchase-note {
+  margin: 10px 0 0;
+  font-size: 13.5px;
+  color: #374151;
+  background: #f9fafb;
+  border: 1px dashed #e5e7eb;
+  border-radius: 9px;
+  padding: 8px 11px;
+}
+.om-purchase-items {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+.om-purchase-items li {
+  padding: 5px 0;
+  border-top: 1px dashed #eceff3;
+  font-size: 13.5px;
+}
+.om-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.om-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eef1f5;
+  color: #374151;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.om-badge--ok {
+  background: #d1fae5;
+  color: #047857;
+}
+.om-badge--warn {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+/* ── Despacho e rastreio ───────────────────────────────────────────────── */
+.om-ship-block {
+  border: 1px solid #eef0f3;
+  border-radius: 13px;
+  padding: 14px 16px;
+  margin-top: 12px;
+}
+.om-ship-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+.om-coverage {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 13.5px;
+  color: #374151;
+}
+.om-coverage li {
+  margin-top: 4px;
+}
+.om-shipment {
+  border: 1px solid #e5e7eb;
+  border-radius: 11px;
+  background: #f9fafb;
+  padding: 10px 12px;
+  margin-top: 10px;
+}
+.om-shipment-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 13.5px;
+}
+.om-form--inline {
+  margin-top: 14px;
+  border-top: 1px dashed #e5e7eb;
+  padding-top: 6px;
+}
+
+/* ── Correções ─────────────────────────────────────────────────────────── */
+.om-corr {
+  margin-top: 20px;
+  border-top: 2px solid #f3f4f6;
+  padding-top: 6px;
+}
+.om-corr-block {
+  background: #f9fafb;
+  border: 1px solid #eef0f3;
+  border-radius: 11px;
+  padding: 12px 14px;
+  margin-top: 10px;
+}
+.om-corr-title {
+  margin: 0 0 8px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #374151;
+}
+.om-corr-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 12px;
+}
+.om-corr-form .om-field {
+  margin-top: 0;
+}
+.om-field--grow {
+  flex: 1 1 220px;
+}
+.om-corr-form .om-field--narrow input {
+  max-width: 220px;
+}
+
+/* ── Histórico operacional ─────────────────────────────────────────────── */
+.om-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.om-audit {
+  border-left: 3px solid #fbcfe8;
+  padding: 2px 0 10px 14px;
+  margin-top: 12px;
+}
+.om-audit-line1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+}
+.om-audit-when {
+  font-size: 12.5px;
+  color: #6b7280;
+}
+.om-audit-label {
+  font-size: 14px;
+}
+.om-audit-who {
+  font-size: 12.5px;
+  background: #f3f4f6;
+  border-radius: 999px;
+  padding: 2px 9px;
+  color: #4b5563;
+}
+.om-audit-reason {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #4b5563;
+}
+.om-audit-details {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: #6b7280;
+}
+.om-audit-details summary {
+  cursor: pointer;
+}
+.om-audit-details p {
+  margin: 4px 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-word;
+}
+.om-foot {
+  margin: 16px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid #f1f3f5;
+  font-size: 12.5px;
+  color: #9ca3af;
+}
+
+/* ── Pontos de quebra (o Tailwind local não traz prefixos de media) ────── */
+@media (min-width: 760px) {
+  .om-grid2 {
+    grid-template-columns: 1.05fr 1fr;
+  }
+  .om-field-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 759px) {
+  .om-main {
+    padding: 20px 14px 56px;
+  }
+  .om-card {
+    padding: 16px 14px;
+    border-radius: 13px;
+  }
+  .om-head h1 {
+    font-size: 22px;
+  }
+  .om-pills {
+    margin-left: 0;
+    width: 100%;
+  }
+  .om-itemrow {
+    flex-wrap: wrap;
+  }
+  .om-qty {
+    width: 100% !important;
+  }
+  .om-btn--primary {
+    width: 100%;
+    text-align: center;
+  }
+  .om-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .om-actions .om-hint {
+    text-align: center;
+  }
+  .om-field input,
+  .om-field textarea {
+    /* 16px evita zoom automático do iOS ao focar */
+    font-size: 16px;
+  }
+  .om-purchase-head {
+    flex-direction: column;
+  }
+  .om-corr-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .om-corr-form .om-field--narrow input,
+  .om-field--narrow input {
+    max-width: none;
+  }
+}
