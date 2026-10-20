@@ -21,16 +21,24 @@ cláusula que transfira responsabilidades a terceiros é nula.
 
 ## 2. Regras da plataforma (uso interno)
 
+**Escopo:** os valores abaixo são regras **gerais** da plataforma, tal como
+publicadas nas fontes a seguir. Eles **podem variar** por categoria de
+produto, programa (ex.: Free Return), país e anúncio — sempre confirmar no
+anúncio e no pedido específico antes de agir. Nenhum deles é tratado como
+universal nem como limite do atendimento ao cliente da Pollo Modas. A fonte
+de disputa é oficial, mas publicada em domínio `.ru` (`docs.aliexpress.ru`).
+
 Fontes: [Buyer Protection](https://www.aliexpress.com/p/buyerprotection/index.html),
 [termos Free Return](https://cdn.contract.alibaba.com/terms/c_end_product_protocol/20240529164446731/20240529164446731.html),
 [blog oficial Return Policy](https://www.aliexpress.com/s/blog-ssr/article/your_complete_guide_to_the_aliexpress_return_polic-478038),
 [como abrir disputa](https://docs.aliexpress.ru/gid/service/article/open-dispute).
 
-- **Item com problema** (defeito/não-conformidade): solicitação em até
-  **15 dias após o recebimento**.
+- **Item com problema** (defeito/não-conformidade): regra geral —
+  solicitação em até **15 dias após o recebimento**.
 - **Não-entrega**: elegível dentro do prazo de entrega garantida (GDT) do
   pedido; disputa em até **15 dias após expirar o GDT**.
-- **Disputa**: o vendedor tem **5 dias** para responder; sem resposta ou sem
+- **Disputa**: regra geral — o vendedor tem **5 dias** para responder; sem
+  resposta ou sem
   acordo, a AliExpress decide; decisão final em geral em 48–72h após
   intervenção (blog oficial, indicativo).
 - **Free Return** ("Devolução grátis"): é **benefício por anúncio** (selo),

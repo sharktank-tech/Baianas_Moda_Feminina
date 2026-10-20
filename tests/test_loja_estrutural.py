@@ -173,6 +173,37 @@ def test_depoimentos_ocultos_sem_autorizacao_confirmada(app, client, db):
     assert "Mariana" not in home
 
 
+def test_troca_preferencia_condicoes_claras(client, db):
+    html = _get(client, "/trocas-e-devolucoes")
+    # Condições da oferta comercial de troca (seção 1).
+    assert "preferência de tamanho ou de cor" in html
+    assert "etiquetas" in html
+    assert "oferta comercial da loja" in html
+    # Separada de arrependimento e defeito, sem restringir direitos legais.
+    assert "não substitui nem restringe" in html
+    assert "gratuita" in html
+
+
+def test_pagina_trocas_sem_promessa_de_prazo_inexistente(client, db):
+    html = _get(client, "/trocas-e-devolucoes")
+    # O site não exibe estimativa de prazo pré-compra: não prometer.
+    assert "informado no checkout e na página do produto" not in html
+    assert "consulte o atendimento" in html
+
+
+def test_publico_sem_cnpj_ficticio_ou_razao_social_inventada(client, db):
+    import re
+    cnpj_pattern = re.compile(r"\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}")
+    for path in ("/", "/trocas-e-devolucoes", "/politica-privacidade",
+                 "/condicoes-de-uso"):
+        html = _get(client, path)
+        assert not cnpj_pattern.search(html), f"CNPJ inventado em {path}"
+    # Enquanto a operação não possui CNPJ, o site não declara conformidade
+    # cadastral nem exibe a sigla em textos institucionais de troca.
+    trocas = _get(client, "/trocas-e-devolucoes")
+    assert "CNPJ" not in trocas
+
+
 def test_parcelamento_sem_promessa_fixa(client, db):
     for path in ("/", "/login"):
         html = _get(client, path)
