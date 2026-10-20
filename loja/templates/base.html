@@ -699,7 +699,7 @@
     <div class="promo-strip-track">
 
       <span>
-        🚚 Frete calculado no checkout
+        🚚 Frete exibido no checkout
         &nbsp;&nbsp;•&nbsp;&nbsp;
         💳 Parcele via Mercado Pago
         &nbsp;&nbsp;•&nbsp;&nbsp;
@@ -711,7 +711,7 @@
 
       <!-- duplicado para criar loop infinito -->
       <span>
-        🚚 Frete calculado no checkout
+        🚚 Frete exibido no checkout
         &nbsp;&nbsp;•&nbsp;&nbsp;
         💳 Parcele via Mercado Pago
         &nbsp;&nbsp;•&nbsp;&nbsp;
@@ -890,6 +890,7 @@
               {% for link in footer.nav_links %}<li><a href="{{ link.url }}">{{ link.label }}</a></li>{% endfor %}
             {% else %}
               <li><a href="{{ url_for('main.sobre') }}">Sobre nós</a></li>
+              <li><a href="{{ url_for('main.trocas_e_devolucoes') }}">Trocas e devoluções</a></li>
               <li><a href="{{ url_for('main.politica_privacidade') }}">Privacidade</a></li>
             {% endif %}
           </ul>
@@ -933,7 +934,7 @@
           {% else %}
             <div class="footer-contact-item">
               <svg fill="none" stroke-width="1.8" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" stroke-linecap="round" stroke-linejoin="round"/><polyline points="22,6 12,13 2,6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <a href="mailto:contato@pollomodas.com.br">contato@pollomodas.com.br</a>
+              <a href="mailto:atendimento@pollomodas.com.br">atendimento@pollomodas.com.br</a>
             </div>
           {% endif %}
 
@@ -963,6 +964,7 @@
         </div>
         {% else %}
         <div class="footer-bottom-links">
+          <a href="{{ url_for('main.trocas_e_devolucoes') }}">Trocas e devoluções</a>
           <a href="{{ url_for('main.politica_privacidade') }}">Privacidade</a>
           <a href="{{ url_for('main.condi_uso') }}">Termos de uso</a>
         </div>

@@ -124,6 +124,36 @@ def test_troca_sete_dias_sem_texto_de_trinta(client, db, make_product):
     )
 
 
+# ── Informações comerciais padronizadas (e-mail, política, sem depoimento fake)
+
+def test_pagina_trocas_e_devolucoes_publica(client, db):
+    html = _get(client, "/trocas-e-devolucoes")
+    assert "Trocas e devoluções" in html
+    assert "atendimento@pollomodas.com.br" in html
+    assert "7 dias a contar do recebimento" in html
+    assert "Não é necessário abrir disputa" in html
+
+
+def test_email_publico_padrao_sem_dominios_antigos(client, db):
+    for path in ("/", "/politica-privacidade", "/condicoes-de-uso",
+                 "/trocas-e-devolucoes"):
+        html = _get(client, path)
+        assert "suporte@pollomodas.com" not in html
+        assert "contato@pollomodas.com.br" not in html
+
+
+def test_rodapé_linka_trocas_e_devoluções(client, db):
+    html = _get(client, "/")
+    assert "/trocas-e-devolucoes" in html
+
+
+def test_depoimentos_placeholders_removidos(app, client, db):
+    html = _render_home(app, [])
+    assert "Ana Silva" not in html
+    assert "João Pereira" not in html
+    assert "Maria Oliveira" not in html
+
+
 def test_parcelamento_sem_promessa_fixa(client, db):
     for path in ("/", "/login"):
         html = _get(client, path)

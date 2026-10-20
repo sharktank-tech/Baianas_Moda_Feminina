@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Trocas e devoluções - Pollo Modas{% endblock %}
+
+{% block extra_css %}
+<meta name="description"
+      content="Política de trocas e devoluções da Pollo Modas. Conheça as condições para troca, arrependimento, itens com problema e atraso de entrega.">
+{% endblock %}
+
+{% block content %}
+
+<section class="mt-10 px-6 py-8">
+    <h1 class="text-4xl font-bold text-center mb-6">
+        Trocas e devoluções
+    </h1>
+
+    <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-lg p-6">
+
+        <p class="mb-4 text-gray-700">
+            Queremos que sua compra seja tranquila. Esta página reúne as
+            condições de troca, arrependimento, itens com problema e atraso de
+            entrega. Em qualquer caso, fale conosco primeiro: a solução do seu
+            caso é tratada diretamente pela Pollo Modas.
+        </p>
+
+        <h2 class="text-2xl font-semibold mt-6 mb-4">
+            1. Troca
+        </h2>
+
+        <p class="text-gray-700 mb-4">
+            Você pode solicitar a troca de uma peça em até <strong>7 dias</strong>
+            contados do recebimento, informando o número do pedido. As condições
+            da troca — tamanho, peça e logística — são combinadas com o
+            atendimento no momento da solicitação, e a troca gratuita será
+            organizada junto com o atendimento.
+        </p>
+
+        <h2 class="text-2xl font-semibold mt-6 mb-4">
+            2. Arrependimento na compra
+        </h2>
+
+        <p class="text-gray-700 mb-4">
+            Pela legislação brasileira (Código de Defesa do Consumidor,
+            art. 49), você pode desistir da compra em até
+            <strong>7 dias a contar do recebimento do produto</strong>, por
+            qualquer motivo, sem precisar justificar. Solicite pelo e-mail
+            <span class="font-medium">atendimento@pollomodas.com.br</span>
+            informando o número do pedido. Os valores pagos serão devolvidos
+            conforme o meio de pagamento utilizado. As condições para o envio de
+            volta, quando aplicável, são informadas pelo atendimento na
+            abertura da solicitação.
+        </p>
+
+        <h2 class="text-2xl font-semibold mt-6 mb-4">
+            3. Item com defeito ou trocado
+        </h2>
+
+        <p class="text-gray-700 mb-4">
+            Recebeu um item com defeito, danificado ou diferente do pedido?
+            Entre em contato com o atendimento informando o número do pedido e,
+            se possível, fotos do problema. Nesses casos a solução é
+            <strong>sem custo para você</strong>: substituição do item,
+            devolução do valor pago ou abatimento proporcional, conforme
+            previsto no Código de Defesa do Consumidor (art. 18).
+        </p>
+
+        <p class="text-gray-700 mb-4">
+            <strong>Não é necessário abrir disputa ou procedimento junto a
+            fornecedores</strong> para resolver o seu caso conosco. Nós
+            cuidamos da sua solicitação e, quando cabível, tratamos a
+            questionamento com o fornecedor de forma separada, sem condicionar
+            a sua solução à aprovação de qualquer disputa externa.
+        </p>
+
+        <h2 class="text-2xl font-semibold mt-6 mb-4">
+            4. Atraso na entrega
+        </h2>
+
+        <p class="text-gray-700 mb-4">
+            O prazo de cada pedido é informado no checkout e na página do
+            produto e pode variar conforme o item e o destino. Se a entrega
+            estiver atrasada, fale com o atendimento informando o número do
+            pedido. Você pode acompanhar o andamento em
+            <a class="text-pink-600 hover:underline"
+               href="{{ url_for('tracking.acompanhar_pedido') }}">Rastrear pedido</a>
+            e, conforme a legislação, escolher entre aguardar a entrega,
+            cancelar o pedido com devolução dos valores ou as demais opções
+            previstas em lei (Código de Defesa do Consumidor, art. 35).
+        </p>
+
+        <h2 class="text-2xl font-semibold mt-6 mb-4">
+            5. Produtos de fornecedores internacionais
+        </h2>
+
+        <p class="text-gray-700 mb-4">
+            Alguns itens são adquiridos junto a fornecedores internacionais.
+            Os prazos de entrega variam por pedido e destino, e benefícios
+            anunciados em catálogos de fornecedores — como "devolução grátis",
+            cupons de atraso ou prazos de proteção — podem variar por anúncio e
+            por pedido. Esses benefícios <strong>não alteram os seus direitos
+            como consumidor no Brasil</strong> nem as condições descritas nesta
+            página, que são as aplicadas pela Pollo Modas.
+        </p>
+
+        <h2 class="text-2xl font-semibold mt-6 mb-4">
+            6. Como acionar o atendimento
+        </h2>
+
+        <p class="text-gray-700 mb-4">
+            Envie sua solicitação para
+            <span class="font-medium">atendimento@pollomodas.com.br</span>
+            com o número do pedido. Confirmamos o recebimento imediatamente e
+            respondemos em até <strong>5 dias</strong>. Você também pode usar o
+            formulário da página de
+            <a class="text-pink-600 hover:underline"
+               href="{{ url_for('main.contato') }}">Contato</a>.
+        </p>
+
+        <p class="mt-8 text-sm text-gray-500">
+            Última atualização: Outubro de 2026.
+        </p>
+
+    </div>
+</section>
+
+{% endblock %}
