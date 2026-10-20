@@ -781,26 +781,10 @@
   <!-- ══════════════════════════════════════════════
        DEPOIMENTOS
   ══════════════════════════════════════════════ -->
-  {% if testimonials %}
-  <section class="testimonials-section" data-reveal>
-    <div class="testimonials-inner">
-      <h2 class="section-title">O que nossos clientes dizem</h2>
-      <div class="testimonials-grid">
-        {% for t in testimonials %}
-        <div class="testimonial-card">
-          <div class="star-row" aria-label="{{ (t.rating or 0) }} de 5 estrelas">
-            {% for i in range(5) %}
-            <span class="star{% if i >= (t.rating or 0) %} star--empty{% endif %}" aria-hidden="true">★</span>
-            {% endfor %}
-          </div>
-          <p class="testimonial-text">{{ t.text }}</p>
-          <p class="testimonial-author">— {{ t.author }}</p>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-  </section>
-  {% endif %}
+  <!-- Depoimentos desativados na home até confirmação de origem e
+       autorização de exibição dos depoimentos cadastrados (revisão do
+       PR #144). Dados e CRUD do painel permanecem intactos. -->
+
 
 {% endblock %}
 

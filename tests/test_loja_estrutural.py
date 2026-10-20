@@ -132,6 +132,15 @@ def test_pagina_trocas_e_devolucoes_publica(client, db):
     assert "atendimento@pollomodas.com.br" in html
     assert "7 dias a contar do recebimento" in html
     assert "Não é necessário abrir disputa" in html
+    # Arrependimento: sem custo e restituição integral (CDC art. 49).
+    assert "devolução é" in html
+    assert "sem custo para você" in html
+    assert "restituição integral" in html
+    assert "incluindo o frete da compra original" in html
+    # Distinção troca × vício.
+    assert "Troca por preferência" in html
+    assert "não é arrependimento" in html
+    assert "abatimento proporcional" in html
 
 
 def test_email_publico_padrao_sem_dominios_antigos(client, db):
@@ -147,11 +156,21 @@ def test_rodapé_linka_trocas_e_devoluções(client, db):
     assert "/trocas-e-devolucoes" in html
 
 
-def test_depoimentos_placeholders_removidos(app, client, db):
+def test_novidades_sem_cadencia_semanal_nao_confirmada(client, db):
+    for path in ("/", "/login"):
+        html = _get(client, path)
+        assert "Novidades toda semana" not in html
+        assert "Novidades e lançamentos" in html
+
+
+def test_depoimentos_ocultos_sem_autorizacao_confirmada(app, client, db):
     html = _render_home(app, [])
     assert "Ana Silva" not in html
     assert "João Pereira" not in html
     assert "Maria Oliveira" not in html
+    home = _get(client, "/")
+    assert "O que nossos clientes dizem" not in home
+    assert "Mariana" not in home
 
 
 def test_parcelamento_sem_promessa_fixa(client, db):
