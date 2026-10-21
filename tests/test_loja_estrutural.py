@@ -186,9 +186,10 @@ def test_troca_preferencia_condicoes_claras(client, db):
 
 def test_pagina_trocas_sem_promessa_de_prazo_inexistente(client, db):
     html = _get(client, "/trocas-e-devolucoes")
-    # O site não exibe estimativa de prazo pré-compra: não prometer.
+    # A página de trocas não exibe estimativa nem orientação de prazo pré-compra:
+    # essa orientação pertence à seção de entrega, não a esta página.
     assert "informado no checkout e na página do produto" not in html
-    assert "consulte o atendimento" in html
+    assert "consulte o atendimento antes de comprar" not in html
 
 
 def test_publico_sem_cnpj_ficticio(client, db):
