@@ -15,6 +15,7 @@ import re
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
+from html.parser import HTMLParser
 from types import SimpleNamespace
 
 import pytest
@@ -25,6 +26,51 @@ def _get(client, path):
     resp = client.get(path)
     assert resp.status_code == 200, f"GET {path} retornou {resp.status_code}"
     return resp.get_data(as_text=True)
+
+
+_ESTRUTURA_TAGS = {
+    "section", "div", "main", "ul", "ol", "li",
+    "p", "h2", "h3", "strong", "a", "span",
+}
+
+
+class _BalanceadorTags(HTMLParser):
+    """Pilha de tags estruturais para detectar fechamentos ausentes/trocados."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.pilha = []
+        self.erros = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _ESTRUTURA_TAGS:
+            self.pilha.append(tag)
+
+    def handle_endtag(self, tag):
+        if tag not in _ESTRUTURA_TAGS:
+            return
+        if not self.pilha:
+            self.erros.append(f"</{tag}> sem abertura")
+            return
+        if self.pilha[-1] == tag:
+            self.pilha.pop()
+            return
+        self.erros.append(f"esperado </{self.pilha[-1]}>, veio </{tag}>")
+        if tag in self.pilha:
+            while self.pilha and self.pilha[-1] != tag:
+                self.pilha.pop()
+            if self.pilha:
+                self.pilha.pop()
+        else:
+            self.pilha.clear()
+
+
+def _assert_estrutura_html_balanceada(html):
+    validador = _BalanceadorTags()
+    validador.feed(html)
+    validador.close()
+    assert not validador.erros, "HTML desbalanceado: " + "; ".join(validador.erros)
+    assert not validador.pilha, "Tags não fechadas: " + ", ".join(validador.pilha)
 
 
 def _produto_transiente(nome="Camiseta Teste"):
@@ -186,10 +232,40 @@ def test_troca_preferencia_condicoes_claras(client, db):
 
 def test_pagina_trocas_sem_promessa_de_prazo_inexistente(client, db):
     html = _get(client, "/trocas-e-devolucoes")
-    # A página de trocas não exibe estimativa nem orientação de prazo pré-compra:
-    # essa orientação pertence à seção de entrega, não a esta página.
+    # A seção de atraso orienta a consultar o atendimento, mas não afirma que
+    # prazo/estimativa pré-compra aparece no produto ou no checkout.
     assert "informado no checkout e na página do produto" not in html
-    assert "consulte o atendimento antes de comprar" not in html
+    assert "prazo de entrega é exibido no checkout" not in html
+
+
+def test_pagina_trocas_tem_cinco_secoes_e_link_de_rastreio(client, db):
+    html = _get(client, "/trocas-e-devolucoes")
+    texto = re.sub(r"\s+", " ", html)
+    for titulo in (
+        "1. Troca por preferência (oferta da loja)",
+        "2. Arrependimento na compra",
+        "3. Item com defeito ou produto incorreto",
+        "4. Atraso na entrega",
+        "5. Produtos de fornecedores internacionais",
+    ):
+        assert titulo in texto, f"Seção ausente: {titulo}"
+    assert "/acompanhar-pedido" in html
+    # Alternativas do art. 35 do CDC para descumprimento da oferta.
+    assert "cumprimento forçado da oferta" in texto
+    assert "outro produto ou prestação equivalente" in texto
+    assert "rescindir o contrato" in texto
+    # Distinção entre prazo de entrega e valor do frete.
+    assert "valor do frete" in texto
+    assert "prazo de entrega varia" in texto
+
+
+def test_pagina_trocas_html_balanceado(client, db):
+    html = _get(client, "/trocas-e-devolucoes")
+    _assert_estrutura_html_balanceada(html)
+    # O rodapé fica fora do contêiner da política: a seção fecha antes dele.
+    inicio_secao5 = html.index("5. Produtos de fornecedores internacionais")
+    inicio_rodape = html.index("<footer", inicio_secao5)
+    assert "</section>" in html[inicio_secao5:inicio_rodape]
 
 
 def test_publico_sem_cnpj_ficticio(client, db):
