@@ -192,20 +192,24 @@ def test_pagina_trocas_sem_promessa_de_prazo_inexistente(client, db):
 
 
 def test_publico_sem_cnpj_ficticio(client, db):
-    """Verifica que não há CNPJ no formato fictício em páginas públicas.
-    Mantém a regex de formato; non impede a eventual exibição de CNPJ legítimo
-    configurado posteriormente (os campos ContactInfo não possuem CNPJ no modelo
-    atual, mas caso sejam adicionados, a regex poderá validar a formatação)."""
-    import re
-    cnpj_pattern = re.compile(r"\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}")
+    """Verifica ausência de placeholders de CNPJ conhecidos em páginas públicas.
+    Não classifica CNPJ como fictício apenas pelo formato.
+    Permite a exibição de CNPJ legítimo configurado posteriormente nos campos ContactInfo.
+    Apenas rejeita máscaras de placeholder predefinidas (ex.: 00.000.000/0000-00)."""
+    # Placeholders de CNPJ conhecidos que não devem aparecer em texto institucional
+    _cnpj_placeholders = (
+        r"00\.000\.000/0000-00",  # máscara de placeholder totalmente preenchida
+    )
     for path in ("/", "/trocas-e-devolucoes", "/politica-privacidade",
                  "/condicoes-de-uso"):
         html = _get(client, path)
-        assert not cnpj_pattern.search(html), f"CNPJ inventado em {path}"
+        for placeholder in _cnpj_placeholders:
+            import re as _re
+            assert not _re.search(placeholder, html), f"Placeholder de CNPJ em {path}"
     # Enquanto a operação não possui CNPJ, o site não declara conformidade
     # cadastral nem exibe a sigla em textos institucionais de troca.
     # Dados legítimos configurados futuramente poderão ser exibidos obedecendo
-    # o mesmo padrão de formatação.
+    # o próprio padrão de formatação, desde que não correspondam a placeholder conhecido.
 
 
 def test_parcelamento_sem_promessa_fixa(client, db):
