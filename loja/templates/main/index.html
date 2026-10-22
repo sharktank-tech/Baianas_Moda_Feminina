@@ -752,7 +752,7 @@
     </div>
     <div class="trust-item">
       <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="3" width="15" height="13"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-      <div><strong>Entrega Brasil todo</strong><span>Frete calculado no checkout</span></div>
+      <div><strong>Entrega Brasil todo</strong><span>Frete exibido no checkout</span></div>
     </div>
   </section>
 
@@ -781,40 +781,10 @@
   <!-- ══════════════════════════════════════════════
        DEPOIMENTOS
   ══════════════════════════════════════════════ -->
-  <section class="testimonials-section" data-reveal>
-    <div class="testimonials-inner">
-      <h2 class="section-title">O que nossos clientes dizem</h2>
-      <div class="testimonials-grid">
-        {% for t in testimonials %}
-        <div class="testimonial-card">
-          <div class="star-row" aria-label="{{ (t.rating or 0) }} de 5 estrelas">
-            {% for i in range(5) %}
-            <span class="star{% if i >= (t.rating or 0) %} star--empty{% endif %}" aria-hidden="true">★</span>
-            {% endfor %}
-          </div>
-          <p class="testimonial-text">{{ t.text }}</p>
-          <p class="testimonial-author">— {{ t.author }}</p>
-        </div>
-        {% else %}
-        <div class="testimonial-card">
-          <div class="star-row" aria-label="5 de 5 estrelas">{% for i in range(5) %}<span class="star" aria-hidden="true">★</span>{% endfor %}</div>
-          <p class="testimonial-text">A qualidade das peças é impecável! Sempre encontro o que preciso e o atendimento é excelente.</p>
-          <p class="testimonial-author">— Ana Silva</p>
-        </div>
-        <div class="testimonial-card">
-          <div class="star-row" aria-label="5 de 5 estrelas">{% for i in range(5) %}<span class="star" aria-hidden="true">★</span>{% endfor %}</div>
-          <p class="testimonial-text">Entrega super rápida e as roupas chegaram perfeitamente embaladas. Com certeza compro de novo!</p>
-          <p class="testimonial-author">— João Pereira</p>
-        </div>
-        <div class="testimonial-card">
-          <div class="star-row" aria-label="5 de 5 estrelas">{% for i in range(5) %}<span class="star" aria-hidden="true">★</span>{% endfor %}</div>
-          <p class="testimonial-text">Adoro a variedade e os preços honestos. Uma loja de confiança que recomendo para todo mundo.</p>
-          <p class="testimonial-author">— Maria Oliveira</p>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-  </section>
+  <!-- Depoimentos desativados na home até confirmação de origem e
+       autorização de exibição dos depoimentos cadastrados (revisão do
+       PR #144). Dados e CRUD do painel permanecem intactos. -->
+
 
 {% endblock %}
 

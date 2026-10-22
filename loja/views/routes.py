@@ -3158,6 +3158,11 @@ def sobre():
     return render_template('institucional/sobre.html')
 
 
+@main_blueprint.route('/trocas-e-devolucoes')
+def trocas_e_devolucoes():
+    return render_template('institucional/trocas_e_devolucoes.html')
+
+
 # CORRIGIDO: URLs com acentos podem causar problemas de encoding/links
 # quebrados em alguns clientes. Trocado para uma versão sem acento.
 @main_blueprint.route('/condicoes-de-uso')

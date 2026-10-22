@@ -971,7 +971,7 @@ def admin_dashboard():
         db.session.add(FooterConfig(id=uuid4(), brand_name="Pollo Modas"))
     if ContactInfo.query.first() is None:
         db.session.add(
-            ContactInfo(id=uuid4(), email="contato@pollomodas.com.br")
+            ContactInfo(id=uuid4(), email="atendimento@pollomodas.com.br")
         )
     db.session.commit()
 

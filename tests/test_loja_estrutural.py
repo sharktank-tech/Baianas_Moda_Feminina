@@ -15,6 +15,7 @@ import re
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
+from html.parser import HTMLParser
 from types import SimpleNamespace
 
 import pytest
@@ -25,6 +26,51 @@ def _get(client, path):
     resp = client.get(path)
     assert resp.status_code == 200, f"GET {path} retornou {resp.status_code}"
     return resp.get_data(as_text=True)
+
+
+_ESTRUTURA_TAGS = {
+    "section", "div", "main", "ul", "ol", "li",
+    "p", "h2", "h3", "strong", "a", "span",
+}
+
+
+class _BalanceadorTags(HTMLParser):
+    """Pilha de tags estruturais para detectar fechamentos ausentes/trocados."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.pilha = []
+        self.erros = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _ESTRUTURA_TAGS:
+            self.pilha.append(tag)
+
+    def handle_endtag(self, tag):
+        if tag not in _ESTRUTURA_TAGS:
+            return
+        if not self.pilha:
+            self.erros.append(f"</{tag}> sem abertura")
+            return
+        if self.pilha[-1] == tag:
+            self.pilha.pop()
+            return
+        self.erros.append(f"esperado </{self.pilha[-1]}>, veio </{tag}>")
+        if tag in self.pilha:
+            while self.pilha and self.pilha[-1] != tag:
+                self.pilha.pop()
+            if self.pilha:
+                self.pilha.pop()
+        else:
+            self.pilha.clear()
+
+
+def _assert_estrutura_html_balanceada(html):
+    validador = _BalanceadorTags()
+    validador.feed(html)
+    validador.close()
+    assert not validador.erros, "HTML desbalanceado: " + "; ".join(validador.erros)
+    assert not validador.pilha, "Tags não fechadas: " + ", ".join(validador.pilha)
 
 
 def _produto_transiente(nome="Camiseta Teste"):
@@ -122,6 +168,125 @@ def test_troca_sete_dias_sem_texto_de_trinta(client, db, make_product):
         "Solicite a troca em até 7 dias; a troca gratuita será combinada com o atendimento"
         in pagina
     )
+
+
+# ── Informações comerciais padronizadas (e-mail, política, sem depoimento fake)
+
+def test_pagina_trocas_e_devolucoes_publica(client, db):
+    html = _get(client, "/trocas-e-devolucoes")
+    assert "Trocas e devoluções" in html
+    assert "atendimento@pollomodas.com.br" in html
+    assert "7 dias a contar do recebimento" in html
+    assert "Não é necessário abrir disputa" in html
+    # Arrependimento: sem custo e restituição integral (CDC art. 49).
+    assert "devolução é" in html
+    assert "sem custo para você" in html
+    assert "restituição integral" in html
+    assert "incluindo o frete da compra original" in html
+    # Distinção troca × vício.
+    assert "Troca por preferência" in html
+    assert "não é arrependimento" in html
+    assert "abatimento proporcional" in html
+
+
+def test_email_publico_padrao_sem_dominios_antigos(client, db):
+    for path in ("/", "/politica-privacidade", "/condicoes-de-uso",
+                 "/trocas-e-devolucoes"):
+        html = _get(client, path)
+        assert "suporte@pollomodas.com" not in html
+        assert "contato@pollomodas.com.br" not in html
+
+
+def test_rodapé_linka_trocas_e_devoluções(client, db):
+    html = _get(client, "/")
+    assert "/trocas-e-devolucoes" in html
+
+
+def test_novidades_sem_cadencia_semanal_nao_confirmada(client, db):
+    for path in ("/", "/login"):
+        html = _get(client, path)
+        assert "Novidades toda semana" not in html
+        assert "Novidades e lançamentos" in html
+
+
+def test_depoimentos_ocultos_sem_autorizacao_confirmada(app, client, db):
+    html = _render_home(app, [])
+    assert "Ana Silva" not in html
+    assert "João Pereira" not in html
+    assert "Maria Oliveira" not in html
+    home = _get(client, "/")
+    assert "O que nossos clientes dizem" not in home
+    assert "Mariana" not in home
+
+
+def test_troca_preferencia_condicoes_claras(client, db):
+    html = _get(client, "/trocas-e-devolucoes")
+    # Condições da oferta comercial de troca (seção 1).
+    assert "preferência de tamanho ou de cor" in html
+    assert "etiquetas" in html
+    assert "oferta comercial da loja" in html
+    # Separada de arrependimento e defeito, sem restringir direitos legais.
+    assert "não substitui nem restringe" in html
+    assert "gratuita" in html
+
+
+def test_pagina_trocas_sem_promessa_de_prazo_inexistente(client, db):
+    html = _get(client, "/trocas-e-devolucoes")
+    # A seção de atraso orienta a consultar o atendimento, mas não afirma que
+    # prazo/estimativa pré-compra aparece no produto ou no checkout.
+    assert "informado no checkout e na página do produto" not in html
+    assert "prazo de entrega é exibido no checkout" not in html
+
+
+def test_pagina_trocas_tem_cinco_secoes_e_link_de_rastreio(client, db):
+    html = _get(client, "/trocas-e-devolucoes")
+    texto = re.sub(r"\s+", " ", html)
+    for titulo in (
+        "1. Troca por preferência (oferta da loja)",
+        "2. Arrependimento na compra",
+        "3. Item com defeito ou produto incorreto",
+        "4. Atraso na entrega",
+        "5. Produtos de fornecedores internacionais",
+    ):
+        assert titulo in texto, f"Seção ausente: {titulo}"
+    assert "/acompanhar-pedido" in html
+    # Alternativas do art. 35 do CDC para descumprimento da oferta.
+    assert "cumprimento forçado da oferta" in texto
+    assert "outro produto ou prestação equivalente" in texto
+    assert "rescindir o contrato" in texto
+    # Distinção entre prazo de entrega e valor do frete.
+    assert "valor do frete" in texto
+    assert "prazo de entrega varia" in texto
+
+
+def test_pagina_trocas_html_balanceado(client, db):
+    html = _get(client, "/trocas-e-devolucoes")
+    _assert_estrutura_html_balanceada(html)
+    # O rodapé fica fora do contêiner da política: a seção fecha antes dele.
+    inicio_secao5 = html.index("5. Produtos de fornecedores internacionais")
+    inicio_rodape = html.index("<footer", inicio_secao5)
+    assert "</section>" in html[inicio_secao5:inicio_rodape]
+
+
+def test_publico_sem_cnpj_ficticio(client, db):
+    """Verifica ausência de placeholders de CNPJ conhecidos em páginas públicas.
+    Não classifica CNPJ como fictício apenas pelo formato.
+    Permite a exibição de CNPJ legítimo configurado posteriormente nos campos ContactInfo.
+    Apenas rejeita máscaras de placeholder predefinidas (ex.: 00.000.000/0000-00)."""
+    # Placeholders de CNPJ conhecidos que não devem aparecer em texto institucional
+    _cnpj_placeholders = (
+        r"00\.000\.000/0000-00",  # máscara de placeholder totalmente preenchida
+    )
+    for path in ("/", "/trocas-e-devolucoes", "/politica-privacidade",
+                 "/condicoes-de-uso"):
+        html = _get(client, path)
+        for placeholder in _cnpj_placeholders:
+            import re as _re
+            assert not _re.search(placeholder, html), f"Placeholder de CNPJ em {path}"
+    # Enquanto a operação não possui CNPJ, o site não declara conformidade
+    # cadastral nem exibe a sigla em textos institucionais de troca.
+    # Dados legítimos configurados futuramente poderão ser exibidos obedecendo
+    # o próprio padrão de formatação, desde que não correspondam a placeholder conhecido.
 
 
 def test_parcelamento_sem_promessa_fixa(client, db):
