@@ -1,0 +1,62 @@
+1. Diagnóstico e Preparação (Semana 1-2)
+
+Perfis e identidade visual
+
+Padronizar bio, foto de perfil (logo) e destaques (stories salvos) nas três redes
+Criar link na bio (Linktree ou similar) direcionando para WhatsApp, catálogo e loja online (se houver)
+Definir paleta de cores e estilo fotográfico consistente entre as plataformas
+
+Público-alvo
+
+Mapear persona: idade, estilo de roupa preferido, faixa de renda, região
+Analisar concorrentes locais e nacionais de moda para benchmarking
+2. Estratégia de Conteúdo por Plataforma
+
+Instagram (vitrine + relacionamento)
+
+Feed: fotos de produtos com boa iluminação, looks montados (styling), bastidores da loja
+Stories diários: enquetes, "novidade chegou", contagem regressiva de promoções, caixinha de perguntas
+Reels: try-on hauls, "3 looks com 1 peça", tendências do momento
+Compras no Instagram (Instagram Shopping) ativado para marcação de produtos
+
+Facebook (conversão + público mais maduro)
+
+Postagens replicando os melhores conteúdos do Instagram
+Grupo de clientes VIP com promoções exclusivas
+Anúncios pagos (Facebook Ads) para tráfego e conversão direta
+
+TikTok (alcance e viralização)
+
+Vídeos curtos de tendências de moda, "outfit of the day", desafios do nicho
+Parcerias com microinfluenciadores locais
+Uso de sons/trends em alta para aumentar alcance orgânico
+3. Funil de Conversão
+Etapa	Objetivo	Ação
+Atração	Alcance	Reels/TikToks virais, hashtags relevantes
+Interesse	Engajamento	Stories interativos, comentários respondidos rápido
+Desejo	Consideração	Depoimentos, provas sociais, looks reais de clientes
+Ação	Conversão	Botão de compra, WhatsApp direto, cupom de desconto
+4. Calendário e Frequência
+Instagram: 4-5 posts/semana + stories diários
+Facebook: 3 posts/semana
+TikTok: 3-4 vídeos/semana
+Usar ferramenta de agendamento (Meta Business Suite, Later) para manter consistência
+5. Investimento em Anúncios
+Início com orçamento de teste (ex: R$20-30/dia) em campanhas de conversão no Meta Ads
+Público personalizado (retargeting de quem visitou o perfil/site)
+Testar 2-3 criativos diferentes por campanha (A/B testing)
+6. Ações de Conversão Direta
+Cupons exclusivos para seguidores ("INSTA10")
+Lives de vendas mostrando peças ao vivo
+Parcerias com influenciadoras locais para provar looks
+Programa de indicação (desconto para quem trouxer amigos)
+7. Métricas para Acompanhar
+Alcance e engajamento (curtidas, comentários, compartilhamentos)
+Cliques no link da bio
+Taxa de conversão de anúncios
+Ticket médio de clientes vindos das redes sociais
+Crescimento de seguidores qualificados (não só número, mas engajamento real)
+8. Cronograma Resumido
+Mês 1: organização de perfis, produção de conteúdo, início de postagens orgânicas
+Mês 2: início de anúncios pagos, parcerias com microinfluenciadores
+Mês 3: otimização com base em métricas, escalar o que funciona

@@ -1,5 +1,5 @@
 {
-  "name": "pollomodas",
+  "name": "baianas_moda_feminina",
   "private": true,
   "description": "Tooling de build do storefront — Tailwind pré-compilado (PR P3b). O CSS gerado é versionado em public/static/styles/tailwind.css e a Vercel NÃO precisa de Node.",
   "scripts": {

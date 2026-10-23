@@ -25,11 +25,11 @@ class Config:
     # ============= SQLAlchemy ==================
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
 
-    # Schema dedicado da PolloModas. Tudo (create_all, ensure_schema, sessões e
+    # Schema dedicado da Baianas Moda Feminina. Tudo (create_all, ensure_schema, sessões e
     # queries) ocorre dentro dele; `public` pertence a outro sistema e é
-    # intocável. Em testes isolados (ex.: pollo_smoke_xxx) sobrescreva via env
-    # POLLOMODAS_SCHEMA — mas NUNCA aponte para public/pollomodas em produção.
-    POLLOMODAS_SCHEMA = os.getenv("POLLOMODAS_SCHEMA", "pollomodas")
+    # intocável. Em testes isolados (ex.: baianas_smoke_xxx) sobrescreva via env
+    # BAIANAS_SCHEMA — mas NUNCA aponte para public/baianas em produção.
+    POLLOMODAS_SCHEMA = os.getenv("POLLOMODAS_SCHEMA", "baianas_moda_feminina")
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
@@ -59,8 +59,8 @@ class Config:
         if EMAIL_SERVER.strip().lower() == "smtp.resend.com" else None
     )
     EMAIL_PORT = int(os.getenv("EMAIL_PORT", 587))
-    EMAIL_SENDER = os.getenv("EMAIL_SENDER", "atendimento@pollomodas.com.br")
-    EMAIL_SENDER_NAME = os.getenv("EMAIL_SENDER_NAME", "PolloModas")
+    EMAIL_SENDER = os.getenv("EMAIL_SENDER", "atendimento@baianasmodafeminina.com.br")
+    EMAIL_SENDER_NAME = os.getenv("EMAIL_SENDER_NAME", "Baianas Moda Feminina")
 
     # ===== Mercado Pago ====================
     MERCADO_PAGO_ACCESS_TOKEN = os.environ.get(

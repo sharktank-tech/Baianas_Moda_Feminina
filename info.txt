@@ -1,0 +1,68 @@
+canditado 1: "             Vestido Feminino 2026 com Estampa Floral, Alças Finas, Estilo Boho de Verão, Elegante, Decote Quadrado, Fenda Lateral, Vestidos         
+             ID: 1005013003211750              · Categoria: 200000347 Variações (20)
+Atributos 	Estoque 	Preço (BRL)
+Preto Floral, P 	9999 	69,85
+Preto Floral, M 	9999 	69,85
+Verde Menta, G 	9999 	69,85
+Verde Menta, GG 	9999 	69,85
+Preto Floral, G 	9999 	69,85
+Preto Floral, GG 	9999 	69,85
+Rosa, P 	0 	69,85
+Rosa, M 	0 	69,85
+Estampado Floral Bege, P 	9999 	69,85
+Estampado Floral Bege, M 	9999 	69,85
+Rosa, G 	0 	69,85
+Rosa, GG 	0 	69,85
+Marrom Escuro, P 	9999 	69,85
+Marrom Escuro, M 	122 	69,85
+Estampado Floral Bege, G 	9999 	69,85
+Estampado Floral Bege, GG 	9999 	69,85
+Verde Menta, P 	130 	69,85
+Verde Menta, M 	9999 	69,85
+Marrom Escuro, G 	9999 	69,85
+Marrom Escuro, GG 	9999 	69,85"
+candidato 2: " Vestidos de Verão Femininos, Vestido Maxi Floral, Vestido de Alças Finas com Detalhe Franzido, Estilo Boho para Férias na Praia, Vestidos Longos e Fluidos com Alças Finas
+
+ID: 1005012926123897 · Categoria: 200000347  Variações (16)
+Atributos 	Estoque 	Preço (BRL)
+Bege, P 	119 	62,50
+Bege, M 	2000 	62,50
+Bege, G 	2000 	62,50
+Verde, GG 	2000 	59,50
+Bege, GG 	2000 	62,50
+Marrom, P 	2000 	62,50
+Marrom, M 	2000 	62,50
+Marrom, G 	2000 	62,50
+Marrom, GG 	2000 	62,50
+Preto, P 	2000 	62,50
+Preto, M 	2000 	62,50
+Preto, G 	2000 	62,50
+Preto, GG 	2000 	62,50
+Verde, P 	130 	59,50
+Verde, G 	119 	59,50
+Verde, M 	119 	59,50
+"
+ candidato 3:"Vestido Sem Manga em Algodão com Cores Delicadas – Modelagem Leve com Toque Decorativo para Looks Frescos e Versáteis
+
+ID: 1005010478234256 · Categoria: 200000347  Variações (3)
+Atributos 	Estoque 	Preço (BRL)
+CÉU AZUL, M 	1111 	34,80
+CÉU AZUL, P 	1111 	34,80
+CÉU AZUL, G 	1111 	34,80 "
+controle internacional: " Outono feminino agasalho com zíper e calças gary casual conjunto de duas peças feminino casual calça amarela terno esportivo com capuz
+
+ID: 1005009519310498 · Categoria: 201530602  Variações (12)
+Atributos 	Estoque 	Preço (BRL)
+Brown, L 	401 	312,99
+Brown, M 	330 	312,99
+Brown, S 	433 	312,99
+Gray, L 	430 	312,99
+Pink, S 	251 	312,99
+Yellow, L 	242 	312,99
+Yellow, M 	217 	312,99
+Yellow, S 	289 	312,99
+Pink, L 	280 	312,99
+Pink, M 	233 	312,99
+Gray, M 	339 	312,99
+Gray, S 	346 	312,99 "
+

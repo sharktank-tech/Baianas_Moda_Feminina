@@ -2,7 +2,13 @@
 module.exports = {
   content: ["./loja/templates/**/*.html"],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        "brand-pink": "#fc03a9",
+        "brand-pink-dark": "#e60090",
+        "brand-pink-light": "#fdf0f5",
+      },
+    },
   },
   plugins: [],
 };

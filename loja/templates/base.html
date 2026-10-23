@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="{% block meta_description %}Pollo Modas — moda feminina, masculina e infantil com qualidade e estilo.{% endblock %}">
-  <meta name="keywords" content="{% block meta_keywords %}roupas, moda, promoções, loja online, Pollo Modas{% endblock %}">
-  <title>{% block title %}Pollo Modas{% endblock %}</title>
+  <meta name="description" content="{% block meta_description %}Baianas Moda Feminina — moda feminina com estilo e qualidade.{% endblock %}">
+  <meta name="keywords" content="{% block meta_keywords %}roupas, moda, promoções, loja online, Baianas Moda Feminina{% endblock %}">
+  <title>{% block title %}Baianas Moda Feminina{% endblock %}</title>
 
   <!-- Google AdSense: auto ads carregado somente após o window load
        (fase do plano: PageLoad ≤3.5s / requests ≤25 — o request do
@@ -29,9 +29,9 @@
   <style nonce="{{ csp_nonce }}">
     :root {
       /* ── Marca ── */
-      --brand-pink:       #EC008C;
-      --brand-pink-dark:  #B0006A;
-      --brand-pink-light: #FCE4F1;
+      --brand-pink:       #fc03a9;
+      --brand-pink-dark:  #e60090;
+      --brand-pink-light: #fdf0f5;
       /* ── Neutros ── */
       --ink:          #1A1A1A;
       --gray-700:     #4D4D4D;
@@ -934,7 +934,7 @@
           {% else %}
             <div class="footer-contact-item">
               <svg fill="none" stroke-width="1.8" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" stroke-linecap="round" stroke-linejoin="round"/><polyline points="22,6 12,13 2,6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <a href="mailto:atendimento@pollomodas.com.br">atendimento@pollomodas.com.br</a>
+              <a href="mailto:atendimento@baianasmodafeminina.com.br">atendimento@baianasmodafeminina.com.br</a>
             </div>
           {% endif %}
 
@@ -953,7 +953,7 @@
           {% if footer %}
             &copy; {{ footer.copyright_year }} {{ footer.brand_name }}. {{ footer.copyright_text }}
           {% else %}
-            &copy; 2026 Pollo Modas. Todos os direitos reservados.
+            &copy; 2026 Baianas Moda Feminina. Todos os direitos reservados.
           {% endif %}
         </span>
         {% if footer and footer.legal_links %}
