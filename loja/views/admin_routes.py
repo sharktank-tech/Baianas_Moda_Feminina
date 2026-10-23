@@ -966,9 +966,9 @@ def admin_dashboard():
     # O dashboard assume que os singletons existem. Em primeiro acesso,
     # cria os registros com valores padrão para não quebrar o template.
     if SiteConfig.query.first() is None:
-        db.session.add(SiteConfig(id=uuid4(), name="Pollo Modas"))
+        db.session.add(SiteConfig(id=uuid4(), name="Baianas Moda Feminina"))
     if FooterConfig.query.first() is None:
-        db.session.add(FooterConfig(id=uuid4(), brand_name="Pollo Modas"))
+        db.session.add(FooterConfig(id=uuid4(), brand_name="Baianas Moda Feminina"))
     if ContactInfo.query.first() is None:
         db.session.add(
             ContactInfo(id=uuid4(), email="atendimento@pollomodas.com.br")
@@ -1613,27 +1613,10 @@ def edit_product(id):
         desired_active      = request.form.get("is_active") == "on"
 
         try:
-            if product.source == "aliexpress":
-                # Todo caminho de PUBLICAÇÃO de AliExpress passa por
-                # publish_product(). Ativar bloqueado => flash amigável com
-                # códigos sanitizados e NENHUMA alteração dos flags (rollback).
-                if desired_active:
-                    publish_product(product)
-                else:
-                    product.is_active = False
-            else:
-                product.is_active = desired_active
+            product.is_active = desired_active
             db.session.commit()
             flash("Produto atualizado com sucesso!", "success")
             return redirect(url_for("admin.admin_dashboard", _anchor="products"))
-
-        except PublicationBlocked as exc:
-            db.session.rollback()
-            flash(
-                "Não foi possível publicar o produto AliExpress (motivos: "
-                + ", ".join(exc.reasons) + ").",
-                "danger",
-            )
 
         except Exception as e:
             db.session.rollback()

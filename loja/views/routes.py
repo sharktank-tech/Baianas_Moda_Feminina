@@ -506,12 +506,9 @@ def _assert_selector_invariant(selector):
 
 
 def _uses_variants(product):
-    """Produtos AliExpress (e qualquer um com variantes) usam seleção por
-    variante; produtos internos/legados continuam no fluxo por tamanho."""
-    return (
-        product.source == "aliexpress"
-        or bool(_active_variants_for_product(product))
-    )
+    """Produtos com variantes usam seleção por variante; produtos sem
+    variantes continuam no fluxo por tamanho."""
+    return bool(_active_variants_for_product(product))
 
 
 def _safe_internal_url(value):
