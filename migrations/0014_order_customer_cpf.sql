@@ -1,12 +1,12 @@
 -- Migration 0014: CPF nativo do destinatário no pedido (FASE 8.0.12C)
--- Idempotente, restrita ao schema pollomodas. Nunca toca public.
+-- Idempotente, restrita ao schema baianas_moda_feminina. Nunca toca public.
 --
 -- Pedidos legados permanecem válidos com customer_cpf NULL. Novos checkouts
 -- AliExpress validam checksum na aplicação antes da criação da preferência MP.
 
 \set ON_ERROR_STOP on
 
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 ALTER TABLE orders
     ADD COLUMN IF NOT EXISTS customer_cpf VARCHAR(11) NULL;
@@ -17,7 +17,7 @@ BEGIN
         SELECT 1
         FROM pg_constraint
         WHERE conname = 'ck_orders_customer_cpf_length'
-          AND conrelid = 'pollomodas.orders'::regclass
+          AND conrelid = 'baianas_moda_feminina.orders'::regclass
     ) THEN
         ALTER TABLE orders
             ADD CONSTRAINT ck_orders_customer_cpf_length

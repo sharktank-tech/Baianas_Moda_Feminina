@@ -125,9 +125,9 @@ def test_products_public_index_declared(db):
 def test_migration_0033_declares_idempotent_index():
     sql = (_MIGRATIONS / "0033_products_public_recent_index.sql").read_text()
     assert "CREATE INDEX IF NOT EXISTS ix_products_public_recent" in sql
-    assert "pollomodas.products (is_active, is_draft, created_at)" in sql
+    assert "baianas_moda_feminina.products (is_active, is_draft, created_at)" in sql
 
     down = (
         _MIGRATIONS / "0033_products_public_recent_index_down.sql"
     ).read_text()
-    assert "DROP INDEX IF EXISTS pollomodas.ix_products_public_recent" in down
+    assert "DROP INDEX IF EXISTS baianas_moda_feminina.ix_products_public_recent" in down

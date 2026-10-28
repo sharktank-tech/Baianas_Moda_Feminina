@@ -8,7 +8,7 @@ COLUMNS = {
 }
 
 
-def validate_schema(conn, schema="pollomodas"):
+def validate_schema(conn, schema="baianas_moda_feminina"):
     errors = []
     cur = conn.cursor()
     cur.execute(

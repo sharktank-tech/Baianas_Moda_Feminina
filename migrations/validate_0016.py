@@ -10,7 +10,7 @@ def validate_schema(conn) -> list[str]:
     cur.execute("""
         SELECT column_name, data_type, character_maximum_length, is_nullable
         FROM information_schema.columns
-        WHERE table_schema='pollomodas'
+        WHERE table_schema='baianas_moda_feminina'
           AND table_name='aliexpress_remote_orders'
           AND column_name IN ('tracking_code','carrier','tracking_updated_at')
     """)
@@ -29,7 +29,7 @@ def validate_schema(conn) -> list[str]:
             errors.append("tracking_updated_at has unexpected definition")
     cur.execute("""
         SELECT conname FROM pg_constraint
-        WHERE conrelid='pollomodas.aliexpress_remote_orders'::regclass
+        WHERE conrelid='baianas_moda_feminina.aliexpress_remote_orders'::regclass
           AND conname IN ('ck_areo_tracking_code_format','ck_areo_carrier_format')
     """)
     constraints = {row[0] for row in cur.fetchall()}

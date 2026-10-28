@@ -1,5 +1,5 @@
 -- Migration 0010: canonical AliExpress place-order snapshot (Fase 8.0.10)
--- Idempotente, restrita ao schema `pollomodas`. Nunca toca `public`.
+-- Idempotente, restrita ao schema `baianas_moda_feminina`. Nunca toca `public`.
 --
 -- Cria uma tabela 1:1 por aliexpress_orders para congelar os dados de escrita
 -- exigidos pelo futuro `aliexpress.trade.buy.placeorder`:
@@ -10,7 +10,7 @@
 
 \set ON_ERROR_STOP on
 
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 CREATE TABLE IF NOT EXISTS aliexpress_submission_snapshots (
     id UUID PRIMARY KEY NOT NULL,

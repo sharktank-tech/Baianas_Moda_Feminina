@@ -508,7 +508,7 @@ def _assert_selector_invariant(selector):
 def _uses_variants(product):
     """Produtos com variantes usam seleção por variante; produtos sem
     variantes continuam no fluxo por tamanho."""
-    return bool(_active_variants_for_product(product))
+    return bool(product.variants)
 
 
 def _safe_internal_url(value):
@@ -2593,9 +2593,14 @@ def register():
         email = request.form.get("email", "").strip().lower()
         telefone = request.form.get("telefone", "")
         password = request.form.get("password", "")
+        confirm_password = request.form.get("confirm_password", "")
 
-        if not username or not email or not telefone or not password:
+        if not username or not email or not telefone or not password or not confirm_password:
             flash("Todos os campos são obrigatórios.", "danger")
+            return redirect(url_for("main.register"))
+
+        if password != confirm_password:
+            flash("As senhas não coincidem.", "danger")
             return redirect(url_for("main.register"))
 
         try:

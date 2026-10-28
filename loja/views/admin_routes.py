@@ -971,7 +971,7 @@ def admin_dashboard():
         db.session.add(FooterConfig(id=uuid4(), brand_name="Baianas Moda Feminina"))
     if ContactInfo.query.first() is None:
         db.session.add(
-            ContactInfo(id=uuid4(), email="atendimento@pollomodas.com.br")
+            ContactInfo(id=uuid4(), email="atendimento@baianasmodafeminina.com.br")
         )
     db.session.commit()
 
@@ -1613,11 +1613,19 @@ def edit_product(id):
         desired_active      = request.form.get("is_active") == "on"
 
         try:
-            product.is_active = desired_active
+            if product.source == "aliexpress" and desired_active:
+                publish_product(product)
+            else:
+                product.is_active = desired_active
+                if product.source == "aliexpress" and not desired_active:
+                    product.is_draft = True
             db.session.commit()
             flash("Produto atualizado com sucesso!", "success")
             return redirect(url_for("admin.admin_dashboard", _anchor="products"))
 
+        except PublicationBlocked:
+            db.session.rollback()
+            flash("Não foi possível publicar o produto AliExpress", "danger")
         except Exception as e:
             db.session.rollback()
             flash(str(e), "danger")

@@ -39,8 +39,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
 
-SCHEMA_ENV = "POLLOMODAS_SCHEMA"
-DEFAULT_SCHEMA = "pollomodas"
+SCHEMA_ENV = "BAIANAS_DB_SCHEMA"
+DEFAULT_SCHEMA = "baianas_moda_feminina"
 SCHEMA_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 # Cast numérico protegido: só converte quando o tipo é number e os dígitos
@@ -64,7 +64,7 @@ def _schema() -> str:
     schema = os.environ.get(SCHEMA_ENV) or DEFAULT_SCHEMA
     if not SCHEMA_RE.match(schema):
         raise SystemExit(f"schema invalido: {schema!r}")
-    if schema in ("public", "auth", "storage", "extensions"):
+    if schema in ("public", "pollomodas", "auth", "storage", "extensions"):
         raise SystemExit(f"schema destrutivo/proibido: {schema!r}")
     return schema
 

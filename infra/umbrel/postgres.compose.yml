@@ -1,0 +1,35 @@
+# PostgreSQL exclusivo As Baianas — executar no host Umbrel via Docker Compose.
+# Nunca compartilhe volume, role ou base de dados com outra loja.
+services:
+  baianas-postgres:
+    image: postgres:17-alpine
+    container_name: baianas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: baianas_db
+      POSTGRES_USER: baianas_app
+      POSTGRES_PASSWORD: ${BAIANAS_POSTGRES_PASSWORD:?Defina BAIANAS_POSTGRES_PASSWORD no .env local do Umbrel}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - baianas_pgdata:/var/lib/postgresql/data
+    ports:
+      # Somente loopback do Umbrel; NÃO publicar 5432 na WAN/roteador.
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U baianas_app -d baianas_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - baianas-private
+
+volumes:
+  baianas_pgdata:
+    name: baianas_pgdata
+
+networks:
+  baianas-private:
+    name: baianas-private
+    driver: bridge

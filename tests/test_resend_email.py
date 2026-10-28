@@ -16,8 +16,8 @@ def smtp(monkeypatch):
     for key, value in {
         'EMAIL_SERVER': 'smtp.resend.com', 'EMAIL_PORT': 587,
         'EMAIL_USERNAME': None, 'EMAIL_PASSWORD': 're_test_not_a_real_key',
-        'EMAIL_SENDER': 'atendimento@pollomodas.com.br',
-        'EMAIL_SENDER_NAME': 'PolloModas',
+        'EMAIL_SENDER': 'atendimento@baianasmodafeminina.com.br',
+        'EMAIL_SENDER_NAME': 'As Baianas Moda Feminina',
     }.items():
         monkeypatch.setattr(Config, key, value)
     events = []
@@ -50,8 +50,8 @@ def test_resend_identity_tls_and_alternative(smtp):
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
     assert smtp[2][1:] == ('resend', 're_test_not_a_real_key')
     message, envelope = smtp[-1][1:]
-    assert message['From'] == 'PolloModas <atendimento@pollomodas.com.br>'
-    assert envelope == {'from_addr': 'atendimento@pollomodas.com.br',
+    assert message['From'] == 'As Baianas Moda Feminina <atendimento@baianasmodafeminina.com.br>'
+    assert envelope == {'from_addr': 'atendimento@baianasmodafeminina.com.br',
                         'to_addrs': ['customer@example.test']}
     assert message.get_content_type() == 'multipart/alternative'
     assert [p.get_content_type() for p in message.get_payload()] == ['text/plain', 'text/html']
@@ -100,9 +100,9 @@ def test_reset_dispatch_waits_for_smtp_by_default(app, smtp, monkeypatch):
     from loja.services.password_reset import _dispatch_email
     monkeypatch.delitem(app.config, 'PASSWORD_RESET_SEND_ASYNC', raising=False)
     with app.app_context():
-        _dispatch_email('customer@example.test', 'https://www.pollomodas.com.br/redefinir-senha?token=fake')
+        _dispatch_email('customer@example.test', 'https://www.baianasmodafeminina.com.br/redefinir-senha?token=fake')
     assert smtp[-1][0] == 'send'
-    assert 'atendimento@pollomodas.com.br' in smtp[-1][1]['From']
+    assert 'atendimento@baianasmodafeminina.com.br' in smtp[-1][1]['From']
     assert len(smtp[-1][1].get_payload()) == 2
 
 
@@ -121,11 +121,11 @@ def test_newsletter_uses_shared_sender(app, smtp):
         db.session.add(subscriber)
         db.session.commit()
         assert _send_welcome_email(subscriber)
-    assert smtp[-1][1]['From'] == 'PolloModas <atendimento@pollomodas.com.br>'
+    assert smtp[-1][1]['From'] == 'As Baianas Moda Feminina <atendimento@baianasmodafeminina.com.br>'
 
 
 def test_reset_request_reaches_resend_transport(client, make_user, app, smtp, monkeypatch):
-    monkeypatch.setitem(app.config, 'APP_PUBLIC_URL', 'https://www.pollomodas.com.br')
+    monkeypatch.setitem(app.config, 'APP_PUBLIC_URL', 'https://www.baianasmodafeminina.com.br')
     monkeypatch.delitem(app.config, 'PASSWORD_RESET_SEND_ASYNC', raising=False)
     user = make_user()
     # The suite shares committed rate-limit rows. Give this transport test
@@ -137,7 +137,7 @@ def test_reset_request_reaches_resend_transport(client, make_user, app, smtp, mo
     message = smtp[-1][1]
     assert message['To'] == user.email
     body = message.get_payload()[0].get_payload(decode=True).decode()
-    assert 'https://www.pollomodas.com.br/redefinir-senha?token=' in body
+    assert 'https://www.baianasmodafeminina.com.br/redefinir-senha?token=' in body
 
 
 @pytest.mark.parametrize('server,password,expected', [
@@ -154,4 +154,4 @@ def test_api_key_fallback_only_for_resend(monkeypatch, server, password, expecte
         monkeypatch.setenv('EMAIL_PASSWORD', password)
     config = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'config.py'))['Config']
     assert config.EMAIL_PASSWORD == expected
-    assert config.EMAIL_SENDER == 'atendimento@pollomodas.com.br'
+    assert config.EMAIL_SENDER == 'atendimento@baianasmodafeminina.com.br'

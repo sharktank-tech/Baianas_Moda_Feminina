@@ -1,8 +1,8 @@
 -- Migration 0016: tracking sanitizado por pedido remoto (FASE 8.3.0-B)
--- Idempotente e restrita ao schema pollomodas. Não habilita HTTP ou polling.
+-- Idempotente e restrita ao schema baianas_moda_feminina. Não habilita HTTP ou polling.
 \set ON_ERROR_STOP on
 
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 ALTER TABLE aliexpress_remote_orders
     ADD COLUMN IF NOT EXISTS tracking_code VARCHAR(64) NULL,
@@ -14,7 +14,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'ck_areo_tracking_code_format'
-          AND conrelid = 'pollomodas.aliexpress_remote_orders'::regclass
+          AND conrelid = 'baianas_moda_feminina.aliexpress_remote_orders'::regclass
     ) THEN
         ALTER TABLE aliexpress_remote_orders
             ADD CONSTRAINT ck_areo_tracking_code_format
@@ -27,7 +27,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'ck_areo_carrier_format'
-          AND conrelid = 'pollomodas.aliexpress_remote_orders'::regclass
+          AND conrelid = 'baianas_moda_feminina.aliexpress_remote_orders'::regclass
     ) THEN
         ALTER TABLE aliexpress_remote_orders
             ADD CONSTRAINT ck_areo_carrier_format

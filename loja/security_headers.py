@@ -66,7 +66,7 @@ def csp_directives(nonce: str) -> list[str]:
         "font-src 'self'",
         (
             "connect-src 'self' https://viacep.com.br "
-            "https://api.pollomodas.com.br https://www.google.com "
+            "https://www.google.com "
             f"{AD_SCRIPT_ORIGINS}"
         ),
         "frame-ancestors 'self'",

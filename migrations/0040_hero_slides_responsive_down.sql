@@ -1,11 +1,11 @@
 -- Reverte 0040: remove as colunas responsivas dos slides.
 -- Perde imagem mobile, foco, posição/visibilidade e descrições.
 -- Slides voltam ao comportamento anterior (imagem única). Restrito a
--- pollomodas; idempotente.
+-- baianas_moda_feminina; idempotente.
 
 \set ON_ERROR_STOP on
 
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 ALTER TABLE hero_slides
     DROP COLUMN IF EXISTS show_description,

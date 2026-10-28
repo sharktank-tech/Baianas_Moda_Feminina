@@ -1,14 +1,14 @@
--- Migration 0003: normalização de IDs legados VARCHAR -> UUID (PolloModas)
+-- Migration 0003: normalização de IDs legados VARCHAR -> UUID (baianas_moda_feminina)
 -- Estratégia 2 (conversão explícita, FORA do ensure_schema).
 --
 -- IMPORTANTE — ESCOPO E HISTÓRICO:
---   * 0001 (create schema)  -> instalação NOVA: cria o schema `pollomodas`.
+--   * 0001 (create schema)  -> instalação NOVA: cria o schema `baianas_moda_feminina`.
 --   * 0003 (UUID normalize) -> UPGRADE de instalação LEGADA/preexistente que
 --     ainda possua IDs VARCHAR. NÃO é necessária para um bootstrap limpo
 --     (db.create_all() já produz UUID diretamente a partir dos models).
 --   * Esta migration NUNCA deve atingir o schema `public` (sistema legado,
---     intocável). Por isso fixa `SET search_path TO pollomodas;` abaixo; todas
---     as referências não-qualificadas resolvem para `pollomodas`.
+--     intocável). Por isso fixa `SET search_path TO baianas_moda_feminina;` abaixo; todas
+--     as referências não-qualificadas resolvem para `baianas_moda_feminina`.
 --   * Trate como ferramenta de RECUPERAÇÃO de instalação legada, não como
 --     passo obrigatório de novos ambientes.
 --
@@ -38,9 +38,9 @@
 
 \set ON_ERROR_STOP on
 
--- Restringe toda a migration ao schema dedicado da PolloModas. O schema
+-- Restringe toda a migration ao schema dedicado da baianas_moda_feminina. O schema
 -- `public` (legado) jamais deve ser tocado por esta migration.
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 BEGIN;
 
@@ -118,7 +118,7 @@ BEGIN
 END $$;
 
 -- 6) Verificação explícita: esperado data_type = uuid / udt_name = uuid
---    Restrita a pollomodas (table_schema) para não confundir com public.
+--    Restrita a baianas_moda_feminina (table_schema) para não confundir com public.
 SELECT
     table_schema,
     table_name,
@@ -126,7 +126,7 @@ SELECT
     data_type,
     udt_name
 FROM information_schema.columns
-WHERE table_schema = 'pollomodas'
+WHERE table_schema = 'baianas_moda_feminina'
   AND table_name IN ('products', 'suppliers', 'cart_items', 'order_items')
   AND column_name IN ('id', 'product_id')
 ORDER BY table_name, column_name;

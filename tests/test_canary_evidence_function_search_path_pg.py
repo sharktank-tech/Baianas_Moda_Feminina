@@ -12,10 +12,10 @@ pytestmark = pytest.mark.skipif(not IS_POSTGRES, reason="requer PostgreSQL desca
 
 def test_trigger_function_search_path_migration_is_idempotent(env):
     schema, _ = env
-    assert schema.startswith("pollo_test_")
+    assert schema.startswith("baianas_smoke_")
     script = (Path(__file__).resolve().parents[1] / "migrations" /
               "0022_canary_evidence_function_search_path.sql").read_text(encoding="utf-8")
-    script = script.replace("pollomodas", schema)
+    script = script.replace("baianas_moda_feminina", schema)
     engine = create_engine(DATABASE_URL)
     try:
         with engine.connect() as conn:

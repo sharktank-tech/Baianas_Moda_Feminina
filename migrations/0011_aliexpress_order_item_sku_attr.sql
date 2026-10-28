@@ -1,5 +1,5 @@
 -- Migration 0011: freeze AliExpress sku_attr in fulfillment snapshot (Fase 8.0.10.1)
--- Idempotente, restrita ao schema `pollomodas`. Nunca toca `public`.
+-- Idempotente, restrita ao schema `baianas_moda_feminina`. Nunca toca `public`.
 --
 -- Contexto:
 --   Depois que AliExpressOrderItem é materializado, catálogo mutável nunca mais
@@ -15,7 +15,7 @@
 
 \set ON_ERROR_STOP on
 
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 ALTER TABLE aliexpress_order_items
     ADD COLUMN IF NOT EXISTS supplier_sku_attr TEXT;
@@ -29,7 +29,7 @@ BEGIN
             AND conrelid = (
                 SELECT c.oid FROM pg_class c
                 JOIN pg_namespace n ON n.oid = c.relnamespace
-                WHERE n.nspname = 'pollomodas' AND c.relname = 'aliexpress_order_items'
+                WHERE n.nspname = 'baianas_moda_feminina' AND c.relname = 'aliexpress_order_items'
             )
     ) THEN
         ALTER TABLE aliexpress_order_items

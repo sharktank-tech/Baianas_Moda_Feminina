@@ -1,6 +1,6 @@
 -- Slides responsivos: imagem mobile + foco + posição/visibilidade do conteúdo.
 --
--- Aditivo e idempotente; restrito ao schema `pollomodas`. Todos os defaults
+-- Aditivo e idempotente; restrito ao schema `baianas_moda_feminina`. Todos os defaults
 -- reproduzem o comportamento atual, sem alterar silenciosamente os slides
 -- existentes: imagem atual vira desktop/fallback, foco centralizado,
 -- conteúdo à esquerda e título/descrição exibidos.
@@ -16,7 +16,7 @@
 
 \set ON_ERROR_STOP on
 
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 ALTER TABLE hero_slides
     ADD COLUMN IF NOT EXISTS image_mobile TEXT;

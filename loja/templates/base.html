@@ -3,41 +3,29 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="{% block meta_description %}Baianas Moda Feminina — moda feminina com estilo e qualidade.{% endblock %}">
-  <meta name="keywords" content="{% block meta_keywords %}roupas, moda, promoções, loja online, Baianas Moda Feminina{% endblock %}">
-  <title>{% block title %}Baianas Moda Feminina{% endblock %}</title>
-
-  <!-- Google AdSense: auto ads carregado somente após o window load
-       (fase do plano: PageLoad ≤3.5s / requests ≤25 — o request do
-       adsbygoogle.js deixa de disputar o critical path). -->
-  <script nonce="{{ csp_nonce }}">
-    window.addEventListener('load', function () {
-      var adsbygoogle = document.createElement('script');
-      adsbygoogle.async = true;
-      adsbygoogle.crossOrigin = 'anonymous';
-      adsbygoogle.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1185235685562020';
-      document.head.appendChild(adsbygoogle);
-    });
-  </script>
+  <meta name="description" content="{% block meta_description %}As Baianas Moda Feminina — moda feminina com estilo e qualidade.{% endblock %}">
+  <meta name="keywords" content="{% block meta_keywords %}roupas, moda, promoções, loja online, As Baianas Moda Feminina{% endblock %}">
+  <title>{% block title %}As Baianas Moda Feminina{% endblock %}</title>
 
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/tailwind.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/fonts.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles/animation.css') }}">
-  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-baianas.svg') }}">
+  <link rel="alternate icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
   {% block extra_head %}{% endblock %}
 
   <style nonce="{{ csp_nonce }}">
     :root {
       /* ── Marca ── */
-      --brand-pink:       #fc03a9;
-      --brand-pink-dark:  #e60090;
-      --brand-pink-light: #fdf0f5;
+      --brand-pink:       #b40d4c;
+      --brand-pink-dark:  #850b39;
+      --brand-pink-light: #fff0f5;
       /* ── Neutros ── */
-      --ink:          #1A1A1A;
+      --ink:          #2b1820;
       --gray-700:     #4D4D4D;
       --gray-500:     #808080;
       --gray-300:     #D9D9D9;
-      --gray-100:     #F5F5F5;
+      --gray-100:     #fff7fa;
       --white: #FFFFFF;
       /* ── Semânticos ── */
       --sale-red:      #E5251B;
@@ -84,7 +72,7 @@
        PROMO STRIP (topo)
     ════════════════════════════════════════ */
     .promo-strip {
-      background: var(--accent);
+      background: linear-gradient(90deg, #8d0c3b, #c61a61, #8d0c3b);
       color: #fff;
       overflow: hidden;
       white-space: nowrap;
@@ -155,6 +143,12 @@
       flex-shrink: 0;
     }
     .navbar-brand span { color: var(--brand-pink); }
+    .navbar-brand__name { font-family: "Brush Script MT", "Segoe Script", "Snell Roundhand", cursive; font-style: italic; font-size: 2rem; font-weight: 700; color: #ac164f; letter-spacing: -.055em; text-shadow: 1px 2px #ffe0ed; }
+    .navbar-brand__name::before { content: "♡"; font-family: Georgia, serif; font-size: .7em; margin-right: .12em; }
+    .navbar-brand__subtitle { display: block; text-align: center; font-family: "DM Sans", sans-serif; font-size: .54rem; font-weight: 800; letter-spacing: .24em; color: #8c3555; }
+    @media (max-width: 620px) { .navbar-brand__name { font-size: 1.45rem; } .navbar-brand__subtitle { font-size: .45rem; } }
+    .navbar-brand { letter-spacing: -.035em; }
+
 
     /* ── Busca ampla (sempre visível) ── */
     .navbar-search {
@@ -747,7 +741,7 @@
   <!-- ── Navbar ── -->
   <nav class="navbar">
     <a href="{{ url_for('main.home') }}" class="navbar-brand">
-      {% if site and site.name %}{{ site.name }}{% else %}Pollo<span>.</span>Modas{% endif %}
+      <span class="navbar-brand__name">As Baianas</span><span class="navbar-brand__subtitle">Moda Feminina</span>
     </a>
 
     <!-- Busca ampla, sempre visível -->
@@ -808,7 +802,7 @@
 
       <div class="navbar-drawer-header">
         <a href="{{ url_for('main.home') }}" class="navbar-drawer-brand">
-          {% if site and site.name %}{{ site.name }}{% else %}Pollo<span>.</span>Modas{% endif %}
+          {% if site and site.name %}{{ site.name }}{% else %}As <span>Baianas</span>{% endif %}
         </a>
         <button class="navbar-drawer-close" id="navDrawerClose" aria-label="Fechar menu">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
@@ -852,7 +846,7 @@
         <!-- Col 1: brand -->
         <div>
           <span class="footer-brand-logo">
-            {% if footer and footer.brand_name %}{{ footer.brand_name }}{% else %}Pollo<span>.</span>Modas{% endif %}
+            As <span>Baianas</span>
           </span>
           <p class="footer-brand-desc">
             {% if footer and footer.brand_description %}{{ footer.brand_description }}{% else %}Moda com identidade. Qualidade que você sente na primeira peça.{% endif %}
@@ -953,7 +947,7 @@
           {% if footer %}
             &copy; {{ footer.copyright_year }} {{ footer.brand_name }}. {{ footer.copyright_text }}
           {% else %}
-            &copy; 2026 Baianas Moda Feminina. Todos os direitos reservados.
+            &copy; 2026 As Baianas Moda Feminina. Todos os direitos reservados.
           {% endif %}
         </span>
         {% if footer and footer.legal_links %}

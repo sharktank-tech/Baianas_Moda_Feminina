@@ -21,7 +21,7 @@
 -- A liberação em si acontece no próximo cron (09:17 UTC) ou pelo botão
 -- admin de liberação em lote.
 
-UPDATE pollomodas.orders
+UPDATE baianas_moda_feminina.orders
 SET mp_preference_expires_at = created_at + interval '24 hours'
 WHERE status = 'pending_payment'
   AND mp_preference_expires_at IS NULL;

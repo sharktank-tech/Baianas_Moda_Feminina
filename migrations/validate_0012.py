@@ -1,8 +1,8 @@
 """Validator for migration 0012: AliExpress remote orders with durable attempts.
 
 Validates:
-- Table pollomodas.aliexpress_submission_attempts exists with all columns
-- Table pollomodas.aliexpress_remote_orders exists with all columns
+- Table baianas_moda_feminina.aliexpress_submission_attempts exists with all columns
+- Table baianas_moda_feminina.aliexpress_remote_orders exists with all columns
 - CHECK constraints present (state in_flight/confirmed/rejected/unknown, position >= 0)
 - Unique constraints present (attempt_key, remote_order_id, aliexpress_order_id+position)
 - Foreign keys present and correct
@@ -35,18 +35,18 @@ def validate_schema(conn) -> list[str]:
     # 1. aliexpress_submission_attempts table
     cur.execute("""
         SELECT count(*) FROM information_schema.tables
-        WHERE table_schema = 'pollomodas'
+        WHERE table_schema = 'baianas_moda_feminina'
           AND table_name = 'aliexpress_submission_attempts'
     """)
     if cur.fetchone()[0] == 0:
-        errors.append("Table pollomodas.aliexpress_submission_attempts NOT FOUND")
+        errors.append("Table baianas_moda_feminina.aliexpress_submission_attempts NOT FOUND")
         return errors
 
     # Columns
     cur.execute("""
         SELECT column_name, data_type, is_nullable
         FROM information_schema.columns
-        WHERE table_schema = 'pollomodas'
+        WHERE table_schema = 'baianas_moda_feminina'
           AND table_name = 'aliexpress_submission_attempts'
         ORDER BY ordinal_position
     """)
@@ -81,7 +81,7 @@ def validate_schema(conn) -> list[str]:
           AND conrelid = (
               SELECT c.oid FROM pg_class c
               JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = 'pollomodas' AND c.relname = 'aliexpress_submission_attempts'
+              WHERE n.nspname = 'baianas_moda_feminina' AND c.relname = 'aliexpress_submission_attempts'
           )
     """)
     if cur.fetchone() is None:
@@ -91,7 +91,7 @@ def validate_schema(conn) -> list[str]:
     # na migration 0012 — LONGE de pg_constraint; vive em pg_indexes).
     cur.execute("""
         SELECT indexname FROM pg_indexes
-        WHERE schemaname = 'pollomodas'
+        WHERE schemaname = 'baianas_moda_feminina'
           AND tablename = 'aliexpress_submission_attempts'
           AND indexname = 'ux_ase_attempt_key'
     """)
@@ -101,17 +101,17 @@ def validate_schema(conn) -> list[str]:
     # 2. aliexpress_remote_orders table
     cur.execute("""
         SELECT count(*) FROM information_schema.tables
-        WHERE table_schema = 'pollomodas'
+        WHERE table_schema = 'baianas_moda_feminina'
           AND table_name = 'aliexpress_remote_orders'
     """)
     if cur.fetchone()[0] == 0:
-        errors.append("Table pollomodas.aliexpress_remote_orders NOT FOUND")
+        errors.append("Table baianas_moda_feminina.aliexpress_remote_orders NOT FOUND")
         return errors
 
     cur.execute("""
         SELECT column_name, data_type, is_nullable
         FROM information_schema.columns
-        WHERE table_schema = 'pollomodas'
+        WHERE table_schema = 'baianas_moda_feminina'
           AND table_name = 'aliexpress_remote_orders'
         ORDER BY ordinal_position
     """)
@@ -138,7 +138,7 @@ def validate_schema(conn) -> list[str]:
           AND conrelid = (
               SELECT c.oid FROM pg_class c
               JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = 'pollomodas' AND c.relname = 'aliexpress_remote_orders'
+              WHERE n.nspname = 'baianas_moda_feminina' AND c.relname = 'aliexpress_remote_orders'
           )
     """)
     if cur.fetchone() is None:
@@ -151,7 +151,7 @@ def validate_schema(conn) -> list[str]:
           AND conrelid = (
               SELECT c.oid FROM pg_class c
               JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = 'pollomodas' AND c.relname = 'aliexpress_remote_orders'
+              WHERE n.nspname = 'baianas_moda_feminina' AND c.relname = 'aliexpress_remote_orders'
           )
     """)
     if cur.fetchone() is None:
@@ -164,7 +164,7 @@ def validate_schema(conn) -> list[str]:
           AND conrelid = (
               SELECT c.oid FROM pg_class c
               JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = 'pollomodas' AND c.relname = 'aliexpress_remote_orders'
+              WHERE n.nspname = 'baianas_moda_feminina' AND c.relname = 'aliexpress_remote_orders'
           )
     """)
     if cur.fetchone() is None:
@@ -178,7 +178,7 @@ def validate_schema(conn) -> list[str]:
           AND conrelid = (
               SELECT c.oid FROM pg_class c
               JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = 'pollomodas' AND c.relname = 'aliexpress_remote_orders'
+              WHERE n.nspname = 'baianas_moda_feminina' AND c.relname = 'aliexpress_remote_orders'
           )
     """)
     if cur.fetchone() is None:
@@ -187,7 +187,7 @@ def validate_schema(conn) -> list[str]:
     # 3. Backfill: aliexpress_orders.ali_order_id should allow NULL
     cur.execute("""
         SELECT is_nullable FROM information_schema.columns
-        WHERE table_schema = 'pollomodas'
+        WHERE table_schema = 'baianas_moda_feminina'
           AND table_name = 'aliexpress_orders'
           AND column_name = 'ali_order_id'
     """)
@@ -208,16 +208,16 @@ def validate_schema(conn) -> list[str]:
 
 
 def _apply_migration(cur, schema: str) -> None:
-    """Aplica migration 0012 num schema alvo (substitui `pollomodas`)."""
+    """Aplica migration 0012 num schema alvo (substitui `baianas_moda_feminina`)."""
     here = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(here, "0012_aliexpress_remote_orders.sql"), "r") as f:
         sql = f.read()
-    # Alignment contract: o DDL referencia `pollomodas`; para provas em schema
+    # Alignment contract: o DDL referencia `baianas_moda_feminina`; para provas em schema
     # descartável substituímos o schema alvo. Mantém UNIQUE INDEX, CHECKs e
     # backfill exatamente como em produção.
     # Strip psql meta-commands (lines starting with backslash) for psycopg2 compatibility.
     sql = "\n".join(line for line in sql.split("\n") if not line.lstrip().startswith("\\"))
-    sql = sql.replace("pollomodas", schema)
+    sql = sql.replace("baianas_moda_feminina", schema)
     cur.execute(sql)
 
 

@@ -1,9 +1,9 @@
 -- Cotação vigente de frete por vínculo e cenário de referência.
 -- Guarda somente prefixo de CEP e referência opaca; nunca endereço/CEP completo
 -- nem payload ou credencial do fornecedor.
-CREATE TABLE IF NOT EXISTS pollomodas.supplier_reference_freight_quotes (
+CREATE TABLE IF NOT EXISTS baianas_moda_feminina.supplier_reference_freight_quotes (
     supplier_product_id uuid NOT NULL
-        REFERENCES pollomodas.supplier_products(id) ON DELETE CASCADE,
+        REFERENCES baianas_moda_feminina.supplier_products(id) ON DELETE CASCADE,
     dest_prefix varchar(3) NOT NULL,
     option_key varchar(120) NOT NULL DEFAULT '',
     quantity integer NOT NULL,
@@ -36,4 +36,4 @@ CREATE TABLE IF NOT EXISTS pollomodas.supplier_reference_freight_quotes (
 );
 
 CREATE INDEX IF NOT EXISTS ix_supplier_reference_freight_quotes_expiry
-    ON pollomodas.supplier_reference_freight_quotes (expires_at);
+    ON baianas_moda_feminina.supplier_reference_freight_quotes (expires_at);

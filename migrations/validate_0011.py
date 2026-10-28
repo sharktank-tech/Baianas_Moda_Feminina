@@ -1,7 +1,7 @@
 """Validator for migration 0011: AliExpress order item supplier_sku_attr.
 
 Validates:
-- Column supplier_sku_attr exists in pollomodas.aliexpress_order_items
+- Column supplier_sku_attr exists in baianas_moda_feminina.aliexpress_order_items
 - Column type is TEXT
 - Column is nullable
 - CHECK constraint exists (if present) enforcing non-empty strings
@@ -35,7 +35,7 @@ def validate_schema(conn) -> list[str]:
     cur.execute("""
         SELECT data_type, is_nullable
         FROM information_schema.columns
-        WHERE table_schema = 'pollomodas'
+        WHERE table_schema = 'baianas_moda_feminina'
           AND table_name = 'aliexpress_order_items'
           AND column_name = 'supplier_sku_attr'
     """)
@@ -60,7 +60,7 @@ def validate_schema(conn) -> list[str]:
           AND conrelid = (
               SELECT c.oid FROM pg_class c
               JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = 'pollomodas' AND c.relname = 'aliexpress_order_items'
+              WHERE n.nspname = 'baianas_moda_feminina' AND c.relname = 'aliexpress_order_items'
           )
     """)
     ck_row = cur.fetchone()

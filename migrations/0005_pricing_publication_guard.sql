@@ -1,5 +1,5 @@
 -- Migration 0005: precificação dropshipping + guarda de publicação (FASE 6)
--- — APENAS adições, restritas ao schema `pollomodas`. Nunca toca `public`.
+-- — APENAS adições, restritas ao schema `baianas_moda_feminina`. Nunca toca `public`.
 --
 -- Escopo e histórico:
 --   * 0004 (draft import) -> colunas de frete em supplier_products.
@@ -39,9 +39,9 @@
 
 \set ON_ERROR_STOP on
 
--- Restringe toda a migration ao schema dedicado da PolloModas. O schema
+-- Restringe toda a migration ao schema dedicado da baianas_moda_feminina. O schema
 -- `public` (legado) jamais deve ser tocado por esta migration.
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 ALTER TABLE products
     ADD COLUMN IF NOT EXISTS currency VARCHAR(3)
@@ -65,7 +65,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'ck_product_target_margin_range'
-          AND conrelid = 'pollomodas.products'::regclass
+          AND conrelid = 'baianas_moda_feminina.products'::regclass
     ) THEN
         ALTER TABLE products
             ADD CONSTRAINT ck_product_target_margin_range
@@ -81,7 +81,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'ck_product_aliexpress_publication_guard'
-          AND conrelid = 'pollomodas.products'::regclass
+          AND conrelid = 'baianas_moda_feminina.products'::regclass
     ) THEN
         ALTER TABLE products
             ADD CONSTRAINT ck_product_aliexpress_publication_guard
@@ -98,7 +98,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'ck_product_pricing_status'
-          AND conrelid = 'pollomodas.products'::regclass
+          AND conrelid = 'baianas_moda_feminina.products'::regclass
     ) THEN
         ALTER TABLE products
             ADD CONSTRAINT ck_product_pricing_status

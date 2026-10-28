@@ -10,7 +10,7 @@ def validate_schema(conn):
     cur.execute("""
         SELECT column_name, data_type, character_maximum_length, is_nullable
         FROM information_schema.columns
-        WHERE table_schema='pollomodas' AND table_name='orders'
+        WHERE table_schema='baianas_moda_feminina' AND table_name='orders'
           AND column_name IN (
             'supplier_refund_state','supplier_refund_requested_at',
             'supplier_refund_confirmed_at','supplier_refund_last_error'
@@ -33,7 +33,7 @@ def validate_schema(conn):
     cur.execute("""
         SELECT 1 FROM pg_constraint
         WHERE conname='ck_orders_supplier_refund_state'
-          AND conrelid='pollomodas.orders'::regclass
+          AND conrelid='baianas_moda_feminina.orders'::regclass
     """)
     if cur.fetchone() is None:
         errors.append("constraint ck_orders_supplier_refund_state NOT FOUND")

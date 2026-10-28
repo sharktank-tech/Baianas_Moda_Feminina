@@ -1,7 +1,7 @@
 """Prova de corrida pagamento x fulfillment em PostgreSQL (Fase 8.1.0) — HARD-OFF.
 
 Só roda quando DATABASE_URL aponta para PostgreSQL (dialeto ``postgresql``).
-Usa schema descartável ``pollo_test_payment_guard_*`` criado e dropado por
+Usa schema descartável ``baianas_smoke_payment_guard_*`` criado e dropado por
 teste; NUNCA toca ``public``, a base de testes compartilhada nem banco de
 produção.
 
@@ -74,7 +74,7 @@ class CountingSubmitter:
 
 @pytest.fixture
 def env(monkeypatch):
-    schema = "pollo_test_%s_%s" % ("payment_guard", secrets.token_hex(4))
+    schema = "baianas_smoke_%s_%s" % ("payment_guard", secrets.token_hex(4))
     eng = create_engine(DATABASE_URL)
     with eng.connect() as c:
         c.execute(text("CREATE SCHEMA IF NOT EXISTS %s" % schema))

@@ -29,11 +29,13 @@ class Config:
     # queries) ocorre dentro dele; `public` pertence a outro sistema e é
     # intocável. Em testes isolados (ex.: baianas_smoke_xxx) sobrescreva via env
     # BAIANAS_SCHEMA — mas NUNCA aponte para public/baianas em produção.
-    POLLOMODAS_SCHEMA = os.getenv("POLLOMODAS_SCHEMA", "baianas_moda_feminina")
+    BAIANAS_DB_SCHEMA = os.getenv("BAIANAS_DB_SCHEMA", "baianas_moda_feminina")
+    if BAIANAS_DB_SCHEMA != "baianas_moda_feminina" and not (os.getenv("BAIANAS_ALLOW_TEST_SCHEMA") == "1" and BAIANAS_DB_SCHEMA.startswith("baianas_smoke_")):
+        raise RuntimeError("Schema inválido: a Baianas só pode usar baianas_moda_feminina.")
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # search_path: em PostgreSQL usamos options=-csearch_path=<POLLOMODAS_SCHEMA>
+    # search_path: em PostgreSQL usamos options=-csearch_path=<BAIANAS_DB_SCHEMA>
     # como DICA para conexão direta / pooling de sessão. PORÉM o Session Pooler
     # do Supabase em transaction pooling IGNORA essa option, por isso o mecanismo
     # definitivo é o hook de transação (SET LOCAL search_path) instalado em
@@ -45,7 +47,7 @@ class Config:
     }
     if DATABASE_URL.startswith("postgresql"):
         SQLALCHEMY_ENGINE_OPTIONS["connect_args"] = {
-            "options": "-csearch_path=%s" % POLLOMODAS_SCHEMA,
+            "options": "-csearch_path=%s" % BAIANAS_DB_SCHEMA,
         }
 
     # ============= Email ==================

@@ -1,5 +1,5 @@
 -- Migration 0013: audited AliExpress submission snapshot revisions (FASE 8.0.11Y)
--- Idempotente, restrita ao schema `pollomodas`. Nunca toca `public`.
+-- Idempotente, restrita ao schema `baianas_moda_feminina`. Nunca toca `public`.
 --
 -- Objetivo:
 --   preservar integralmente o snapshot ativo ANTES de uma correção manual e
@@ -8,7 +8,7 @@
 
 \set ON_ERROR_STOP on
 
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 CREATE TABLE IF NOT EXISTS aliexpress_submission_snapshot_revisions (
     id UUID PRIMARY KEY NOT NULL,

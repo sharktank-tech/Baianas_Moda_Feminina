@@ -7,12 +7,12 @@
 -- não provada do catálogo) e as contagens de estoque.
 --
 -- Nunca guarda payload do fornecedor, token, sku_id nem product_id externo.
--- Aditivo e idempotente; restrito ao schema `pollomodas`.
+-- Aditivo e idempotente; restrito ao schema `baianas_moda_feminina`.
 -- DOWN em 0037_aliexpress_sync_attempts_down.sql.
 
 \set ON_ERROR_STOP on
 
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 CREATE TABLE IF NOT EXISTS aliexpress_sync_attempts (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

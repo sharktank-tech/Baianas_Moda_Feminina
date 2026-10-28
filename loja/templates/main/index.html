@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
-{% block title %}{{ site.name }} — Novidades e Promoções{% endblock %}
-{% block meta_description %}{{ site.meta_description }}{% endblock %}
+{% block title %}As Baianas Moda Feminina — Novidades e Promoções{% endblock %}
+{% block meta_description %}Moda feminina com personalidade, estilo e carinho. Conheça As Baianas Moda Feminina.{% endblock %}
 
 {% block extra_head %}
   <link rel="canonical" href="{{ request.url_root.rstrip('/') }}{{ url_for('main.home') }}">
@@ -15,7 +15,7 @@
   <meta property="og:image" content="{{ hero_slides[0].image }}">
   {% endif %}
 
-  <link rel="preload" as="image" href="{{ hero_slides[0].image if hero_slides else url_for('static', filename='img/agua-de-coco.jpg') }}" media="(min-width: 701px)">
+  <link rel="preload" as="image" href="{{ hero_slides[0].image if hero_slides else url_for('static', filename='img/favicon-baianas.svg') }}" media="(min-width: 701px)">
   {% if hero_slides and hero_slides[0].image_mobile %}
   <link rel="preload" as="image" href="{{ hero_slides[0].image_mobile }}" media="(max-width: 700px)">
   {% endif %}
@@ -406,7 +406,7 @@
           <div class="hero-carousel__media">
             <img
               class="hero-carousel__image"
-              src="{{ url_for('static', filename='img/agua-de-coco.jpg') }}"
+              src="{{ url_for('static', filename='img/favicon-baianas.svg') }}"
               alt="Coleção Outono Inverno 2026"
               width="1600"
               height="700"

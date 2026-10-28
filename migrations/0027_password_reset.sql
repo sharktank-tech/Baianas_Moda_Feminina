@@ -1,4 +1,4 @@
--- Fluxo "Esqueci minha senha" (PolloModas).
+-- Fluxo "Esqueci minha senha" (baianas_moda_feminina).
 -- 1) auth_version: versão de autenticação por usuário; embutida no payload de
 --    sessão/lembrar-me (User.get_id) e validada no user_loader — trocar a
 --    senha invalida sessões e cookies "manter conectado" antigos.
@@ -7,13 +7,13 @@
 -- 3) auth_rate_limits: limite de tentativas por IP e por e-mail (janela fixa).
 -- Idempotente. Seção final DOWN é reversível.
 
-ALTER TABLE pollomodas.users
+ALTER TABLE baianas_moda_feminina.users
     ADD COLUMN IF NOT EXISTS auth_version integer NOT NULL DEFAULT 1;
 
-CREATE TABLE IF NOT EXISTS pollomodas.password_reset_tokens (
+CREATE TABLE IF NOT EXISTS baianas_moda_feminina.password_reset_tokens (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid NOT NULL
-        REFERENCES pollomodas.users(id) ON DELETE CASCADE,
+        REFERENCES baianas_moda_feminina.users(id) ON DELETE CASCADE,
     token_hash varchar(64) NOT NULL,
     created_at timestamp without time zone NOT NULL,
     expires_at timestamp without time zone NOT NULL,
@@ -26,13 +26,13 @@ CREATE TABLE IF NOT EXISTS pollomodas.password_reset_tokens (
 -- No máximo 1 token não consumido por usuário (nova solicitação revoga os
 -- anteriores no serviço; o índice garante a unicidade mesmo sob corrida).
 CREATE UNIQUE INDEX IF NOT EXISTS uq_password_reset_active_user
-    ON pollomodas.password_reset_tokens (user_id)
+    ON baianas_moda_feminina.password_reset_tokens (user_id)
     WHERE used_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS ix_password_reset_tokens_user
-    ON pollomodas.password_reset_tokens (user_id);
+    ON baianas_moda_feminina.password_reset_tokens (user_id);
 
-CREATE TABLE IF NOT EXISTS pollomodas.auth_rate_limits (
+CREATE TABLE IF NOT EXISTS baianas_moda_feminina.auth_rate_limits (
     scope varchar(32) NOT NULL,
     key_hash varchar(64) NOT NULL,
     window_started_at timestamp without time zone NOT NULL,

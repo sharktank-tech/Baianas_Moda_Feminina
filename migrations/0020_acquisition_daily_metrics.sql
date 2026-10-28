@@ -1,6 +1,6 @@
 -- Migration 0020: sessões agregadas por canal (FASE 9.0.0-G)
 \set ON_ERROR_STOP on
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 CREATE TABLE IF NOT EXISTS acquisition_daily_metrics (
     id UUID PRIMARY KEY,

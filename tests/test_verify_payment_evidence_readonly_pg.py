@@ -34,7 +34,7 @@ pytestmark = pytest.mark.skipif(
 def _run(schema: str) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["DATABASE_URL"] = DATABASE_URL
-    env["POLLOMODAS_SCHEMA"] = schema
+    env["BAIANAS_DB_SCHEMA"] = schema
     env["PYTHONPATH"] = os.pathsep.join(
         filter(
             None,

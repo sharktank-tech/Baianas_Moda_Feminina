@@ -15,13 +15,13 @@ pytestmark = pytest.mark.skipif(
 
 def test_recovery_skip_migration_is_idempotent_and_scoped(env):
     schema, _ = env
-    assert schema.startswith("pollo_test_")
+    assert schema.startswith("baianas_smoke_")
     script = (
         Path(__file__).resolve().parents[1]
         / "migrations"
         / "0023_checkout_recovery_skip.sql"
     ).read_text(encoding="utf-8")
-    script = script.replace("pollomodas", schema)
+    script = script.replace("baianas_moda_feminina", schema)
 
     engine = create_engine(DATABASE_URL)
     try:
