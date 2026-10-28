@@ -15,7 +15,7 @@ from loja import schema as schema_mod
 
 
 def _clear_env(monkeypatch):
-    for var in ("VERCEL", "POLLOMODAS_BOOTSTRAP_ON_STARTUP"):
+    for var in ("VERCEL", "BAIANAS_BOOTSTRAP_ON_STARTUP"):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -33,19 +33,19 @@ def test_gate_local_default_true(monkeypatch):
 def test_gate_vercel_explicit_true(monkeypatch):
     _clear_env(monkeypatch)
     monkeypatch.setenv("VERCEL", "1")
-    monkeypatch.setenv("POLLOMODAS_BOOTSTRAP_ON_STARTUP", "1")
+    monkeypatch.setenv("BAIANAS_BOOTSTRAP_ON_STARTUP", "1")
     assert loja._should_bootstrap_database_on_startup() is True
 
 
 def test_gate_local_explicit_false(monkeypatch):
     _clear_env(monkeypatch)
-    monkeypatch.setenv("POLLOMODAS_BOOTSTRAP_ON_STARTUP", "0")
+    monkeypatch.setenv("BAIANAS_BOOTSTRAP_ON_STARTUP", "0")
     assert loja._should_bootstrap_database_on_startup() is False
 
 
 def test_vercel_no_bootstrap(monkeypatch):
     _clear_env(monkeypatch)
-    monkeypatch.setenv("VERCEL", "1")  # POLLOMODAS_BOOTSTRAP_ON_STARTUP ausente
+    monkeypatch.setenv("VERCEL", "1")  # BAIANAS_BOOTSTRAP_ON_STARTUP ausente
 
     calls = {"bootstrap": 0, "hook": 0, "create_all": 0, "ensure_schema": 0}
 
