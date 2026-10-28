@@ -30,7 +30,7 @@ class Config:
     # intocável. Em testes isolados (ex.: baianas_smoke_xxx) sobrescreva via env
     # BAIANAS_SCHEMA — mas NUNCA aponte para public/baianas em produção.
     POLLOMODAS_SCHEMA = os.getenv("BAIANAS_DB_SCHEMA", "baianas_moda_feminina")
-    if POLLOMODAS_SCHEMA != "baianas_moda_feminina":
+    if POLLOMODAS_SCHEMA != "baianas_moda_feminina" and not (os.getenv("BAIANAS_ALLOW_TEST_SCHEMA") == "1" and POLLOMODAS_SCHEMA.startswith("baianas_smoke_")):
         raise RuntimeError("Schema inválido: a Baianas só pode usar baianas_moda_feminina.")
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
