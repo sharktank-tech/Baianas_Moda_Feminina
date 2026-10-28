@@ -3,7 +3,7 @@ registros e persistência de rótulos de 21–40 caracteres.
 
 Só roda quando DATABASE_URL (ORIGINAL, antes do conftest trocar por SQLite)
 aponta para PostgreSQL — mesmo padrão dos demais test_*_pg.py. Usa schema
-descartável próprio; NUNCA toca `pollomodas` nem produção.
+descartável próprio; NUNCA toca `baianas_moda_feminina` nem produção.
 """
 
 import secrets
@@ -27,7 +27,7 @@ _MIG = Path(__file__).resolve().parents[1] / "migrations"
 
 def _script(nome: str, schema: str) -> str:
     return (_MIG / nome).read_text(encoding="utf-8").replace(
-        "pollomodas", schema
+        "baianas_moda_feminina", schema
     )
 
 
@@ -45,7 +45,7 @@ def _largura(conn, schema, tabela, coluna):
 
 
 def test_0028_up_idempotente_preserva_e_persiste_21_40():
-    schema = "pollo_test_variant_size_%s" % secrets.token_hex(4)
+    schema = "baianas_smoke_variant_size_%s" % secrets.token_hex(4)
     engine = create_engine(DATABASE_URL)
     try:
         with engine.connect() as conn:

@@ -250,7 +250,7 @@ def test_reviewed_migration_is_idempotent_in_disposable_schema(env):
     script = (Path(__file__).resolve().parents[1] / "migrations" /
               "0006_canary_evidence.sql").read_text(encoding="utf-8")
     # Replace the reviewed target in-memory for this disposable schema only.
-    script = script.replace("pollomodas", schema)
+    script = script.replace("baianas_moda_feminina", schema)
     engine = create_engine(DATABASE_URL)
     try:
         with engine.connect() as conn:

@@ -187,7 +187,7 @@ jobs:
           assert url.get_backend_name() == "postgresql", url
           assert url.host in ("127.0.0.1", "localhost", "::1"), url.host
           assert url.database == "baianastest", url.database
-          assert url.database.startswith("pollo"), url.database
+          assert url.database.startswith("baianas"), url.database
           print("DATABASE_URL OK ->", url.render_as_string(hide_password=True))
           PY
 

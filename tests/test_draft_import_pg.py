@@ -1,7 +1,7 @@
 """Validação do import de rascunho AliExpress em PostgreSQL (Fase 5).
 
 Só roda quando DATABASE_URL aponta para PostgreSQL. Usa schemas descartáveis
-`pollo_test_*` e NUNCA toca `public` nem o schema persistente `pollomodas`:
+`baianas_smoke_*` e NUNCA toca `public` nem o schema persistente `baianas_moda_feminina`:
 - aplica migrations/0004 sem destrutivo, idempotente (2x), colunas + checks
 - import/reimport integral de um draft no schema descartável
 - `public` permanece intocado (snapshot antes/depois)
@@ -97,11 +97,11 @@ def _public_columns_snapshot(eng):
 def _apply_migration(engine, schema):
     sql = _MIGRATION.read_text()
     sql = sql.replace(
-        "SET search_path TO pollomodas;",
+        "SET search_path TO baianas_moda_feminina;",
         "SET search_path TO %s;" % schema,
     )
     sql = sql.replace(
-        "'pollomodas.supplier_products'::regclass",
+        "'baianas_moda_feminina.supplier_products'::regclass",
         "'%s.supplier_products'::regclass" % schema,
     )
     with engine.begin() as c:
@@ -111,7 +111,7 @@ def _apply_migration(engine, schema):
 
 @pytest.fixture
 def env(monkeypatch):
-    schema = "pollo_test_%s_%s" % ("draft", secrets.token_hex(4))
+    schema = "baianas_smoke_%s_%s" % ("draft", secrets.token_hex(4))
     eng = create_engine(DATABASE_URL)
     with eng.connect() as c:
         c.execute(text("CREATE SCHEMA IF NOT EXISTS %s" % schema))
