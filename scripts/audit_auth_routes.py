@@ -31,7 +31,7 @@ with app.test_client() as client:
                 print(f"AVISO: redirecionamento de {path} para {location}")
     page = client.get("/login")
     html = page.get_data(as_text=True)
-    token_match = re.search(r'name=["\\\']csrf_token["\\\']\\s+value=["\\\']([^"\\\']+)', html)
+    token_match = re.search(r'<input[^>]*name="csrf_token"[^>]*value="([^"]+)"', html)
     if not token_match:
         print("FALHA formulario de login sem token CSRF detectavel")
         failures.append("csrf do login")
