@@ -11,12 +11,12 @@
 --
 -- NULL = nunca sincronizado (a liberação segue sem teto, como antes).
 -- Sem backfill: só a próxima sincronização técnica preenche.
--- Aditivo e idempotente; restrito ao schema `pollomodas`.
+-- Aditivo e idempotente; restrito ao schema `baianas_moda_feminina`.
 -- DOWN em 0038_variant_supplier_stock_down.sql.
 
 \set ON_ERROR_STOP on
 
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 ALTER TABLE product_variants
     ADD COLUMN IF NOT EXISTS supplier_stock integer;

@@ -2,11 +2,11 @@
 --
 -- Só execute após interromper a sinalização de divergência em produto
 -- publicado (produto com `pricing_status='stale'` e `is_active=true`
--- passa a violar a guarda). Restringido a pollomodas; idempotente.
+-- passa a violar a guarda). Restringido a baianas_moda_feminina; idempotente.
 
 \set ON_ERROR_STOP on
 
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 ALTER TABLE products
     DROP CONSTRAINT IF EXISTS ck_product_aliexpress_publication_guard;
