@@ -6,7 +6,7 @@
 -- estados queued/blocked/ready/submitting/...): preencher aqueles estados
 -- só para caber o registro manual corromperia a semântica da automação.
 --
--- Tabelas novas (aditivas, idempotentes, restritas ao schema `pollomodas`):
+-- Tabelas novas (aditivas, idempotentes, restritas ao schema `baianas_moda_feminina`):
 -- - manual_supplier_purchases: uma linha por pedido AliExpress (compras
 --   divididas = várias linhas); external_order_id UNIQUE impede o mesmo
 --   número em dois pedidos e dá idempotência sob concorrência.
@@ -21,7 +21,7 @@
 
 \set ON_ERROR_STOP on
 
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 CREATE TABLE IF NOT EXISTS manual_supplier_purchases (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
