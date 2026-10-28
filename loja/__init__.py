@@ -91,7 +91,7 @@ def _should_bootstrap_database_on_startup():
         serverless não deve abrir conexão nem executar migração); em ambiente
         local/controlado roda.
     """
-    explicit = os.environ.get("BAIANAS_BOOTSTRAP_ON_STARTUP")
+    explicit = os.environ.get("POLLOMODAS_BOOTSTRAP_ON_STARTUP")
     if explicit is not None:
         return explicit.strip().lower() in {"1", "true", "yes", "on"}
     # Vercel Functions não executam bootstrap/migração em cold start.

@@ -116,7 +116,7 @@ def create_preference(order):
         "items": [
             {
                 "id": str(order.id),
-                "title": f"Pedido As Baianas {str(order.id)[:8]}",
+                "title": f"Pedido Pollo Modas {str(order.id)[:8]}",
                 "description": f"{len(order.items)} item(ns) do pedido",
                 "currency_id": "BRL",
                 "quantity": 1,
@@ -146,7 +146,7 @@ def create_preference(order):
         },
         "notification_url": public_url("/pagamentos/webhook"),
         "auto_return": "approved",
-        "statement_descriptor": "AS BAIANAS",
+        "statement_descriptor": "POLLO MODAS",
         "expires": True,
         "expiration_date_from": expiration_date_from,
         "expiration_date_to": expiration_date_to,

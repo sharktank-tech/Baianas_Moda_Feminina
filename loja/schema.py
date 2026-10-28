@@ -32,7 +32,7 @@ from sqlalchemy import event, inspect, text
 # ---------------------------------------------------------------------------
 
 # Schema alvo de toda a aplicação PolloModas. Centralizado em um único ponto.
-DB_SCHEMA = os.getenv("BAIANAS_DB_SCHEMA", "baianas_moda_feminina")
+DB_SCHEMA = os.getenv("POLLOMODAS_SCHEMA", "pollomodas")
 
 # Nomes que jamais podem ser usados como schema descartável de teste/smoke,
 # pois pertencem ao Supabase/legado e estão fora do domínio da PolloModas.
@@ -41,7 +41,7 @@ RESERVED_DISPOSABLE_SCHEMAS = {"public", "pollomodas", "auth", "storage", "exten
 # Schemas que a APLICAÇÃO nunca deve usar como alvo de escrita (create_all /
 # ensure_schema). public é legado intocável; auth/storage/extensions são do
 # Supabase. pollomodas É um alvo válido (produção), por isso não está aqui.
-FORBIDDEN_TARGET_SCHEMAS = {"public", "pollomodas", "auth", "storage", "extensions"}
+FORBIDDEN_TARGET_SCHEMAS = {"public", "auth", "storage", "extensions"}
 
 
 def assert_safe_disposable_schema(name):

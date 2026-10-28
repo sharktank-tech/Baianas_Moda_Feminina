@@ -29,9 +29,7 @@ class Config:
     # queries) ocorre dentro dele; `public` pertence a outro sistema e é
     # intocável. Em testes isolados (ex.: baianas_smoke_xxx) sobrescreva via env
     # BAIANAS_SCHEMA — mas NUNCA aponte para public/baianas em produção.
-    POLLOMODAS_SCHEMA = os.getenv("BAIANAS_DB_SCHEMA", "baianas_moda_feminina")
-    if POLLOMODAS_SCHEMA != "baianas_moda_feminina":
-        raise RuntimeError("Schema inválido: a Baianas só pode usar baianas_moda_feminina.")
+    POLLOMODAS_SCHEMA = os.getenv("POLLOMODAS_SCHEMA", "baianas_moda_feminina")
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 

@@ -1,6 +1,6 @@
 -- Migration 0041: opt-out da newsletter (cancelamento + reativação).
 --
--- Aditivo e idempotente; restrito ao schema `baianas_moda_feminina`.
+-- Aditivo e idempotente; restrito ao schema `pollomodas`.
 -- - unsubscribed_at: NULL = ativo; preenchido = cancelado (supressão).
 -- - resubscribed_at: marca reativação explícita posterior (auditoria).
 --
@@ -11,7 +11,7 @@
 
 \set ON_ERROR_STOP on
 
-SET search_path TO baianas_moda_feminina;
+SET search_path TO pollomodas;
 
 ALTER TABLE newsletter_subscribers
     ADD COLUMN IF NOT EXISTS unsubscribed_at TIMESTAMP;
