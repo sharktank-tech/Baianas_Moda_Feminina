@@ -1,7 +1,7 @@
 -- Migration 0017: ledger de refund pós-cancelamento (FASE 8.3.0-H)
--- Idempotente, somente schema pollomodas. Não chama gateway financeiro.
+-- Idempotente, somente schema baianas_moda_feminina. Não chama gateway financeiro.
 \set ON_ERROR_STOP on
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 ALTER TABLE orders
     ADD COLUMN IF NOT EXISTS supplier_refund_state VARCHAR(30) NULL,
@@ -14,7 +14,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'ck_orders_supplier_refund_state'
-          AND conrelid = 'pollomodas.orders'::regclass
+          AND conrelid = 'baianas_moda_feminina.orders'::regclass
     ) THEN
         ALTER TABLE orders
             ADD CONSTRAINT ck_orders_supplier_refund_state

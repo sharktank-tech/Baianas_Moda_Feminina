@@ -1,8 +1,8 @@
 -- Migration 0018: origem de tráfego no pedido (FASE 9.0.0)
--- Idempotente, somente schema pollomodas. Captura sanitizada e opcional;
+-- Idempotente, somente schema baianas_moda_feminina. Captura sanitizada e opcional;
 -- pedidos legados permanecem NULL (fail-closed em métricas).
 \set ON_ERROR_STOP on
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 ALTER TABLE orders
     ADD COLUMN IF NOT EXISTS acquisition_source VARCHAR(64) NULL,

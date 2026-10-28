@@ -1,18 +1,18 @@
 -- Descarte administrativo auditável de candidatos de recuperação.
 -- Não representa envio, pagamento, cancelamento nem liberação de estoque.
 BEGIN;
-SET LOCAL search_path TO pollomodas;
+SET LOCAL search_path TO baianas_moda_feminina;
 
 DO $$
 BEGIN
-    IF current_schema() IS DISTINCT FROM 'pollomodas'
-       OR to_regclass('pollomodas.orders') IS NULL THEN
-        RAISE EXCEPTION 'dedicated pollomodas.orders required';
+    IF current_schema() IS DISTINCT FROM 'baianas_moda_feminina'
+       OR to_regclass('baianas_moda_feminina.orders') IS NULL THEN
+        RAISE EXCEPTION 'dedicated baianas_moda_feminina.orders required';
     END IF;
 END
 $$;
 
-ALTER TABLE pollomodas.orders
+ALTER TABLE baianas_moda_feminina.orders
     ADD COLUMN IF NOT EXISTS recovery_email_skipped_at TIMESTAMP WITHOUT TIME ZONE,
     ADD COLUMN IF NOT EXISTS recovery_email_skipped_by_user_id UUID,
     ADD COLUMN IF NOT EXISTS recovery_email_skip_reason VARCHAR(32);
@@ -23,12 +23,12 @@ BEGIN
         SELECT 1
           FROM pg_constraint
          WHERE conname = 'orders_recovery_email_skipped_by_user_id_fkey'
-           AND conrelid = 'pollomodas.orders'::regclass
+           AND conrelid = 'baianas_moda_feminina.orders'::regclass
     ) THEN
-        ALTER TABLE pollomodas.orders
+        ALTER TABLE baianas_moda_feminina.orders
             ADD CONSTRAINT orders_recovery_email_skipped_by_user_id_fkey
             FOREIGN KEY (recovery_email_skipped_by_user_id)
-            REFERENCES pollomodas.users(id)
+            REFERENCES baianas_moda_feminina.users(id)
             ON DELETE SET NULL;
     END IF;
 
@@ -36,9 +36,9 @@ BEGIN
         SELECT 1
           FROM pg_constraint
          WHERE conname = 'ck_orders_recovery_email_skip_reason'
-           AND conrelid = 'pollomodas.orders'::regclass
+           AND conrelid = 'baianas_moda_feminina.orders'::regclass
     ) THEN
-        ALTER TABLE pollomodas.orders
+        ALTER TABLE baianas_moda_feminina.orders
             ADD CONSTRAINT ck_orders_recovery_email_skip_reason
             CHECK (
                 recovery_email_skip_reason IS NULL
@@ -49,6 +49,6 @@ END
 $$;
 
 CREATE INDEX IF NOT EXISTS ix_orders_recovery_email_skipped_by_user_id
-    ON pollomodas.orders (recovery_email_skipped_by_user_id);
+    ON baianas_moda_feminina.orders (recovery_email_skipped_by_user_id);
 
 COMMIT;

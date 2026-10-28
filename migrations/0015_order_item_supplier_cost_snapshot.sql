@@ -1,12 +1,12 @@
 -- Migration 0015: snapshot financeiro do fornecedor por item (FASE 8.2.0-D)
--- Idempotente, restrita ao schema pollomodas. Nunca toca public.
+-- Idempotente, restrita ao schema baianas_moda_feminina. Nunca toca public.
 --
 -- Campos nullable preservam pedidos legados. Custo desconhecido continua NULL:
 -- a aplicação nunca o converte em zero para calcular margem.
 
 \set ON_ERROR_STOP on
 
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 ALTER TABLE order_items
     ADD COLUMN IF NOT EXISTS supplier_unit_cost_snapshot NUMERIC(10, 2) NULL,
@@ -19,7 +19,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'ck_order_items_supplier_unit_cost_positive'
-          AND conrelid = 'pollomodas.order_items'::regclass
+          AND conrelid = 'baianas_moda_feminina.order_items'::regclass
     ) THEN
         ALTER TABLE order_items ADD CONSTRAINT
             ck_order_items_supplier_unit_cost_positive
@@ -32,7 +32,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'ck_order_items_supplier_shipping_nonnegative'
-          AND conrelid = 'pollomodas.order_items'::regclass
+          AND conrelid = 'baianas_moda_feminina.order_items'::regclass
     ) THEN
         ALTER TABLE order_items ADD CONSTRAINT
             ck_order_items_supplier_shipping_nonnegative
@@ -45,7 +45,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'ck_order_items_supplier_landed_cost_positive'
-          AND conrelid = 'pollomodas.order_items'::regclass
+          AND conrelid = 'baianas_moda_feminina.order_items'::regclass
     ) THEN
         ALTER TABLE order_items ADD CONSTRAINT
             ck_order_items_supplier_landed_cost_positive
