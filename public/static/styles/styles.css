@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════
-   POLLO MODAS — styles.css
+   AS BAIANAS MODA FEMININA — styles.css
    Design system: rosa/magenta vibrante + branco + cinzas claros
    (inspirado em e-commerce de moda popular — ver design.md)
    Fontes: Poppins (display) + DM Sans (corpo)
@@ -7,15 +7,15 @@
 
 :root {
   /* ── Marca ── */
-  --brand-pink:       #EC008C;
-  --brand-pink-dark:  #B0006A;
-  --brand-pink-light: #FCE4F1;
+  --brand-pink:       #b40d4c;
+  --brand-pink-dark:  #850b39;
+  --brand-pink-light: #fff0f5;
   /* ── Neutros ── */
-  --ink:          #1A1A1A;
+  --ink:          #2b1820;
   --gray-700:     #4D4D4D;
   --gray-500:     #808080;
   --gray-300:     #D9D9D9;
-  --gray-100:     #F5F5F5;
+  --gray-100:     #fff7fa;
   --white:        #FFFFFF;
   /* ── Semânticos ── */
   --sale-red:      #E5251B;
@@ -39,7 +39,7 @@
   --black:        var(--ink);
   --black-soft:   #262626;
   --cream:        var(--gray-100);
-  --cream-dark:   #ECECEC;
+  --cream-dark:   #fce2ec;
   --gray-mid:     var(--gray-700);
   --gray-muted:   var(--gray-500);
   --border:       var(--gray-300);
