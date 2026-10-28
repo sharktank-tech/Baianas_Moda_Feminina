@@ -32,7 +32,8 @@ from sqlalchemy import event, inspect, text
 # ---------------------------------------------------------------------------
 
 # Schema alvo de toda a aplicação PolloModas. Centralizado em um único ponto.
-DB_SCHEMA = os.getenv("BAIANAS_DB_SCHEMA", "baianas_moda_feminina")
+from config import Config
+DB_SCHEMA = Config.BAIANAS_DB_SCHEMA
 
 # Nomes que jamais podem ser usados como schema descartável de teste/smoke,
 # pois pertencem ao Supabase/legado e estão fora do domínio da PolloModas.
