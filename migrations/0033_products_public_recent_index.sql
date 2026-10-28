@@ -8,4 +8,4 @@
 -- CONCURRENTLY fora de transação.
 
 CREATE INDEX IF NOT EXISTS ix_products_public_recent
-    ON pollomodas.products (is_active, is_draft, created_at);
+    ON baianas_moda_feminina.products (is_active, is_draft, created_at);

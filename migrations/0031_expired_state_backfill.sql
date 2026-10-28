@@ -19,7 +19,7 @@
 -- Idempotente: o WHERE fica vazio na reaplicação (o status deixa de ser
 -- `pending_payment`).
 
-UPDATE pollomodas.orders
+UPDATE baianas_moda_feminina.orders
 SET status = 'expired'
 WHERE status = 'pending_payment'
   AND stock_reserved = false
@@ -27,7 +27,7 @@ WHERE status = 'pending_payment'
   AND mp_preference_expires_at < now()
   AND NOT EXISTS (
       SELECT 1
-      FROM pollomodas.payments p
+      FROM baianas_moda_feminina.payments p
       WHERE p.order_id = orders.id
         AND p.status = 'approved'
   );

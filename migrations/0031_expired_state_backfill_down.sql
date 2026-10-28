@@ -7,7 +7,7 @@
 -- cron exigem reserva ativa) — usar o DOWN apenas em janela curta logo após
 -- a aplicação. Linhas com pagamento aprovado nunca são tocadas.
 
-UPDATE pollomodas.orders
+UPDATE baianas_moda_feminina.orders
 SET status = 'pending_payment'
 WHERE status = 'expired'
   AND stock_reserved = false
@@ -15,7 +15,7 @@ WHERE status = 'expired'
   AND mp_preference_expires_at < DATE '2026-10-03'
   AND NOT EXISTS (
       SELECT 1
-      FROM pollomodas.payments p
+      FROM baianas_moda_feminina.payments p
       WHERE p.order_id = orders.id
         AND p.status = 'approved'
   );

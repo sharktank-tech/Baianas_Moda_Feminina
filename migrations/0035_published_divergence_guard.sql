@@ -13,12 +13,12 @@
 -- `is_active=true` em AliExpress NÃO precificado (unpriced/blocked/ready)
 -- continua rejeitado.
 --
--- Aditivo e idempotente; restrito ao schema `pollomodas`.
+-- Aditivo e idempotente; restrito ao schema `baianas_moda_feminina`.
 -- DOWN em 0035_published_divergence_guard_down.sql.
 
 \set ON_ERROR_STOP on
 
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 ALTER TABLE products
     DROP CONSTRAINT IF EXISTS ck_product_aliexpress_publication_guard;

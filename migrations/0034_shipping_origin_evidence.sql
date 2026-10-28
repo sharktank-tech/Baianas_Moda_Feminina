@@ -17,10 +17,10 @@
 -- Nada é backfillado: ausência de linha = origem desconhecida (fail-closed).
 -- Idempotente. DOWN em 0034_shipping_origin_evidence_down.sql.
 
-CREATE TABLE IF NOT EXISTS pollomodas.supplier_sku_shipping_origins (
+CREATE TABLE IF NOT EXISTS baianas_moda_feminina.supplier_sku_shipping_origins (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     supplier_product_id uuid NOT NULL
-        REFERENCES pollomodas.supplier_products(id) ON DELETE CASCADE,
+        REFERENCES baianas_moda_feminina.supplier_products(id) ON DELETE CASCADE,
     supplier_sku_id varchar(64),
     covers_all_variants boolean NOT NULL DEFAULT FALSE,
     api_origin varchar(16),
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS pollomodas.supplier_sku_shipping_origins (
     origin_country varchar(2),
     evidence_ref text,
     confirmed_by_user_id uuid
-        REFERENCES pollomodas.users(id) ON DELETE SET NULL,
+        REFERENCES baianas_moda_feminina.users(id) ON DELETE SET NULL,
     confirmed_at timestamp without time zone,
     api_observed_at timestamp without time zone,
     created_at timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -55,17 +55,17 @@ CREATE TABLE IF NOT EXISTS pollomodas.supplier_sku_shipping_origins (
 
 -- Uma linha por escopo: SKU específico ou cobertura total do vínculo.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_shipping_origin_variant_sku
-    ON pollomodas.supplier_sku_shipping_origins
+    ON baianas_moda_feminina.supplier_sku_shipping_origins
     (supplier_product_id, supplier_sku_id)
     WHERE supplier_sku_id IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_shipping_origin_cover_all
-    ON pollomodas.supplier_sku_shipping_origins (supplier_product_id)
+    ON baianas_moda_feminina.supplier_sku_shipping_origins (supplier_product_id)
     WHERE covers_all_variants;
 
 -- Seleção de operação nacional por variante: somente a variante marcada
 -- participa do gate de operação nacional (catálogo internacional não
 -- selecionado nunca bloqueia). Aditivo, com default, sem backfill.
-ALTER TABLE pollomodas.product_variants
+ALTER TABLE baianas_moda_feminina.product_variants
     ADD COLUMN IF NOT EXISTS national_shipping_operation boolean
     NOT NULL DEFAULT FALSE;
