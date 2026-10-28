@@ -749,7 +749,7 @@
   <!-- ── Navbar ── -->
   <nav class="navbar">
     <a href="{{ url_for('main.home') }}" class="navbar-brand">
-      {% if site and site.name %}{{ site.name }}{% else %}As <span>Baianas</span>{% endif %}
+      As <span>Baianas</span>
     </a>
 
     <!-- Busca ampla, sempre visível -->
@@ -854,7 +854,7 @@
         <!-- Col 1: brand -->
         <div>
           <span class="footer-brand-logo">
-            {% if footer and footer.brand_name %}{{ footer.brand_name }}{% else %}As <span>Baianas</span>{% endif %}
+            As <span>Baianas</span>
           </span>
           <p class="footer-brand-desc">
             {% if footer and footer.brand_description %}{{ footer.brand_description }}{% else %}Moda com identidade. Qualidade que você sente na primeira peça.{% endif %}
