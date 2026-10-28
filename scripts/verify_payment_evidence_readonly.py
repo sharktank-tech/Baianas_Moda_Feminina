@@ -39,8 +39,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
 
-SCHEMA_ENV = "POLLOMODAS_SCHEMA"
-DEFAULT_SCHEMA = "pollomodas"
+SCHEMA_ENV = "BAIANAS_DB_SCHEMA"
+DEFAULT_SCHEMA = "baianas_moda_feminina"
 SCHEMA_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 # Cast numérico protegido: só converte quando o tipo é number e os dígitos

@@ -2,7 +2,7 @@
 """Smoke test PÓS-migration 0003 em PostgreSQL REAL (staging/dev), ISOLADO.
 
 Valida o schema-alvo UUID criando um SCHEMA DESCARTÁVEL dedicado
-(`pollo_smoke_<random>`) e rodando tudo lá dentro. O schema `public` (legado)
+(`baianas_smoke_<random>`) e rodando tudo lá dentro. O schema `public` (legado)
 e o schema `pollomodas` (produção da PolloModas) NÃO são tocados: nenhuma
 tabela de produção é dropada ou alterada por este script. Ao final (sucesso ou
 erro) o schema isolado é removido com `DROP SCHEMA ... CASCADE`.
@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 SECRET_KEY = os.environ.get("SECRET_KEY") or "smoke-test-secret"
-SCHEMA = os.environ.get("SMOKE_SCHEMA") or ("pollo_smoke_" + secrets.token_hex(4))
+SCHEMA = os.environ.get("SMOKE_SCHEMA") or ("baianas_smoke_" + secrets.token_hex(4))
 
 if not DATABASE_URL or not DATABASE_URL.startswith("postgresql"):
     print("ERRO: defina DATABASE_URL para um PostgreSQL (postgresql://...). "
@@ -46,7 +46,7 @@ if not DATABASE_URL or not DATABASE_URL.startswith("postgresql"):
 #   - config.SQLALCHEMY_ENGINE_OPTIONS injete options=-csearch_path=<SCHEMA>;
 #   - loja.schema.DB_SCHEMA (usado por ensure_schema) aponte para o schema
 #     descartável. Assim a app e o schema.py miram SOMENTE o schema isolado.
-os.environ["POLLOMODAS_SCHEMA"] = SCHEMA
+os.environ["BAIANAS_DB_SCHEMA"] = SCHEMA
 os.environ["SECRET_KEY"] = SECRET_KEY
 os.environ["DATABASE_URL"] = DATABASE_URL
 
@@ -57,7 +57,7 @@ from loja.schema import (
 )
 
 # Proteção: recusa nomes reservados (public/pollomodas/auth/storage/extensions)
-# e exige prefixo pollo_smoke_, mesmo que SMOKE_SCHEMA venha mal configurado.
+# e exige prefixo baianas_smoke_, mesmo que SMOKE_SCHEMA venha mal configurado.
 assert_safe_disposable_schema(SCHEMA)
 
 from loja import db, create_app  # noqa: E402
@@ -132,7 +132,7 @@ def create_isolated_schema(engine):
     """Cria o schema descartável (limpo) onde todo o smoke roda."""
     # Proteção antes de qualquer DDL destrutivo.
     assert_safe_disposable_schema(SCHEMA)
-    assert SCHEMA.startswith("pollo_smoke_")
+    assert SCHEMA.startswith("baianas_smoke_")
     with engine.connect() as conn:
         conn.execute(text("DROP SCHEMA IF EXISTS %s CASCADE" % SCHEMA))
         conn.execute(text("CREATE SCHEMA %s" % SCHEMA))
@@ -152,7 +152,7 @@ def seed_legacy(engine, tables):
 def cleanup(engine):
     """Remove o schema isolado. Nunca mexe em `public` nem `pollomodas`."""
     assert_safe_disposable_schema(SCHEMA)
-    assert SCHEMA.startswith("pollo_smoke_")
+    assert SCHEMA.startswith("baianas_smoke_")
     with engine.connect() as conn:
         conn.execute(text("DROP SCHEMA IF EXISTS %s CASCADE" % SCHEMA))
         conn.commit()
