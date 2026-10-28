@@ -2593,9 +2593,14 @@ def register():
         email = request.form.get("email", "").strip().lower()
         telefone = request.form.get("telefone", "")
         password = request.form.get("password", "")
+        confirm_password = request.form.get("confirm_password", "")
 
-        if not username or not email or not telefone or not password:
+        if not username or not email or not telefone or not password or not confirm_password:
             flash("Todos os campos são obrigatórios.", "danger")
+            return redirect(url_for("main.register"))
+
+        if password != confirm_password:
+            flash("As senhas não coincidem.", "danger")
             return redirect(url_for("main.register"))
 
         try:
