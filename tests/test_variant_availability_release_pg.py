@@ -14,7 +14,7 @@ Prova no dialeto com `SELECT ... FOR UPDATE` de verdade que:
    do fornecedor.
 
 Somente banco descartável loopback com nome pollo*. Cada teste usa schema
-pollo_test_avail_release_* e nunca toca public ou produção.
+baianas_smoke_avail_release_* e nunca toca public ou produção.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ try:
         _url
         and _url.get_backend_name() == "postgresql"
         and _url.host in {"127.0.0.1", "localhost", "::1"}
-        and str(_url.database or "").startswith("pollo")
+        and str(_url.database or "").startswith("baianas")
     )
 except Exception:
     IS_SAFE_POSTGRES = False
@@ -53,7 +53,7 @@ EXTERNAL_ID = "2000000000899"
 
 @pytest.fixture
 def pg_app(monkeypatch):
-    schema = "pollo_test_avail_release_%s" % secrets.token_hex(4)
+    schema = "baianas_smoke_avail_release_%s" % secrets.token_hex(4)
     engine = create_engine(DATABASE_URL)
     with engine.begin() as connection:
         connection.execute(text('CREATE SCHEMA "%s"' % schema))
