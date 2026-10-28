@@ -64,7 +64,7 @@ def _schema() -> str:
     schema = os.environ.get(SCHEMA_ENV) or DEFAULT_SCHEMA
     if not SCHEMA_RE.match(schema):
         raise SystemExit(f"schema invalido: {schema!r}")
-    if schema in ("public", "auth", "storage", "extensions"):
+    if schema in ("public", "pollomodas", "auth", "storage", "extensions"):
         raise SystemExit(f"schema destrutivo/proibido: {schema!r}")
     return schema
 
