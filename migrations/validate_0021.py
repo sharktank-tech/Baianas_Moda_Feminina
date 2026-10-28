@@ -1,4 +1,4 @@
-"""Validator da migration 0021 — schema pollomodas privado."""
+"""Validator da migration 0021 — schema baianas_moda_feminina privado."""
 
 from __future__ import annotations
 import os
@@ -13,8 +13,8 @@ def validate_schema(conn):
 
     for role in ROLES:
         cur.execute(
-            "SELECT has_schema_privilege(%s, 'pollomodas', 'USAGE'), "
-            "has_schema_privilege(%s, 'pollomodas', 'CREATE')",
+            "SELECT has_schema_privilege(%s, 'baianas_moda_feminina', 'USAGE'), "
+            "has_schema_privilege(%s, 'baianas_moda_feminina', 'CREATE')",
             (role, role),
         )
         usage, create = cur.fetchone()
@@ -25,7 +25,7 @@ def validate_schema(conn):
             SELECT count(*)
             FROM pg_class c
             JOIN pg_namespace n ON n.oid=c.relnamespace
-            WHERE n.nspname='pollomodas'
+            WHERE n.nspname='baianas_moda_feminina'
               AND c.relkind IN ('r', 'v', 'm')
               AND (
                 has_table_privilege(%s, c.oid, 'SELECT')
@@ -41,7 +41,7 @@ def validate_schema(conn):
             SELECT count(*)
             FROM pg_class c
             JOIN pg_namespace n ON n.oid=c.relnamespace
-            WHERE n.nspname='pollomodas'
+            WHERE n.nspname='baianas_moda_feminina'
               AND c.relkind='S'
               AND (
                 has_sequence_privilege(%s, c.oid, 'USAGE')
@@ -56,7 +56,7 @@ def validate_schema(conn):
             SELECT count(*)
             FROM pg_proc p
             JOIN pg_namespace n ON n.oid=p.pronamespace
-            WHERE n.nspname='pollomodas'
+            WHERE n.nspname='baianas_moda_feminina'
               AND has_function_privilege(%s, p.oid, 'EXECUTE')
         """, (role,))
         if cur.fetchone()[0]:
@@ -78,7 +78,7 @@ def main():
             for error in errors:
                 print(f"ERROR: {error}")
             return 1
-        print("OK: pollomodas schema is private")
+        print("OK: baianas_moda_feminina schema is private")
         return 0
     finally:
         conn.close()

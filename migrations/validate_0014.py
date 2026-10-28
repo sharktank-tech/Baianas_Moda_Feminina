@@ -1,4 +1,4 @@
-"""Validator for migration 0014: nullable customer CPF on pollomodas.orders."""
+"""Validator for migration 0014: nullable customer CPF on baianas_moda_feminina.orders."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def validate_schema(conn) -> list[str]:
     cur.execute("""
         SELECT data_type, character_maximum_length, is_nullable
         FROM information_schema.columns
-        WHERE table_schema = 'pollomodas'
+        WHERE table_schema = 'baianas_moda_feminina'
           AND table_name = 'orders'
           AND column_name = 'customer_cpf'
     """)
@@ -39,7 +39,7 @@ def validate_schema(conn) -> list[str]:
         SELECT pg_get_constraintdef(oid)
         FROM pg_constraint
         WHERE conname = 'ck_orders_customer_cpf_length'
-          AND conrelid = 'pollomodas.orders'::regclass
+          AND conrelid = 'baianas_moda_feminina.orders'::regclass
     """)
     ck = cur.fetchone()
     if ck is None:

@@ -10,7 +10,7 @@ def validate_schema(conn):
     cur.execute("""
         SELECT column_name, data_type, is_nullable
         FROM information_schema.columns
-        WHERE table_schema='pollomodas'
+        WHERE table_schema='baianas_moda_feminina'
           AND table_name='acquisition_daily_metrics'
     """)
     columns = {row[0]: row[1:] for row in cur.fetchall()}

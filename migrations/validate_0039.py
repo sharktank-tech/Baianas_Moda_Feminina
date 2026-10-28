@@ -2,7 +2,7 @@
 
 Verifica tabelas, colunas (tipo + nulabilidade), PKs, FKs, unicidade,
 checks e índices. Usado contra schema descartável nos testes PG e contra
-`pollomodas` na aplicação real.
+`baianas_moda_feminina` na aplicação real.
 """
 
 from __future__ import annotations
@@ -84,7 +84,7 @@ INDEXES = {
 }
 
 
-def validate_schema(conn, schema="pollomodas"):
+def validate_schema(conn, schema="baianas_moda_feminina"):
     errors = []
     cur = conn.cursor()
 
