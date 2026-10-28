@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="{% block meta_description %}Baianas Moda Feminina — moda feminina com estilo e qualidade.{% endblock %}">
-  <meta name="keywords" content="{% block meta_keywords %}roupas, moda, promoções, loja online, Baianas Moda Feminina{% endblock %}">
-  <title>{% block title %}Baianas Moda Feminina{% endblock %}</title>
+  <meta name="description" content="{% block meta_description %}As Baianas Moda Feminina — moda feminina com estilo e qualidade.{% endblock %}">
+  <meta name="keywords" content="{% block meta_keywords %}roupas, moda, promoções, loja online, As Baianas Moda Feminina{% endblock %}">
+  <title>{% block title %}As Baianas Moda Feminina{% endblock %}</title>
 
   <!-- Google AdSense: auto ads carregado somente após o window load
        (fase do plano: PageLoad ≤3.5s / requests ≤25 — o request do
@@ -29,15 +29,15 @@
   <style nonce="{{ csp_nonce }}">
     :root {
       /* ── Marca ── */
-      --brand-pink:       #fc03a9;
-      --brand-pink-dark:  #e60090;
-      --brand-pink-light: #fdf0f5;
+      --brand-pink:       #b40d4c;
+      --brand-pink-dark:  #850b39;
+      --brand-pink-light: #fff0f5;
       /* ── Neutros ── */
-      --ink:          #1A1A1A;
+      --ink:          #2b1820;
       --gray-700:     #4D4D4D;
       --gray-500:     #808080;
       --gray-300:     #D9D9D9;
-      --gray-100:     #F5F5F5;
+      --gray-100:     #fff7fa;
       --white: #FFFFFF;
       /* ── Semânticos ── */
       --sale-red:      #E5251B;
@@ -84,7 +84,7 @@
        PROMO STRIP (topo)
     ════════════════════════════════════════ */
     .promo-strip {
-      background: var(--accent);
+      background: linear-gradient(90deg, #8d0c3b, #c61a61, #8d0c3b);
       color: #fff;
       overflow: hidden;
       white-space: nowrap;
@@ -155,6 +155,8 @@
       flex-shrink: 0;
     }
     .navbar-brand span { color: var(--brand-pink); }
+    .navbar-brand { letter-spacing: -.035em; }
+    .navbar-brand::after { content: 'MODA FEMININA'; display: block; font-size: .51rem; font-weight: 700; letter-spacing: .23em; color: #8a5367; line-height: 1.1; margin-top: 2px; }
 
     /* ── Busca ampla (sempre visível) ── */
     .navbar-search {
@@ -747,7 +749,7 @@
   <!-- ── Navbar ── -->
   <nav class="navbar">
     <a href="{{ url_for('main.home') }}" class="navbar-brand">
-      {% if site and site.name %}{{ site.name }}{% else %}Pollo<span>.</span>Modas{% endif %}
+      {% if site and site.name %}{{ site.name }}{% else %}As <span>Baianas</span>{% endif %}
     </a>
 
     <!-- Busca ampla, sempre visível -->
@@ -808,7 +810,7 @@
 
       <div class="navbar-drawer-header">
         <a href="{{ url_for('main.home') }}" class="navbar-drawer-brand">
-          {% if site and site.name %}{{ site.name }}{% else %}Pollo<span>.</span>Modas{% endif %}
+          {% if site and site.name %}{{ site.name }}{% else %}As <span>Baianas</span>{% endif %}
         </a>
         <button class="navbar-drawer-close" id="navDrawerClose" aria-label="Fechar menu">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
@@ -852,7 +854,7 @@
         <!-- Col 1: brand -->
         <div>
           <span class="footer-brand-logo">
-            {% if footer and footer.brand_name %}{{ footer.brand_name }}{% else %}Pollo<span>.</span>Modas{% endif %}
+            {% if footer and footer.brand_name %}{{ footer.brand_name }}{% else %}As <span>Baianas</span>{% endif %}
           </span>
           <p class="footer-brand-desc">
             {% if footer and footer.brand_description %}{{ footer.brand_description }}{% else %}Moda com identidade. Qualidade que você sente na primeira peça.{% endif %}
@@ -953,7 +955,7 @@
           {% if footer %}
             &copy; {{ footer.copyright_year }} {{ footer.brand_name }}. {{ footer.copyright_text }}
           {% else %}
-            &copy; 2026 Baianas Moda Feminina. Todos os direitos reservados.
+            &copy; 2026 As Baianas Moda Feminina. Todos os direitos reservados.
           {% endif %}
         </span>
         {% if footer and footer.legal_links %}
