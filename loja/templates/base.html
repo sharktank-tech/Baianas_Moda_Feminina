@@ -156,8 +156,12 @@
       flex-shrink: 0;
     }
     .navbar-brand span { color: var(--brand-pink); }
+    .navbar-brand__name { font-family: "Brush Script MT", "Segoe Script", "Snell Roundhand", cursive; font-style: italic; font-size: 2rem; font-weight: 700; color: #ac164f; letter-spacing: -.055em; text-shadow: 1px 2px #ffe0ed; }
+    .navbar-brand__name::before { content: "♡"; font-family: Georgia, serif; font-size: .7em; margin-right: .12em; }
+    .navbar-brand__subtitle { display: block; text-align: center; font-family: "DM Sans", sans-serif; font-size: .54rem; font-weight: 800; letter-spacing: .24em; color: #8c3555; }
+    @media (max-width: 620px) { .navbar-brand__name { font-size: 1.45rem; } .navbar-brand__subtitle { font-size: .45rem; } }
     .navbar-brand { letter-spacing: -.035em; }
-    .navbar-brand::after { content: 'MODA FEMININA'; display: block; font-size: .51rem; font-weight: 700; letter-spacing: .23em; color: #8a5367; line-height: 1.1; margin-top: 2px; }
+
 
     /* ── Busca ampla (sempre visível) ── */
     .navbar-search {
@@ -750,7 +754,7 @@
   <!-- ── Navbar ── -->
   <nav class="navbar">
     <a href="{{ url_for('main.home') }}" class="navbar-brand">
-      As <span>Baianas</span>
+      <span class="navbar-brand__name">As Baianas</span><span class="navbar-brand__subtitle">Moda Feminina</span>
     </a>
 
     <!-- Busca ampla, sempre visível -->
