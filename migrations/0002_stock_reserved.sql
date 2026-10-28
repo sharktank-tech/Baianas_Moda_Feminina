@@ -1,4 +1,4 @@
--- Migration: coluna de reserva de estoque (PolloModas)
+-- Migration: coluna de reserva de estoque (baianas_moda_feminina)
 -- Aplicação: execute uma única vez no banco de produção (PostgreSQL):
 --
 --   ALTER TABLE orders ADD COLUMN stock_reserved BOOLEAN NOT NULL DEFAULT FALSE;

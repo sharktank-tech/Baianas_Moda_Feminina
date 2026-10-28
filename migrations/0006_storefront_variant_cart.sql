@@ -1,5 +1,5 @@
 -- Migration 0006: storefront multivariante — carrinho/pedido variant-aware (FASE 7.2)
--- — Idempotente, restrita ao schema `pollomodas`. Nunca toca `public`.
+-- — Idempotente, restrita ao schema `baianas_moda_feminina`. Nunca toca `public`.
 --
 -- Contexto:
 --   * 0005 -> precificação/publicação (products).
@@ -32,8 +32,8 @@
 
 \set ON_ERROR_STOP on
 
--- Restringe toda a migration ao schema dedicado da PolloModas.
-SET search_path TO pollomodas;
+-- Restringe toda a migration ao schema dedicado da baianas_moda_feminina.
+SET search_path TO baianas_moda_feminina;
 
 -- cart_items.variant_id (aditivo, idempotente)
 ALTER TABLE cart_items
@@ -44,7 +44,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'cart_items_variant_id_fkey'
-          AND conrelid = 'pollomodas.cart_items'::regclass
+          AND conrelid = 'baianas_moda_feminina.cart_items'::regclass
     ) THEN
         ALTER TABLE cart_items
             ADD CONSTRAINT cart_items_variant_id_fkey
@@ -63,7 +63,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'order_items_variant_id_fkey'
-          AND conrelid = 'pollomodas.order_items'::regclass
+          AND conrelid = 'baianas_moda_feminina.order_items'::regclass
     ) THEN
         ALTER TABLE order_items
             ADD CONSTRAINT order_items_variant_id_fkey

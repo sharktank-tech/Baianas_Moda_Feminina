@@ -1,7 +1,7 @@
 -- Migration 0004: import de rascunho do catálogo AliExpress (FASE 5) — aditiva.
 --
 -- Escopo e histórico:
---   * 0001 (create schema)  -> instalação NOVA: cria o schema `pollomodas`.
+--   * 0001 (create schema)  -> instalação NOVA: cria o schema `baianas_moda_feminina`.
 --   * 0003 (UUID normalize) -> UPGRADE de instalação legada (VARCHAR -> UUID).
 --   * 0004 (esta)           -> colunas de frete em supplier_products + atributos
 --     JSONB em product_variants, necessárias ao import idempotente de drafts.
@@ -25,9 +25,9 @@
 
 \set ON_ERROR_STOP on
 
--- Restringe toda a migration ao schema dedicado da PolloModas. O schema
+-- Restringe toda a migration ao schema dedicado da baianas_moda_feminina. O schema
 -- `public` (legado) jamais deve ser tocado por esta migration.
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 ALTER TABLE supplier_products
     ADD COLUMN IF NOT EXISTS freight_status VARCHAR(30) NOT NULL DEFAULT 'unknown';
@@ -49,7 +49,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'ck_supplier_product_shipping_cost_nonneg'
-          AND conrelid = 'pollomodas.supplier_products'::regclass
+          AND conrelid = 'baianas_moda_feminina.supplier_products'::regclass
     ) THEN
         ALTER TABLE supplier_products
             ADD CONSTRAINT ck_supplier_product_shipping_cost_nonneg
@@ -59,7 +59,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'ck_supplier_product_landed_cost_nonneg'
-          AND conrelid = 'pollomodas.supplier_products'::regclass
+          AND conrelid = 'baianas_moda_feminina.supplier_products'::regclass
     ) THEN
         ALTER TABLE supplier_products
             ADD CONSTRAINT ck_supplier_product_landed_cost_nonneg

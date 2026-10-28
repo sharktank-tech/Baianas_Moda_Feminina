@@ -1,5 +1,5 @@
 -- Migration 0007: AliExpress Fulfillment Core (Fase 8.0 / 8.0.1)
--- — Idempotente, restrita ao schema `pollomodas`. Nunca toca `public`.
+-- — Idempotente, restrita ao schema `baianas_moda_feminina`. Nunca toca `public`.
 --
 -- Contexto:
 --   * 0005 -> precificação/publicação (products)
@@ -35,8 +35,8 @@
 
 \set ON_ERROR_STOP on
 
--- Restringe toda a migration ao schema dedicado da PolloModas.
-SET search_path TO pollomodas;
+-- Restringe toda a migration ao schema dedicado da baianas_moda_feminina.
+SET search_path TO baianas_moda_feminina;
 
 -- ============================================================
 -- 1) Tabela de credenciais persistentes criptografadas
@@ -97,7 +97,7 @@ DO $$
 BEGIN
     IF EXISTS (
         SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'pollomodas'
+        WHERE table_schema = 'baianas_moda_feminina'
           AND table_name = 'aliexpress_orders'
           AND column_name = 'state'
     ) THEN
@@ -110,7 +110,7 @@ DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_indexes
-        WHERE schemaname = 'pollomodas'
+        WHERE schemaname = 'baianas_moda_feminina'
           AND tablename = 'aliexpress_orders'
           AND indexname = 'uq_aliexpress_order_supplier'
     ) THEN
@@ -143,7 +143,7 @@ BEGIN
           AND conrelid = (
               SELECT c.oid FROM pg_class c
               JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = 'pollomodas' AND c.relname = 'aliexpress_orders'
+              WHERE n.nspname = 'baianas_moda_feminina' AND c.relname = 'aliexpress_orders'
           )
     ) THEN
         ALTER TABLE aliexpress_orders
@@ -186,7 +186,7 @@ DO $$
 BEGIN
     IF EXISTS (
         SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'pollomodas'
+        WHERE table_schema = 'baianas_moda_feminina'
           AND table_name = 'aliexpress_order_items'
           AND column_name = 'product_id'
           AND is_nullable = 'NO'
@@ -209,12 +209,12 @@ BEGIN
           AND conrelid = (
               SELECT c.oid FROM pg_class c
               JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = 'pollomodas' AND c.relname = 'aliexpress_order_items'
+              WHERE n.nspname = 'baianas_moda_feminina' AND c.relname = 'aliexpress_order_items'
           )
           AND confrelid = (
               SELECT c.oid FROM pg_class c
               JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = 'pollomodas' AND c.relname = 'products'
+              WHERE n.nspname = 'baianas_moda_feminina' AND c.relname = 'products'
           )
     LOOP
         EXECUTE format(
@@ -229,7 +229,7 @@ BEGIN
           AND conrelid = (
               SELECT c.oid FROM pg_class c
               JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = 'pollomodas' AND c.relname = 'aliexpress_order_items'
+              WHERE n.nspname = 'baianas_moda_feminina' AND c.relname = 'aliexpress_order_items'
           )
     ) THEN
         ALTER TABLE aliexpress_order_items
@@ -251,13 +251,13 @@ BEGIN
     LOOP
         FOR col IN
             SELECT column_name FROM information_schema.columns
-            WHERE table_schema = 'pollomodas'
+            WHERE table_schema = 'baianas_moda_feminina'
               AND table_name = tbl
               AND data_type = 'timestamp with time zone'
         LOOP
             EXECUTE format(
                 'ALTER TABLE %I.%I ALTER COLUMN %I TYPE timestamp without time zone',
-                'pollomodas', tbl, col.column_name
+                'baianas_moda_feminina', tbl, col.column_name
             );
         END LOOP;
     END LOOP;
@@ -281,7 +281,7 @@ BEGIN
           AND conrelid = (
               SELECT c.oid FROM pg_class c
               JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = 'pollomodas' AND c.relname = 'aliexpress_order_items'
+              WHERE n.nspname = 'baianas_moda_feminina' AND c.relname = 'aliexpress_order_items'
           )
     ) THEN
         ALTER TABLE aliexpress_order_items

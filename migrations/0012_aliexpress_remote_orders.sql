@@ -1,5 +1,5 @@
 -- Migration 0012: Persist remote order IDs with durable attempts (Fase 8.0.11B)
--- Idempotente, restrita ao schema `pollomodas`. Nunca toca `public`.
+-- Idempotente, restrita ao schema `baianas_moda_feminina`. Nunca toca `public`.
 --
 -- Contexto:
 --   A submissão AliExpress agora suporta cardinalidade 0/1/N de
@@ -16,7 +16,7 @@
 
 \set ON_ERROR_STOP on
 
-SET search_path TO pollomodas;
+SET search_path TO baianas_moda_feminina;
 
 -- ============================================================
 -- 1. Tabela: aliexpress_submission_attempts

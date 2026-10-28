@@ -1,5 +1,5 @@
 -- Migration 0009: AliExpress order status timeline (Fase 8.0.6)
--- — Idempotente, restrita ao schema `pollomodas`. Nunca toca `public`.
+-- — Idempotente, restrita ao schema `baianas_moda_feminina`. Nunca toca `public`.
 --
 -- Contexto:
 --   * 0007 -> pipeline de fulfillment AliExpress (AliExpressOrder, estados,
@@ -26,8 +26,8 @@
 
 \set ON_ERROR_STOP on
 
--- Restringe toda a migration ao schema dedicado da PolloModas.
-SET search_path TO pollomodas;
+-- Restringe toda a migration ao schema dedicado da baianas_moda_feminina.
+SET search_path TO baianas_moda_feminina;
 
 -- ============================================================
 -- 1) Marcos temporais do ciclo de vida logístico
@@ -42,7 +42,7 @@ ALTER TABLE aliexpress_orders
 -- Verificação de schema public invariável
 -- ============================================================
 -- Esta migration NÃO cria objetos no schema public. O projeto real possui uma
--- public.aliexpress_orders legada/preexistente, fora do domínio da PolloModas;
+-- public.aliexpress_orders legada/preexistente, fora do domínio da baianas_moda_feminina;
 -- sua mera existência não pode ser tratada como evidência de mutação por esta
 -- migration. Os objetos NOVOS introduzidos pelo fulfillment (credentials/items)
 -- continuam proibidos em public.
