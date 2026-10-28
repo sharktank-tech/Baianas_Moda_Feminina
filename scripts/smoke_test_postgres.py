@@ -47,6 +47,7 @@ if not DATABASE_URL or not DATABASE_URL.startswith("postgresql"):
 #   - loja.schema.DB_SCHEMA (usado por ensure_schema) aponte para o schema
 #     descartável. Assim a app e o schema.py miram SOMENTE o schema isolado.
 os.environ["BAIANAS_DB_SCHEMA"] = SCHEMA
+os.environ["BAIANAS_ALLOW_TEST_SCHEMA"] = "1"
 os.environ["SECRET_KEY"] = SECRET_KEY
 os.environ["DATABASE_URL"] = DATABASE_URL
 
