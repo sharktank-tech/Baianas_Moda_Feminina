@@ -1,138 +1,20 @@
-# Loja de Roupas
+# As Baianas Moda Feminina
 
-Loja de roupas com estilização moderna e limpa com todas as funcionalidades de administração.
+MVP de loja feminina, baseado no backend Flask/PostgreSQL existente, em fase de estabilização e separação do projeto original.
 
-## Funcionalidades
+## Desenvolvimento local
 
-- Gerenciamento de produtos, promoções, cupons e fornecedores
-- Gerenciamento de usuários e favoritos
-- Carrinho e checkout (buy now ou carrinho completo)
-- Pagamento via Mercado Pago (Checkout Pro, webhook com assinatura)
-- Rastreio de pedidos
-- Newsletter, depoimentos e páginas institucionais
-- Painel administrativo completo
+1. `git clone https://github.com/sharktank-tech/Baianas_Moda_Feminina.git`.
+2. `python -m venv .venv` e `pip install -r requirements-dev.txt`.
+3. Copie `.env.example` para `.env`, gere uma chave aleatória exclusiva e configure um PostgreSQL exclusivo.
+4. Configure `BAIANAS_DB_SCHEMA=baianas_moda_feminina`. Nunca compartilhe `DATABASE_URL`, credenciais ou schemas com outro projeto.
+5. Crie o schema em banco vazio e controlado; execute o bootstrap somente com `BAIANAS_BOOTSTRAP_ON_STARTUP=1`.
+6. Rode `python -m pytest -q tests/` e testes PostgreSQL antes do deploy.
 
-## Tecnologias Utilizadas
+**Aviso crítico:** o legado contém migrations e scripts não homologados para a Baianas. Não execute lote de migrations nem scripts DOWN em qualquer ambiente real antes da auditoria SQL integral. A simples criação do schema não autoriza pagamentos reais.
 
-- Flask (Python 3.10+)
-- SQLAlchemy + PostgreSQL (UUID, JSONB)
-- HTML / CSS / JavaScript (Tailwind CSS via CDN)
-- Mercado Pago SDK
+## MVP pretendido
 
-## Pré-requisitos
+Vitrine responsiva, catálogo real, sacola, checkout WhatsApp, admin básico, estoque e, posteriormente, Pix em sandbox. Integrações AliExpress herdadas não compõem o fluxo básico.
 
-- Python 3.10+
-- PostgreSQL (a aplicação **não** roda com SQLite: os modelos usam tipos `UUID`/`JSONB` do PostgreSQL)
-- Chaves de ambiente (veja abaixo)
-
-## Como Executar o Projeto
-
-1. Clone o repositório:
-
-    ```sh
-    git clone https://github.com/sharktank-tech/PolloModas
-    cd PolloModas
-    ```
-
-2. Crie um ambiente virtual:
-
-    ```sh
-    python -m venv venv
-    source venv/bin/activate  # No Windows, use `venv\Scripts\activate`
-    ```
-
-3. Instale as dependências:
-
-    ```sh
-    pip install -r requirements.txt
-    ```
-
-4. Configure as variáveis de ambiente (crie um `.env` na raiz):
-
-    ```sh
-    DATABASE_URL=postgresql://usuario:senha@localhost:5432/pollomodas
-    SECRET_KEY=uma-chave-secreta-forte
-    EMAIL_SERVER=smtp.resend.com
-    EMAIL_PORT=587
-    EMAIL_USERNAME=resend
-    EMAIL_SENDER=atendimento@pollomodas.com.br
-    EMAIL_SENDER_NAME=PolloModas
-    EMAIL_PASSWORD=<API_KEY_RESEND>
-    EMAIL_DESTINE=contato@pollomodas.com.br
-    MERCADO_PAGO_ACCESS_TOKEN=APP_USR-xxxxxxxx
-    MERCADO_PAGO_WEBHOOK_SECRET=xxxxxxxx
-    APP_PUBLIC_URL=http://127.0.0.1:5001
-    MERCADO_PAGO_USE_SANDBOX=true
-    ```
-
-   Consulte [a configuração de e-mail Resend](docs/RESEND_EMAIL.md) para
-   produção, prioridade de credenciais e validação de entrega.
-
-5. Crie as tabelas do banco (necessário uma única vez):
-
-    ```sh
-    flask shell
-    ```
-
-    Dentro do shell:
-
-    ```python
-    from loja import db, create_app
-    app = create_app()
-    with app.app_context():
-        db.create_all()
-    ```
-
-6. Crie o primeiro usuário administrador:
-
-    ```sh
-    flask create-admin --email admin@pollomodas.com.br --password 'senha-forte'
-    ```
-
-7. Execute a aplicação:
-
-    ```sh
-    python run.py
-    ```
-
-8. Acesse a aplicação no seu navegador:
-
-    ```
-    http://127.0.0.1:5001
-    ```
-
-## Notas de segurança e estoque
-
-- `SECRET_KEY` e `DATABASE_URL` são obrigatórias e lidas do ambiente.
-- Todos os formulários são protegidos contra CSRF (Flask-WTF); o webhook do
-  Mercado Pago é a única rota isenta.
-- O estoque é **reservado** na criação do pedido e devolvido quando o pagamento
-  é recusado, cancelado ou reembolsado (webhook/retorno), ou quando a reserva
-  expira sem pagamento aprovado — prazo canônico `STOCK_RESERVATION_HOURS`
-  (default 24h; produção opera com override de 4h), expirado pelo cron diário
-  ou pelo painel admin, caso em que o pedido transiciona para `expired`.
-
-## Mudanças de schema (PostgreSQL)
-
-O projeto não usa Flask-Migrate. Quando o modelo ganha uma coluna nova,
-`db.create_all()` **não** a adiciona a tabelas existentes. Para aplicar:
-
-```sh
-# Opção 1 — executar o SQL de migração (veja migrations/):
-psql "$DATABASE_URL" -f migrations/0002_stock_reserved.sql
-
-# Opção 2 — deixar o app criar no primeiro boot (loja/schema.py)
-```
-
-Sempre rode os scripts em `migrations/` no banco de produção após o deploy.
-
-## Testes
-
-```sh
-pytest -q tests/
-```
-
-## Deploy
-
-- Heroku: `Procfile` usa `gunicorn run:app`.
-- O webhook do Mercado Pago (`/pagamentos/webhook`) precisa ser público via HTTPS em produção.
+Leia [o plano](PLAN.md), [dados pendentes](TODO_DADOS.md), [backlog](BACKLOG.md) e [isolamento](docs/BAIANAS_ISOLAMENTO.md). Produtos, preços, logo, endereço e contatos só devem ser publicados após confirmação da loja.
