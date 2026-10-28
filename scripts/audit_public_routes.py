@@ -7,6 +7,11 @@ Só dispara GETs de uma lista explícita de páginas públicas, sem alterar dado
 Não substitui testes de login, checkout, webhook, administração ou integrações.
 """
 import sys
+from pathlib import Path
+
+# Permite executar diretamente: python scripts/audit_public_routes.py
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from run import app
 
 PUBLIC = (
