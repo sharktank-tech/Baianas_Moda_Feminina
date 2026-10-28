@@ -508,7 +508,7 @@ def _assert_selector_invariant(selector):
 def _uses_variants(product):
     """Produtos com variantes usam seleção por variante; produtos sem
     variantes continuam no fluxo por tamanho."""
-    return bool(_active_variants_for_product(product))
+    return bool(product.variants)
 
 
 def _safe_internal_url(value):
